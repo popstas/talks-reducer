@@ -23,6 +23,30 @@ def _get_max_volume(s):
     return max(-np.min(s), np.max(s))
 
 
+def _is_valid_input_file(filename) -> bool:
+    """
+    Check wether the input file is one that ffprobe recognizes, i.e. a video / audio / ... file.
+    If it does, check whether there exists an audio stream, as we could not perform the dynamic shortening without one.
+
+    :param filename: The full path to the input that is to be checked
+    :return: True if it is a file with an audio stream attached.
+    """
+
+    command = 'ffprobe -i "{}" -hide_banner -loglevel error -select_streams a' \
+              ' -show_entries stream=codec_type'.format(filename)
+    p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    outs, errs = None, None
+    try:
+        outs, errs = p.communicate(timeout=0.1)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        outs, errs = p.communicate()
+    finally:
+        # If the file is no file that ffprobe recognizes we will get an error in the errors
+        # else wise we will obtain an output in outs if there exists at least one audio stream
+        return len(errs) == 0 and len(outs) > 0
+
+
 def _input_to_output_filename(filename):
     dot_index = filename.rfind(".")
     return filename[:dot_index] + "_ALTERED" + filename[dot_index:]
@@ -262,15 +286,13 @@ if __name__ == '__main__':
                         help="Frame rate of the input and output videos. FFmpeg tries to extract this information."
                              " Thus only needed if FFmpeg fails to do so.")
 
-    valid_extensions = tuple(['.mp4'])
-
     files = []
     for input_file in parser.parse_args().input_file:
-        if os.path.isfile(input_file) and input_file.endswith(valid_extensions):
+        if os.path.isfile(input_file) and _is_valid_input_file(input_file):
             files += [os.path.abspath(input_file)]
         elif os.path.isdir(input_file):
             files += [os.path.join(input_file, file) for file in os.listdir(input_file)
-                      if file.endswith(valid_extensions)]
+                      if _is_valid_input_file(os.path.join(input_file, file))]
 
     args = {k: v for k, v in vars(parser.parse_args()).items() if v is not None}
     del args['input_file']
