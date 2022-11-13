@@ -10,14 +10,14 @@ let
       propagatedBuildInputs = [
         python.pkgs.numpy
       ];
-      meta = with pkgs.stdenv.lib; {
+      meta = with pkgs.lib; {
         homepage = "https://github.com/Muges/audiotsm";
         license = licenses.mit;
         description = "A real-time audio time-scale modification library";
       };
     };
 
-  pythonForThis = python.withPackages (ps: with ps;[
+  pythonForThis = python310.withPackages (ps: with ps;[
     scipy
     numpy
     pillow
@@ -42,7 +42,7 @@ let
   
   nix-bundle-src = builtins.fetchGit {
     url = "https://github.com/matthewbauer/nix-bundle";
-    rev = "113d8c6b426b0932a64c58c21cd065baad4c2314";
+    rev = "e9fa7e8a118942adafa8592a28b301ee23d37c13";
   };
   nix-bundle = (import ("${nix-bundle-src}/appimage-top.nix") {}) // (import "${nix-bundle-src}/default.nix" {});
 in
