@@ -35,7 +35,7 @@ let
       mkdir -p $out/bin
       echo "#!${pythonForThis}/bin/python" > $out/bin/jumpcutter
       cat $src/jumpcutter.py >> $out/bin/jumpcutter
-      substituteInPlace $out/bin/jumpcutter --replace "ffmpegPath = 'ffmpeg'" "ffmpegPath = '${ffmpeg}'"
+      substituteInPlace $out/bin/jumpcutter --replace "FFMPEG_PATH = 'ffmpeg'" "FFMPEG_PATH = '${ffmpeg}'"
       chmod +x $out/bin/jumpcutter
     '';
   };

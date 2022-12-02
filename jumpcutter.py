@@ -12,7 +12,7 @@ import math
 import os
 import time
 
-ffmpegPath = 'ffmpeg'
+FFMPEG_PATH = 'ffmpeg'
 
 tqdm = partial(std_tqdm,
                bar_format=('{desc:<20} {percentage:3.0f}%'
@@ -77,7 +77,7 @@ def _delete_path(s):  # Dangerous! Watch out!
 
 # TODO maybe transition to use the time=... instead of frame=... as frame is not accessible when exporting audio only
 def _run_timed_ffmpeg_command(command, **kwargs):
-    p = subprocess.Popen( f"{ffmpegPath} {command}", stderr=subprocess.PIPE, universal_newlines=True, bufsize=1)
+    p = subprocess.Popen( f"{FFMPEG_PATH} {command}", stderr=subprocess.PIPE, universal_newlines=True, bufsize=1)
 
     with tqdm(**kwargs) as t:
         while p.poll() is None:
