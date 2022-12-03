@@ -12,6 +12,8 @@ import math
 import os
 import time
 
+FFMPEG_PATH = 'ffmpeg'
+
 tqdm = partial(std_tqdm,
                bar_format=('{desc:<20} {percentage:3.0f}%'
                            '|{bar:10}|'
@@ -75,7 +77,7 @@ def _delete_path(s):  # Dangerous! Watch out!
 
 # TODO maybe transition to use the time=... instead of frame=... as frame is not accessible when exporting audio only
 def _run_timed_ffmpeg_command(command, **kwargs):
-    p = subprocess.Popen(command, stderr=subprocess.PIPE, universal_newlines=True, bufsize=1)
+    p = subprocess.Popen( f"{FFMPEG_PATH} {command}", stderr=subprocess.PIPE, universal_newlines=True, bufsize=1)
 
     with tqdm(**kwargs) as t:
         while p.poll() is None:
@@ -165,7 +167,7 @@ def speed_up_video(
         # print(f'Found Duration {original_duration}')
 
     # Extract the audio
-    command = 'ffmpeg -i "{}" -ab 160k -ac 2 -ar {} -vn {} -hide_banner' \
+    command = '-i "{}" -ab 160k -ac 2 -ar {} -vn {} -hide_banner' \
         .format(input_file,
                 sample_rate,
                 temp_folder + '/audio.wav')
@@ -247,7 +249,7 @@ def speed_up_video(
     filter_graph_file.write(expression.replace(',', '\\,'))
     filter_graph_file.close()
 
-    command = 'ffmpeg -i "{}" -i "{}" -filter_script:v "{}" -map 0 -map -0:a -map 1:a -c:a aac "{}"' \
+    command = '-i "{}" -i "{}" -filter_script:v "{}" -map 0 -map -0:a -map 1:a -c:a aac "{}"' \
               ' -loglevel warning -stats -y -hide_banner' \
         .format(input_file,
                 temp_folder + '/audioNew.wav',
