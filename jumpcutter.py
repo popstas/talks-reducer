@@ -1,18 +1,48 @@
+import numpy as np
+from scipy.io import wavfile
+
 from audiotsm import phasevocoder
 from audiotsm.io.array import ArrayReader, ArrayWriter
-from scipy.io import wavfile
 from shutil import rmtree
 from tqdm import tqdm as std_tqdm
 from functools import partial
-import numpy as np
 import subprocess
 import argparse
 import re
 import math
 import os
+import sys
 import time
+import warnings
+from pprint import pprint
+from shutil import which
 
-FFMPEG_PATH = 'ffmpeg'
+# Suppress warnings that might occur during GPU operations
+warnings.filterwarnings('ignore')
+
+def find_ffmpeg():
+    """Find FFmpeg executable in common locations"""
+    # Check common Windows locations
+    common_paths = [
+        'C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe',
+        'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe',
+        'C:\\ffmpeg\\bin\\ffmpeg.exe',
+        'ffmpeg'  # Try system PATH as last resort
+    ]
+    
+    for path in common_paths:
+        if os.path.isfile(path) or which(path):
+            return os.path.abspath(path) if os.path.isfile(path) else path
+    
+    return None
+
+# Try to find FFmpeg
+FFMPEG_PATH = find_ffmpeg()
+if not FFMPEG_PATH:
+    print("Error: FFmpeg not found. Please install FFmpeg and add it to your PATH or specify the full path.", file=sys.stderr)
+    sys.exit(1)
+
+print(f"Using FFmpeg at: {FFMPEG_PATH}")
 
 tqdm = partial(std_tqdm,
                bar_format=('{desc:<20} {percentage:3.0f}%'
@@ -39,8 +69,11 @@ def _is_valid_input_file(filename) -> bool:
     p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     outs, errs = None, None
     try:
-        outs, errs = p.communicate(timeout=0.1)
+        outs, errs = p.communicate(timeout=1)
+        # pprint(outs)
     except subprocess.TimeoutExpired:
+        print("Timeout while checking the input file. Aborting. Command:")
+        print(command)
         p.kill()
         outs, errs = p.communicate()
     finally:
@@ -51,7 +84,7 @@ def _is_valid_input_file(filename) -> bool:
 
 def _input_to_output_filename(filename):
     dot_index = filename.rfind(".")
-    return filename[:dot_index] + "_ALTERED" + filename[dot_index:]
+    return filename[:dot_index] + "_speedup" + filename[dot_index:]
 
 
 def _create_path(s):
@@ -77,18 +110,79 @@ def _delete_path(s):  # Dangerous! Watch out!
 
 # TODO maybe transition to use the time=... instead of frame=... as frame is not accessible when exporting audio only
 def _run_timed_ffmpeg_command(command, **kwargs):
-    p = subprocess.Popen( f"{FFMPEG_PATH} {command}", stderr=subprocess.PIPE, universal_newlines=True, bufsize=1)
-
+    """Run an FFmpeg command with progress tracking.
+    
+    Args:
+        command: The FFmpeg command string to execute
+        **kwargs: Additional arguments for tqdm progress bar
+    """
+    import shlex
+    import sys
+    
+    # Split the command into a list of arguments
+    try:
+        args = shlex.split(command)
+    except Exception as e:
+        print(f"Error parsing command: {e}", file=sys.stderr)
+        raise
+    
+    # Print the command for debugging
+    # print("\nExecuting command:")
+    # print(' '.join(f'"{arg}"' if ' ' in arg else arg for arg in args))
+    
+    # Run the command
+    try:
+        p = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            bufsize=1,
+            errors='replace'  # Handle encoding issues
+        )
+    except Exception as e:
+        print(f"Error starting FFmpeg: {e}", file=sys.stderr)
+        raise
+    
+    # Process output in real-time
     with tqdm(**kwargs) as t:
-        while p.poll() is None:
+        while True:
+            # Read from stderr
             line = p.stderr.readline()
-            m = re.search(r'frame=.*?(\d+)', line)
-            if m is not None:
-                new_frame = int(m.group(1))
-                if t.total < new_frame:
-                    t.total = new_frame
-                t.update(new_frame - t.n)
-        t.update(t.total - t.n)
+            if not line and p.poll() is not None:
+                break
+                
+            if not line:
+                continue
+                
+            # Print FFmpeg output for debugging
+            sys.stderr.write(line)
+            sys.stderr.flush()
+            
+            # Update progress
+            m = re.search(r'frame=\s*(\d+)', line)
+            if m:
+                try:
+                    new_frame = int(m.group(1))
+                    if t.total < new_frame:
+                        t.total = new_frame
+                    t.update(new_frame - t.n)
+                except (ValueError, IndexError):
+                    pass
+        
+        # Wait for process to complete
+        p.wait()
+        
+        # Check for errors
+        if p.returncode != 0:
+            error_output = p.stderr.read()
+            print(f"\nFFmpeg error (return code {p.returncode}):", file=sys.stderr)
+            print(error_output, file=sys.stderr)
+            raise subprocess.CalledProcessError(p.returncode, args)
+        
+        # Update progress bar to 100% if not already there
+        if t.n < t.total:
+            t.update(t.total - t.n)
 
 
 def _get_tree_expression(chunks) -> str:
@@ -125,7 +219,8 @@ def speed_up_video(
         sounded_speed: float = 1.0,
         frame_spreadage: int = 1,
         audio_fade_envelope_size: int = 400,
-        temp_folder: str = 'TEMP') -> None:
+        temp_folder: str = 'TEMP',
+        use_cuda: bool = False) -> None:
     """
     Speeds up a video file with different speeds for the silent and loud sections in the video.
 
@@ -166,11 +261,18 @@ def speed_up_video(
         original_duration = float(match_duration.group(1))
         # print(f'Found Duration {original_duration}')
 
-    # Extract the audio
-    command = '-i "{}" -ab 160k -ac 2 -ar {} -vn {} -hide_banner' \
-        .format(input_file,
-                sample_rate,
-                temp_folder + '/audio.wav')
+    # Extract the audio with hardware acceleration if enabled
+    hwaccel = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'] if use_cuda else []
+    command = ' '.join([
+        f'"{FFMPEG_PATH}"',
+        ' '.join(hwaccel),
+        f'-i "{input_file}"',
+        '-ab 160k -ac 2',
+        f'-ar {sample_rate}',
+        '-vn',
+        f'"{os.path.join(temp_folder, "audio.wav")}"',
+        '-hide_banner -loglevel warning -stats'
+    ])
 
     _run_timed_ffmpeg_command(command, total=int(original_duration * frame_rate), unit='frames',
                               desc='Extracting audio:')
@@ -178,6 +280,9 @@ def speed_up_video(
     wav_sample_rate, audio_data = wavfile.read(temp_folder + "/audio.wav")
     audio_sample_count = audio_data.shape[0]
     max_audio_volume = _get_max_volume(audio_data)
+    print('\nProcessing Information:')
+    print(f"- Max Audio Volume: {max_audio_volume}")
+    print(f"- Processing on: {'GPU (CUDA)' if use_cuda else 'CPU'}")
     samples_per_frame = wav_sample_rate / frame_rate
     audio_frame_count = int(math.ceil(audio_sample_count / samples_per_frame))
 
@@ -209,32 +314,43 @@ def speed_up_video(
     new_speeds = [silent_speed, sounded_speed]
     output_pointer = 0
     audio_buffers = []
-    for index, chunk in tqdm(enumerate(chunks), total=len(chunks), desc='Changing audio:', unit='chunks'):
-        audio_chunk = audio_data[int(chunk[0] * samples_per_frame):int(chunk[1] * samples_per_frame)]
-
-        reader = ArrayReader(np.transpose(audio_chunk))
-        writer = ArrayWriter(reader.channels)
-        tsm = phasevocoder(reader.channels, speed=new_speeds[int(chunk[2])])
-        tsm.run(reader, writer)
-        altered_audio_data = np.transpose(writer.data)
-
-        # smooth out transition's audio by quickly fading in/out
-        if altered_audio_data.shape[0] < audio_fade_envelope_size:
-            altered_audio_data[:] = 0  # audio is less than 0.01 sec, let's just remove it.
-        else:
-            premask = np.arange(audio_fade_envelope_size) / audio_fade_envelope_size
-            mask = np.repeat(premask[:, np.newaxis], 2, axis=1)  # make the fade-envelope mask stereo
-            altered_audio_data[:audio_fade_envelope_size] *= mask
-            altered_audio_data[-audio_fade_envelope_size:] *= 1 - mask
-
-        audio_buffers.append(altered_audio_data / max_audio_volume)
-
-        end_pointer = output_pointer + altered_audio_data.shape[0]
-        start_output_frame = int(math.ceil(output_pointer / samples_per_frame))
-        end_output_frame = int(math.ceil(end_pointer / samples_per_frame))
-        chunks[index] = chunk[:2] + [start_output_frame, end_output_frame]
-
-        output_pointer = end_pointer
+    
+    # Process audio in batches to better utilize GPU
+    batch_size = 10  # Adjust based on your GPU memory
+    for batch_start in tqdm(range(0, len(chunks), batch_size), desc='Processing audio chunks'):
+        batch_chunks = chunks[batch_start:batch_start + batch_size]
+        batch_audio = []
+        
+        for chunk in batch_chunks:
+            audio_chunk = audio_data[int(chunk[0] * samples_per_frame):int(chunk[1] * samples_per_frame)]
+            
+            reader = ArrayReader(np.transpose(audio_chunk))
+            writer = ArrayWriter(reader.channels)
+            tsm = phasevocoder(reader.channels, speed=new_speeds[int(chunk[2])])
+            tsm.run(reader, writer)
+            altered_audio_data = np.transpose(writer.data)
+            
+            # Process fade in/out
+            if altered_audio_data.shape[0] < audio_fade_envelope_size:
+                altered_audio_data[:] = 0
+            else:
+                premask = np.arange(audio_fade_envelope_size) / audio_fade_envelope_size
+                mask = np.repeat(premask[:, np.newaxis], 2, axis=1)
+                altered_audio_data[:audio_fade_envelope_size] *= mask
+                altered_audio_data[-audio_fade_envelope_size:] *= 1 - mask
+            
+            batch_audio.append(altered_audio_data / max_audio_volume)
+        
+        # Process batch updates
+        for i, chunk in enumerate(batch_chunks):
+            altered_audio_data = batch_audio[i]
+            audio_buffers.append(altered_audio_data)
+            
+            end_pointer = output_pointer + altered_audio_data.shape[0]
+            start_output_frame = int(math.ceil(output_pointer / samples_per_frame))
+            end_output_frame = int(math.ceil(end_pointer / samples_per_frame))
+            chunks[batch_start + i] = chunk[:2] + [start_output_frame, end_output_frame]
+            output_pointer = end_pointer
 
     # print(chunks)
 
@@ -249,19 +365,46 @@ def speed_up_video(
     filter_graph_file.write(expression.replace(',', '\\,'))
     filter_graph_file.close()
 
-    command = '-i "{}" -i "{}" -filter_script:v "{}" -map 0 -map -0:a -map 1:a -c:a aac "{}"' \
-              ' -loglevel warning -stats -y -hide_banner' \
-        .format(input_file,
-                temp_folder + '/audioNew.wav',
-                temp_folder + '/filterGraph.txt',
-                output_file)
-
-    _run_timed_ffmpeg_command(command, total=chunks[-1][3], unit='frames', desc='Generating final:')
+    # Build the FFmpeg command with proper argument formatting
+    command_parts = [
+        f'"{FFMPEG_PATH}"',
+        '-y',
+        *(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'] if use_cuda else []),
+        f'-i "{input_file}"',
+        f'-i "{os.path.join(temp_folder, "audioNew.wav")}"',
+        f'-filter_script:v "{os.path.join(temp_folder, "filterGraph.txt")}"',
+        '-map 0 -map -0:a -map 1:a',
+        '-c:v h264_nvenc' if use_cuda else '-c:v copy',
+        '-c:a aac',
+        f'"{output_file}"',
+        '-loglevel info -stats -hide_banner'
+    ]
+    
+    # Join the command parts into a single string
+    command_str = ' '.join(command_parts)
+    
+    # Print the command for debugging
+    # print("\nExecuting FFmpeg command:")
+    # print(command_str)
+    
+    # Verify output directory exists
+    output_dir = os.path.dirname(os.path.abspath(output_file))
+    if output_dir and not os.path.exists(output_dir):
+        print(f"Creating output directory: {output_dir}")
+        os.makedirs(output_dir, exist_ok=True)
+    
+    try:
+        _run_timed_ffmpeg_command(command_str, total=chunks[-1][3], unit='frames', desc='Generating final:')
+    except Exception as e:
+        print(f"\nError running FFmpeg command: {e}")
+        print("Please check if all input files exist and FFmpeg has proper permissions.")
+        raise
 
     _delete_path(temp_folder)
 
 
 if __name__ == '__main__':
+    start_time = time.time()
     parser = argparse.ArgumentParser(
         description='Modifies a video file to play at different speeds when there is sound vs. silence.')
 
@@ -271,6 +414,10 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--output_file', type=str, dest='output_file',
                         help="The output file. Only usable if a single file is given."
                              " If not included, it'll just modify the input file name by adding _ALTERED.")
+    parser.add_argument('--temp_folder', type=str, default='TEMP',
+                        help='The file path of the temporary working folder.')
+    parser.add_argument('--cuda', action='store_true',
+                        help='Use CUDA acceleration for video encoding if available.')
     parser.add_argument('-t', '--silent_threshold', type=float, dest='silent_threshold',
                         help='The volume amount that frames\' audio needs to surpass to be consider "sounded".'
                              ' It ranges from 0 (silence) to 1 (max volume). Defaults to 0.03')
@@ -296,6 +443,7 @@ if __name__ == '__main__':
             files += [os.path.join(input_file, file) for file in os.listdir(input_file)
                       if _is_valid_input_file(os.path.join(input_file, file))]
 
+    # pprint(files)
     args = {k: v for k, v in vars(parser.parse_args()).items() if v is not None}
     del args['input_file']
     if len(files) > 1 and 'output_file' in args:
@@ -308,4 +456,12 @@ if __name__ == '__main__':
         print(f"Processing file {index + 1}/{len(files)} '{os.path.basename(file)}'")
         local_options = dict(args)
         local_options['input_file'] = file
+        local_options['use_cuda'] = local_options['cuda']
+        del local_options['cuda']
         speed_up_video(**local_options)
+    
+    end_time = time.time()
+    total_time = end_time - start_time
+    hours, remainder = divmod(total_time, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    print(f"\nTime: {int(hours)}h {int(minutes)}m {seconds:.2f}s")

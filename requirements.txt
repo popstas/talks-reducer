@@ -1,4 +1,4 @@
-audiotsm
-scipy
-numpy
-tqdm
+audiotsm>=0.3.0
+scipy>=1.10.0
+numpy>=1.22.0,<2.0.0
+tqdm>=4.65.0
