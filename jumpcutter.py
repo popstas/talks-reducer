@@ -82,9 +82,10 @@ def _is_valid_input_file(filename) -> bool:
         return len(errs) == 0 and len(outs) > 0
 
 
-def _input_to_output_filename(filename):
+def _input_to_output_filename(filename, small=False):
     dot_index = filename.rfind(".")
-    return filename[:dot_index] + "_speedup" + filename[dot_index:]
+    suffix = "_speedup_small" if small else "_speedup"
+    return filename[:dot_index] + suffix + filename[dot_index:]
 
 
 def _create_path(s):
@@ -94,6 +95,20 @@ def _create_path(s):
     except OSError:
         assert False, "Creation of the directory failed." \
                       " (The TEMP folder may already exist. Delete or rename it, and try again.)"
+
+
+def _check_cuda_available():
+    """Check if CUDA encoding is available and working"""
+    try:
+        # Simple test: try to get encoder info
+        result = subprocess.run(
+            [FFMPEG_PATH, '-encoders'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+        return False
 
 
 def _delete_path(s):  # Dangerous! Watch out!
@@ -108,7 +123,6 @@ def _delete_path(s):  # Dangerous! Watch out!
         print(OSError)
 
 
-# TODO maybe transition to use the time=... instead of frame=... as frame is not accessible when exporting audio only
 def _run_timed_ffmpeg_command(command, **kwargs):
     """Run an FFmpeg command with progress tracking.
     
@@ -118,8 +132,6 @@ def _run_timed_ffmpeg_command(command, **kwargs):
     """
     import shlex
     import sys
-    
-    # Split the command into a list of arguments
     try:
         args = shlex.split(command)
     except Exception as e:
@@ -220,7 +232,8 @@ def speed_up_video(
         frame_spreadage: int = 1,
         audio_fade_envelope_size: int = 400,
         temp_folder: str = 'TEMP',
-        use_cuda: bool = False) -> None:
+        use_cuda: bool = False,
+        small: bool = False) -> None:
     """
     Speeds up a video file with different speeds for the silent and loud sections in the video.
 
@@ -235,10 +248,12 @@ def speed_up_video(
     :param frame_spreadage: How many silent frames adjacent to sounded frames should be included to provide context.
     :param audio_fade_envelope_size: Audio transition smoothing duration in samples.
     :param temp_folder: The file path of the temporary working folder.
+    :param use_cuda: Whether to use CUDA acceleration for video encoding.
+    :param small: Whether to apply small file optimizations (720p resize, 128k audio bitrate, best compression).
     """
     # Set output file name based on input file name if none was given
     if output_file is None:
-        output_file = _input_to_output_filename(input_file)
+        output_file = _input_to_output_filename(input_file, small)
 
     # Create Temp Folder
     if os.path.exists(temp_folder):
@@ -263,11 +278,12 @@ def speed_up_video(
 
     # Extract the audio with hardware acceleration if enabled
     hwaccel = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'] if use_cuda else []
+    audio_bitrate = '128k' if small else '160k'
     command = ' '.join([
         f'"{FFMPEG_PATH}"',
         ' '.join(hwaccel),
         f'-i "{input_file}"',
-        '-ab 160k -ac 2',
+        f'-ab {audio_bitrate} -ac 2',
         f'-ar {sample_rate}',
         '-vn',
         f'"{os.path.join(temp_folder, "audio.wav")}"',
@@ -283,6 +299,8 @@ def speed_up_video(
     print('\nProcessing Information:')
     print(f"- Max Audio Volume: {max_audio_volume}")
     print(f"- Processing on: {'GPU (CUDA)' if use_cuda else 'CPU'}")
+    if small:
+        print("- Small mode: 720p video, 128k audio, optimized compression")
     samples_per_frame = wav_sample_rate / frame_rate
     audio_frame_count = int(math.ceil(audio_sample_count / samples_per_frame))
 
@@ -309,6 +327,12 @@ def speed_up_video(
 
     chunks.append([chunks[-1][1], audio_frame_count, should_include_frame[audio_frame_count - 1]])
     chunks = chunks[1:]
+
+    print(f"Generated {len(chunks)} chunks:")
+    for i, chunk in enumerate(chunks[:5]):  # Show first 5 chunks
+        print(f"  Chunk {i}: {chunk}")
+    if len(chunks) > 5:
+        print(f"  ... and {len(chunks) - 5} more chunks")
 
     # Generate audio data with varying speed for each chunk
     new_speeds = [silent_speed, sounded_speed]
@@ -361,44 +385,126 @@ def speed_up_video(
     expression = _get_tree_expression(chunks)
 
     filter_graph_file = open(temp_folder + "/filterGraph.txt", 'w')
-    filter_graph_file.write(f'fps=fps={frame_rate},setpts=')
+    if small:
+        # For small mode, include scaling in the filter script
+        filter_graph_file.write(f'scale=-2:720,fps=fps={frame_rate},setpts=')
+    else:
+        filter_graph_file.write(f'fps=fps={frame_rate},setpts=')
     filter_graph_file.write(expression.replace(',', '\\,'))
     filter_graph_file.close()
 
     # Build the FFmpeg command with proper argument formatting
     command_parts = [
         f'"{FFMPEG_PATH}"',
-        '-y',
-        *(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'] if use_cuda else []),
+        '-y'
+    ]
+
+    # Add hardware acceleration if CUDA is enabled and available
+    if use_cuda and not small:
+        command_parts.extend(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'])
+
+    command_parts.extend([
         f'-i "{input_file}"',
         f'-i "{os.path.join(temp_folder, "audioNew.wav")}"',
-        f'-filter_script:v "{os.path.join(temp_folder, "filterGraph.txt")}"',
-        '-map 0 -map -0:a -map 1:a',
-        '-c:v h264_nvenc' if use_cuda else '-c:v copy',
+        '-map 0 -map -0:a -map 1:a'
+    ])
+
+    # Add video scaling and compression settings for small mode
+    if small:
+        command_parts.extend([
+            f'-filter_script:v "{os.path.join(temp_folder, "filterGraph.txt")}"',
+        ])
+
+        # For small mode, try CUDA first, then fallback to software encoding
+        cuda_available = _check_cuda_available()
+        if use_cuda and cuda_available:
+            command_parts.extend([
+                '-c:v h264_nvenc',
+                '-preset slow',  # Better compression preset
+                '-cq 23'  # Constant quality (lower = better quality, but larger file)
+            ])
+        else:
+            if use_cuda and not cuda_available:
+                print("CUDA encoding not available, using software encoding")
+            command_parts.extend([
+                '-c:v libx264',
+                '-preset slow',
+                '-crf 23'
+            ])
+    else:
+        command_parts.extend([
+            f'-filter_script:v "{os.path.join(temp_folder, "filterGraph.txt")}"',
+        ])
+        cuda_available = _check_cuda_available()
+        if use_cuda and cuda_available:
+            command_parts.append('-c:v h264_nvenc')
+        elif use_cuda and not cuda_available:
+            print("CUDA encoding not available for normal mode, using copy mode")
+            command_parts.append('-c:v copy')
+        else:
+            command_parts.append('-c:v copy')
+
+    command_parts.extend([
         '-c:a aac',
         f'"{output_file}"',
         '-loglevel info -stats -hide_banner'
-    ]
+    ])
     
     # Join the command parts into a single string
     command_str = ' '.join(command_parts)
     
     # Print the command for debugging
-    # print("\nExecuting FFmpeg command:")
-    # print(command_str)
+    print("\nExecuting FFmpeg command:")
+    print(command_str)
+    print(f"Command parts: {command_parts}")
+    
+    # Debug: Show filter file contents
+    try:
+        with open(os.path.join(temp_folder, "filterGraph.txt"), 'r') as f:
+            filter_content = f.read()
+        print(f"Filter file contents: {filter_content}")
+    except Exception as e:
+        print(f"Could not read filter file: {e}")
     
     # Verify output directory exists
     output_dir = os.path.dirname(os.path.abspath(output_file))
     if output_dir and not os.path.exists(output_dir):
         print(f"Creating output directory: {output_dir}")
         os.makedirs(output_dir, exist_ok=True)
-    
+
+    # Debug: Check if all required files exist before running final command
+    print(f"Input file exists: {os.path.exists(input_file)}")
+    print(f"Audio file exists: {os.path.exists(os.path.join(temp_folder, 'audioNew.wav'))}")
+    print(f"Filter file exists: {os.path.exists(os.path.join(temp_folder, 'filterGraph.txt'))}")
+
+    if not os.path.exists(os.path.join(temp_folder, 'audioNew.wav')):
+        print("ERROR: Audio file not found!")
+        _delete_path(temp_folder)
+        return
+
+    if not os.path.exists(os.path.join(temp_folder, 'filterGraph.txt')):
+        print("ERROR: Filter file not found!")
+        _delete_path(temp_folder)
+        return
+
     try:
         _run_timed_ffmpeg_command(command_str, total=chunks[-1][3], unit='frames', desc='Generating final:')
-    except Exception as e:
-        print(f"\nError running FFmpeg command: {e}")
-        print("Please check if all input files exist and FFmpeg has proper permissions.")
-        raise
+    except subprocess.CalledProcessError as e:
+        # If CUDA encoding failed, retry with software encoding for small mode
+        if small and use_cuda and cuda_available and '-c:v h264_nvenc' in command_str:
+            print("CUDA encoding failed, retrying with software encoding...")
+            # Replace h264_nvenc with libx264 in the command
+            command_str = command_str.replace('-c:v h264_nvenc -preset slow -cq 23', '-c:v libx264 -preset slow -crf 23')
+            try:
+                _run_timed_ffmpeg_command(command_str, total=chunks[-1][3], unit='frames', desc='Generating final (software):')
+            except subprocess.CalledProcessError:
+                print(f"\nError running FFmpeg command: {e}")
+                print("Please check if all input files exist and FFmpeg has proper permissions.")
+                raise
+        else:
+            print(f"\nError running FFmpeg command: {e}")
+            print("Please check if all input files exist and FFmpeg has proper permissions.")
+            raise
 
     _delete_path(temp_folder)
 
@@ -431,9 +537,8 @@ if __name__ == '__main__':
     parser.add_argument('-sr', '--sample_rate', type=float, dest='sample_rate',
                         help="Sample rate of the input and output videos. FFmpeg tries to extract this information."
                              " Thus only needed if FFmpeg fails to do so.")
-    parser.add_argument('-fr', '--frame_rate', type=float, dest='frame_rate',
-                        help="Frame rate of the input and output videos. FFmpeg tries to extract this information."
-                             " Thus only needed if FFmpeg fails to do so.")
+    parser.add_argument('--small', action='store_true',
+                        help='Apply small file optimizations: resize video to 720p, audio to 128k bitrate, best compression (uses CUDA if available).')
 
     files = []
     for input_file in parser.parse_args().input_file:
@@ -457,6 +562,7 @@ if __name__ == '__main__':
         local_options = dict(args)
         local_options['input_file'] = file
         local_options['use_cuda'] = local_options['cuda']
+        local_options['small'] = local_options.get('small', False)
         del local_options['cuda']
         speed_up_video(**local_options)
     
