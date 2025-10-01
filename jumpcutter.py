@@ -110,6 +110,12 @@ def _check_cuda_available():
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
         return False
 
+    if result.returncode != 0:
+        return False
+
+    encoder_list = result.stdout.lower()
+    return 'h264_nvenc' in encoder_list or 'hevc_nvenc' in encoder_list or 'nvenc' in encoder_list
+
 
 def _delete_path(s):  # Dangerous! Watch out!
     try:
@@ -227,12 +233,11 @@ def speed_up_video(
         frame_rate: float = 30,
         sample_rate: int = 44100,
         silent_threshold: float = 0.03,
-        silent_speed: float = 5.0,
+        silent_speed: float = 4.0,
         sounded_speed: float = 1.0,
-        frame_spreadage: int = 1,
+        frame_spreadage: int = 2,
         audio_fade_envelope_size: int = 400,
         temp_folder: str = 'TEMP',
-        use_cuda: bool = False,
         small: bool = False) -> None:
     """
     Speeds up a video file with different speeds for the silent and loud sections in the video.
@@ -248,12 +253,13 @@ def speed_up_video(
     :param frame_spreadage: How many silent frames adjacent to sounded frames should be included to provide context.
     :param audio_fade_envelope_size: Audio transition smoothing duration in samples.
     :param temp_folder: The file path of the temporary working folder.
-    :param use_cuda: Whether to use CUDA acceleration for video encoding.
     :param small: Whether to apply small file optimizations (720p resize, 128k audio bitrate, best compression).
     """
     # Set output file name based on input file name if none was given
     if output_file is None:
         output_file = _input_to_output_filename(input_file, small)
+
+    cuda_available = _check_cuda_available()
 
     # Create Temp Folder
     if os.path.exists(temp_folder):
@@ -277,7 +283,7 @@ def speed_up_video(
         # print(f'Found Duration {original_duration}')
 
     # Extract the audio with hardware acceleration if enabled
-    hwaccel = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'] if use_cuda else []
+    hwaccel = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'] if cuda_available else []
     audio_bitrate = '128k' if small else '160k'
     command = ' '.join([
         f'"{FFMPEG_PATH}"',
@@ -298,7 +304,7 @@ def speed_up_video(
     max_audio_volume = _get_max_volume(audio_data)
     print('\nProcessing Information:')
     print(f"- Max Audio Volume: {max_audio_volume}")
-    print(f"- Processing on: {'GPU (CUDA)' if use_cuda else 'CPU'}")
+    print(f"- Processing on: {'GPU (CUDA)' if cuda_available else 'CPU'}")
     if small:
         print("- Small mode: 720p video, 128k audio, optimized compression")
     samples_per_frame = wav_sample_rate / frame_rate
@@ -400,7 +406,7 @@ def speed_up_video(
     ]
 
     # Add hardware acceleration if CUDA is enabled and available
-    if use_cuda and not small:
+    if cuda_available and not small:
         command_parts.extend(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'])
 
     command_parts.extend([
@@ -416,16 +422,14 @@ def speed_up_video(
         ])
 
         # For small mode, try CUDA first, then fallback to software encoding
-        cuda_available = _check_cuda_available()
-        if use_cuda and cuda_available:
+        if cuda_available:
             command_parts.extend([
                 '-c:v h264_nvenc',
-                '-preset slow',  # Better compression preset
+                '-preset p3',  # p1 - fast, low compression, p7 - slow, high compression
                 '-cq 23'  # Constant quality (lower = better quality, but larger file)
             ])
         else:
-            if use_cuda and not cuda_available:
-                print("CUDA encoding not available, using software encoding")
+            print("CUDA encoding not available, using software encoding")
             command_parts.extend([
                 '-c:v libx264',
                 '-preset slow',
@@ -435,13 +439,10 @@ def speed_up_video(
         command_parts.extend([
             f'-filter_script:v "{os.path.join(temp_folder, "filterGraph.txt")}"',
         ])
-        cuda_available = _check_cuda_available()
-        if use_cuda and cuda_available:
+        if cuda_available:
             command_parts.append('-c:v h264_nvenc')
-        elif use_cuda and not cuda_available:
-            print("CUDA encoding not available for normal mode, using copy mode")
-            command_parts.append('-c:v copy')
         else:
+            print("CUDA encoding not available for normal mode, using copy mode")
             command_parts.append('-c:v copy')
 
     command_parts.extend([
@@ -491,7 +492,7 @@ def speed_up_video(
         _run_timed_ffmpeg_command(command_str, total=chunks[-1][3], unit='frames', desc='Generating final:')
     except subprocess.CalledProcessError as e:
         # If CUDA encoding failed, retry with software encoding for small mode
-        if small and use_cuda and cuda_available and '-c:v h264_nvenc' in command_str:
+        if small and cuda_available and '-c:v h264_nvenc' in command_str:
             print("CUDA encoding failed, retrying with software encoding...")
             # Replace h264_nvenc with libx264 in the command
             command_str = command_str.replace('-c:v h264_nvenc -preset slow -cq 23', '-c:v libx264 -preset slow -crf 23')
@@ -522,18 +523,16 @@ if __name__ == '__main__':
                              " If not included, it'll just modify the input file name by adding _ALTERED.")
     parser.add_argument('--temp_folder', type=str, default='TEMP',
                         help='The file path of the temporary working folder.')
-    parser.add_argument('--cuda', action='store_true',
-                        help='Use CUDA acceleration for video encoding if available.')
     parser.add_argument('-t', '--silent_threshold', type=float, dest='silent_threshold',
                         help='The volume amount that frames\' audio needs to surpass to be consider "sounded".'
                              ' It ranges from 0 (silence) to 1 (max volume). Defaults to 0.03')
     parser.add_argument('-S', '--sounded_speed', type=float, dest='sounded_speed',
                         help="The speed that sounded (spoken) frames should be played at. Defaults to 1.")
     parser.add_argument('-s', '--silent_speed', type=float, dest='silent_speed',
-                        help="The speed that silent frames should be played at. Defaults to 5")
+                        help="The speed that silent frames should be played at. Defaults to 4")
     parser.add_argument('-fm', '--frame_margin', type=float, dest='frame_spreadage',
                         help="Some silent frames adjacent to sounded frames are included to provide context."
-                             " This is how many frames on either the side of speech should be included. Defaults to 1")
+                             " This is how many frames on either the side of speech should be included. Defaults to 2")
     parser.add_argument('-sr', '--sample_rate', type=float, dest='sample_rate',
                         help="Sample rate of the input and output videos. FFmpeg tries to extract this information."
                              " Thus only needed if FFmpeg fails to do so.")
@@ -561,9 +560,7 @@ if __name__ == '__main__':
         print(f"Processing file {index + 1}/{len(files)} '{os.path.basename(file)}'")
         local_options = dict(args)
         local_options['input_file'] = file
-        local_options['use_cuda'] = local_options['cuda']
         local_options['small'] = local_options.get('small', False)
-        del local_options['cuda']
         speed_up_video(**local_options)
     
     end_time = time.time()

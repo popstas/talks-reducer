@@ -1,0 +1,33 @@
+# Jumpcutter Project Rules
+
+## Project Snapshot
+- Core logic lives in `jumpcutter.py`; no package layout, so keep imports and helpers in that file unless you introduce a clear module split.
+- External runtime dependencies: `ffmpeg` in PATH, `ffprobe`, `audiotsm`, `numpy`, `scipy`, `tqdm`.
+- Temporary artifacts go under `TEMP`; clean it explicitly after runs to avoid stale media.
+
+## Coding Conventions
+- Stay with Python 3 style already used: snake_case for functions, constants in all caps, minimal type hints.
+- Preserve ASCII; file currently mixes f-strings and `format`, both acceptable.
+- Keep progress feedback via `tqdm`; use `partial(std_tqdm, ...)` pattern if you add new progress bars.
+- Maintain helper prefixes (`_get_*`, `_run_*`) for private utilities.
+
+## Audio/Video Workflow
+- Always validate media with `_is_valid_input_file` before processing bulk paths.
+- Derive frame and duration metadata with `ffprobe`; prefer parsing stdout like existing code for consistency.
+- Audio chunks are processed with `phasevocoder`; adjust fade envelopes carefully—small values zero out short clips.
+- Filter script writes to `TEMP/filterGraph.txt`; escape commas (`\,`) when appending to the file.
+
+## CLI Usage
+- Main entry point: `python jumpcutter.py -i <paths...> [options]`.
+- Options kept in sync with `argparse`; update help strings if behavior changes.
+- When adding flags, ensure batch mode (multiple inputs) still respects single-output restrictions.
+
+## Common Tasks
+- To inspect available options: `python jumpcutter.py --help`.
+- Typical pipeline per file: extract audio ➝ classify frames ➝ time-stretch ➝ rebuild video.
+- Temp folder resets each run; guard against unintended deletion if you change `_delete_path`.
+
+## Testing & Verification
+- Smoke test with a short video clip; verify final duration shrinks compared to original.
+- Confirm ffmpeg progress bars reach expected frame totals to catch filter graph errors.
+
