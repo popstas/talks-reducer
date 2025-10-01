@@ -391,73 +391,92 @@ def speed_up_video(
     expression = _get_tree_expression(chunks)
 
     filter_graph_file = open(temp_folder + "/filterGraph.txt", 'w')
+    filter_parts = []
+
     if small:
-        # For small mode, include scaling in the filter script
-        filter_graph_file.write(f'scale=-2:720,fps=fps={frame_rate},setpts=')
-    else:
-        filter_graph_file.write(f'fps=fps={frame_rate},setpts=')
-    filter_graph_file.write(expression.replace(',', '\\,'))
+        filter_parts.append('scale=-2:720')
+
+    filter_parts.append(f'fps=fps={frame_rate}')
+    filter_parts.append(f'setpts={expression.replace(",", "\\,")}')
+
+    filter_graph_file.write(','.join(filter_parts))
     filter_graph_file.close()
 
     # Build the FFmpeg command with proper argument formatting
-    command_parts = [
+    global_command_parts = [
         f'"{FFMPEG_PATH}"',
         '-y'
     ]
 
-    # Add hardware acceleration if CUDA is enabled and available
-    if cuda_available and not small:
-        command_parts.extend(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'])
+    hwaccel_args = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'] if (cuda_available and not small) else []
 
-    command_parts.extend([
+    input_command_parts = []
+    output_command_parts = [
+        '-map 0 -map -0:a -map 1:a',
+        f'-filter_script:v "{os.path.join(temp_folder, "filterGraph.txt")}"'
+    ]
+
+    if hwaccel_args:
+        global_command_parts.extend(hwaccel_args)
+
+    input_command_parts.extend([
         f'-i "{input_file}"',
-        f'-i "{os.path.join(temp_folder, "audioNew.wav")}"',
-        '-map 0 -map -0:a -map 1:a'
+        f'-i "{os.path.join(temp_folder, "audioNew.wav")}"'
     ])
 
-    # Add video scaling and compression settings for small mode
-    if small:
-        command_parts.extend([
-            f'-filter_script:v "{os.path.join(temp_folder, "filterGraph.txt")}"',
-        ])
+    video_encoder_args = []
+    fallback_encoder_args = []
+    use_cuda_encoder = False
 
-        # For small mode, try CUDA first, then fallback to software encoding
+    if small:
         if cuda_available:
-            command_parts.extend([
+            use_cuda_encoder = True
+            video_encoder_args = [
                 '-c:v h264_nvenc',
-                '-preset p3',  # p1 - fast, low compression, p7 - slow, high compression
-                '-cq 23'  # Constant quality (lower = better quality, but larger file)
-            ])
+                '-preset p1',
+                '-cq 28',
+                '-tune', 'll'
+            ]
+            fallback_encoder_args = [
+                '-c:v libx264',
+                '-preset veryfast',
+                '-crf 24',
+                '-tune', 'zerolatency'
+            ]
         else:
             print("CUDA encoding not available, using software encoding")
-            command_parts.extend([
+            video_encoder_args = [
                 '-c:v libx264',
-                '-preset slow',
-                '-crf 23'
-            ])
+                '-preset veryfast',
+                '-crf 24',
+                '-tune', 'zerolatency'
+            ]
     else:
-        command_parts.extend([
-            f'-filter_script:v "{os.path.join(temp_folder, "filterGraph.txt")}"',
-        ])
+        base_command_parts.append('-filter_complex_threads 1')
         if cuda_available:
-            command_parts.append('-c:v h264_nvenc')
+            video_encoder_args = ['-c:v h264_nvenc']
         else:
             print("CUDA encoding not available for normal mode, using copy mode")
-            command_parts.append('-c:v copy')
+            video_encoder_args = ['-c:v copy']
 
-    command_parts.extend([
+    audio_command_parts = [
         '-c:a aac',
         f'"{output_file}"',
         '-loglevel info -stats -hide_banner'
-    ])
-    
-    # Join the command parts into a single string
-    command_str = ' '.join(command_parts)
+    ]
+
+    final_command_parts = global_command_parts + input_command_parts + output_command_parts + video_encoder_args + audio_command_parts
+    command_str = ' '.join(final_command_parts)
+
+    fallback_command_str = None
+    if fallback_encoder_args:
+        fallback_command_parts = global_command_parts + input_command_parts + output_command_parts + fallback_encoder_args + audio_command_parts
+        fallback_command_str = ' '.join(fallback_command_parts)
     
     # Print the command for debugging
     print("\nExecuting FFmpeg command:")
     print(command_str)
-    print(f"Command parts: {command_parts}")
+    print(f"Command parts: {final_command_parts}")
     
     # Debug: Show filter file contents
     try:
@@ -491,13 +510,10 @@ def speed_up_video(
     try:
         _run_timed_ffmpeg_command(command_str, total=chunks[-1][3], unit='frames', desc='Generating final:')
     except subprocess.CalledProcessError as e:
-        # If CUDA encoding failed, retry with software encoding for small mode
-        if small and cuda_available and '-c:v h264_nvenc' in command_str:
-            print("CUDA encoding failed, retrying with software encoding...")
-            # Replace h264_nvenc with libx264 in the command
-            command_str = command_str.replace('-c:v h264_nvenc -preset slow -cq 23', '-c:v libx264 -preset slow -crf 23')
+        if fallback_command_str and use_cuda_encoder:
+            print("CUDA encoding failed, retrying with CPU encoder...")
             try:
-                _run_timed_ffmpeg_command(command_str, total=chunks[-1][3], unit='frames', desc='Generating final (software):')
+                _run_timed_ffmpeg_command(fallback_command_str, total=chunks[-1][3], unit='frames', desc='Generating final (fallback):')
             except subprocess.CalledProcessError:
                 print(f"\nError running FFmpeg command: {e}")
                 print("Please check if all input files exist and FFmpeg has proper permissions.")
