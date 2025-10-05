@@ -59,31 +59,15 @@ jobs:
           pip install pyinstaller
         shell: bash
 
-      - name: Build PyInstaller binary
-        run: |
-          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            export MACOSX_DEPLOYMENT_TARGET=10.13
-          fi
-          pyinstaller talks_reducer/gui.py \
-            --name talks-reducer-gui \
-            --onefile \
-            --console \
-            --hidden-import=tkinterdnd2 \
-            --collect-submodules talks_reducer
-        shell: bash
-
-      - name: Prepare artifact name
-        run: |
-          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            mv dist/talks-reducer-gui dist/talks-reducer-gui-macos-universal
-          fi
+      - name: Build GUI executable
+        run: bash scripts/build-gui.sh --clean --zip
         shell: bash
 
       - name: Upload PyInstaller artifact
         uses: actions/upload-artifact@v4
         with:
-          name: talks-reducer-gui-${{ matrix.os }}-pyinstaller
-          path: dist/*
+          name: talks-reducer-${{ matrix.os }}
+          path: dist/*.zip
 
   release:
     runs-on: ubuntu-latest
@@ -115,7 +99,7 @@ jobs:
         with:
           pattern: talks-reducer-gui-*-pyinstaller
           merge-multiple: true
-          path: pyinstaller-dist
+          path: gui-dist
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4
@@ -128,6 +112,6 @@ jobs:
         with:
           files: |
             dist/*
-            pyinstaller-dist/*
+            gui-dist/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

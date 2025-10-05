@@ -100,7 +100,27 @@ def gather_input_files(paths: List[str]) -> List[str]:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
-    """Entry point for the command line interface."""
+    """Entry point for the command line interface.
+    
+    Launch the GUI when run without arguments, otherwise defer to the CLI.
+    """
+    
+    # Check if running without arguments
+    if argv is None:
+        argv_list = sys.argv[1:]
+    else:
+        argv_list = list(argv)
+    
+    # Launch GUI if no arguments provided
+    if not argv_list:
+        try:
+            from .gui import TalksReducerGUI
+            app = TalksReducerGUI()
+            app.run()
+            return
+        except ImportError:
+            # GUI dependencies not available, show help instead
+            pass
 
     parser = _build_parser()
     parsed_args = parser.parse_args(argv)
