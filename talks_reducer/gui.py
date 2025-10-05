@@ -11,11 +11,25 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Iterable, List, Optional
 
-from .cli import gather_input_files
-from .ffmpeg import FFmpegNotFoundError
-from .models import ProcessingOptions
-from .pipeline import speed_up_video
-from .progress import ProgressHandle, SignalProgressReporter
+try:
+    from .cli import gather_input_files
+    from .ffmpeg import FFmpegNotFoundError
+    from .models import ProcessingOptions
+    from .pipeline import speed_up_video
+    from .progress import ProgressHandle, SignalProgressReporter
+except ImportError:  # pragma: no cover - handled at runtime
+    if __package__ not in (None, ""):
+        raise
+
+    PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+    if str(PACKAGE_ROOT) not in sys.path:
+        sys.path.insert(0, str(PACKAGE_ROOT))
+
+    from talks_reducer.cli import gather_input_files
+    from talks_reducer.ffmpeg import FFmpegNotFoundError
+    from talks_reducer.models import ProcessingOptions
+    from talks_reducer.pipeline import speed_up_video
+    from talks_reducer.progress import ProgressHandle, SignalProgressReporter
 
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD

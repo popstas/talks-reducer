@@ -8,7 +8,11 @@ project was renamed from **jumpcutter** to emphasize its focus on conference tal
 - 1h 19m, 171 MB — Talks Reducer `--small`
 
 ## Install GUI (Windows, macOS)
-Go to the [releases page](https://github.com/popstas/talks-reducer/releases) and download the appropriate `talks-reducer-gui-<platform>` artifact.
+Go to the [releases page](https://github.com/popstas/talks-reducer/releases) and download the appropriate artifact:
+
+- **Windows** — `talks-reducer-gui.exe`
+- **macOS** — `talks-reducer-gui-macos-universal` (requires macOS 10.13 High Sierra or
+  newer)
 
 ## Install CLI (Linux, Windows, macOS)
 ```
