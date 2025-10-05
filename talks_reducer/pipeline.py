@@ -203,7 +203,8 @@ def speed_up_video(
         if options.small:
             filter_parts.append("scale=-2:720")
         filter_parts.append(f"fps=fps={frame_rate}")
-        filter_parts.append(f'setpts={expression.replace(",", "\\,")}')
+        escaped_expression = expression.replace(",", "\\,")
+        filter_parts.append(f"setpts={escaped_expression}")
         filter_graph_file.write(",".join(filter_parts))
 
     command_str, fallback_command_str, use_cuda_encoder = build_video_commands(

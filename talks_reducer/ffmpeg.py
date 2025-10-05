@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+from shutil import which as _shutil_which
 from typing import List, Optional, Tuple
 
 from .progress import ProgressReporter, TqdmProgressReporter
@@ -13,6 +14,12 @@ from .progress import ProgressReporter, TqdmProgressReporter
 
 class FFmpegNotFoundError(RuntimeError):
     """Raised when FFmpeg cannot be located on the current machine."""
+
+
+def shutil_which(cmd: str) -> Optional[str]:
+    """Wrapper around :func:`shutil.which` for easier testing."""
+
+    return _shutil_which(cmd)
 
 
 def find_ffmpeg() -> Optional[str]:
@@ -272,9 +279,13 @@ def build_video_commands(
     return command_str, fallback_command_str, use_cuda_encoder
 
 
-def shutil_which(cmd: str) -> Optional[str]:
-    """Wrapper around :func:`shutil.which` for easier testing."""
-
-    from shutil import which as _which
-
-    return _which(cmd)
+__all__ = [
+    "FFmpegNotFoundError",
+    "find_ffmpeg",
+    "get_ffmpeg_path",
+    "check_cuda_available",
+    "run_timed_ffmpeg_command",
+    "build_extract_audio_command",
+    "build_video_commands",
+    "shutil_which",
+]
