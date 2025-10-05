@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from pprint import pprint
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -75,7 +76,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.bump:
-        subprocess.run(["bumpversion", args.bump], check=True, cwd=ROOT)
+        subprocess.run(["bump-my-version", "bump", args.bump, "--commit", "--tag"], check=True, cwd=ROOT)
 
     # Run tests first
     if not run_tests():
