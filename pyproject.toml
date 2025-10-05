@@ -1,3 +1,27 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "talks-reducer"
+version = "0.1.0"
+description = "CLI for speeding up long-form talks by removing silence"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Talks Reducer Maintainers" }
+]
+dependencies = [
+    "audiotsm>=0.3.0",
+    "scipy>=1.10.0",
+    "numpy>=1.22.0,<2.0.0",
+    "tqdm>=4.65.0",
+]
+
+[project.scripts]
+talks-reducer = "talks_reducer.cli:main"
+
 [tool.black]
 line-length = 88
 target-version = ["py39"]

@@ -13,13 +13,13 @@ Ensure FFmpeg is installed and available on your command line. Visit [ffmpeg.org
 Inspect the CLI options:
 
 ```
-python talks_reducer.py -h
+python -m talks_reducer -h
 ```
 
 Run with default settings:
 
 ```
-python talks_reducer.py -i INPUT_FILE
+python -m talks_reducer -i INPUT_FILE
 ```
 
 Feel free to open pull requests with enhancements or bug fixes.
