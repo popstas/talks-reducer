@@ -79,11 +79,56 @@ else
         --noconfirm)
 
     if [[ "$OS_NAME" == "macos" ]]; then
-        # Produce a universal binary so the bundle runs natively on Apple Silicon
-        # while still supporting Intel Macs. PyInstaller requires a universal
-        # Python build for this flag to succeed.
+        # Produce the most compatible binary we can. Prefer universal builds
+        # when the Python runtime and dependencies contain both arm64 and
+        # x86_64 slices, otherwise fall back to the active architecture to
+        # avoid PyInstaller attempting to thin non-fat binaries.
         if command -v pyinstaller &> /dev/null && pyinstaller --help 2>/dev/null | grep -q -- "--target-arch"; then
-            PYINSTALLER_ARGS+=(--target-arch universal2)
+            TARGET_ARCH=""
+            HOST_ARCH=$(uname -m)
+            HOST_TARGET=""
+            case "$HOST_ARCH" in
+                arm64|aarch64)
+                    HOST_TARGET="arm64"
+                    ;;
+                x86_64|amd64)
+                    HOST_TARGET="x86_64"
+                    ;;
+            esac
+
+            if command -v python3 &> /dev/null; then
+                PYTHON_SHARED_LIB=$(python3 - <<'PY'
+import sysconfig
+libname = sysconfig.get_config_var('LDLIBRARY') or ''
+libdir = sysconfig.get_config_var('LIBDIR') or ''
+if libname and libdir:
+    import os
+    path = os.path.join(libdir, libname)
+    if os.path.exists(path):
+        print(path)
+PY
+)
+            fi
+
+            if [[ -n "$PYTHON_SHARED_LIB" && -f "$PYTHON_SHARED_LIB" ]] && command -v lipo &> /dev/null; then
+                LIPO_INFO=$(lipo -info "$PYTHON_SHARED_LIB" 2>/dev/null || true)
+                if echo "$LIPO_INFO" | grep -q "Architectures in the fat file"; then
+                    TARGET_ARCH="universal2"
+                elif echo "$LIPO_INFO" | grep -q "Non-fat file"; then
+                    TARGET_ARCH="$HOST_TARGET"
+                fi
+            fi
+
+            if [[ -z "$TARGET_ARCH" ]]; then
+                TARGET_ARCH="$HOST_TARGET"
+            fi
+
+            if [[ -z "$TARGET_ARCH" ]]; then
+                TARGET_ARCH="universal2"
+            fi
+
+            echo "🎯 macOS build target architecture: $TARGET_ARCH"
+            PYINSTALLER_ARGS+=(--target-arch "$TARGET_ARCH")
         else
             echo "⚠️  This version of PyInstaller does not support --target-arch;"
             echo "   falling back to the default architecture."
