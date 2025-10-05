@@ -37,6 +37,9 @@ LIGHT_THEME = {
     "accent": "#2563eb",
     "surface": "#ffffff",
     "border": "#cbd5e1",
+    "hover": "#1d4ed8",
+    "selection_background": "#2563eb",
+    "selection_foreground": "#ffffff",
 }
 
 DARK_THEME = {
@@ -45,6 +48,9 @@ DARK_THEME = {
     "accent": "#60a5fa",
     "surface": "#2b2b3c",
     "border": "#4b5563",
+    "hover": "#333333",
+    "selection_background": "#333333",
+    "selection_foreground": "#f3f4f6",
 }
 
 
@@ -114,7 +120,7 @@ class TalksReducerGUI:
         self._apply_window_icon()
 
         self._full_size = (760, 680)
-        self._simple_size = (520, 420)
+        self._simple_size = (245, 300)
         self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
         self.style = ttk.Style(self.root)
 
@@ -473,7 +479,7 @@ class TalksReducerGUI:
         self.style.map(
             "TButton",
             background=[
-                ("active", palette["accent"]),
+                ("active", palette.get("hover", palette["accent"])),
                 ("disabled", palette["surface"]),
             ],
             foreground=[
@@ -501,8 +507,8 @@ class TalksReducerGUI:
         self.input_list.configure(
             bg=palette["surface"],
             fg=palette["foreground"],
-            selectbackground=palette["accent"],
-            selectforeground=palette["surface"],
+            selectbackground=palette.get("selection_background", palette["accent"]),
+            selectforeground=palette.get("selection_foreground", palette["surface"]),
             highlightbackground=palette["border"],
             highlightcolor=palette["border"],
         )
