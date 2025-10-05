@@ -452,7 +452,7 @@ def speed_up_video(
                 '-tune', 'zerolatency'
             ]
     else:
-        base_command_parts.append('-filter_complex_threads 1')
+        global_command_parts.append('-filter_complex_threads 1')
         if cuda_available:
             video_encoder_args = ['-c:v h264_nvenc']
         else:
