@@ -9,10 +9,11 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
-from typing import Callable, Iterable, List, Optional
+from typing import Callable, Iterable, List, Optional, Sequence
 
 try:
     from .cli import gather_input_files
+    from .cli import main as cli_main
     from .ffmpeg import FFmpegNotFoundError
     from .models import ProcessingOptions
     from .pipeline import speed_up_video
@@ -26,6 +27,7 @@ except ImportError:  # pragma: no cover - handled at runtime
         sys.path.insert(0, str(PACKAGE_ROOT))
 
     from talks_reducer.cli import gather_input_files
+    from talks_reducer.cli import main as cli_main
     from talks_reducer.ffmpeg import FFmpegNotFoundError
     from talks_reducer.models import ProcessingOptions
     from talks_reducer.pipeline import speed_up_video
@@ -839,8 +841,15 @@ class TalksReducerGUI:
         self.root.mainloop()
 
 
-def main() -> None:
-    """Entry-point used by the ``talks-reducer-gui`` console script."""
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    """Launch the GUI when run without arguments, otherwise defer to the CLI."""
+
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if argv:
+        cli_main(argv)
+        return
 
     app = TalksReducerGUI()
     app.run()

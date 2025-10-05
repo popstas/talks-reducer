@@ -7,7 +7,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Sequence
 
 from . import audio
 from .ffmpeg import FFmpegNotFoundError
@@ -99,11 +99,11 @@ def gather_input_files(paths: List[str]) -> List[str]:
     return files
 
 
-def main() -> None:
+def main(argv: Optional[Sequence[str]] = None) -> None:
     """Entry point for the command line interface."""
 
     parser = _build_parser()
-    parsed_args = parser.parse_args()
+    parsed_args = parser.parse_args(argv)
     start_time = time.time()
 
     files = gather_input_files(parsed_args.input_file)
