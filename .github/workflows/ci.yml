@@ -61,6 +61,9 @@ jobs:
 
       - name: Build PyInstaller binary
         run: |
+          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            export MACOSX_DEPLOYMENT_TARGET=10.13
+          fi
           pyinstaller talks_reducer/gui.py \
             --name talks-reducer-gui \
             --onefile \
