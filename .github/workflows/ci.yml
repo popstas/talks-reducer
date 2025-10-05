@@ -71,9 +71,7 @@ jobs:
 
       - name: Prepare artifact name
         run: |
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            mv dist/talks-reducer-gui.exe dist/talks-reducer-gui-windows-amd64.exe
-          else
+          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
             mv dist/talks-reducer-gui dist/talks-reducer-gui-macos-universal
           fi
         shell: bash
