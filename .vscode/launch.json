@@ -1,0 +1,53 @@
+{
+    "version": "0.2.0",
+    "inputs": [
+        {
+            "id": "talksReducerInput",
+            "type": "promptString",
+            "description": "Path to the video file to process with Talks Reducer",
+            "default": "${workspaceFolder}/assets/demo.mp4"
+        }
+    ],
+    "configurations": [
+        {
+            "name": "assets/demo.mp4 --silent_speed 4 --frame_margin 2",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "talks_reducer",
+            "args": [
+                "assets/demo.mp4",
+                "--silent_speed",
+                "4",
+                "--frame_margin",
+                "2"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "assets/demo.mp4 --small",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "talks_reducer",
+            "args": [
+                "assets/demo.mp4",
+                "--small"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "pytest -s tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "-s",
+                "tests"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
