@@ -76,11 +76,15 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.bump:
-        subprocess.run(["bump-my-version", "bump", args.bump, "--commit", "--tag"], check=True, cwd=ROOT)
+        subprocess.run(
+            ["bump-my-version", "bump", args.bump, "--commit", "--tag"],
+            check=True,
+            cwd=ROOT,
+        )
 
     # Run tests first
     # if not run_tests():
-        # sys.exit(1)
+    # sys.exit(1)
 
     # Proceed with deployment if tests pass
     build_package()
