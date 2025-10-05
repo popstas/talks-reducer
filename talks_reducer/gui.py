@@ -6,10 +6,12 @@ import os
 import subprocess
 import sys
 import threading
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
-from typing import Callable, Iterable, List, Optional, Sequence
+from typing import TYPE_CHECKING, Callable, Iterable, List, Optional, Sequence
+
+if TYPE_CHECKING:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, ttk
 
 try:
     from .cli import gather_input_files
@@ -32,6 +34,36 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.models import ProcessingOptions
     from talks_reducer.pipeline import speed_up_video
     from talks_reducer.progress import ProgressHandle, SignalProgressReporter
+
+
+def _check_tkinter_available() -> tuple[bool, str]:
+    """Check if tkinter can create windows without importing it globally."""
+    # Test in a subprocess to avoid crashing the main process
+    test_code = """import tkinter as tk
+try:
+    root = tk.Tk()
+    root.destroy()
+    print("SUCCESS")
+except Exception as e:
+    print(f"ERROR: {e}")"""
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", test_code], capture_output=True, text=True, timeout=5
+        )
+
+        if result.returncode == 0 and "SUCCESS" in result.stdout:
+            return True, ""
+        else:
+            error_output = (
+                result.stdout.strip()
+                or result.stderr.strip()
+                or "Window creation failed"
+            )
+            return False, error_output
+    except Exception as e:
+        return False, f"Error testing tkinter: {e}"
+
 
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
@@ -128,6 +160,16 @@ class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
 
     def __init__(self) -> None:
+        # Import tkinter here to avoid loading it at module import time
+        import tkinter as tk
+        from tkinter import filedialog, messagebox, ttk
+
+        # Store references for use in methods
+        self.tk = tk
+        self.filedialog = filedialog
+        self.messagebox = messagebox
+        self.ttk = ttk
+
         if TkinterDnD is not None:
             self.root = TkinterDnD.Tk()  # type: ignore[call-arg]
         else:
@@ -546,7 +588,7 @@ class TalksReducerGUI:
 
                 with winreg.OpenKey(
                     winreg.HKEY_CURRENT_USER,
-                    r"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                    r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
                 ) as key:
                     value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
                 return "light" if int(value) else "dark"
@@ -851,8 +893,37 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         cli_main(argv)
         return
 
+    # Check if tkinter is available before creating GUI
+    tkinter_available, error_msg = _check_tkinter_available()
+
+    if not tkinter_available:
+        print("Talks Reducer GUI")
+        print("=" * 50)
+        print("❌ GUI not available on this system")
+        print(f"Error: {error_msg}")
+        print()
+        print("💡 Alternative: Use the command-line interface")
+        print()
+        print("The CLI provides all the same functionality:")
+        print("  python3 -m talks_reducer <input_file> [options]")
+        print()
+        print("Examples:")
+        print("  python3 -m talks_reducer video.mp4")
+        print("  python3 -m talks_reducer video.mp4 --small")
+        print("  python3 -m talks_reducer video.mp4 -o output.mp4")
+        print()
+        print("Run 'python3 -m talks_reducer --help' for all options.")
+        print()
+        print("This is likely a macOS/Tkinter compatibility issue.")
+        print("The CLI interface works perfectly and is recommended.")
+        return
+
     app = TalksReducerGUI()
     app.run()
+
+
+if __name__ == "__main__":
+    main()
 
 
 __all__ = ["TalksReducerGUI", "main"]
