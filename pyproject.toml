@@ -18,6 +18,7 @@ dependencies = [
     "numpy>=1.22.0,<2.0.0",
     "tqdm>=4.65.0",
     "tkinterdnd2>=0.3.0",
+    "Pillow>=9.0.0",
 ]
 
 [project.optional-dependencies]
