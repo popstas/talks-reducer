@@ -68,7 +68,11 @@ def find_ffprobe() -> Optional[str]:
         ffmpeg_dir = os.path.dirname(ffmpeg_path)
         ffprobe_path = os.path.join(ffmpeg_dir, "ffprobe")
         if os.path.isfile(ffprobe_path) or shutil_which(ffprobe_path):
-            return os.path.abspath(ffprobe_path) if os.path.isfile(ffprobe_path) else ffprobe_path
+            return (
+                os.path.abspath(ffprobe_path)
+                if os.path.isfile(ffprobe_path)
+                else ffprobe_path
+            )
 
     # Fallback to common locations
     common_paths = [
@@ -316,11 +320,7 @@ def build_video_commands(
         else:
             # Cannot use copy codec when applying filters (speed modifications)
             # Use a fast software encoder instead
-            video_encoder_args = [
-                "-c:v libx264",
-                "-preset veryfast",
-                "-crf 23"
-            ]
+            video_encoder_args = ["-c:v libx264", "-preset veryfast", "-crf 23"]
 
     audio_parts = ["-c:a aac", f'"{output_file}"', "-loglevel info -stats -hide_banner"]
 
