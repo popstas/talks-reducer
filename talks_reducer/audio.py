@@ -20,8 +20,11 @@ def get_max_volume(samples: np.ndarray) -> float:
 def is_valid_input_file(filename: str) -> bool:
     """Check whether ``ffprobe`` recognises the input file and finds an audio stream."""
 
+    from .ffmpeg import get_ffprobe_path
+
+    ffprobe_path = get_ffprobe_path()
     command = [
-        "ffprobe",
+        ffprobe_path,
         "-i",
         filename,
         "-hide_banner",

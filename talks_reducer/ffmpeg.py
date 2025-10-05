@@ -49,6 +49,42 @@ def find_ffmpeg() -> Optional[str]:
     return None
 
 
+def find_ffprobe() -> Optional[str]:
+    """Locate the ffprobe executable, typically in the same directory as FFmpeg."""
+
+    env_override = os.environ.get("TALKS_REDUCER_FFPROBE") or os.environ.get(
+        "FFPROBE_PATH"
+    )
+    if env_override and (os.path.isfile(env_override) or shutil_which(env_override)):
+        return (
+            os.path.abspath(env_override)
+            if os.path.isfile(env_override)
+            else env_override
+        )
+
+    # Try to find ffprobe in the same directory as FFmpeg
+    ffmpeg_path = find_ffmpeg()
+    if ffmpeg_path:
+        ffmpeg_dir = os.path.dirname(ffmpeg_path)
+        ffprobe_path = os.path.join(ffmpeg_dir, "ffprobe")
+        if os.path.isfile(ffprobe_path) or shutil_which(ffprobe_path):
+            return os.path.abspath(ffprobe_path) if os.path.isfile(ffprobe_path) else ffprobe_path
+
+    # Fallback to common locations
+    common_paths = [
+        "C:\\ProgramData\\chocolatey\\bin\\ffprobe.exe",
+        "C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe",
+        "C:\\ffmpeg\\bin\\ffprobe.exe",
+        "ffprobe",
+    ]
+
+    for path in common_paths:
+        if os.path.isfile(path) or shutil_which(path):
+            return os.path.abspath(path) if os.path.isfile(path) else path
+
+    return None
+
+
 def _resolve_ffmpeg_path() -> str:
     """Resolve the FFmpeg executable path or raise ``FFmpegNotFoundError``."""
 
@@ -62,7 +98,20 @@ def _resolve_ffmpeg_path() -> str:
     return ffmpeg_path
 
 
+def _resolve_ffprobe_path() -> str:
+    """Resolve the ffprobe executable path or raise ``FFmpegNotFoundError``."""
+
+    ffprobe_path = find_ffprobe()
+    if not ffprobe_path:
+        raise FFmpegNotFoundError(
+            "ffprobe not found. Install FFmpeg (which includes ffprobe) and add it to PATH."
+        )
+
+    return ffprobe_path
+
+
 _FFMPEG_PATH: Optional[str] = None
+_FFPROBE_PATH: Optional[str] = None
 
 
 def get_ffmpeg_path() -> str:
@@ -72,6 +121,15 @@ def get_ffmpeg_path() -> str:
     if _FFMPEG_PATH is None:
         _FFMPEG_PATH = _resolve_ffmpeg_path()
     return _FFMPEG_PATH
+
+
+def get_ffprobe_path() -> str:
+    """Return the cached ffprobe path, resolving it on first use."""
+
+    global _FFPROBE_PATH
+    if _FFPROBE_PATH is None:
+        _FFPROBE_PATH = _resolve_ffprobe_path()
+    return _FFPROBE_PATH
 
 
 def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
@@ -256,7 +314,13 @@ def build_video_commands(
             video_encoder_args = ["-c:v h264_nvenc"]
             use_cuda_encoder = True
         else:
-            video_encoder_args = ["-c:v copy"]
+            # Cannot use copy codec when applying filters (speed modifications)
+            # Use a fast software encoder instead
+            video_encoder_args = [
+                "-c:v libx264",
+                "-preset veryfast",
+                "-crf 23"
+            ]
 
     audio_parts = ["-c:a aac", f'"{output_file}"', "-loglevel info -stats -hide_banner"]
 
@@ -282,7 +346,9 @@ def build_video_commands(
 __all__ = [
     "FFmpegNotFoundError",
     "find_ffmpeg",
+    "find_ffprobe",
     "get_ffmpeg_path",
+    "get_ffprobe_path",
     "check_cuda_available",
     "run_timed_ffmpeg_command",
     "build_extract_audio_command",

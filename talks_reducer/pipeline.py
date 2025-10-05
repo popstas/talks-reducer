@@ -61,12 +61,17 @@ def _delete_path(path: Path) -> None:
 
 
 def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, float]:
-    command = (
-        'ffprobe -i "{}" -hide_banner -loglevel error -select_streams v'
-        " -show_entries format=duration:stream=avg_frame_rate".format(
-            os.fspath(input_file)
-        )
-    )
+    from .ffmpeg import get_ffprobe_path
+
+    ffprobe_path = get_ffprobe_path()
+    command = [
+        ffprobe_path,
+        "-i", os.fspath(input_file),
+        "-hide_banner",
+        "-loglevel", "error",
+        "-select_streams", "v",
+        "-show_entries", "format=duration:stream=avg_frame_rate"
+    ]
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
