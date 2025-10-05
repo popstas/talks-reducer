@@ -24,6 +24,14 @@ except ModuleNotFoundError:  # pragma: no cover - runtime dependency
     TkinterDnD = None  # type: ignore[assignment]
 
 
+STATUS_COLORS = {
+    "idle": "#6c6c6c",
+    "processing": "#cfa600",
+    "success": "#2e8b57",
+    "error": "#c53030",
+}
+
+
 class _GuiProgressHandle(ProgressHandle):
     """Simple progress handle that records totals but only logs milestones."""
 
@@ -98,6 +106,8 @@ class TalksReducerGUI:
         self._dnd_available = TkinterDnD is not None and DND_FILES is not None
 
         self._build_layout()
+        self._apply_simple_mode(initial=True)
+        self._apply_status_style("Idle")
 
         if not self._dnd_available:
             self._append_log(
@@ -111,19 +121,28 @@ class TalksReducerGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
+        self.simple_mode_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            main,
+            text="Simple mode",
+            variable=self.simple_mode_var,
+            command=self._toggle_simple_mode,
+        ).grid(row=0, column=0, sticky="w", pady=(0, 12))
+
         # Input selection frame
         input_frame = ttk.LabelFrame(main, text="Input files", padding=12)
-        input_frame.grid(row=0, column=0, sticky="nsew")
+        input_frame.grid(row=1, column=0, sticky="nsew")
+        main.rowconfigure(1, weight=1)
         for column in range(4):
             input_frame.columnconfigure(column, weight=1)
 
         self.input_list = tk.Listbox(input_frame, height=5)
         self.input_list.grid(row=0, column=0, columnspan=4, sticky="nsew", pady=(0, 12))
-        scrollbar = ttk.Scrollbar(
+        self.input_scrollbar = ttk.Scrollbar(
             input_frame, orient=tk.VERTICAL, command=self.input_list.yview
         )
-        scrollbar.grid(row=0, column=4, sticky="ns", pady=(0, 12))
-        self.input_list.configure(yscrollcommand=scrollbar.set)
+        self.input_scrollbar.grid(row=0, column=4, sticky="ns", pady=(0, 12))
+        self.input_list.configure(yscrollcommand=self.input_scrollbar.set)
 
         self.drop_zone = tk.Label(
             input_frame,
@@ -138,25 +157,29 @@ class TalksReducerGUI:
         self._configure_drop_targets(self.drop_zone)
         self._configure_drop_targets(self.input_list)
 
-        ttk.Button(input_frame, text="Add files", command=self._add_files).grid(
-            row=2, column=0, pady=8, sticky="w"
+        self.add_files_button = ttk.Button(
+            input_frame, text="Add files", command=self._add_files
         )
-        ttk.Button(input_frame, text="Add folder", command=self._add_directory).grid(
-            row=2, column=1, pady=8
+        self.add_files_button.grid(row=2, column=0, pady=8, sticky="w")
+        self.add_folder_button = ttk.Button(
+            input_frame, text="Add folder", command=self._add_directory
         )
-        ttk.Button(
+        self.add_folder_button.grid(row=2, column=1, pady=8)
+        self.remove_selected_button = ttk.Button(
             input_frame, text="Remove selected", command=self._remove_selected
-        ).grid(row=2, column=2, pady=8, sticky="w")
+        )
+        self.remove_selected_button.grid(row=2, column=2, pady=8, sticky="w")
         self.run_after_drop_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
+        self.run_after_drop_check = ttk.Checkbutton(
             input_frame,
             text="Run after drop",
             variable=self.run_after_drop_var,
-        ).grid(row=2, column=3, pady=8, sticky="e")
+        )
+        self.run_after_drop_check.grid(row=2, column=3, pady=8, sticky="e")
 
         # Options frame
         options = ttk.LabelFrame(main, text="Options", padding=12)
-        options.grid(row=1, column=0, pady=(16, 0), sticky="nsew")
+        options.grid(row=2, column=0, pady=(16, 0), sticky="nsew")
         options.columnconfigure(0, weight=1)
 
         self.small_var = tk.BooleanVar(value=True)
@@ -216,7 +239,7 @@ class TalksReducerGUI:
 
         # Action buttons and log output
         actions = ttk.Frame(main)
-        actions.grid(row=2, column=0, pady=(16, 0), sticky="ew")
+        actions.grid(row=3, column=0, pady=(16, 0), sticky="ew")
         actions.columnconfigure(1, weight=1)
 
         self.run_button = ttk.Button(actions, text="Run", command=self._start_run)
@@ -231,23 +254,24 @@ class TalksReducerGUI:
         self.open_button.grid(row=0, column=1, sticky="e")
 
         status_frame = ttk.Frame(main, padding=(0, 8, 0, 0))
-        status_frame.grid(row=3, column=0, sticky="ew")
+        status_frame.grid(row=4, column=0, sticky="ew")
         status_frame.columnconfigure(1, weight=1)
         ttk.Label(status_frame, text="Status:").grid(row=0, column=0, sticky="w")
-        ttk.Label(status_frame, textvariable=self.status_var).grid(
-            row=0, column=1, sticky="w"
+        self.status_label = tk.Label(status_frame, textvariable=self.status_var)
+        self.status_label.grid(row=0, column=1, sticky="w")
+
+        self.log_frame = ttk.LabelFrame(main, text="Log", padding=12)
+        self.log_frame.grid(row=5, column=0, pady=(16, 0), sticky="nsew")
+        main.rowconfigure(5, weight=1)
+        self.log_frame.columnconfigure(0, weight=1)
+        self.log_frame.rowconfigure(0, weight=1)
+
+        self.log_text = tk.Text(
+            self.log_frame, wrap="word", height=10, state=tk.DISABLED
         )
-
-        log_frame = ttk.LabelFrame(main, text="Log", padding=12)
-        log_frame.grid(row=4, column=0, pady=(16, 0), sticky="nsew")
-        main.rowconfigure(4, weight=1)
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-
-        self.log_text = tk.Text(log_frame, wrap="word", height=10, state=tk.DISABLED)
         self.log_text.grid(row=0, column=0, sticky="nsew")
         log_scroll = ttk.Scrollbar(
-            log_frame, orient=tk.VERTICAL, command=self.log_text.yview
+            self.log_frame, orient=tk.VERTICAL, command=self.log_text.yview
         )
         log_scroll.grid(row=0, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=log_scroll.set)
@@ -271,6 +295,33 @@ class TalksReducerGUI:
                 command=lambda var=variable: self._browse_path(var, label),
             )
             button.grid(row=row, column=2, padx=(8, 0))
+
+    def _toggle_simple_mode(self) -> None:
+        self._apply_simple_mode()
+
+    def _apply_simple_mode(self, *, initial: bool = False) -> None:
+        simple = self.simple_mode_var.get()
+        widgets = [
+            self.input_list,
+            self.input_scrollbar,
+            self.add_files_button,
+            self.add_folder_button,
+            self.remove_selected_button,
+            self.run_after_drop_check,
+        ]
+
+        if simple:
+            for widget in widgets:
+                widget.grid_remove()
+            self.log_frame.grid_remove()
+        else:
+            for widget in widgets:
+                widget.grid()
+            self.log_frame.grid()
+
+        if initial and simple:
+            # Ensure the hidden widgets do not retain focus outlines on start.
+            self.drop_zone.focus_set()
 
     def _toggle_advanced(self, *, initial: bool = False) -> None:
         if not initial:
@@ -488,8 +539,21 @@ class TalksReducerGUI:
         ):
             self._set_status("Processing")
 
+    def _apply_status_style(self, status: str) -> None:
+        color = STATUS_COLORS.get(status.lower())
+        if color:
+            self.status_label.configure(fg=color)
+        else:
+            self.status_label.configure(fg="")
+
     def _set_status(self, status: str) -> None:
-        self.root.after(0, lambda: self.status_var.set(status))
+        def apply() -> None:
+            self.status_var.set(status)
+            self._apply_status_style(status)
+            if status.lower() == "processing":
+                self.run_button.configure(state=tk.DISABLED)
+
+        self.root.after(0, apply)
 
     def _notify(self, callback: Callable[[], None]) -> None:
         self.root.after(0, callback)
