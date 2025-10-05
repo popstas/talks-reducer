@@ -23,8 +23,8 @@ let
     pillow
     audiotsm
   ]);
-  jumpcutter = stdenv.mkDerivation {
-    pname = "jumpcutter";
+  talksReducer = stdenv.mkDerivation {
+    pname = "talks-reducer";
     version = "0.0.1";
     src = ./.;
     buildInputs = [
@@ -33,10 +33,10 @@ let
     ];
     installPhase = ''
       mkdir -p $out/bin
-      echo "#!${pythonForThis}/bin/python" > $out/bin/jumpcutter
-      cat $src/jumpcutter.py >> $out/bin/jumpcutter
-      substituteInPlace $out/bin/jumpcutter --replace "FFMPEG_PATH = 'ffmpeg'" "FFMPEG_PATH = '${ffmpeg}'"
-      chmod +x $out/bin/jumpcutter
+      echo "#!${pythonForThis}/bin/python" > $out/bin/talks-reducer
+      cat $src/talks_reducer.py >> $out/bin/talks-reducer
+      substituteInPlace $out/bin/talks-reducer --replace "FFMPEG_PATH = 'ffmpeg'" "FFMPEG_PATH = '${ffmpeg}'"
+      chmod +x $out/bin/talks-reducer
     '';
   };
   
@@ -46,10 +46,10 @@ let
   };
   nix-bundle = (import ("${nix-bundle-src}/appimage-top.nix") {}) // (import "${nix-bundle-src}/default.nix" {});
 in
-  jumpcutter // {
+  talksReducer // {
     bundle = nix-bundle.nix-bootstrap {
       extraTargets = [];
-      target = jumpcutter;
-      run = "/bin/jumpcutter";
+      target = talksReducer;
+      run = "/bin/talks-reducer";
     };
   }
