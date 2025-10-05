@@ -1,9 +1,43 @@
 # Talks Reducer
 Talks Reducer shortens long-form presentations by removing silent gaps and optionally re-encoding them to smaller files. The
-project was renamed from **jumpcutter** to emphasize its focus on conference talks and lectures.
+project was renamed from **jumpcutter** to emphasize its focus on conference talks and screencasts.
+
+## Example
+- 1h 37m, 571 MB — Original OBS video recording
+- 1h 19m, 751 MB — Talks Reducer
+- 1h 19m, 171 MB — Talks Reducer `--small`
+
+## Install GUI (Windows, macOS)
+Go to the [releases page](https://github.com/popstas/talks-reducer/releases) and download the appropriate `talks-reducer-gui-<platform>` artifact.
+
+## Install CLI (Linux, Windows, macOS)
+```
+pip install talks-reducer
+```
+
+The `--small` preset applies a 720p video scale and 128 kbps audio bitrate, making it useful for sharing talks over constrained
+connections. Without `--small`, the script aims to preserve original quality while removing silence.
 
 When CUDA-capable hardware is available the pipeline leans on GPU encoders to keep export times low, but it still runs great on
 CPUs.
+
+### Graphical Interface
+
+- **Simple mode** — the default experience shrinks the window to a large drop
+  zone, hides the manual run controls and log, and automatically processes new
+  files as soon as you drop them. Uncheck the box to return to the full layout
+  with file pickers, the Run button, and detailed logging.
+- **Input drop zone** — drag files or folders from your desktop or add them via
+  the Explorer/Finder dialog; duplicates are ignored.
+- **Small video** — toggles the `--small` preset used by the CLI.
+- **Advanced** — reveals optional controls for the output path, temp folder,
+  timing/audio knobs mirrored from the command line, and an appearance picker
+  that can force dark or light mode or follow your operating system.
+
+Progress updates stream into the 10-line log panel while the processing runs in
+a background thread. Once every queued job succeeds an **Open last output**
+button appears so you can jump straight to the exported file in your system
+file manager.
 
 ## Repository Structure
 - `talks_reducer/` — Python package that exposes the CLI and reusable pipeline:
@@ -16,14 +50,6 @@ CPUs.
 - `default.nix` — reproducible environment definition for Nix users.
 - `CONTRIBUTION.md` — development workflow, formatting expectations, and release checklist.
 - `AGENTS.md` — maintainer tips and coding conventions for this repository.
-
-## Example
-- 1h 37m, 571 MB — Original OBS video
-- 1h 19m, 751 MB — Talks Reducer
-- 1h 19m, 171 MB — Talks Reducer `--small`
-
-The `--small` preset applies a 720p video scale and 128 kbps audio bitrate, making it useful for sharing talks over constrained
-connections. Without `--small`, the script aims to preserve original quality while removing silence.
 
 ## Highlights
 - Builds on gegell's classic jumpcutter workflow with more efficient frame and audio processing
@@ -43,73 +69,6 @@ connections. Without `--small`, the script aims to preserve original quality whi
 - **October 2025** — Project renamed to *Talks Reducer* across documentation and scripts.
 - **October 2025** — Added `--small` preset with 720p/128 kbps defaults for bandwidth-friendly exports.
 - **October 2025** — Removed the `--cuda` flag; CUDA/NVENC support is now auto-detected.
-- **October 2025** — Improved `--small` encoder arguments to balance size and clarity.
-- **October 2025** — CLI argument parsing fixes to prevent crashes on invalid combinations.
-- **October 2025** — Added example output comparison to the README.
-
-## Quick Start
-1. Install FFmpeg and ensure it is on your `PATH`
-2. Install Talks Reducer with `pip install talks-reducer` (this exposes the `talks-reducer` command)
-3. Inspect available options with `talks-reducer --help`
-4. Process a recording using `talks-reducer /path/to/video`
-
-### Prebuilt Binaries
-
-Tagged releases now ship PyInstaller bundles for Windows and macOS in addition to
-the source and wheel distributions. Grab the appropriate
-`talks-reducer-gui-<platform>` artifact from the GitHub release page if you prefer
-a stand-alone executable of the graphical interface over installing from PyPI.
-
-### Graphical Interface
-
-Prefer a form-based workflow? Launch the bundled Tkinter application with
-`talks-reducer-gui`:
-
-- **Simple mode** — the default experience shrinks the window to a large drop
-  zone, hides the manual run controls and log, and automatically processes new
-  files as soon as you drop them. Uncheck the box to return to the full layout
-  with file pickers, the Run button, and detailed logging.
-- **Input drop zone** — drag files or folders from your desktop or add them via
-  the Explorer/Finder dialog; duplicates are ignored.
-- **Small video** — toggles the `--small` preset used by the CLI.
-- **Advanced** — reveals optional controls for the output path, temp folder,
-  timing/audio knobs mirrored from the command line, and an appearance picker
-  that can force dark or light mode or follow your operating system.
-
-Progress updates stream into the 10-line log panel while the processing runs in
-a background thread. Once every queued job succeeds an **Open last output**
-button appears so you can jump straight to the exported file in your system
-file manager.
-
-> **Note**: Drag and drop support relies on the `tkinterdnd2` package. It is
-> installed automatically with Talks Reducer but still requires Tk 8.6 with
-> tkdnd support on your operating system.
-
-## Programmatic Usage
-The pipeline can be reused outside of the CLI by constructing
-`talks_reducer.models.ProcessingOptions` and invoking
-`talks_reducer.pipeline.speed_up_video`. A progress reporter implementing
-`talks_reducer.progress.ProgressReporter` can be supplied to bridge different
-user interfaces (for example, a GUI signal emitter or a logging sink).
-
-```python
-from pathlib import Path
-
-from talks_reducer.models import ProcessingOptions
-from talks_reducer.pipeline import speed_up_video
-from talks_reducer.progress import NullProgressReporter
-
-options = ProcessingOptions(input_file=Path("talk.mp4"))
-result = speed_up_video(options, reporter=NullProgressReporter())
-print("Output created at", result.output_file)
-```
-
-See `tests/test_pipeline_service.py` for additional examples that stub the
-FFmpeg layer during unit tests.
-
-## Requirements
-- Python 3 with `numpy`, `scipy`, `audiotsm`, and `tqdm`
-- FFmpeg with optional NVIDIA NVENC support for CUDA acceleration
 
 ## Contributing
 See `CONTRIBUTION.md` for development setup details and guidance on sharing improvements.
