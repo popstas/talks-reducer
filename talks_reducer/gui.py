@@ -87,10 +87,11 @@ class TalksReducerGUI:
         else:
             self.root = tk.Tk()
         self.root.title("Talks Reducer")
-        self.root.geometry("760x640")
+        self.root.geometry("760x680")
 
         self._processing_thread: Optional[threading.Thread] = None
         self._last_output: Optional[Path] = None
+        self.status_var = tk.StringVar(value="Idle")
 
         self.input_files: List[str] = []
 
@@ -158,7 +159,7 @@ class TalksReducerGUI:
         options.grid(row=1, column=0, pady=(16, 0), sticky="nsew")
         options.columnconfigure(0, weight=1)
 
-        self.small_var = tk.BooleanVar()
+        self.small_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(options, text="Small video", variable=self.small_var).grid(
             row=0, column=0, sticky="w"
         )
@@ -229,9 +230,17 @@ class TalksReducerGUI:
         )
         self.open_button.grid(row=0, column=1, sticky="e")
 
+        status_frame = ttk.Frame(main, padding=(0, 8, 0, 0))
+        status_frame.grid(row=3, column=0, sticky="ew")
+        status_frame.columnconfigure(1, weight=1)
+        ttk.Label(status_frame, text="Status:").grid(row=0, column=0, sticky="w")
+        ttk.Label(status_frame, textvariable=self.status_var).grid(
+            row=0, column=1, sticky="w"
+        )
+
         log_frame = ttk.LabelFrame(main, text="Log", padding=12)
-        log_frame.grid(row=3, column=0, pady=(16, 0), sticky="nsew")
-        main.rowconfigure(3, weight=1)
+        log_frame.grid(row=4, column=0, pady=(16, 0), sticky="nsew")
+        main.rowconfigure(4, weight=1)
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
 
@@ -359,6 +368,7 @@ class TalksReducerGUI:
                             "No files", "No supported media files were found."
                         )
                     )
+                    self._set_status("Idle")
                     return
 
                 for index, file in enumerate(files, start=1):
@@ -377,10 +387,12 @@ class TalksReducerGUI:
                 self._notify(lambda: self.open_button.configure(state=tk.NORMAL))
             except FFmpegNotFoundError as exc:
                 self._notify(lambda: messagebox.showerror("FFmpeg not found", str(exc)))
+                self._set_status("Error")
             except Exception as exc:  # pragma: no cover - GUI level safeguard
                 self._notify(
                     lambda: messagebox.showerror("Error", f"Processing failed: {exc}")
                 )
+                self._set_status("Error")
             finally:
                 self._notify(lambda: self.run_button.configure(state=tk.NORMAL))
 
@@ -457,6 +469,8 @@ class TalksReducerGUI:
             self._append_log(f"Could not open file manager for {target}")
 
     def _append_log(self, message: str) -> None:
+        self._update_status_from_message(message)
+
         def updater() -> None:
             self.log_text.configure(state=tk.NORMAL)
             self.log_text.insert(tk.END, message + "\n")
@@ -464,6 +478,18 @@ class TalksReducerGUI:
             self.log_text.configure(state=tk.DISABLED)
 
         self.log_text.after(0, updater)
+
+    def _update_status_from_message(self, message: str) -> None:
+        normalized = message.strip().lower()
+        if "all jobs finished successfully" in normalized:
+            self._set_status("Success")
+        elif normalized.startswith("starting processing") or normalized.startswith(
+            "processing"
+        ):
+            self._set_status("Processing")
+
+    def _set_status(self, status: str) -> None:
+        self.root.after(0, lambda: self.status_var.set(status))
 
     def _notify(self, callback: Callable[[], None]) -> None:
         self.root.after(0, callback)
