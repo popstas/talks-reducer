@@ -1,0 +1,9 @@
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+known_first_party = ["talks_reducer"]
+
