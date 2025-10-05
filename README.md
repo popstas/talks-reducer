@@ -53,6 +53,23 @@ connections. Without `--small`, the script aims to preserve original quality whi
 3. Inspect available options with `talks-reducer --help`
 4. Process a recording using `talks-reducer /path/to/video`
 
+### Graphical Interface
+
+Prefer a form-based workflow? Launch the bundled Tkinter application with
+`talks-reducer-gui`. Every command-line option is exposed as a control:
+
+- **Input files or folders** — add files or directories using the native
+  Explorer/Finder dialog; duplicate entries are ignored.
+- **Output file** — optional path for single-file exports.
+- **Temp folder** — working directory for intermediate assets.
+- **Silent threshold, sounded speed, silent speed, frame margin, sample rate** —
+  numeric inputs matching the CLI flags.
+- **Small file optimizations** — toggles the `--small` preset.
+
+Progress updates stream into the log panel while the processing runs in a
+background thread, and the resulting video opens in your system file manager as
+soon as it completes.
+
 ## Programmatic Usage
 The pipeline can be reused outside of the CLI by constructing
 `talks_reducer.models.ProcessingOptions` and invoking

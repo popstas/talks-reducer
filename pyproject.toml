@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 talks-reducer = "talks_reducer.cli:main"
+talks-reducer-gui = "talks_reducer.gui:main"
 
 [tool.black]
 line-length = 88

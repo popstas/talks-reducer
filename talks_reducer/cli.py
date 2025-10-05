@@ -84,7 +84,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _gather_input_files(paths: List[str]) -> List[str]:
+def gather_input_files(paths: List[str]) -> List[str]:
     """Expand provided paths into a flat list of files that contain audio streams."""
 
     files: List[str] = []
@@ -106,7 +106,7 @@ def main() -> None:
     parsed_args = parser.parse_args()
     start_time = time.time()
 
-    files = _gather_input_files(parsed_args.input_file)
+    files = gather_input_files(parsed_args.input_file)
 
     args: Dict[str, object] = {
         k: v for k, v in vars(parsed_args).items() if v is not None
