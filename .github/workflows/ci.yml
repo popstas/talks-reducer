@@ -97,7 +97,7 @@ jobs:
       - name: Download PyInstaller binaries
         uses: actions/download-artifact@v4
         with:
-          pattern: talks-reducer-gui-*-pyinstaller
+          pattern: talks-reducer-*
           merge-multiple: true
           path: gui-dist
 
