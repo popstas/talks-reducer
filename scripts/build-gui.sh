@@ -71,17 +71,31 @@ if [[ "$OS_NAME" == "windows" ]]; then
         --workpath build \
         --distpath dist
 else
-    pyinstaller launcher.py --name talks-reducer --windowed \
+    PYINSTALLER_ARGS=(launcher.py --name talks-reducer --windowed \
         --hidden-import=tkinterdnd2 \
         --collect-submodules talks_reducer \
         --icon=docs/assets/icon.ico \
         $EXCLUDES \
-        --noconfirm
+        --noconfirm)
+
+    if [[ "$OS_NAME" == "macos" ]]; then
+        # Produce a universal binary so the bundle runs natively on Apple Silicon
+        # while still supporting Intel Macs. PyInstaller requires a universal
+        # Python build for this flag to succeed.
+        if command -v pyinstaller &> /dev/null && pyinstaller --help 2>/dev/null | grep -q -- "--target-arch"; then
+            PYINSTALLER_ARGS+=(--target-arch universal2)
+        else
+            echo "⚠️  This version of PyInstaller does not support --target-arch;"
+            echo "   falling back to the default architecture."
+        fi
+    fi
+
+    pyinstaller "${PYINSTALLER_ARGS[@]}"
 fi
 
 # Find the output directory (PyInstaller may use dist/ or dist/)
-if [[ -d "dist/talks-reducer" ]]; then
-    OUTPUT_DIR="dist/talks-reducer"
+if [[ -d "dist/talks-reducer.app" ]]; then
+    OUTPUT_DIR="dist/talks-reducer.app"
 elif [[ -d "dist/talks-reducer" ]]; then
     OUTPUT_DIR="dist/talks-reducer"
 else
@@ -108,7 +122,11 @@ echo "📦 Preparing artifacts..."
 mkdir -p dist
 
 if [[ "$OS_NAME" == "macos" ]]; then
-    TARGET="dist/talks-reducer-macos-universal"
+    if [[ "$OUTPUT_DIR" == *.app ]]; then
+        TARGET="dist/talks-reducer-macos-universal.app"
+    else
+        TARGET="dist/talks-reducer-macos-universal"
+    fi
 elif [[ "$OS_NAME" == "windows" ]]; then
     TARGET="dist/talks-reducer-windows"
 elif [[ "$OS_NAME" == "linux" ]]; then
@@ -134,7 +152,67 @@ if [[ -n "$OUTPUT_DIR" && -d "$OUTPUT_DIR" ]]; then
         echo "⚠️  Could not move to $TARGET"
         echo "✅ Build output at: $OUTPUT_DIR/"
     fi
-    
+
+    if [[ "$OS_NAME" == "macos" ]]; then
+        # Codesign the bundle if credentials are provided. This keeps Gatekeeper
+        # from flagging the app as modified during transport and is required
+        # before notarization.
+        if [[ -n "$MACOS_CODESIGN_IDENTITY" ]]; then
+            APP_BUNDLE="$TARGET"
+            if [[ -d "$APP_BUNDLE" && "$APP_BUNDLE" != *.app ]]; then
+                FIRST_APP=$(find "$APP_BUNDLE" -maxdepth 1 -name "*.app" -print -quit)
+                if [[ -n "$FIRST_APP" ]]; then
+                    APP_BUNDLE="$FIRST_APP"
+                fi
+            fi
+
+            if [[ -d "$APP_BUNDLE" ]]; then
+                echo "🔏 Codesigning $APP_BUNDLE with identity '$MACOS_CODESIGN_IDENTITY'..."
+                SIGN_CMD=(codesign --force --deep --options runtime --sign "$MACOS_CODESIGN_IDENTITY")
+                if [[ -n "$MACOS_CODESIGN_ENTITLEMENTS" ]]; then
+                    SIGN_CMD+=(--entitlements "$MACOS_CODESIGN_ENTITLEMENTS")
+                fi
+                if "${SIGN_CMD[@]}" "$APP_BUNDLE"; then
+                    echo "✅ Codesigning succeeded"
+                else
+                    echo "⚠️  Codesigning failed"
+                fi
+            fi
+        fi
+
+        # Notarize using xcrun notarytool if a keychain profile is available.
+        if [[ -n "$MACOS_NOTARIZE_PROFILE" ]]; then
+            if ! command -v xcrun &> /dev/null; then
+                echo "⚠️  Cannot notarize: xcrun not found"
+            else
+                APP_BUNDLE="$TARGET"
+                if [[ -d "$APP_BUNDLE" && "$APP_BUNDLE" != *.app ]]; then
+                    FIRST_APP=$(find "$APP_BUNDLE" -maxdepth 1 -name "*.app" -print -quit)
+                    if [[ -n "$FIRST_APP" ]]; then
+                        APP_BUNDLE="$FIRST_APP"
+                    fi
+                fi
+
+                if [[ -d "$APP_BUNDLE" ]]; then
+                    ARCHIVE_PATH="${APP_BUNDLE%.app}.zip"
+                    echo "📦 Creating notarization archive at $ARCHIVE_PATH..."
+                    /usr/bin/ditto -c -k --keepParent "$APP_BUNDLE" "$ARCHIVE_PATH"
+                    echo "📮 Submitting bundle for notarization using profile '$MACOS_NOTARIZE_PROFILE'..."
+                    if xcrun notarytool submit "$ARCHIVE_PATH" --keychain-profile "$MACOS_NOTARIZE_PROFILE" --wait; then
+                        echo "✅ Notarization succeeded; stapling ticket..."
+                        if xcrun stapler staple "$APP_BUNDLE"; then
+                            echo "✅ Stapled notarization ticket"
+                        else
+                            echo "⚠️  Stapling failed"
+                        fi
+                    else
+                        echo "⚠️  Notarization failed"
+                    fi
+                fi
+            fi
+        fi
+    fi
+
     # Clean up dist if empty
     [[ -d "dist" ]] && rmdir dist 2>/dev/null || true
 else

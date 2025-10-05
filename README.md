@@ -12,7 +12,8 @@ Go to the [releases page](https://github.com/popstas/talks-reducer/releases) and
 
 - **Windows** — `talks-reducer-gui.exe`
 - **macOS** — `talks-reducer-gui-macos-universal` (requires macOS 10.13 High Sierra or
-  newer)
+  newer). The bundle is built as a universal (`x86_64` + `arm64`) app so it runs
+  natively on Apple Silicon without Rosetta.
 
 ## Install CLI (Linux, Windows, macOS)
 ```
@@ -28,6 +29,25 @@ connections. Without `--small`, the script aims to preserve original quality whi
 
 When CUDA-capable hardware is available the pipeline leans on GPU encoders to keep export times low, but it still runs great on
 CPUs.
+
+### macOS codesigning and notarization
+
+Maintainers with Apple Developer credentials can optionally sign and notarize
+the GUI release to avoid Gatekeeper warnings on download:
+
+1. Export or create a keychain profile for `notarytool` (see `man
+   notarytool`) and note the profile name.
+2. Set the following environment variables before running `scripts/build-gui.sh`:
+   - `MACOS_CODESIGN_IDENTITY` — the signing identity, for example
+     `Developer ID Application: Example Corp (TEAMID)`.
+   - `MACOS_CODESIGN_ENTITLEMENTS` *(optional)* — path to an entitlements plist
+     used during codesigning.
+   - `MACOS_NOTARIZE_PROFILE` *(optional)* — the keychain profile name to submit
+     the archive for notarization. When present, the script zips the `.app`,
+     submits it with `notarytool --wait`, and staples the returned ticket.
+
+The codesigning step executes only when the variables are provided, so the build
+continues to work unchanged for local development.
 
 ### Graphical Interface
 
