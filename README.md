@@ -6,8 +6,12 @@ When CUDA-capable hardware is available the pipeline leans on GPU encoders to ke
 CPUs.
 
 ## Repository Structure
-- `talks_reducer.py` — the main entry point. It validates inputs, detects CUDA encoders automatically, and builds FFmpeg filter
-  graphs for gap removal and transcoding.
+- `talks_reducer/` — Python package that exposes the CLI and reusable pipeline:
+  - `cli.py` parses arguments and dispatches to the pipeline.
+  - `pipeline.py` orchestrates FFmpeg, audio processing, and temporary assets.
+  - `audio.py` handles audio validation, volume analysis, and phase vocoder processing.
+  - `chunks.py` builds timing metadata and FFmpeg expressions for frame selection.
+  - `ffmpeg.py` discovers the FFmpeg binary, checks CUDA availability, and assembles command strings.
 - `requirements.txt` — Python dependencies for local development.
 - `default.nix` — reproducible environment definition for Nix users.
 - `CONTRIBUTION.md` — development workflow, formatting expectations, and release checklist.
@@ -45,9 +49,9 @@ connections. Without `--small`, the script aims to preserve original quality whi
 
 ## Quick Start
 1. Install FFmpeg and ensure it is on your `PATH`
-2. Install Python dependencies with `pip install -r requirements.txt`
-3. Inspect available options with `python talks_reducer.py -h`
-4. Process a recording using `python talks_reducer.py -i INPUT_FILE`
+2. Install Talks Reducer with `pip install talks-reducer` (this exposes the `talks-reducer` command)
+3. Inspect available options with `talks-reducer --help`
+4. Process a recording using `talks-reducer /path/to/video`
 
 ## Requirements
 - Python 3 with `numpy`, `scipy`, `audiotsm`, and `tqdm`

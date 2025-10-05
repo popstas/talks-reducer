@@ -32,10 +32,22 @@ let
       ffmpeg
     ];
     installPhase = ''
-      mkdir -p $out/bin
-      echo "#!${pythonForThis}/bin/python" > $out/bin/talks-reducer
-      cat $src/talks_reducer.py >> $out/bin/talks-reducer
-      substituteInPlace $out/bin/talks-reducer --replace "FFMPEG_PATH = 'ffmpeg'" "FFMPEG_PATH = '${ffmpeg}'"
+      mkdir -p $out/bin $out/lib/python
+      cp -r $src/talks_reducer $out/lib/python/
+      cat <<'SCRIPT' > $out/bin/talks-reducer
+#!${pythonForThis}/bin/python
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'lib', 'python'))
+os.environ.setdefault("TALKS_REDUCER_FFMPEG", "${ffmpeg}/bin/ffmpeg")
+
+from talks_reducer.cli import main
+
+
+if __name__ == "__main__":
+    main()
+SCRIPT
       chmod +x $out/bin/talks-reducer
     '';
   };
