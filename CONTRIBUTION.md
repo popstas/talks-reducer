@@ -22,6 +22,17 @@ Run with default settings:
 talks-reducer /path/to/video
 ```
 
+## Service Layer
+The CLI is a thin wrapper over the reusable pipeline defined in
+`talks_reducer.pipeline`. Construct `ProcessingOptions` and call
+`speed_up_video` directly when writing integration tests or GUI front-ends.
+Progress can be forwarded to custom UIs by implementing the
+`ProgressReporter` protocol in `talks_reducer.progress`.
+
+The `tests/test_pipeline_service.py` fixture demonstrates how to mock FFmpeg
+interactions so the pipeline can be exercised without launching external
+processes.
+
 ## Publishing a Release
 1. Update `pyproject.toml` with the new version number or pass a bump rule to the deploy script.
 2. Ensure development dependencies are installed: `pip install build twine bumpversion pytest`.

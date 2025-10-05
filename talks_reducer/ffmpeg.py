@@ -6,10 +6,13 @@ import os
 import re
 import subprocess
 import sys
-from functools import partial
 from typing import List, Optional, Tuple
 
-from tqdm import tqdm as std_tqdm
+from .progress import ProgressReporter, TqdmProgressReporter
+
+
+class FFmpegNotFoundError(RuntimeError):
+    """Raised when FFmpeg cannot be located on the current machine."""
 
 
 def find_ffmpeg() -> Optional[str]:
@@ -40,36 +43,35 @@ def find_ffmpeg() -> Optional[str]:
 
 
 def _resolve_ffmpeg_path() -> str:
-    """Resolve the FFmpeg executable path or exit with a helpful message."""
+    """Resolve the FFmpeg executable path or raise ``FFmpegNotFoundError``."""
 
     ffmpeg_path = find_ffmpeg()
     if not ffmpeg_path:
-        print(
-            "Error: FFmpeg not found. Please install FFmpeg and add it to your PATH or specify the full path.",
-            file=sys.stderr,
+        raise FFmpegNotFoundError(
+            "FFmpeg not found. Install FFmpeg and add it to PATH or provide TALKS_REDUCER_FFMPEG."
         )
-        raise SystemExit(1)
 
     print(f"Using FFmpeg at: {ffmpeg_path}")
     return ffmpeg_path
 
 
-FFMPEG_PATH = _resolve_ffmpeg_path()
-
-tqdm = partial(
-    std_tqdm,
-    bar_format=(
-        "{desc:<20} {percentage:3.0f}%"
-        "|{bar:10}|"
-        " {n_fmt:>6}/{total_fmt:>6} [{elapsed:^5}<{remaining:^5}, {rate_fmt}{postfix}]"
-    ),
-)
+_FFMPEG_PATH: Optional[str] = None
 
 
-def check_cuda_available(ffmpeg_path: str = FFMPEG_PATH) -> bool:
+def get_ffmpeg_path() -> str:
+    """Return the cached FFmpeg path, resolving it on first use."""
+
+    global _FFMPEG_PATH
+    if _FFMPEG_PATH is None:
+        _FFMPEG_PATH = _resolve_ffmpeg_path()
+    return _FFMPEG_PATH
+
+
+def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
     """Return whether CUDA hardware encoders are available in the FFmpeg build."""
 
     try:
+        ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
         result = subprocess.run(
             [ffmpeg_path, "-encoders"], capture_output=True, text=True, timeout=5
         )
@@ -89,8 +91,15 @@ def check_cuda_available(ffmpeg_path: str = FFMPEG_PATH) -> bool:
     )
 
 
-def run_timed_ffmpeg_command(command: str, **kwargs) -> None:
-    """Execute an FFmpeg command while streaming progress information to ``tqdm``."""
+def run_timed_ffmpeg_command(
+    command: str,
+    *,
+    reporter: Optional[ProgressReporter] = None,
+    desc: str = "",
+    total: Optional[int] = None,
+    unit: str = "frames",
+) -> None:
+    """Execute an FFmpeg command while streaming progress information."""
 
     import shlex
 
@@ -113,7 +122,9 @@ def run_timed_ffmpeg_command(command: str, **kwargs) -> None:
         print(f"Error starting FFmpeg: {exc}", file=sys.stderr)
         raise
 
-    with tqdm(**kwargs) as progress:
+    progress_reporter = reporter or TqdmProgressReporter()
+    task_manager = progress_reporter.task(desc=desc, total=total, unit=unit)
+    with task_manager as progress:
         while True:
             line = process.stderr.readline()
             if not line and process.poll() is not None:
@@ -129,9 +140,8 @@ def run_timed_ffmpeg_command(command: str, **kwargs) -> None:
             if match:
                 try:
                     new_frame = int(match.group(1))
-                    if progress.total < new_frame:
-                        progress.total = new_frame
-                    progress.update(new_frame - progress.n)
+                    progress.ensure_total(new_frame)
+                    progress.advance(new_frame - progress.current)
                 except (ValueError, IndexError):
                     pass
 
@@ -145,8 +155,7 @@ def run_timed_ffmpeg_command(command: str, **kwargs) -> None:
             print(error_output, file=sys.stderr)
             raise subprocess.CalledProcessError(process.returncode, args)
 
-        if progress.n < progress.total:
-            progress.update(progress.total - progress.n)
+        progress.finish()
 
 
 def build_extract_audio_command(
@@ -155,11 +164,12 @@ def build_extract_audio_command(
     sample_rate: int,
     audio_bitrate: str,
     hwaccel: Optional[List[str]] = None,
-    ffmpeg_path: str = FFMPEG_PATH,
+    ffmpeg_path: Optional[str] = None,
 ) -> str:
     """Build the FFmpeg command used to extract audio into a temporary WAV file."""
 
     hwaccel = hwaccel or []
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
     command_parts: List[str] = [f'"{ffmpeg_path}"']
     command_parts.extend(hwaccel)
     command_parts.extend(
@@ -181,12 +191,13 @@ def build_video_commands(
     filter_script: str,
     output_file: str,
     *,
-    ffmpeg_path: str = FFMPEG_PATH,
+    ffmpeg_path: Optional[str] = None,
     cuda_available: bool,
     small: bool,
 ) -> Tuple[str, Optional[str], bool]:
     """Create the FFmpeg command strings used to render the final video output."""
 
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
     global_parts: List[str] = [f'"{ffmpeg_path}"', "-y"]
     hwaccel_args: List[str] = []
 

@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import time
+from pathlib import Path
 from typing import Dict, List
 
 from . import audio
+from .ffmpeg import FFmpegNotFoundError
+from .models import ProcessingOptions
 from .pipeline import speed_up_video
+from .progress import TqdmProgressReporter
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -111,12 +116,40 @@ def main() -> None:
     if len(files) > 1 and "output_file" in args:
         del args["output_file"]
 
+    reporter = TqdmProgressReporter()
+
     for index, file in enumerate(files):
         print(f"Processing file {index + 1}/{len(files)} '{os.path.basename(file)}'")
         local_options = dict(args)
-        local_options["input_file"] = file
-        local_options["small"] = bool(local_options.get("small", False))
-        speed_up_video(**local_options)
+
+        option_kwargs: Dict[str, object] = {"input_file": Path(file)}
+
+        if "output_file" in local_options:
+            option_kwargs["output_file"] = Path(local_options["output_file"])
+        if "temp_folder" in local_options:
+            option_kwargs["temp_folder"] = Path(local_options["temp_folder"])
+        if "silent_threshold" in local_options:
+            option_kwargs["silent_threshold"] = float(local_options["silent_threshold"])
+        if "silent_speed" in local_options:
+            option_kwargs["silent_speed"] = float(local_options["silent_speed"])
+        if "sounded_speed" in local_options:
+            option_kwargs["sounded_speed"] = float(local_options["sounded_speed"])
+        if "frame_spreadage" in local_options:
+            option_kwargs["frame_spreadage"] = int(local_options["frame_spreadage"])
+        if "sample_rate" in local_options:
+            option_kwargs["sample_rate"] = int(local_options["sample_rate"])
+        if "small" in local_options:
+            option_kwargs["small"] = bool(local_options["small"])
+
+        options = ProcessingOptions(**option_kwargs)
+
+        try:
+            result = speed_up_video(options, reporter=reporter)
+        except FFmpegNotFoundError as exc:
+            print(str(exc), file=sys.stderr)
+            sys.exit(1)
+
+        reporter.log(f"Completed: {result.output_file}")
 
     end_time = time.time()
     total_time = end_time - start_time

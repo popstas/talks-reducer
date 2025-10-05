@@ -53,6 +53,28 @@ connections. Without `--small`, the script aims to preserve original quality whi
 3. Inspect available options with `talks-reducer --help`
 4. Process a recording using `talks-reducer /path/to/video`
 
+## Programmatic Usage
+The pipeline can be reused outside of the CLI by constructing
+`talks_reducer.models.ProcessingOptions` and invoking
+`talks_reducer.pipeline.speed_up_video`. A progress reporter implementing
+`talks_reducer.progress.ProgressReporter` can be supplied to bridge different
+user interfaces (for example, a GUI signal emitter or a logging sink).
+
+```python
+from pathlib import Path
+
+from talks_reducer.models import ProcessingOptions
+from talks_reducer.pipeline import speed_up_video
+from talks_reducer.progress import NullProgressReporter
+
+options = ProcessingOptions(input_file=Path("talk.mp4"))
+result = speed_up_video(options, reporter=NullProgressReporter())
+print("Output created at", result.output_file)
+```
+
+See `tests/test_pipeline_service.py` for additional examples that stub the
+FFmpeg layer during unit tests.
+
 ## Requirements
 - Python 3 with `numpy`, `scipy`, `audiotsm`, and `tqdm`
 - FFmpeg with optional NVIDIA NVENC support for CUDA acceleration
