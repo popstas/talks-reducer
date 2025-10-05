@@ -49,9 +49,9 @@ connections. Without `--small`, the script aims to preserve original quality whi
 
 ## Quick Start
 1. Install FFmpeg and ensure it is on your `PATH`
-2. Install Talks Reducer with `pip install .` (this exposes the `talks-reducer` command)
+2. Install Talks Reducer with `pip install talks-reducer` (this exposes the `talks-reducer` command)
 3. Inspect available options with `talks-reducer --help`
-4. Process a recording using `talks-reducer -i INPUT_FILE`
+4. Process a recording using `talks-reducer /path/to/video`
 
 ## Requirements
 - Python 3 with `numpy`, `scipy`, `audiotsm`, and `tqdm`

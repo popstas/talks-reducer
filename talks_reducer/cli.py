@@ -18,12 +18,9 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Modifies a video file to play at different speeds when there is sound vs. silence.",
     )
     parser.add_argument(
-        "-i",
-        "--input_file",
+        "input_file",
         type=str,
-        dest="input_file",
         nargs="+",
-        required=True,
         help="The video file(s) you want modified. Can be one or more directories and / or single files.",
     )
     parser.add_argument(
