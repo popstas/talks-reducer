@@ -66,11 +66,15 @@ def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, fl
     ffprobe_path = get_ffprobe_path()
     command = [
         ffprobe_path,
-        "-i", os.fspath(input_file),
+        "-i",
+        os.fspath(input_file),
         "-hide_banner",
-        "-loglevel", "error",
-        "-select_streams", "v",
-        "-show_entries", "format=duration:stream=avg_frame_rate"
+        "-loglevel",
+        "error",
+        "-select_streams",
+        "v",
+        "-show_entries",
+        "format=duration:stream=avg_frame_rate",
     ]
     process = subprocess.Popen(
         command,

@@ -17,6 +17,12 @@ from .models import ProcessingOptions
 from .pipeline import speed_up_video
 from .progress import ProgressHandle, SignalProgressReporter
 
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+except ModuleNotFoundError:  # pragma: no cover - runtime dependency
+    DND_FILES = None  # type: ignore[assignment]
+    TkinterDnD = None  # type: ignore[assignment]
+
 
 class _GuiProgressHandle(ProgressHandle):
     """Simple progress handle that records totals but only logs milestones."""
@@ -76,7 +82,10 @@ class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
 
     def __init__(self) -> None:
-        self.root = tk.Tk()
+        if TkinterDnD is not None:
+            self.root = TkinterDnD.Tk()  # type: ignore[call-arg]
+        else:
+            self.root = tk.Tk()
         self.root.title("Talks Reducer")
         self.root.geometry("760x640")
 
@@ -85,7 +94,14 @@ class TalksReducerGUI:
 
         self.input_files: List[str] = []
 
+        self._dnd_available = TkinterDnD is not None and DND_FILES is not None
+
         self._build_layout()
+
+        if not self._dnd_available:
+            self._append_log(
+                "Drag and drop requires the tkinterdnd2 package. Install it to enable the drop zone."
+            )
 
     # ------------------------------------------------------------------ UI --
     def _build_layout(self) -> None:
@@ -95,58 +111,107 @@ class TalksReducerGUI:
         self.root.rowconfigure(0, weight=1)
 
         # Input selection frame
-        input_frame = ttk.LabelFrame(main, text="Input files or folders", padding=12)
+        input_frame = ttk.LabelFrame(main, text="Input files", padding=12)
         input_frame.grid(row=0, column=0, sticky="nsew")
-        input_frame.columnconfigure(0, weight=1)
+        for column in range(4):
+            input_frame.columnconfigure(column, weight=1)
 
         self.input_list = tk.Listbox(input_frame, height=5)
-        self.input_list.grid(row=0, column=0, columnspan=3, sticky="nsew")
+        self.input_list.grid(row=0, column=0, columnspan=4, sticky="nsew", pady=(0, 12))
         scrollbar = ttk.Scrollbar(
             input_frame, orient=tk.VERTICAL, command=self.input_list.yview
         )
-        scrollbar.grid(row=0, column=3, sticky="ns")
+        scrollbar.grid(row=0, column=4, sticky="ns", pady=(0, 12))
         self.input_list.configure(yscrollcommand=scrollbar.set)
 
+        self.drop_zone = tk.Label(
+            input_frame,
+            text="Drop files or folders here",
+            relief=tk.RIDGE,
+            borderwidth=2,
+            padx=16,
+            pady=16,
+        )
+        self.drop_zone.grid(row=1, column=0, columnspan=4, sticky="nsew")
+        input_frame.rowconfigure(1, weight=1)
+        self._configure_drop_targets(self.drop_zone)
+        self._configure_drop_targets(self.input_list)
+
         ttk.Button(input_frame, text="Add files", command=self._add_files).grid(
-            row=1, column=0, pady=8, sticky="w"
+            row=2, column=0, pady=8, sticky="w"
         )
         ttk.Button(input_frame, text="Add folder", command=self._add_directory).grid(
-            row=1, column=1, pady=8
+            row=2, column=1, pady=8
         )
         ttk.Button(
             input_frame, text="Remove selected", command=self._remove_selected
-        ).grid(row=1, column=2, pady=8, sticky="e")
+        ).grid(row=2, column=2, pady=8, sticky="w")
+        self.run_after_drop_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            input_frame,
+            text="Run after drop",
+            variable=self.run_after_drop_var,
+        ).grid(row=2, column=3, pady=8, sticky="e")
 
         # Options frame
         options = ttk.LabelFrame(main, text="Options", padding=12)
         options.grid(row=1, column=0, pady=(16, 0), sticky="nsew")
-        options.columnconfigure(1, weight=1)
-
-        self.output_var = tk.StringVar()
-        self._add_entry(options, "Output file", self.output_var, row=0, browse=True)
-
-        self.temp_var = tk.StringVar(value="TEMP")
-        self._add_entry(options, "Temp folder", self.temp_var, row=1, browse=True)
-
-        self.silent_threshold_var = tk.StringVar()
-        self._add_entry(options, "Silent threshold", self.silent_threshold_var, row=2)
-
-        self.sounded_speed_var = tk.StringVar()
-        self._add_entry(options, "Sounded speed", self.sounded_speed_var, row=3)
-
-        self.silent_speed_var = tk.StringVar()
-        self._add_entry(options, "Silent speed", self.silent_speed_var, row=4)
-
-        self.frame_margin_var = tk.StringVar()
-        self._add_entry(options, "Frame margin", self.frame_margin_var, row=5)
-
-        self.sample_rate_var = tk.StringVar()
-        self._add_entry(options, "Sample rate", self.sample_rate_var, row=6)
+        options.columnconfigure(0, weight=1)
 
         self.small_var = tk.BooleanVar()
-        ttk.Checkbutton(
-            options, text="Small file optimizations", variable=self.small_var
-        ).grid(row=7, column=0, columnspan=2, pady=8, sticky="w")
+        ttk.Checkbutton(options, text="Small video", variable=self.small_var).grid(
+            row=0, column=0, sticky="w"
+        )
+
+        self.advanced_visible = tk.BooleanVar(value=False)
+        self.advanced_button = ttk.Button(
+            options,
+            text="Advanced",
+            command=self._toggle_advanced,
+        )
+        self.advanced_button.grid(row=0, column=1, sticky="e")
+
+        self.advanced_frame = ttk.Frame(options, padding=(0, 12, 0, 0))
+        self.advanced_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        self.advanced_frame.columnconfigure(1, weight=1)
+
+        self.output_var = tk.StringVar()
+        self._add_entry(
+            self.advanced_frame, "Output file", self.output_var, row=0, browse=True
+        )
+
+        self.temp_var = tk.StringVar(value="TEMP")
+        self._add_entry(
+            self.advanced_frame, "Temp folder", self.temp_var, row=1, browse=True
+        )
+
+        self.silent_threshold_var = tk.StringVar()
+        self._add_entry(
+            self.advanced_frame,
+            "Silent threshold",
+            self.silent_threshold_var,
+            row=2,
+        )
+
+        self.sounded_speed_var = tk.StringVar()
+        self._add_entry(
+            self.advanced_frame, "Sounded speed", self.sounded_speed_var, row=3
+        )
+
+        self.silent_speed_var = tk.StringVar()
+        self._add_entry(
+            self.advanced_frame, "Silent speed", self.silent_speed_var, row=4
+        )
+
+        self.frame_margin_var = tk.StringVar()
+        self._add_entry(
+            self.advanced_frame, "Frame margin", self.frame_margin_var, row=5
+        )
+
+        self.sample_rate_var = tk.StringVar()
+        self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=6)
+
+        self._toggle_advanced(initial=True)
 
         # Action buttons and log output
         actions = ttk.Frame(main)
@@ -180,7 +245,7 @@ class TalksReducerGUI:
 
     def _add_entry(
         self,
-        parent: ttk.LabelFrame,
+        parent: tk.Misc,
         label: str,
         variable: tk.StringVar,
         *,
@@ -198,6 +263,23 @@ class TalksReducerGUI:
             )
             button.grid(row=row, column=2, padx=(8, 0))
 
+    def _toggle_advanced(self, *, initial: bool = False) -> None:
+        if not initial:
+            self.advanced_visible.set(not self.advanced_visible.get())
+        visible = self.advanced_visible.get()
+        if visible:
+            self.advanced_frame.grid()
+            self.advanced_button.configure(text="Hide advanced")
+        else:
+            self.advanced_frame.grid_remove()
+            self.advanced_button.configure(text="Advanced")
+
+    def _configure_drop_targets(self, widget: tk.Widget) -> None:
+        if not self._dnd_available:
+            return
+        widget.drop_target_register(DND_FILES)  # type: ignore[arg-type]
+        widget.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
+
     # -------------------------------------------------------------- actions --
     def _add_files(self) -> None:
         files = filedialog.askopenfilenames(
@@ -214,17 +296,29 @@ class TalksReducerGUI:
         if directory:
             self._extend_inputs([directory])
 
-    def _extend_inputs(self, paths: Iterable[str]) -> None:
+    def _extend_inputs(self, paths: Iterable[str], *, auto_run: bool = False) -> None:
+        added = False
         for path in paths:
             if path and path not in self.input_files:
                 self.input_files.append(path)
                 self.input_list.insert(tk.END, path)
+                added = True
+        if auto_run and added and self.run_after_drop_var.get():
+            self._start_run()
 
     def _remove_selected(self) -> None:
         selection = list(self.input_list.curselection())
         for index in reversed(selection):
             self.input_list.delete(index)
             del self.input_files[index]
+
+    def _on_drop(self, event: object) -> None:
+        data = getattr(event, "data", "")
+        if not data:
+            return
+        paths = self.root.tk.splitlist(data)
+        cleaned = [path.strip("{}") for path in paths]
+        self._extend_inputs(cleaned, auto_run=True)
 
     def _browse_path(self, variable: tk.StringVar, label: str) -> None:
         if "folder" in label.lower():

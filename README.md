@@ -56,19 +56,23 @@ connections. Without `--small`, the script aims to preserve original quality whi
 ### Graphical Interface
 
 Prefer a form-based workflow? Launch the bundled Tkinter application with
-`talks-reducer-gui`. Every command-line option is exposed as a control:
+`talks-reducer-gui`:
 
-- **Input files or folders** — add files or directories using the native
-  Explorer/Finder dialog; duplicate entries are ignored.
-- **Output file** — optional path for single-file exports.
-- **Temp folder** — working directory for intermediate assets.
-- **Silent threshold, sounded speed, silent speed, frame margin, sample rate** —
-  numeric inputs matching the CLI flags.
-- **Small file optimizations** — toggles the `--small` preset.
+- **Input drop zone** — drag files or folders from your desktop or add them via
+  the Explorer/Finder dialog; duplicates are ignored.
+- **Run after drop** — automatically kick off processing as soon as new files
+  are dropped (enabled by default).
+- **Small video** — toggles the `--small` preset used by the CLI.
+- **Advanced** — reveals optional controls for the output path, temp folder,
+  and all timing/audio knobs mirrored from the command line.
 
-Progress updates stream into the log panel while the processing runs in a
-background thread, and the resulting video opens in your system file manager as
-soon as it completes.
+Progress updates stream into the 10-line log panel while the processing runs in
+a background thread, and the resulting video opens in your system file manager
+as soon as it completes.
+
+> **Note**: Drag and drop support relies on the `tkinterdnd2` package. It is
+> installed automatically with Talks Reducer but still requires Tk 8.6 with
+> tkdnd support on your operating system.
 
 ## Programmatic Usage
 The pipeline can be reused outside of the CLI by constructing
