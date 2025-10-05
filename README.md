@@ -3,6 +3,11 @@ Focus of this product: reduce talks recordings by time and by size without data 
 
 Talks Reducer trims the quiet gaps in long-form presentations while keeping every word intelligible. When CUDA-capable hardware is available the pipeline leans on GPU encoders to keep export times low, but it still runs great on CPUs.
 
+## Example
+- 1h 37m, 571 MB - Original OBS video
+- 1h 19m, 751 MB - Talks Reducer
+- 1h 19m, 171 MB - Talks Reducer --small
+
 ## Highlights
 - Builds on gegell's classic jumpcutter workflow with more efficient frame and audio processing
 - Generates ffmpeg filter graphs instead of writing temporary frames to disk
