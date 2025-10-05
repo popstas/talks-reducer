@@ -20,17 +20,25 @@ def get_max_volume(samples: np.ndarray) -> float:
 def is_valid_input_file(filename: str) -> bool:
     """Check whether ``ffprobe`` recognises the input file and finds an audio stream."""
 
-    command = (
-        'ffprobe -i "{}" -hide_banner -loglevel error -select_streams a'
-        " -show_entries stream=codec_type".format(filename)
-    )
+    command = [
+        "ffprobe",
+        "-i",
+        filename,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-select_streams",
+        "a",
+        "-show_entries",
+        "stream=codec_type",
+    ]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     outs, errs = None, None
     try:
         outs, errs = process.communicate(timeout=1)
     except subprocess.TimeoutExpired:
         print("Timeout while checking the input file. Aborting. Command:")
-        print(command)
+        print(" ".join(command))
         process.kill()
         outs, errs = process.communicate()
     finally:
