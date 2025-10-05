@@ -33,9 +33,62 @@ jobs:
       - name: Run tests
         run: pytest
 
+  pyinstaller:
+    strategy:
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+        shell: bash
+
+      - name: Build PyInstaller binary
+        run: |
+          pyinstaller talks_reducer/gui.py \
+            --name talks-reducer-gui \
+            --onefile \
+            --console \
+            --hidden-import=tkinterdnd2 \
+            --collect-submodules talks_reducer
+        shell: bash
+
+      - name: Prepare artifact name
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            mv dist/talks-reducer-gui.exe dist/talks-reducer-gui-windows-amd64.exe
+          else
+            mv dist/talks-reducer-gui dist/talks-reducer-gui-macos-universal
+          fi
+        shell: bash
+
+      - name: Upload PyInstaller artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: talks-reducer-gui-${{ matrix.os }}-pyinstaller
+          path: dist/*
+
   release:
     runs-on: ubuntu-latest
-    needs: test
+    needs:
+      - test
+      - pyinstaller
     if: startsWith(github.ref, 'refs/tags/')
 
     steps:
@@ -56,6 +109,13 @@ jobs:
       - name: Build distributions
         run: python -m build
 
+      - name: Download PyInstaller binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: talks-reducer-gui-*-pyinstaller
+          merge-multiple: true
+          path: pyinstaller-dist
+
       - name: Upload distributions
         uses: actions/upload-artifact@v4
         with:
@@ -65,6 +125,8 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/*
+          files: |
+            dist/*
+            pyinstaller-dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
