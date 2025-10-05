@@ -17,10 +17,12 @@ dependencies = [
     "scipy>=1.10.0",
     "numpy>=1.22.0,<2.0.0",
     "tqdm>=4.65.0",
+    "tkinterdnd2>=0.3.0",
 ]
 
 [project.scripts]
 talks-reducer = "talks_reducer.cli:main"
+talks-reducer-gui = "talks_reducer.gui:main"
 
 [tool.black]
 line-length = 88

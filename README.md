@@ -53,6 +53,31 @@ connections. Without `--small`, the script aims to preserve original quality whi
 3. Inspect available options with `talks-reducer --help`
 4. Process a recording using `talks-reducer /path/to/video`
 
+### Graphical Interface
+
+Prefer a form-based workflow? Launch the bundled Tkinter application with
+`talks-reducer-gui`:
+
+- **Simple mode** — the default experience shrinks the window to a large drop
+  zone, hides the manual run controls and log, and automatically processes new
+  files as soon as you drop them. Uncheck the box to return to the full layout
+  with file pickers, the Run button, and detailed logging.
+- **Input drop zone** — drag files or folders from your desktop or add them via
+  the Explorer/Finder dialog; duplicates are ignored.
+- **Small video** — toggles the `--small` preset used by the CLI.
+- **Advanced** — reveals optional controls for the output path, temp folder,
+  timing/audio knobs mirrored from the command line, and an appearance picker
+  that can force dark or light mode or follow your operating system.
+
+Progress updates stream into the 10-line log panel while the processing runs in
+a background thread. Once every queued job succeeds an **Open last output**
+button appears so you can jump straight to the exported file in your system
+file manager.
+
+> **Note**: Drag and drop support relies on the `tkinterdnd2` package. It is
+> installed automatically with Talks Reducer but still requires Tk 8.6 with
+> tkdnd support on your operating system.
+
 ## Programmatic Usage
 The pipeline can be reused outside of the CLI by constructing
 `talks_reducer.models.ProcessingOptions` and invoking

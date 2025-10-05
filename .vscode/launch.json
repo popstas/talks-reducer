@@ -33,6 +33,14 @@
             "cwd": "${workspaceFolder}"
         },
         {
+            "name": "talks-reducer GUI",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "talks_reducer.gui",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
             "name": "pytest -s tests",
             "type": "debugpy",
             "request": "launch",
