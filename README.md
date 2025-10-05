@@ -53,6 +53,13 @@ connections. Without `--small`, the script aims to preserve original quality whi
 3. Inspect available options with `talks-reducer --help`
 4. Process a recording using `talks-reducer /path/to/video`
 
+### Prebuilt Binaries
+
+Tagged releases now ship PyInstaller bundles for Windows and macOS in addition to
+the source and wheel distributions. Grab the appropriate
+`talks-reducer-gui-<platform>` artifact from the GitHub release page if you prefer
+a stand-alone executable of the graphical interface over installing from PyPI.
+
 ### Graphical Interface
 
 Prefer a form-based workflow? Launch the bundled Tkinter application with
