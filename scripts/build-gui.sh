@@ -35,7 +35,7 @@ cd "$(dirname "$0")/.."
 # Determine the current project version (used for artifact naming)
 VERSION=""
 if command -v python3 &> /dev/null; then
-    VERSION=$(python3 - <<'PY' 2>/dev/null || true)
+    VERSION=$(cat <<'PY' | python3 - 2>/dev/null || true
 import pathlib
 import re
 
@@ -119,7 +119,7 @@ else
             esac
 
             if command -v python3 &> /dev/null; then
-                PYTHON_SHARED_LIB=$(python3 - <<'PY'
+                PYTHON_SHARED_LIB=$(cat <<'PY' | python3 -
 import sysconfig
 libname = sysconfig.get_config_var('LDLIBRARY') or ''
 libdir = sysconfig.get_config_var('LIBDIR') or ''
