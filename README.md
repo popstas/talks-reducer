@@ -7,6 +7,10 @@ project was renamed from **jumpcutter** to emphasize its focus on conference tal
 - 1h 19m, 751 MB — Talks Reducer
 - 1h 19m, 171 MB — Talks Reducer `--small`
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## Install GUI (Windows, macOS)
 Go to the [releases page](https://github.com/popstas/talks-reducer/releases) and download the appropriate artifact:
 
