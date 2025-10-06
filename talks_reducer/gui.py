@@ -395,6 +395,10 @@ class TalksReducerGUI:
         input_frame.rowconfigure(1, weight=1)
         self._configure_drop_targets(self.drop_zone)
         self._configure_drop_targets(self.input_list)
+        self.drop_zone.configure(cursor="hand2", takefocus=1)
+        self.drop_zone.bind("<Button-1>", self._on_drop_zone_click)
+        self.drop_zone.bind("<Return>", self._on_drop_zone_click)
+        self.drop_zone.bind("<space>", self._on_drop_zone_click)
 
         self.add_files_button = self.ttk.Button(
             input_frame, text="Add files", command=self._add_files
@@ -841,14 +845,19 @@ class TalksReducerGUI:
         widget.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
 
     # -------------------------------------------------------------- actions --
-    def _add_files(self) -> None:
-        files = self.filedialog.askopenfilenames(
+    def _ask_for_input_files(self) -> tuple[str, ...]:
+        """Prompt the user to select input files for processing."""
+
+        return self.filedialog.askopenfilenames(
             title="Select input files",
             filetypes=[
                 ("Video files", "*.mp4 *.mkv *.mov *.avi *.m4v"),
                 ("All", "*.*"),
             ],
         )
+
+    def _add_files(self) -> None:
+        files = self._ask_for_input_files()
         self._extend_inputs(files)
 
     def _add_directory(self) -> None:
@@ -887,6 +896,16 @@ class TalksReducerGUI:
         self.input_files.clear()
         self.input_list.delete(0, self.tk.END)
         self._extend_inputs(cleaned, auto_run=True)
+
+    def _on_drop_zone_click(self, event: object) -> str | None:
+        """Open a file selection dialog when the drop zone is activated."""
+
+        files = self._ask_for_input_files()
+        if not files:
+            return "break"
+        self._clear_input_files()
+        self._extend_inputs(files, auto_run=True)
+        return "break"
 
     def _browse_path(
         self, variable, label: str

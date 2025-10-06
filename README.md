@@ -57,8 +57,9 @@ continues to work unchanged for local development.
   zone, hides the manual run controls and log, and automatically processes new
   files as soon as you drop them. Uncheck the box to return to the full layout
   with file pickers, the Run button, and detailed logging.
-- **Input drop zone** — drag files or folders from your desktop or add them via
-  the Explorer/Finder dialog; duplicates are ignored.
+- **Input drop zone** — drag files or folders from your desktop, click to open
+  the system file picker, or add them via the Explorer/Finder dialog; duplicates
+  are ignored.
 - **Small video** — toggles the `--small` preset used by the CLI.
 - **Open after convert** — controls whether the exported file is revealed in
   your system file manager as soon as each job finishes.
