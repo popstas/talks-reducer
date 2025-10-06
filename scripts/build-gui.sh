@@ -164,11 +164,12 @@ fi
 
 # macos sign
 if [[ "$OS_NAME" == "macos" ]]; then
-  APP="dist/talks-reducer.app"
-  IDENTITY="Developer ID Application: Stanislav Popov ()"
+  if [[ "${SIGN_MACOS_APP:-0}" == "1" ]]; then
+    APP="dist/talks-reducer.app"
+    IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Stanislav Popov ()}"
 
-  # Create entitlements if missing
-  [[ -f entitlements.plist ]] || cat > entitlements.plist <<'PLIST'
+    # Create entitlements if missing
+    [[ -f entitlements.plist ]] || cat > entitlements.plist <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -177,27 +178,30 @@ if [[ "$OS_NAME" == "macos" ]]; then
 </dict></plist>
 PLIST
 
-  echo "🔐 Signing nested binaries…"
-  find "$APP/Contents" \( -name "*.dylib" -o -name "*.so" -o -perm +111 -type f \) -print0 \
-  | xargs -0 -I{} codesign --force --options runtime \
-      --entitlements entitlements.plist --timestamp -s "$IDENTITY" "{}"
+    echo "🔐 Signing nested binaries…"
+    find "$APP/Contents" \( -name "*.dylib" -o -name "*.so" -o -perm +111 -type f \) -print0 \
+    | xargs -0 -I{} codesign --force --options runtime \
+        --entitlements entitlements.plist --timestamp -s "$IDENTITY" "{}"
 
-  echo "🔐 Signing app bundle…"
-  codesign --force --deep --options runtime --entitlements entitlements.plist \
-      --timestamp -s "$IDENTITY" "$APP"
+    echo "🔐 Signing app bundle…"
+    codesign --force --deep --options runtime --entitlements entitlements.plist \
+        --timestamp -s "$IDENTITY" "$APP"
 
-  echo "🧪 Verifying signature…"
-  codesign --verify --deep --strict --verbose=2 "$APP" || exit 1
+    echo "🧪 Verifying signature…"
+    codesign --verify --deep --strict --verbose=2 "$APP" || exit 1
 
-  echo "📨 Submitting for notarization…"
-  # assumes notarytool profile already set up
-  xcrun notarytool submit "$APP" --keychain-profile talks-notary --wait || exit 1
+    echo "📨 Submitting for notarization…"
+    # assumes notarytool profile already set up
+    xcrun notarytool submit "$APP" --keychain-profile talks-notary --wait || exit 1
 
-  echo "📎 Stapling ticket…"
-  xcrun stapler staple "$APP" || exit 1
+    echo "📎 Stapling ticket…"
+    xcrun stapler staple "$APP" || exit 1
 
-  echo "✅ Gatekeeper check:"
-  spctl -a -vv --type execute "$APP"
+    echo "✅ Gatekeeper check:"
+    spctl -a -vv --type execute "$APP"
+  else
+    echo "⚠️  Skipping macOS code signing (SIGN_MACOS_APP is not set to 1)."
+  fi
 fi
 
 
