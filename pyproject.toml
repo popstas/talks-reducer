@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "talks-reducer"
-version = "0.2.12"
+version = "0.2.13"
 description = "CLI for speeding up long-form talks by removing silence"
 readme = "README.md"
 requires-python = ">=3.9"
