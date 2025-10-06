@@ -32,6 +32,27 @@ esac
 # Ensure we're in the project root
 cd "$(dirname "$0")/.."
 
+# Determine the current project version (used for artifact naming)
+VERSION=""
+if command -v python3 &> /dev/null; then
+    VERSION=$(python3 - <<'PY' 2>/dev/null || true)
+import pathlib
+import re
+
+path = pathlib.Path("pyproject.toml")
+version = ""
+if path.exists():
+    match = re.search(r"^version\s*=\s*\"([^\"]+)\"", path.read_text(), re.MULTILINE)
+    if match:
+        version = match.group(1).strip()
+
+print(version)
+PY
+    )
+    VERSION=${VERSION//$'\r'/}
+    VERSION=${VERSION//$'\n'/}
+fi
+
 # Check if pyinstaller is installed
 if ! command -v pyinstaller &> /dev/null; then
     echo "❌ PyInstaller not found. Installing..."
@@ -331,16 +352,21 @@ if [[ "$*" == *"--zip"* ]]; then
     if [[ -d "$TARGET" ]]; then
         cd dist
         TARGET_NAME=$(basename "$TARGET")
-        
-        if [[ "$OS_NAME" == "windows" ]]; then
-            powershell Compress-Archive -Path "$TARGET_NAME" -DestinationPath "${TARGET_NAME}.zip" -Force
-        else
-            zip -r "${TARGET_NAME}.zip" "$TARGET_NAME"
+        ZIP_NAME="$TARGET_NAME"
+
+        if [[ "$OS_NAME" == "windows" && -n "$VERSION" ]]; then
+            ZIP_NAME="${TARGET_NAME}-${VERSION}"
         fi
-        
-        if [[ -f "${TARGET_NAME}.zip" ]]; then
-            echo "✅ Created: dist/${TARGET_NAME}.zip"
-            ls -lh "${TARGET_NAME}.zip"
+
+        if [[ "$OS_NAME" == "windows" ]]; then
+            powershell Compress-Archive -Path "$TARGET_NAME" -DestinationPath "${ZIP_NAME}.zip" -Force
+        else
+            zip -r "${ZIP_NAME}.zip" "$TARGET_NAME"
+        fi
+
+        if [[ -f "${ZIP_NAME}.zip" ]]; then
+            echo "✅ Created: dist/${ZIP_NAME}.zip"
+            ls -lh "${ZIP_NAME}.zip"
         fi
         cd ..
     fi
