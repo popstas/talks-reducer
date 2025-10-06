@@ -118,10 +118,10 @@ except ModuleNotFoundError:  # pragma: no cover - runtime dependency
 
 STATUS_COLORS = {
     "idle": "#9ca3af",
-    "processing": "#facc15",
-    "success": "#22c55e",
-    "error": "#f87171",
-    "aborted": "#9ca3af",
+    "processing": "#af8e0e",
+    "success": "#178941",
+    "error": "#ad4f4f",
+    "aborted": "#6d727a",
 }
 
 LIGHT_THEME = {
@@ -285,7 +285,7 @@ class TalksReducerGUI:
         self._apply_window_icon()
 
         self._full_size = (760, 680)
-        self._simple_size = (255, 300)
+        self._simple_size = (255, 330)
         self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
         self.style = self.ttk.Style(self.root)
 
@@ -1192,25 +1192,40 @@ class TalksReducerGUI:
         if self._status_state.lower() != "processing":
             self.status_var.set(self._status_state)
 
-    def _calculate_gradient_color(self, percentage: int) -> str:
-        """Calculate color gradient from red (0%) to green (100%)."""
+    def _calculate_gradient_color(self, percentage: int, darken: float = 1.0) -> str:
+        """Calculate color gradient from red (0%) to green (100%).
+        
+        Args:
+            percentage: The position in the gradient (0-100)
+            darken: Value between 0.0 (black) and 1.0 (original brightness)
+            
+        Returns:
+            Hex color code string
+        """
         # Clamp percentage between 0 and 100
         percentage = max(0, min(100, percentage))
+        # Clamp darken between 0.0 and 1.0
+        darken = max(0.0, min(1.0, darken))
 
         if percentage <= 50:
             # Red to Yellow (0% to 50%)
             # Red: (248, 113, 113) -> Yellow: (250, 204, 21)
             ratio = percentage / 50.0
-            r = int(248 + (250 - 248) * ratio)
-            g = int(113 + (204 - 113) * ratio)
-            b = int(113 + (21 - 113) * ratio)
+            r = int((248 + (250 - 248) * ratio) * darken)
+            g = int((113 + (204 - 113) * ratio) * darken)
+            b = int((113 + (21 - 113) * ratio) * darken)
         else:
             # Yellow to Green (50% to 100%)
             # Yellow: (250, 204, 21) -> Green: (34, 197, 94)
             ratio = (percentage - 50) / 50.0
-            r = int(250 + (34 - 250) * ratio)
-            g = int(204 + (197 - 204) * ratio)
-            b = int(21 + (94 - 21) * ratio)
+            r = int((250 + (34 - 250) * ratio) * darken)
+            g = int((204 + (197 - 204) * ratio) * darken)
+            b = int((21 + (94 - 21) * ratio) * darken)
+
+        # Ensure values are within 0-255 range after darkening
+        r = max(0, min(255, r))
+        g = max(0, min(255, g))
+        b = max(0, min(255, b))
 
         return f"#{r:02x}{g:02x}{b:02x}"
 
@@ -1220,7 +1235,7 @@ class TalksReducerGUI:
         def updater() -> None:
             self.progress_var.set(percentage)
             # Update color based on percentage gradient
-            color = self._calculate_gradient_color(percentage)
+            color = self._calculate_gradient_color(percentage, 0.5)
             palette = (
                 LIGHT_THEME if self._detect_system_theme() == "light" else DARK_THEME
             )
