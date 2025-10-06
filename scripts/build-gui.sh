@@ -87,6 +87,8 @@ if [[ "$OS_NAME" == "windows" ]]; then
         --collect-submodules talks_reducer \
         --icon=docs/assets/icon.ico \
         --version-file=version.txt \
+        --add-data="docs/assets/icon.png;docs/assets" \
+        --add-data="docs/assets/icon.ico;docs/assets" \
         $EXCLUDES \
         --noconfirm \
         --workpath build \
@@ -96,6 +98,8 @@ else
         --hidden-import=tkinterdnd2 \
         --collect-submodules talks_reducer \
         --icon=docs/assets/icon.ico \
+        --add-data="docs/assets/icon.png:docs/assets" \
+        --add-data="docs/assets/icon.ico:docs/assets" \
         $EXCLUDES \
         --noconfirm)
 

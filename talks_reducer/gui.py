@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import threading
+from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Iterable, List, Optional, Sequence
 
@@ -216,11 +217,18 @@ class TalksReducerGUI:
             self.root = TkinterDnD.Tk()  # type: ignore[call-arg]
         else:
             self.root = tk.Tk()
-        self.root.title("Talks Reducer")
+        
+        # Set window title with version
+        try:
+            app_version = version("talks-reducer")
+            self.root.title(f"Talks Reducer v{app_version}")
+        except Exception:
+            self.root.title("Talks Reducer")
+        
         self._apply_window_icon()
 
         self._full_size = (760, 680)
-        self._simple_size = (245, 300)
+        self._simple_size = (255, 300)
         self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
         self.style = self.ttk.Style(self.root)
 

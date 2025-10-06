@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 import time
+from importlib.metadata import version
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
@@ -22,6 +23,19 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Modifies a video file to play at different speeds when there is sound vs. silence.",
     )
+    
+    # Add version argument
+    try:
+        pkg_version = version("talks-reducer")
+    except Exception:
+        pkg_version = "unknown"
+    
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"talks-reducer {pkg_version}",
+    )
+    
     parser.add_argument(
         "input_file",
         type=str,
