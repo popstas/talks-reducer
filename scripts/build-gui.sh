@@ -162,13 +162,52 @@ if [[ -n "$OUTPUT_DIR" && -d "$OUTPUT_DIR/_internal" ]]; then
     echo "✅ Removed CUDA libraries"
 fi
 
+# macos sign
+if [[ "$OS_NAME" == "macos" ]]; then
+  APP="dist/talks-reducer.app"
+  IDENTITY="Developer ID Application: Stanislav Popov ()"
+
+  # Create entitlements if missing
+  [[ -f entitlements.plist ]] || cat > entitlements.plist <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>com.apple.security.files.user-selected.read-write</key><true/>
+</dict></plist>
+PLIST
+
+  echo "🔐 Signing nested binaries…"
+  find "$APP/Contents" \( -name "*.dylib" -o -name "*.so" -o -perm +111 -type f \) -print0 \
+  | xargs -0 -I{} codesign --force --options runtime \
+      --entitlements entitlements.plist --timestamp -s "$IDENTITY" "{}"
+
+  echo "🔐 Signing app bundle…"
+  codesign --force --deep --options runtime --entitlements entitlements.plist \
+      --timestamp -s "$IDENTITY" "$APP"
+
+  echo "🧪 Verifying signature…"
+  codesign --verify --deep --strict --verbose=2 "$APP" || exit 1
+
+  echo "📨 Submitting for notarization…"
+  # assumes notarytool profile already set up
+  xcrun notarytool submit "$APP" --keychain-profile talks-notary --wait || exit 1
+
+  echo "📎 Stapling ticket…"
+  xcrun stapler staple "$APP" || exit 1
+
+  echo "✅ Gatekeeper check:"
+  spctl -a -vv --type execute "$APP"
+fi
+
+
 # Prepare target directory
 echo "📦 Preparing artifacts..."
 mkdir -p dist
 
 if [[ "$OS_NAME" == "macos" ]]; then
     if [[ "$OUTPUT_DIR" == *.app ]]; then
-        TARGET="dist/talks-reducer-macos-universal.app"
+        TARGET="dist/talks-reducer.app"
     else
         TARGET="dist/talks-reducer-macos-universal"
     fi
