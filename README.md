@@ -2,6 +2,8 @@
 Talks Reducer shortens long-form presentations by removing silent gaps and optionally re-encoding them to smaller files. The
 project was renamed from **jumpcutter** to emphasize its focus on conference talks and screencasts.
 
+![Main demo](docs/assets/screencast-main.gif)
+
 ## Example
 - 1h 37m, 571 MB — Original OBS video recording
 - 1h 19m, 751 MB — Talks Reducer
