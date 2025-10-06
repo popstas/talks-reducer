@@ -190,8 +190,13 @@ def run_timed_ffmpeg_command(
     desc: str = "",
     total: Optional[int] = None,
     unit: str = "frames",
+    process_callback: Optional[callable] = None,
 ) -> None:
-    """Execute an FFmpeg command while streaming progress information."""
+    """Execute an FFmpeg command while streaming progress information.
+    
+    Args:
+        process_callback: Optional callback that receives the subprocess.Popen object
+    """
 
     import shlex
 
@@ -220,6 +225,10 @@ def run_timed_ffmpeg_command(
     except Exception as exc:  # pragma: no cover - defensive logging
         print(f"Error starting FFmpeg: {exc}", file=sys.stderr)
         raise
+
+    # Notify callback with process object
+    if process_callback:
+        process_callback(process)
 
     progress_reporter = reporter or TqdmProgressReporter()
     task_manager = progress_reporter.task(desc=desc, total=total, unit=unit)

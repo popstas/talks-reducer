@@ -121,6 +121,7 @@ STATUS_COLORS = {
     "processing": "#facc15",
     "success": "#22c55e",
     "error": "#f87171",
+    "aborted": "#9ca3af",
 }
 
 LIGHT_THEME = {
@@ -130,6 +131,7 @@ LIGHT_THEME = {
     "surface": "#ffffff",
     "border": "#cbd5e1",
     "hover": "#efefef",
+    "hover_text": "#000000",
     "selection_background": "#2563eb",
     "selection_foreground": "#ffffff",
 }
@@ -141,6 +143,7 @@ DARK_THEME = {
     "surface": "#2b2b3c",
     "border": "#4b5563",
     "hover": "#333333",
+    "hover_text": "#ffffff",
     "selection_background": "#333333",
     "selection_foreground": "#f3f4f6",
 }
@@ -187,8 +190,13 @@ class _GuiProgressHandle(ProgressHandle):
 class _TkProgressReporter(SignalProgressReporter):
     """Progress reporter that forwards updates to the GUI thread."""
 
-    def __init__(self, log_callback: Callable[[str], None]) -> None:
+    def __init__(
+        self, 
+        log_callback: Callable[[str], None],
+        process_callback: Optional[Callable] = None
+    ) -> None:
         self._log_callback = log_callback
+        self.process_callback = process_callback
 
     def log(self, message: str) -> None:
         self._log_callback(message)
@@ -243,6 +251,8 @@ class TalksReducerGUI:
         self._status_animation_phase = 0
         self._video_duration_seconds: Optional[float] = None
         self.progress_var = tk.IntVar(value=0)
+        self._ffmpeg_process: Optional[subprocess.Popen] = None
+        self._stop_requested = False
 
         self.input_files: List[str] = []
 
@@ -433,10 +443,11 @@ class TalksReducerGUI:
         self.actions_frame = self.ttk.Frame(main)
         self.actions_frame.grid(row=2, column=0, pady=(16, 0), sticky="ew")
 
-        self.run_button = self.ttk.Button(
-            self.actions_frame, text="Run", command=self._start_run
+        self.stop_button = self.ttk.Button(
+            self.actions_frame, text="Stop", command=self._stop_processing
         )
-        self.run_button.grid(row=0, column=0, sticky="w")
+        self.stop_button.grid(row=0, column=0, sticky="w", padx=self.PADDING, pady=self.PADDING)
+        self.stop_button.grid_remove()  # Hidden by default
 
         status_frame = self.ttk.Frame(main, padding=self.PADDING)
         status_frame.grid(row=3, column=0, sticky="ew")
@@ -520,7 +531,7 @@ class TalksReducerGUI:
             for widget in widgets:
                 widget.grid_remove()
             self.log_frame.grid_remove()
-            self.run_button.grid_remove()
+            self.stop_button.grid_remove()
             self.advanced_button.grid_remove()
             self.advanced_frame.grid_remove()
             self.actions_frame.grid_remove()
@@ -534,7 +545,6 @@ class TalksReducerGUI:
                 widget.grid()
             self.log_frame.grid()
             self.actions_frame.grid()
-            self.run_button.grid()
             self.advanced_button.grid()
             if self.advanced_visible.get():
                 self.advanced_frame.grid()
@@ -631,7 +641,7 @@ class TalksReducerGUI:
                 ("disabled", palette["surface"]),
             ],
             foreground=[
-                ("active", palette["surface"]),
+                ("active", palette.get("hover_text", "#000000")),
                 ("disabled", palette["foreground"]),
             ],
         )
@@ -671,6 +681,13 @@ class TalksReducerGUI:
         self.style.configure(
             "Error.Horizontal.TProgressbar",
             background=STATUS_COLORS["error"],
+            troughcolor=palette["surface"],
+            borderwidth=0,
+            thickness=20,
+        )
+        self.style.configure(
+            "Aborted.Horizontal.TProgressbar",
+            background=STATUS_COLORS["aborted"],
             troughcolor=palette["surface"],
             borderwidth=0,
             thickness=20,
@@ -770,6 +787,11 @@ class TalksReducerGUI:
             self.input_list.delete(index)
             del self.input_files[index]
 
+    def _clear_input_files(self) -> None:
+        """Clear all input files from the list."""
+        self.input_files.clear()
+        self.input_list.delete(0, self.tk.END)
+
     def _on_drop(self, event: object) -> None:
         data = getattr(event, "data", "")
         if not data:
@@ -812,10 +834,13 @@ class TalksReducerGUI:
             return
 
         self._append_log("Starting processing…")
-        self.run_button.configure(state=self.tk.DISABLED)
+        self._stop_requested = False
 
         def worker() -> None:
-            reporter = _TkProgressReporter(self._append_log)
+            def set_process(proc: subprocess.Popen) -> None:
+                self._ffmpeg_process = proc
+            
+            reporter = _TkProgressReporter(self._append_log, process_callback=set_process)
             try:
                 files = gather_input_files(self.input_files)
                 if not files:
@@ -841,23 +866,60 @@ class TalksReducerGUI:
 
                 self._append_log("All jobs finished successfully.")
                 self._notify(lambda: self.open_button.configure(state=self.tk.NORMAL))
+                self._notify(self._clear_input_files)
             except FFmpegNotFoundError as exc:
                 self._notify(
                     lambda: self.messagebox.showerror("FFmpeg not found", str(exc))
                 )
                 self._set_status("Error")
             except Exception as exc:  # pragma: no cover - GUI level safeguard
-                self._notify(
-                    lambda: self.messagebox.showerror(
-                        "Error", f"Processing failed: {exc}"
+                # If stop was requested, don't show error (FFmpeg termination is expected)
+                if self._stop_requested:
+                    self._append_log("Processing aborted by user.")
+                    self._set_status("Aborted")
+                else:
+                    self._notify(
+                        lambda: self.messagebox.showerror(
+                            "Error", f"Processing failed: {exc}"
+                        )
                     )
-                )
-                self._set_status("Error")
+                    self._set_status("Error")
             finally:
-                self._notify(lambda: self.run_button.configure(state=self.tk.NORMAL))
+                self._notify(self._hide_stop_button)
 
         self._processing_thread = threading.Thread(target=worker, daemon=True)
         self._processing_thread.start()
+        
+        # Show Stop button when processing starts
+        self.stop_button.grid()
+
+    def _stop_processing(self) -> None:
+        """Stop the currently running processing by terminating FFmpeg."""
+        import signal
+        
+        self._stop_requested = True
+        if self._ffmpeg_process and self._ffmpeg_process.poll() is None:
+            self._append_log("Stopping FFmpeg process...")
+            try:
+                # Send SIGTERM to FFmpeg process
+                if sys.platform == "win32":
+                    # Windows doesn't have SIGTERM, use terminate()
+                    self._ffmpeg_process.terminate()
+                else:
+                    # Unix-like systems can use SIGTERM
+                    self._ffmpeg_process.send_signal(signal.SIGTERM)
+                
+                self._append_log("FFmpeg process stopped.")
+            except Exception as e:
+                self._append_log(f"Error stopping process: {e}")
+        else:
+            self._append_log("No active FFmpeg process to stop.")
+        
+        self._hide_stop_button()
+    
+    def _hide_stop_button(self) -> None:
+        """Hide Stop button."""
+        self.stop_button.grid_remove()
 
     def _collect_arguments(self) -> dict[str, object]:
         args: dict[str, object] = {}
@@ -1001,21 +1063,24 @@ class TalksReducerGUI:
             self._apply_status_style(status)
             self._set_progress_bar_style(status)
             lowered = status.lower()
-            if lowered == "processing" or "extracting audio" in lowered:
-                self.run_button.configure(state=self.tk.DISABLED)
+            is_processing = lowered == "processing" or "extracting audio" in lowered
+            
+            if is_processing:
                 self._start_status_animation()
-            else:
-                if not self.simple_mode_var.get():
-                    self.run_button.configure(state=self.tk.NORMAL)
+                # Show stop button during processing
+                self.actions_frame.grid()
+                self.stop_button.grid()
 
             if lowered == "success":
                 if self.simple_mode_var.get():
                     self.actions_frame.grid()
+                    self.stop_button.grid_remove()
                 self.open_button.grid()
             else:
                 self.open_button.grid_remove()
-                if self.simple_mode_var.get():
+                if self.simple_mode_var.get() and not is_processing:
                     self.actions_frame.grid_remove()
+                    self.stop_button.grid_remove()
 
         self.root.after(0, apply)
 
@@ -1083,6 +1148,11 @@ class TalksReducerGUI:
                 thickness=20,
             )
             self.progress_bar.configure(style="Dynamic.Horizontal.TProgressbar")
+            
+            # Show stop button when progress < 100
+            if percentage < 100:
+                self.actions_frame.grid()
+                self.stop_button.grid()
         
         self.root.after(0, updater)
     
@@ -1095,6 +1165,8 @@ class TalksReducerGUI:
                 style = "Success.Horizontal.TProgressbar"
             elif status_lower == "error":
                 style = "Error.Horizontal.TProgressbar"
+            elif status_lower == "aborted":
+                style = "Aborted.Horizontal.TProgressbar"
             elif status_lower == "idle":
                 style = "Idle.Horizontal.TProgressbar"
             else:

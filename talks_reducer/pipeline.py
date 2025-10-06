@@ -158,12 +158,14 @@ def speed_up_video(
     )
 
     reporter.log("Extracting audio...")
+    process_callback = getattr(reporter, 'process_callback', None)
     run_timed_ffmpeg_command(
         extract_command,
         reporter=reporter,
         total=int(original_duration * frame_rate),
         unit="frames",
         desc="Extracting audio:",
+        process_callback=process_callback,
     )
 
     wav_sample_rate, audio_data = wavfile.read(os.fspath(audio_wav))
@@ -250,6 +252,7 @@ def speed_up_video(
             total=updated_chunks[-1][3],
             unit="frames",
             desc="Generating final:",
+            process_callback=process_callback,
         )
     except subprocess.CalledProcessError as exc:
         if fallback_command_str and use_cuda_encoder:
@@ -260,6 +263,7 @@ def speed_up_video(
                 total=updated_chunks[-1][3],
                 unit="frames",
                 desc="Generating final (fallback):",
+                process_callback=process_callback,
             )
         else:
             raise
