@@ -232,20 +232,25 @@ fi
 
 # Move output to target
 if [[ -n "$OUTPUT_DIR" && -d "$OUTPUT_DIR" ]]; then
-    # Remove old target if it exists
-    if [[ -d "$TARGET" ]]; then
-        rm -rf "$TARGET" 2>/dev/null || {
-            echo "⚠️  Could not remove $TARGET (may be in use)"
-            exit 1
-        }
-    fi
-    
-    # Move to target
-    if mv "$OUTPUT_DIR" "$TARGET" 2>/dev/null; then
+    # Check if output is already at target location
+    if [[ "$OUTPUT_DIR" == "$TARGET" ]]; then
         echo "✅ Build complete: $TARGET/"
     else
-        echo "⚠️  Could not move from $OUTPUT_DIR to $TARGET"
-        echo "✅ Build output at: $OUTPUT_DIR/"
+        # Remove old target if it exists
+        if [[ -d "$TARGET" ]]; then
+            rm -rf "$TARGET" 2>/dev/null || {
+                echo "⚠️  Could not remove $TARGET (may be in use)"
+                exit 1
+            }
+        fi
+        
+        # Move to target
+        if mv "$OUTPUT_DIR" "$TARGET" 2>/dev/null; then
+            echo "✅ Build complete: $TARGET/"
+        else
+            echo "⚠️  Could not move from $OUTPUT_DIR to $TARGET"
+            echo "✅ Build output at: $OUTPUT_DIR/"
+        fi
     fi
 
     if [[ "$OS_NAME" == "macos" ]]; then
