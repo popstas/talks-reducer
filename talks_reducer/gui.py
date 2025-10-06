@@ -180,7 +180,7 @@ class TalksReducerGUI:
         self._full_size = (760, 680)
         self._simple_size = (245, 300)
         self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
-        self.style = ttk.Style(self.root)
+        self.style = self.ttk.Style(self.root)
 
         self._processing_thread: Optional[threading.Thread] = None
         self._last_output: Optional[Path] = None
@@ -220,36 +220,36 @@ class TalksReducerGUI:
             return
 
         try:
-            self.root.iconphoto(False, tk.PhotoImage(file=str(icon_path)))
-        except tk.TclError:
+            self.root.iconphoto(False, self.tk.PhotoImage(file=str(icon_path)))
+        except self.tk.TclError:
             # Missing Tk image support (e.g. headless environments) should not crash the GUI.
             pass
 
     def _build_layout(self) -> None:
-        main = ttk.Frame(self.root, padding=16)
+        main = self.ttk.Frame(self.root, padding=16)
         main.grid(row=0, column=0, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
         # Input selection frame
-        input_frame = ttk.LabelFrame(main, text="Input files", padding=12)
+        input_frame = self.ttk.LabelFrame(main, text="Input files", padding=12)
         input_frame.grid(row=0, column=0, sticky="nsew")
         main.rowconfigure(0, weight=1)
         for column in range(4):
             input_frame.columnconfigure(column, weight=1)
 
-        self.input_list = tk.Listbox(input_frame, height=5)
+        self.input_list = self.tk.Listbox(input_frame, height=5)
         self.input_list.grid(row=0, column=0, columnspan=4, sticky="nsew", pady=(0, 12))
-        self.input_scrollbar = ttk.Scrollbar(
-            input_frame, orient=tk.VERTICAL, command=self.input_list.yview
+        self.input_scrollbar = self.ttk.Scrollbar(
+            input_frame, orient=self.tk.VERTICAL, command=self.input_list.yview
         )
         self.input_scrollbar.grid(row=0, column=4, sticky="ns", pady=(0, 12))
         self.input_list.configure(yscrollcommand=self.input_scrollbar.set)
 
-        self.drop_zone = tk.Label(
+        self.drop_zone = self.tk.Label(
             input_frame,
             text="Drop files or folders here",
-            relief=tk.RIDGE,
+            relief=self.tk.RIDGE,
             borderwidth=2,
             padx=16,
             pady=16,
@@ -260,19 +260,19 @@ class TalksReducerGUI:
         self._configure_drop_targets(self.drop_zone)
         self._configure_drop_targets(self.input_list)
 
-        self.add_files_button = ttk.Button(
+        self.add_files_button = self.ttk.Button(
             input_frame, text="Add files", command=self._add_files
         )
         self.add_files_button.grid(row=2, column=0, pady=8, sticky="w")
-        self.add_folder_button = ttk.Button(
+        self.add_folder_button = self.ttk.Button(
             input_frame, text="Add folder", command=self._add_directory
         )
         self.add_folder_button.grid(row=2, column=1, pady=8)
-        self.remove_selected_button = ttk.Button(
+        self.remove_selected_button = self.ttk.Button(
             input_frame, text="Remove selected", command=self._remove_selected
         )
         self.remove_selected_button.grid(row=2, column=2, pady=8, sticky="w")
-        self.run_after_drop_check = ttk.Checkbutton(
+        self.run_after_drop_check = self.ttk.Checkbutton(
             input_frame,
             text="Run after drop",
             variable=self.run_after_drop_var,
@@ -280,11 +280,11 @@ class TalksReducerGUI:
         self.run_after_drop_check.grid(row=2, column=3, pady=8, sticky="e")
 
         # Options frame
-        options = ttk.LabelFrame(main, text="Options", padding=12)
+        options = self.ttk.LabelFrame(main, text="Options", padding=12)
         options.grid(row=1, column=0, pady=(16, 0), sticky="nsew")
         options.columnconfigure(0, weight=1)
 
-        self.simple_mode_check = ttk.Checkbutton(
+        self.simple_mode_check = self.ttk.Checkbutton(
             options,
             text="Simple mode",
             variable=self.simple_mode_var,
@@ -292,33 +292,33 @@ class TalksReducerGUI:
         )
         self.simple_mode_check.grid(row=0, column=0, sticky="w")
 
-        ttk.Checkbutton(options, text="Small video", variable=self.small_var).grid(
+        self.ttk.Checkbutton(options, text="Small video", variable=self.small_var).grid(
             row=1, column=0, sticky="w", pady=(8, 0)
         )
 
-        self.advanced_visible = tk.BooleanVar(value=False)
-        self.advanced_button = ttk.Button(
+        self.advanced_visible = self.tk.BooleanVar(value=False)
+        self.advanced_button = self.ttk.Button(
             options,
             text="Advanced",
             command=self._toggle_advanced,
         )
         self.advanced_button.grid(row=0, column=1, sticky="e")
 
-        self.advanced_frame = ttk.Frame(options, padding=(0, 12, 0, 0))
+        self.advanced_frame = self.ttk.Frame(options, padding=(0, 12, 0, 0))
         self.advanced_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
         self.advanced_frame.columnconfigure(1, weight=1)
 
-        self.output_var = tk.StringVar()
+        self.output_var = self.tk.StringVar()
         self._add_entry(
             self.advanced_frame, "Output file", self.output_var, row=0, browse=True
         )
 
-        self.temp_var = tk.StringVar(value="TEMP")
+        self.temp_var = self.tk.StringVar(value="TEMP")
         self._add_entry(
             self.advanced_frame, "Temp folder", self.temp_var, row=1, browse=True
         )
 
-        self.silent_threshold_var = tk.StringVar()
+        self.silent_threshold_var = self.tk.StringVar()
         self._add_entry(
             self.advanced_frame,
             "Silent threshold",
@@ -326,96 +326,96 @@ class TalksReducerGUI:
             row=2,
         )
 
-        self.sounded_speed_var = tk.StringVar()
+        self.sounded_speed_var = self.tk.StringVar()
         self._add_entry(
             self.advanced_frame, "Sounded speed", self.sounded_speed_var, row=3
         )
 
-        self.silent_speed_var = tk.StringVar()
+        self.silent_speed_var = self.tk.StringVar()
         self._add_entry(
             self.advanced_frame, "Silent speed", self.silent_speed_var, row=4
         )
 
-        self.frame_margin_var = tk.StringVar()
+        self.frame_margin_var = self.tk.StringVar()
         self._add_entry(
             self.advanced_frame, "Frame margin", self.frame_margin_var, row=5
         )
 
-        self.sample_rate_var = tk.StringVar()
+        self.sample_rate_var = self.tk.StringVar()
         self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=6)
 
-        ttk.Label(self.advanced_frame, text="Theme").grid(
+        self.ttk.Label(self.advanced_frame, text="Theme").grid(
             row=7, column=0, sticky="w", pady=(8, 0)
         )
-        theme_choice = ttk.Frame(self.advanced_frame)
+        theme_choice = self.ttk.Frame(self.advanced_frame)
         theme_choice.grid(row=7, column=1, columnspan=2, sticky="w", pady=(8, 0))
         for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
-            ttk.Radiobutton(
+            self.ttk.Radiobutton(
                 theme_choice,
                 text=label,
                 value=value,
                 variable=self.theme_var,
                 command=self._apply_theme,
-            ).pack(side=tk.LEFT, padx=(0, 8))
+            ).pack(side=self.tk.LEFT, padx=(0, 8))
 
         self._toggle_advanced(initial=True)
 
         # Action buttons and log output
-        self.actions_frame = ttk.Frame(main)
+        self.actions_frame = self.ttk.Frame(main)
         self.actions_frame.grid(row=2, column=0, pady=(16, 0), sticky="ew")
         self.actions_frame.columnconfigure(1, weight=1)
 
-        self.run_button = ttk.Button(
+        self.run_button = self.ttk.Button(
             self.actions_frame, text="Run", command=self._start_run
         )
         self.run_button.grid(row=0, column=0, sticky="w")
 
-        self.open_button = ttk.Button(
+        self.open_button = self.ttk.Button(
             self.actions_frame,
             text="Open last output",
             command=self._open_last_output,
-            state=tk.DISABLED,
+            state=self.tk.DISABLED,
         )
         self.open_button.grid(row=0, column=1, sticky="e")
         self.open_button.grid_remove()
 
-        status_frame = ttk.Frame(main, padding=(0, 8, 0, 0))
+        status_frame = self.ttk.Frame(main, padding=(0, 8, 0, 0))
         status_frame.grid(row=3, column=0, sticky="ew")
         status_frame.columnconfigure(1, weight=1)
-        ttk.Label(status_frame, text="Status:").grid(row=0, column=0, sticky="w")
-        self.status_label = tk.Label(status_frame, textvariable=self.status_var)
+        self.ttk.Label(status_frame, text="Status:").grid(row=0, column=0, sticky="w")
+        self.status_label = self.tk.Label(status_frame, textvariable=self.status_var)
         self.status_label.grid(row=0, column=1, sticky="w")
 
-        self.log_frame = ttk.LabelFrame(main, text="Log", padding=12)
+        self.log_frame = self.ttk.LabelFrame(main, text="Log", padding=12)
         self.log_frame.grid(row=4, column=0, pady=(16, 0), sticky="nsew")
         main.rowconfigure(4, weight=1)
         self.log_frame.columnconfigure(0, weight=1)
         self.log_frame.rowconfigure(0, weight=1)
 
-        self.log_text = tk.Text(
-            self.log_frame, wrap="word", height=10, state=tk.DISABLED
+        self.log_text = self.tk.Text(
+            self.log_frame, wrap="word", height=10, state=self.tk.DISABLED
         )
         self.log_text.grid(row=0, column=0, sticky="nsew")
-        log_scroll = ttk.Scrollbar(
-            self.log_frame, orient=tk.VERTICAL, command=self.log_text.yview
+        log_scroll = self.ttk.Scrollbar(
+            self.log_frame, orient=self.tk.VERTICAL, command=self.log_text.yview
         )
         log_scroll.grid(row=0, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=log_scroll.set)
 
     def _add_entry(
         self,
-        parent: tk.Misc,
+        parent,  # type: tk.Misc
         label: str,
-        variable: tk.StringVar,
+        variable,  # type: tk.StringVar
         *,
         row: int,
         browse: bool = False,
     ) -> None:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=4)
-        entry = ttk.Entry(parent, textvariable=variable)
+        self.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=4)
+        entry = self.ttk.Entry(parent, textvariable=variable)
         entry.grid(row=row, column=1, sticky="ew", pady=4)
         if browse:
-            button = ttk.Button(
+            button = self.ttk.Button(
                 parent,
                 text="Browse",
                 command=lambda var=variable: self._browse_path(var, label),
@@ -613,7 +613,7 @@ class TalksReducerGUI:
             return "dark"
         return "light"
 
-    def _configure_drop_targets(self, widget: tk.Widget) -> None:
+    def _configure_drop_targets(self, widget) -> None:  # type: tk.Widget
         if not self._dnd_available:
             return
         widget.drop_target_register(DND_FILES)  # type: ignore[arg-type]
@@ -640,7 +640,7 @@ class TalksReducerGUI:
         for path in paths:
             if path and path not in self.input_files:
                 self.input_files.append(path)
-                self.input_list.insert(tk.END, path)
+                self.input_list.insert(self.tk.END, path)
                 added = True
         if auto_run and added and self.run_after_drop_var.get():
             self._start_run()
@@ -659,7 +659,7 @@ class TalksReducerGUI:
         cleaned = [path.strip("{}") for path in paths]
         self._extend_inputs(cleaned, auto_run=True)
 
-    def _browse_path(self, variable: tk.StringVar, label: str) -> None:
+    def _browse_path(self, variable, label: str) -> None:  # type: (tk.StringVar, str) -> None
         if "folder" in label.lower():
             result = filedialog.askdirectory()
         else:
@@ -714,7 +714,7 @@ class TalksReducerGUI:
                     )
 
                 self._append_log("All jobs finished successfully.")
-                self._notify(lambda: self.open_button.configure(state=tk.NORMAL))
+                self._notify(lambda: self.open_button.configure(state=self.tk.NORMAL))
             except FFmpegNotFoundError as exc:
                 self._notify(lambda: messagebox.showerror("FFmpeg not found", str(exc)))
                 self._set_status("Error")
@@ -724,7 +724,7 @@ class TalksReducerGUI:
                 )
                 self._set_status("Error")
             finally:
-                self._notify(lambda: self.run_button.configure(state=tk.NORMAL))
+                self._notify(lambda: self.run_button.configure(state=self.tk.NORMAL))
 
         self._processing_thread = threading.Thread(target=worker, daemon=True)
         self._processing_thread.start()
@@ -802,10 +802,10 @@ class TalksReducerGUI:
         self._update_status_from_message(message)
 
         def updater() -> None:
-            self.log_text.configure(state=tk.NORMAL)
-            self.log_text.insert(tk.END, message + "\n")
-            self.log_text.see(tk.END)
-            self.log_text.configure(state=tk.DISABLED)
+            self.log_text.configure(state=self.tk.NORMAL)
+            self.log_text.insert(self.tk.END, message + "\n")
+            self.log_text.see(self.tk.END)
+            self.log_text.configure(state=self.tk.DISABLED)
 
         self.log_text.after(0, updater)
 
@@ -833,11 +833,11 @@ class TalksReducerGUI:
             self._apply_status_style(status)
             lowered = status.lower()
             if lowered == "processing":
-                self.run_button.configure(state=tk.DISABLED)
+                self.run_button.configure(state=self.tk.DISABLED)
                 self._start_status_animation()
             else:
                 if not self.simple_mode_var.get():
-                    self.run_button.configure(state=tk.NORMAL)
+                    self.run_button.configure(state=self.tk.NORMAL)
 
             if lowered == "success":
                 if self.simple_mode_var.get():
@@ -893,38 +893,52 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         cli_main(argv)
         return
 
-    # Check if tkinter is available before creating GUI
-    tkinter_available, error_msg = _check_tkinter_available()
+    # Skip tkinter check if running as a PyInstaller frozen app
+    # In that case, tkinter is bundled and the subprocess check would fail
+    is_frozen = getattr(sys, 'frozen', False)
+    
+    if not is_frozen:
+        # Check if tkinter is available before creating GUI (only when not frozen)
+        tkinter_available, error_msg = _check_tkinter_available()
 
-    if not tkinter_available:
-        # Use ASCII-safe output for Windows console compatibility
-        try:
-            print("Talks Reducer GUI")
-            print("=" * 50)
-            print("X GUI not available on this system")
-            print(f"Error: {error_msg}")
-            print()
-            print("! Alternative: Use the command-line interface")
-            print()
-            print("The CLI provides all the same functionality:")
-            print("  python3 -m talks_reducer <input_file> [options]")
-            print()
-            print("Examples:")
-            print("  python3 -m talks_reducer video.mp4")
-            print("  python3 -m talks_reducer video.mp4 --small")
-            print("  python3 -m talks_reducer video.mp4 -o output.mp4")
-            print()
-            print("Run 'python3 -m talks_reducer --help' for all options.")
-            print()
-            print("This is likely a macOS/Tkinter compatibility issue.")
-            print("The CLI interface works perfectly and is recommended.")
-        except UnicodeEncodeError:
-            # Fallback for extreme encoding issues
-            sys.stderr.write("GUI not available. Use CLI mode instead.\n")
-        return
+        if not tkinter_available:
+            # Use ASCII-safe output for Windows console compatibility
+            try:
+                print("Talks Reducer GUI")
+                print("=" * 50)
+                print("X GUI not available on this system")
+                print(f"Error: {error_msg}")
+                print()
+                print("! Alternative: Use the command-line interface")
+                print()
+                print("The CLI provides all the same functionality:")
+                print("  python3 -m talks_reducer <input_file> [options]")
+                print()
+                print("Examples:")
+                print("  python3 -m talks_reducer video.mp4")
+                print("  python3 -m talks_reducer video.mp4 --small")
+                print("  python3 -m talks_reducer video.mp4 -o output.mp4")
+                print()
+                print("Run 'python3 -m talks_reducer --help' for all options.")
+                print()
+                print("This is likely a macOS/Tkinter compatibility issue.")
+                print("The CLI interface works perfectly and is recommended.")
+            except UnicodeEncodeError:
+                # Fallback for extreme encoding issues
+                sys.stderr.write("GUI not available. Use CLI mode instead.\n")
+            return
 
-    app = TalksReducerGUI()
-    app.run()
+    # Catch and report any errors during GUI initialization
+    try:
+        app = TalksReducerGUI()
+        app.run()
+    except Exception as e:
+        import traceback
+        sys.stderr.write(f"Error starting GUI: {e}\n")
+        sys.stderr.write(traceback.format_exc())
+        sys.stderr.write("\nPlease use the CLI mode instead:\n")
+        sys.stderr.write("  python3 -m talks_reducer <input_file> [options]\n")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
