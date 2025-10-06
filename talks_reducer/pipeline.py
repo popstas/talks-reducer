@@ -158,7 +158,7 @@ def speed_up_video(
     )
 
     reporter.log("Extracting audio...")
-    process_callback = getattr(reporter, 'process_callback', None)
+    process_callback = getattr(reporter, "process_callback", None)
     run_timed_ffmpeg_command(
         extract_command,
         reporter=reporter,
