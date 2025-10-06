@@ -36,6 +36,9 @@ class ProcessingResult:
     output_file: Path
     frame_rate: float
     original_duration: float
+    output_duration: float
     chunk_count: int
     used_cuda: bool
     max_audio_volume: float
+    time_ratio: Optional[float]
+    size_ratio: Optional[float]

@@ -87,13 +87,19 @@ def test_speed_up_video_returns_result(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "talks_reducer.pipeline.chunk_utils.get_tree_expression", lambda _chunks: "X"
     )
-    monkeypatch.setattr(
-        "talks_reducer.pipeline.run_timed_ffmpeg_command", lambda *a, **k: None
-    )
+
+    def fake_run(command, *args, **kwargs):
+        if command == "render":
+            options.output_file.write_bytes(b"fake")
+        return None
+
+    monkeypatch.setattr("talks_reducer.pipeline.run_timed_ffmpeg_command", fake_run)
 
     result = speed_up_video(options, reporter=reporter)
 
     assert isinstance(result, ProcessingResult)
     assert result.output_file == options.output_file
     assert result.chunk_count == 1
+    assert result.time_ratio == 1.0
+    assert result.size_ratio == 1.0
     assert reporter.messages  # progress logs should be collected

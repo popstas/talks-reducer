@@ -270,12 +270,23 @@ def speed_up_video(
     finally:
         _delete_path(temp_path)
 
+    output_metadata = _extract_video_metadata(output_path, frame_rate)
+    output_duration = output_metadata.get("duration", 0.0)
+    time_ratio = output_duration / original_duration if original_duration > 0 else None
+
+    input_size = input_path.stat().st_size if input_path.exists() else 0
+    output_size = output_path.stat().st_size if output_path.exists() else 0
+    size_ratio = (output_size / input_size) if input_size > 0 else None
+
     return ProcessingResult(
         input_file=input_path,
         output_file=output_path,
         frame_rate=frame_rate,
         original_duration=original_duration,
+        output_duration=output_duration,
         chunk_count=len(chunks),
         used_cuda=use_cuda_encoder,
         max_audio_volume=max_audio_volume,
+        time_ratio=time_ratio,
+        size_ratio=size_ratio,
     )

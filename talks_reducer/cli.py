@@ -196,6 +196,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             sys.exit(1)
 
         reporter.log(f"Completed: {result.output_file}")
+        summary_parts = []
+        time_ratio = getattr(result, "time_ratio", None)
+        size_ratio = getattr(result, "size_ratio", None)
+        if time_ratio is not None:
+            summary_parts.append(f"{time_ratio * 100:.0f}% time")
+        if size_ratio is not None:
+            summary_parts.append(f"{size_ratio * 100:.0f}% size")
+        if summary_parts:
+            reporter.log("Result: " + ", ".join(summary_parts))
 
     end_time = time.time()
     total_time = end_time - start_time
