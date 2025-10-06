@@ -270,12 +270,14 @@ class TalksReducerGUI:
 
             try:
                 if icon_type == "ico" and sys.platform.startswith("win"):
-                    self.root.iconbitmap(default=str(icon_path))
+                    # On Windows, iconbitmap works better without the 'default' parameter
+                    self.root.iconbitmap(str(icon_path))
                 else:
                     self.root.iconphoto(False, self.tk.PhotoImage(file=str(icon_path)))
-                break
-            except self.tk.TclError:
-                # Missing Tk image support (e.g. headless environments) should not crash the GUI.
+                # If we got here without exception, icon was set successfully
+                return
+            except (self.tk.TclError, Exception) as e:
+                # Missing Tk image support or invalid icon format - try next candidate
                 continue
 
     def _build_layout(self) -> None:

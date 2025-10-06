@@ -20,6 +20,8 @@ Go to the [releases page](https://github.com/popstas/talks-reducer/releases) and
 pip install talks-reducer
 ```
 
+**Note:** FFmpeg is now bundled automatically with the package, so you don't need to install it separately. However, if you have FFmpeg already installed on your system, it will be used instead of the bundled version.
+
 The `--small` preset applies a 720p video scale and 128 kbps audio bitrate, making it useful for sharing talks over constrained
 connections. Without `--small`, the script aims to preserve original quality while removing silence.
 

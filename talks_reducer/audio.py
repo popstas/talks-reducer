@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import subprocess
+import sys
 from typing import List, Sequence, Tuple
 
 import numpy as np
@@ -35,7 +36,19 @@ def is_valid_input_file(filename: str) -> bool:
         "-show_entries",
         "stream=codec_type",
     ]
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    
+    # Hide console window on Windows
+    creationflags = 0
+    if sys.platform == "win32":
+        # CREATE_NO_WINDOW = 0x08000000
+        creationflags = 0x08000000
+    
+    process = subprocess.Popen(
+        command, 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.PIPE,
+        creationflags=creationflags
+    )
     outs, errs = None, None
     try:
         outs, errs = process.communicate(timeout=1)
