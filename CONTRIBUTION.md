@@ -42,3 +42,22 @@ processes.
 The deploy helper automatically runs the test suite, rebuilds the distribution artifacts, validates them with `twine check`, and uploads the release. Provide `TWINE_REPOSITORY_URL` to target TestPyPI instead of PyPI. Ensure you have valid credentials configured in `~/.pypirc` before running the publish step.
 
 Feel free to open pull requests with enhancements or bug fixes.
+
+### macOS codesigning and notarization
+
+Maintainers with Apple Developer credentials can optionally sign and notarize
+the GUI release to avoid Gatekeeper warnings on download:
+
+1. Export or create a keychain profile for `notarytool` (see `man
+   notarytool`) and note the profile name.
+2. Set the following environment variables before running `scripts/build-gui.sh`:
+   - `MACOS_CODESIGN_IDENTITY` — the signing identity, for example
+     `Developer ID Application: Example Corp (TEAMID)`.
+   - `MACOS_CODESIGN_ENTITLEMENTS` *(optional)* — path to an entitlements plist
+     used during codesigning.
+   - `MACOS_NOTARIZE_PROFILE` *(optional)* — the keychain profile name to submit
+     the archive for notarization. When present, the script zips the `.app`,
+     submits it with `notarytool --wait`, and staples the returned ticket.
+
+The codesigning step executes only when the variables are provided, so the build
+continues to work unchanged for local development.
