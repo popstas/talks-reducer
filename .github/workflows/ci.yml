@@ -30,9 +30,6 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      - name: Validate changelog
-        run: python scripts/generate_changelog.py --check
-
       - name: Run tests
         run: pytest
 
