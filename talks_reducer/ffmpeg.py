@@ -234,6 +234,9 @@ def run_timed_ffmpeg_command(
 
             sys.stderr.write(line)
             sys.stderr.flush()
+            
+            # Send FFmpeg output to reporter for GUI display
+            progress_reporter.log(line.strip())
 
             match = re.search(r"frame=\s*(\d+)", line)
             if match:

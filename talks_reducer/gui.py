@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -893,13 +894,24 @@ class TalksReducerGUI:
             "processing"
         ):
             self._set_status("Processing")
+        
+        # Parse FFmpeg progress information (time and speed)
+        time_match = re.search(r'time=(\d{2}:\d{2}:\d{2})\.\d+', message)
+        speed_match = re.search(r'speed=\s*([\d.]+)x', message)
+        
+        if time_match and speed_match:
+            time_str = time_match.group(1)
+            speed_str = speed_match.group(1)
+            self._set_status(f"{time_str}, {speed_str}x")
 
     def _apply_status_style(self, status: str) -> None:
         color = STATUS_COLORS.get(status.lower())
         if color:
             self.status_label.configure(fg=color)
         else:
-            self.status_label.configure(fg="")
+            # For FFmpeg progress messages (time, speed), use processing color
+            if re.search(r'\d{2}:\d{2}:\d{2}.*\d+\.\d+x', status):
+                self.status_label.configure(fg=STATUS_COLORS["processing"])
 
     def _set_status(self, status: str) -> None:
         def apply() -> None:
