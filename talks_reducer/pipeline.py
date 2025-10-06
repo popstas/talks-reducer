@@ -157,6 +157,7 @@ def speed_up_video(
         ffmpeg_path=ffmpeg_path,
     )
 
+    reporter.log("Extracting audio...")
     run_timed_ffmpeg_command(
         extract_command,
         reporter=reporter,

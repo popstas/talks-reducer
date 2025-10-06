@@ -129,7 +129,7 @@ LIGHT_THEME = {
     "accent": "#2563eb",
     "surface": "#ffffff",
     "border": "#cbd5e1",
-    "hover": "#1d4ed8",
+    "hover": "#efefef",
     "selection_background": "#2563eb",
     "selection_foreground": "#ffffff",
 }
@@ -241,6 +241,8 @@ class TalksReducerGUI:
         self.status_var = tk.StringVar(value=self._status_state)
         self._status_animation_job: Optional[str] = None
         self._status_animation_phase = 0
+        self._video_duration_seconds: Optional[float] = None
+        self.progress_var = tk.IntVar(value=0)
 
         self.input_files: List[str] = []
 
@@ -453,6 +455,16 @@ class TalksReducerGUI:
         )
         self.open_button.grid(row=0, column=2, sticky="e")
         self.open_button.grid_remove()
+        
+        # Progress bar
+        self.progress_bar = self.ttk.Progressbar(
+            status_frame,
+            variable=self.progress_var,
+            maximum=100,
+            mode='determinate',
+            style='Idle.Horizontal.TProgressbar'
+        )
+        self.progress_bar.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(5, 0))
 
         self.log_frame = self.ttk.Frame(main, padding=self.PADDING)
         self.log_frame.grid(row=4, column=0, pady=(16, 0), sticky="nsew")
@@ -593,10 +605,18 @@ class TalksReducerGUI:
             background=palette["background"],
             foreground=palette["foreground"],
         )
+        self.style.map(
+            "TCheckbutton",
+            background=[("active", palette.get("hover", palette["background"]))],
+        )
         self.style.configure(
             "TRadiobutton",
             background=palette["background"],
             foreground=palette["foreground"],
+        )
+        self.style.map(
+            "TRadiobutton",
+            background=[("active", palette.get("hover", palette["background"]))],
         )
         self.style.configure(
             "TButton",
@@ -624,6 +644,36 @@ class TalksReducerGUI:
             "TCombobox",
             fieldbackground=palette["surface"],
             foreground=palette["foreground"],
+        )
+        
+        # Configure progress bar styles for different states
+        self.style.configure(
+            "Idle.Horizontal.TProgressbar",
+            background=STATUS_COLORS["idle"],
+            troughcolor=palette["surface"],
+            borderwidth=0,
+            thickness=20,
+        )
+        self.style.configure(
+            "Processing.Horizontal.TProgressbar",
+            background=STATUS_COLORS["processing"],
+            troughcolor=palette["surface"],
+            borderwidth=0,
+            thickness=20,
+        )
+        self.style.configure(
+            "Success.Horizontal.TProgressbar",
+            background=STATUS_COLORS["success"],
+            troughcolor=palette["surface"],
+            borderwidth=0,
+            thickness=20,
+        )
+        self.style.configure(
+            "Error.Horizontal.TProgressbar",
+            background=STATUS_COLORS["error"],
+            troughcolor=palette["surface"],
+            borderwidth=0,
+            thickness=20,
         )
 
         self.drop_zone.configure(
@@ -726,6 +776,9 @@ class TalksReducerGUI:
             return
         paths = self.root.tk.splitlist(data)
         cleaned = [path.strip("{}") for path in paths]
+        # Clear existing files before adding dropped files
+        self.input_files.clear()
+        self.input_list.delete(0, self.tk.END)
         self._extend_inputs(cleaned, auto_run=True)
 
     def _browse_path(
@@ -890,27 +943,54 @@ class TalksReducerGUI:
         normalized = message.strip().lower()
         if "all jobs finished successfully" in normalized:
             self._set_status("Success")
+            self._set_progress(100)  # 100% on success
+            self._video_duration_seconds = None  # Reset for next video
+        elif normalized.startswith("extracting audio"):
+            self._set_status("Extracting audio...")
+            self._set_progress(0)  # 0% on start
+            self._video_duration_seconds = None  # Reset for new processing
         elif normalized.startswith("starting processing") or normalized.startswith(
             "processing"
         ):
             self._set_status("Processing")
+            self._set_progress(0)  # 0% on start
+            self._video_duration_seconds = None  # Reset for new processing
+        
+        # Parse video duration from FFmpeg output
+        duration_match = re.search(r'Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)', message)
+        if duration_match:
+            hours = int(duration_match.group(1))
+            minutes = int(duration_match.group(2))
+            seconds = float(duration_match.group(3))
+            self._video_duration_seconds = hours * 3600 + minutes * 60 + seconds
         
         # Parse FFmpeg progress information (time and speed)
-        time_match = re.search(r'time=(\d{2}:\d{2}:\d{2})\.\d+', message)
+        time_match = re.search(r'time=(\d{2}):(\d{2}):(\d{2})\.\d+', message)
         speed_match = re.search(r'speed=\s*([\d.]+)x', message)
         
         if time_match and speed_match:
-            time_str = time_match.group(1)
+            hours = int(time_match.group(1))
+            minutes = int(time_match.group(2))
+            seconds = int(time_match.group(3))
+            time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
             speed_str = speed_match.group(1)
-            self._set_status(f"{time_str}, {speed_str}x")
+            
+            # Calculate percentage if we have duration
+            if self._video_duration_seconds and self._video_duration_seconds > 0:
+                current_seconds = hours * 3600 + minutes * 60 + seconds
+                percentage = min(100, int((current_seconds / self._video_duration_seconds) * 100))
+                self._set_status(f"{time_str}, {speed_str}x ({percentage}%)")
+                self._set_progress(percentage)  # Update progress bar
+            else:
+                self._set_status(f"{time_str}, {speed_str}x")
 
     def _apply_status_style(self, status: str) -> None:
         color = STATUS_COLORS.get(status.lower())
         if color:
             self.status_label.configure(fg=color)
         else:
-            # For FFmpeg progress messages (time, speed), use processing color
-            if re.search(r'\d{2}:\d{2}:\d{2}.*\d+\.\d+x', status):
+            # For extracting audio or FFmpeg progress messages, use processing color
+            if "extracting audio" in status.lower() or re.search(r'\d{2}:\d{2}:\d{2}.*\d+\.?\d*x', status):
                 self.status_label.configure(fg=STATUS_COLORS["processing"])
 
     def _set_status(self, status: str) -> None:
@@ -919,8 +999,9 @@ class TalksReducerGUI:
             self._status_state = status
             self.status_var.set(status)
             self._apply_status_style(status)
+            self._set_progress_bar_style(status)
             lowered = status.lower()
-            if lowered == "processing":
+            if lowered == "processing" or "extracting audio" in lowered:
                 self.run_button.configure(state=self.tk.DISABLED)
                 self._start_status_animation()
             else:
@@ -961,6 +1042,68 @@ class TalksReducerGUI:
             self._status_animation_job = None
         if self._status_state.lower() != "processing":
             self.status_var.set(self._status_state)
+
+    def _calculate_gradient_color(self, percentage: int) -> str:
+        """Calculate color gradient from red (0%) to green (100%)."""
+        # Clamp percentage between 0 and 100
+        percentage = max(0, min(100, percentage))
+        
+        if percentage <= 50:
+            # Red to Yellow (0% to 50%)
+            # Red: (248, 113, 113) -> Yellow: (250, 204, 21)
+            ratio = percentage / 50.0
+            r = int(248 + (250 - 248) * ratio)
+            g = int(113 + (204 - 113) * ratio)
+            b = int(113 + (21 - 113) * ratio)
+        else:
+            # Yellow to Green (50% to 100%)
+            # Yellow: (250, 204, 21) -> Green: (34, 197, 94)
+            ratio = (percentage - 50) / 50.0
+            r = int(250 + (34 - 250) * ratio)
+            g = int(204 + (197 - 204) * ratio)
+            b = int(21 + (94 - 21) * ratio)
+        
+        return f"#{r:02x}{g:02x}{b:02x}"
+    
+    def _set_progress(self, percentage: int) -> None:
+        """Update the progress bar value and color (thread-safe)."""
+        def updater() -> None:
+            self.progress_var.set(percentage)
+            # Update color based on percentage gradient
+            color = self._calculate_gradient_color(percentage)
+            palette = LIGHT_THEME if self._detect_system_theme() == "light" else DARK_THEME
+            if self.theme_var.get().lower() in {"light", "dark"}:
+                palette = LIGHT_THEME if self.theme_var.get().lower() == "light" else DARK_THEME
+            
+            self.style.configure(
+                "Dynamic.Horizontal.TProgressbar",
+                background=color,
+                troughcolor=palette["surface"],
+                borderwidth=0,
+                thickness=20,
+            )
+            self.progress_bar.configure(style="Dynamic.Horizontal.TProgressbar")
+        
+        self.root.after(0, updater)
+    
+    def _set_progress_bar_style(self, status: str) -> None:
+        """Update the progress bar color based on status."""
+        def updater() -> None:
+            # Map status to progress bar style
+            status_lower = status.lower()
+            if status_lower == "success":
+                style = "Success.Horizontal.TProgressbar"
+            elif status_lower == "error":
+                style = "Error.Horizontal.TProgressbar"
+            elif status_lower == "idle":
+                style = "Idle.Horizontal.TProgressbar"
+            else:
+                # For processing states, use dynamic gradient (will be set by _set_progress)
+                return
+            
+            self.progress_bar.configure(style=style)
+        
+        self.root.after(0, updater)
 
     def _notify(self, callback: Callable[[], None]) -> None:
         self.root.after(0, callback)
