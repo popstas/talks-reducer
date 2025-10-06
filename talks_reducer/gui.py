@@ -291,6 +291,8 @@ class TalksReducerGUI:
 
         self._processing_thread: Optional[threading.Thread] = None
         self._last_output: Optional[Path] = None
+        self._last_time_ratio: Optional[float] = None
+        self._last_size_ratio: Optional[float] = None
         self._status_state = "Idle"
         self.status_var = tk.StringVar(value=self._status_state)
         self._status_animation_job: Optional[str] = None
@@ -982,7 +984,15 @@ class TalksReducerGUI:
                     options = self._build_options(Path(file), args)
                     result = speed_up_video(options, reporter=reporter)
                     self._last_output = result.output_file
-                    self._append_log(f"Completed: {result.output_file}")
+                    self._last_time_ratio = result.time_ratio
+                    self._last_size_ratio = result.size_ratio
+                    
+                    # Create completion message with ratios if available
+                    completion_msg = f"Completed: {result.output_file}"
+                    if result.time_ratio is not None and result.size_ratio is not None:
+                        completion_msg += f" (Time: {result.time_ratio:.2%}, Size: {result.size_ratio:.2%})"
+                    
+                    self._append_log(completion_msg)
                     if open_after_convert:
                         self._notify(
                             lambda path=result.output_file: self._open_in_file_manager(
@@ -1137,17 +1147,22 @@ class TalksReducerGUI:
     def _update_status_from_message(self, message: str) -> None:
         normalized = message.strip().lower()
         if "all jobs finished successfully" in normalized:
-            self._set_status("Success")
+            # Create status message with ratios if available
+            status_msg = "Success"
+            if self._last_time_ratio is not None and self._last_size_ratio is not None:
+                status_msg = f"Time: {self._last_time_ratio:.0%}, Size: {self._last_size_ratio:.0%}"
+            
+            self._set_status("success", status_msg)
             self._set_progress(100)  # 100% on success
             self._video_duration_seconds = None  # Reset for next video
         elif normalized.startswith("extracting audio"):
-            self._set_status("Extracting audio...")
+            self._set_status("processing", "Extracting audio...")
             self._set_progress(0)  # 0% on start
             self._video_duration_seconds = None  # Reset for new processing
         elif normalized.startswith("starting processing") or normalized.startswith(
             "processing"
         ):
-            self._set_status("Processing")
+            self._set_status("processing", "Processing")
             self._set_progress(0)  # 0% on start
             self._video_duration_seconds = None  # Reset for new processing
 
@@ -1176,10 +1191,10 @@ class TalksReducerGUI:
                 percentage = min(
                     100, int((current_seconds / self._video_duration_seconds) * 100)
                 )
-                self._set_status(f"{time_str}, {speed_str}x ({percentage}%)")
+                self._set_status("processing", f"{time_str}, {speed_str}x ({percentage}%)")
                 self._set_progress(percentage)  # Update progress bar
             else:
-                self._set_status(f"{time_str}, {speed_str}x")
+                self._set_status("processing", f"{time_str}, {speed_str}x")
 
     def _apply_status_style(self, status: str) -> None:
         color = STATUS_COLORS.get(status.lower())
@@ -1187,30 +1202,36 @@ class TalksReducerGUI:
             self.status_label.configure(fg=color)
         else:
             # For extracting audio or FFmpeg progress messages, use processing color
-            if "extracting audio" in status.lower() or re.search(
-                r"\d{2}:\d{2}:\d{2}.*\d+\.?\d*x", status
-            ):
-                self.status_label.configure(fg=STATUS_COLORS["processing"])
+            # Also handle the new "Time: X%, Size: Y%" format as success
+            status_lower = status.lower()
+            if ("extracting audio" in status_lower or 
+                re.search(r"\d{2}:\d{2}:\d{2}.*\d+\.?\d*x", status) or
+                ("time:" in status_lower and "size:" in status_lower)):
+                if "time:" in status_lower and "size:" in status_lower:
+                    # This is our new success format with ratios
+                    self.status_label.configure(fg=STATUS_COLORS["success"])
+                else:
+                    self.status_label.configure(fg=STATUS_COLORS["processing"])
 
-    def _set_status(self, status: str) -> None:
+    def _set_status(self, status: str, status_msg: str = "") -> None:
         def apply() -> None:
-            self._stop_status_animation()
             self._status_state = status
-            self.status_var.set(status)
-            self._apply_status_style(status)
+            # Use status_msg if provided, otherwise use status
+            display_text = status_msg if status_msg else status
+            self.status_var.set(display_text)
+            self._apply_status_style(status)  # Colors depend on status, not display text
             self._set_progress_bar_style(status)
             lowered = status.lower()
             is_processing = lowered == "processing" or "extracting audio" in lowered
 
             if is_processing:
-                self._start_status_animation()
                 # Show stop button during processing
                 if hasattr(self, "status_frame"):
                     self.status_frame.grid()
                 self.stop_button.grid()
                 self.drop_hint_button.grid_remove()
 
-            if lowered == "success":
+            if lowered == "success" or "time:" in lowered and "size:" in lowered:
                 if self.simple_mode_var.get() and hasattr(self, "status_frame"):
                     self.status_frame.grid()
                     self.stop_button.grid_remove()
@@ -1233,30 +1254,6 @@ class TalksReducerGUI:
                         self.drop_hint_button.grid()
 
         self.root.after(0, apply)
-
-    def _start_status_animation(self) -> None:
-        self._status_animation_phase = 0
-        self._schedule_status_animation()
-
-    def _schedule_status_animation(self) -> None:
-        if self._status_state.lower() != "processing":
-            return
-
-        dots = self._status_animation_phase % 4
-        suffix = "." * dots
-        text = "Processing" + suffix
-        self.status_var.set(text)
-        self._status_animation_phase = (self._status_animation_phase + 1) % 4
-        self._status_animation_job = self.root.after(
-            400, self._schedule_status_animation
-        )
-
-    def _stop_status_animation(self) -> None:
-        if self._status_animation_job is not None:
-            self.root.after_cancel(self._status_animation_job)
-            self._status_animation_job = None
-        if self._status_state.lower() != "processing":
-            self.status_var.set(self._status_state)
 
     def _calculate_gradient_color(self, percentage: int, darken: float = 1.0) -> str:
         """Calculate color gradient from red (0%) to green (100%).
@@ -1336,7 +1333,7 @@ class TalksReducerGUI:
         def updater() -> None:
             # Map status to progress bar style
             status_lower = status.lower()
-            if status_lower == "success":
+            if status_lower == "success" or ("time:" in status_lower and "size:" in status_lower):
                 style = "Success.Horizontal.TProgressbar"
             elif status_lower == "error":
                 style = "Error.Horizontal.TProgressbar"
