@@ -1320,7 +1320,21 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
                 print()
                 print("Run 'python3 -m talks_reducer --help' for all options.")
                 print()
-                print("This is likely a macOS/Tkinter compatibility issue.")
+                print("Troubleshooting tips:")
+                if sys.platform == "darwin":
+                    print(
+                        "  - On macOS, install Python from python.org or ensure "
+                        "Homebrew's python-tk package is present."
+                    )
+                elif sys.platform.startswith("linux"):
+                    print(
+                        "  - On Linux, install the Tk bindings for Python (for example, "
+                        "python3-tk)."
+                    )
+                else:
+                    print("  - Ensure your Python installation includes Tk support.")
+                print("  - You can always fall back to the CLI workflow below.")
+                print()
                 print("The CLI interface works perfectly and is recommended.")
             except UnicodeEncodeError:
                 # Fallback for extreme encoding issues
