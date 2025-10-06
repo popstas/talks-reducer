@@ -35,6 +35,18 @@ def find_ffmpeg() -> Optional[str]:
             else env_override
         )
 
+    # Try bundled ffmpeg from imageio-ffmpeg first
+    try:
+        import imageio_ffmpeg
+        bundled_path = imageio_ffmpeg.get_ffmpeg_exe()
+        if bundled_path and os.path.isfile(bundled_path):
+            return bundled_path
+    except ImportError:
+        pass
+    except Exception:
+        # If imageio_ffmpeg is installed but fails, continue to other methods
+        pass
+
     common_paths = [
         "C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe",
         "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe",
@@ -95,7 +107,8 @@ def _resolve_ffmpeg_path() -> str:
     ffmpeg_path = find_ffmpeg()
     if not ffmpeg_path:
         raise FFmpegNotFoundError(
-            "FFmpeg not found. Install FFmpeg and add it to PATH or provide TALKS_REDUCER_FFMPEG."
+            "FFmpeg not found. Please install imageio-ffmpeg (pip install imageio-ffmpeg) "
+            "or install FFmpeg manually and add it to PATH, or set TALKS_REDUCER_FFMPEG environment variable."
         )
 
     print(f"Using FFmpeg at: {ffmpeg_path}")
@@ -139,10 +152,20 @@ def get_ffprobe_path() -> str:
 def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
     """Return whether CUDA hardware encoders are available in the FFmpeg build."""
 
+    # Hide console window on Windows
+    creationflags = 0
+    if sys.platform == "win32":
+        # CREATE_NO_WINDOW = 0x08000000
+        creationflags = 0x08000000
+
     try:
         ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
         result = subprocess.run(
-            [ffmpeg_path, "-encoders"], capture_output=True, text=True, timeout=5
+            [ffmpeg_path, "-encoders"], 
+            capture_output=True, 
+            text=True, 
+            timeout=5,
+            creationflags=creationflags
         )
     except (
         subprocess.TimeoutExpired,
@@ -178,6 +201,12 @@ def run_timed_ffmpeg_command(
         print(f"Error parsing command: {exc}", file=sys.stderr)
         raise
 
+    # Hide console window on Windows
+    creationflags = 0
+    if sys.platform == "win32":
+        # CREATE_NO_WINDOW = 0x08000000
+        creationflags = 0x08000000
+
     try:
         process = subprocess.Popen(
             args,
@@ -186,6 +215,7 @@ def run_timed_ffmpeg_command(
             universal_newlines=True,
             bufsize=1,
             errors="replace",
+            creationflags=creationflags,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         print(f"Error starting FFmpeg: {exc}", file=sys.stderr)

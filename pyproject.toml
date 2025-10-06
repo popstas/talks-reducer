@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "talks-reducer"
-version = "0.2.18"
+version = "0.2.19"
 description = "CLI for speeding up long-form talks by removing silence"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -19,6 +19,7 @@ dependencies = [
     "tqdm>=4.65.0",
     "tkinterdnd2>=0.3.0",
     "Pillow>=9.0.0",
+    "imageio-ffmpeg>=0.4.8",
 ]
 
 [project.optional-dependencies]

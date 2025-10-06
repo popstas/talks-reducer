@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -39,29 +40,70 @@ except ImportError:  # pragma: no cover - handled at runtime
 def _check_tkinter_available() -> tuple[bool, str]:
     """Check if tkinter can create windows without importing it globally."""
     # Test in a subprocess to avoid crashing the main process
-    test_code = """import tkinter as tk
-try:
-    root = tk.Tk()
-    root.destroy()
-    print("SUCCESS")
-except Exception as e:
-    print(f"ERROR: {e}")"""
+    test_code = """
+import json
+
+def run_check():
+    try:
+        import tkinter as tk  # noqa: F401 - imported for side effect
+    except Exception as exc:  # pragma: no cover - runs in subprocess
+        return {
+            "status": "import_error",
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+
+    try:
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.destroy()
+    except Exception as exc:  # pragma: no cover - runs in subprocess
+        return {
+            "status": "init_error",
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+
+    return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    print(json.dumps(run_check()))
+"""
 
     try:
         result = subprocess.run(
             [sys.executable, "-c", test_code], capture_output=True, text=True, timeout=5
         )
 
-        if result.returncode == 0 and "SUCCESS" in result.stdout:
+        output = result.stdout.strip() or result.stderr.strip()
+
+        if not output:
+            return False, "Window creation failed"
+
+        try:
+            payload = json.loads(output)
+        except json.JSONDecodeError:
+            return False, output
+
+        status = payload.get("status")
+
+        if status == "ok":
             return True, ""
-        else:
-            error_output = (
-                result.stdout.strip()
-                or result.stderr.strip()
-                or "Window creation failed"
+
+        if status == "import_error":
+            return (
+                False,
+                f"tkinter is not installed ({payload.get('error', 'unknown error')})",
             )
-            return False, error_output
-    except Exception as e:
+
+        if status == "init_error":
+            return (
+                False,
+                f"tkinter could not open a window ({payload.get('error', 'unknown error')})",
+            )
+
+        return False, output
+    except Exception as e:  # pragma: no cover - defensive fallback
         return False, f"Error testing tkinter: {e}"
 
 
@@ -213,17 +255,30 @@ class TalksReducerGUI:
     def _apply_window_icon(self) -> None:
         """Configure the application icon when the asset is available."""
 
-        icon_path = (
-            Path(__file__).resolve().parent.parent / "docs" / "assets" / "icon.png"
+        base_path = Path(
+            getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)
         )
-        if not icon_path.is_file():
-            return
 
-        try:
-            self.root.iconphoto(False, self.tk.PhotoImage(file=str(icon_path)))
-        except self.tk.TclError:
-            # Missing Tk image support (e.g. headless environments) should not crash the GUI.
-            pass
+        icon_candidates: list[tuple[Path, str]] = []
+        if sys.platform.startswith("win"):
+            icon_candidates.append((base_path / "docs" / "assets" / "icon.ico", "ico"))
+        icon_candidates.append((base_path / "docs" / "assets" / "icon.png", "png"))
+
+        for icon_path, icon_type in icon_candidates:
+            if not icon_path.is_file():
+                continue
+
+            try:
+                if icon_type == "ico" and sys.platform.startswith("win"):
+                    # On Windows, iconbitmap works better without the 'default' parameter
+                    self.root.iconbitmap(str(icon_path))
+                else:
+                    self.root.iconphoto(False, self.tk.PhotoImage(file=str(icon_path)))
+                # If we got here without exception, icon was set successfully
+                return
+            except (self.tk.TclError, Exception) as e:
+                # Missing Tk image support or invalid icon format - try next candidate
+                continue
 
     def _build_layout(self) -> None:
         main = self.ttk.Frame(self.root, padding=16)
@@ -621,7 +676,7 @@ class TalksReducerGUI:
 
     # -------------------------------------------------------------- actions --
     def _add_files(self) -> None:
-        files = filedialog.askopenfilenames(
+        files = self.filedialog.askopenfilenames(
             title="Select input files",
             filetypes=[
                 ("Video files", "*.mp4 *.mkv *.mov *.avi *.m4v"),
@@ -631,7 +686,7 @@ class TalksReducerGUI:
         self._extend_inputs(files)
 
     def _add_directory(self) -> None:
-        directory = filedialog.askdirectory(title="Select input folder")
+        directory = self.filedialog.askdirectory(title="Select input folder")
         if directory:
             self._extend_inputs([directory])
 
@@ -659,22 +714,26 @@ class TalksReducerGUI:
         cleaned = [path.strip("{}") for path in paths]
         self._extend_inputs(cleaned, auto_run=True)
 
-    def _browse_path(self, variable, label: str) -> None:  # type: (tk.StringVar, str) -> None
+    def _browse_path(
+        self, variable, label: str
+    ) -> None:  # type: (tk.StringVar, str) -> None
         if "folder" in label.lower():
-            result = filedialog.askdirectory()
+            result = self.filedialog.askdirectory()
         else:
             initial = variable.get() or os.getcwd()
-            result = filedialog.asksaveasfilename(initialfile=os.path.basename(initial))
+            result = self.filedialog.asksaveasfilename(
+                initialfile=os.path.basename(initial)
+            )
         if result:
             variable.set(result)
 
     def _start_run(self) -> None:
         if self._processing_thread and self._processing_thread.is_alive():
-            messagebox.showinfo("Processing", "A job is already running.")
+            self.messagebox.showinfo("Processing", "A job is already running.")
             return
 
         if not self.input_files:
-            messagebox.showwarning(
+            self.messagebox.showwarning(
                 "Missing input", "Please add at least one file or folder."
             )
             return
@@ -682,11 +741,11 @@ class TalksReducerGUI:
         try:
             args = self._collect_arguments()
         except ValueError as exc:
-            messagebox.showerror("Invalid value", str(exc))
+            self.messagebox.showerror("Invalid value", str(exc))
             return
 
         self._append_log("Starting processing…")
-        self.run_button.configure(state=tk.DISABLED)
+        self.run_button.configure(state=self.tk.DISABLED)
 
         def worker() -> None:
             reporter = _TkProgressReporter(self._append_log)
@@ -694,7 +753,7 @@ class TalksReducerGUI:
                 files = gather_input_files(self.input_files)
                 if not files:
                     self._notify(
-                        lambda: messagebox.showwarning(
+                        lambda: self.messagebox.showwarning(
                             "No files", "No supported media files were found."
                         )
                     )
@@ -716,11 +775,15 @@ class TalksReducerGUI:
                 self._append_log("All jobs finished successfully.")
                 self._notify(lambda: self.open_button.configure(state=self.tk.NORMAL))
             except FFmpegNotFoundError as exc:
-                self._notify(lambda: messagebox.showerror("FFmpeg not found", str(exc)))
+                self._notify(
+                    lambda: self.messagebox.showerror("FFmpeg not found", str(exc))
+                )
                 self._set_status("Error")
             except Exception as exc:  # pragma: no cover - GUI level safeguard
                 self._notify(
-                    lambda: messagebox.showerror("Error", f"Processing failed: {exc}")
+                    lambda: self.messagebox.showerror(
+                        "Error", f"Processing failed: {exc}"
+                    )
                 )
                 self._set_status("Error")
             finally:
@@ -883,20 +946,24 @@ class TalksReducerGUI:
         self.root.mainloop()
 
 
-def main(argv: Optional[Sequence[str]] = None) -> None:
-    """Launch the GUI when run without arguments, otherwise defer to the CLI."""
+def main(argv: Optional[Sequence[str]] = None) -> bool:
+    """Launch the GUI when run without arguments, otherwise defer to the CLI.
+
+    Returns ``True`` if the GUI event loop started successfully. ``False``
+    indicates that execution was delegated to the CLI or aborted early.
+    """
 
     if argv is None:
         argv = sys.argv[1:]
 
     if argv:
         cli_main(argv)
-        return
+        return False
 
     # Skip tkinter check if running as a PyInstaller frozen app
     # In that case, tkinter is bundled and the subprocess check would fail
-    is_frozen = getattr(sys, 'frozen', False)
-    
+    is_frozen = getattr(sys, "frozen", False)
+
     if not is_frozen:
         # Check if tkinter is available before creating GUI (only when not frozen)
         tkinter_available, error_msg = _check_tkinter_available()
@@ -926,14 +993,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             except UnicodeEncodeError:
                 # Fallback for extreme encoding issues
                 sys.stderr.write("GUI not available. Use CLI mode instead.\n")
-            return
+            return False
 
     # Catch and report any errors during GUI initialization
     try:
         app = TalksReducerGUI()
         app.run()
+        return True
     except Exception as e:
         import traceback
+
         sys.stderr.write(f"Error starting GUI: {e}\n")
         sys.stderr.write(traceback.format_exc())
         sys.stderr.write("\nPlease use the CLI mode instead:\n")
