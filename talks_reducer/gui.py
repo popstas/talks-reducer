@@ -420,23 +420,28 @@ class TalksReducerGUI:
         options.grid(row=2, column=0, pady=(16, 0), sticky="ew")
         options.columnconfigure(0, weight=1)
 
+        checkbox_frame = self.ttk.Frame(options)
+        checkbox_frame.grid(row=0, column=0, columnspan=2, sticky="w")
+
+        self.ttk.Checkbutton(
+            checkbox_frame,
+            text="Small video",
+            variable=self.small_var,
+        ).grid(row=0, column=0, sticky="w")
+
+        self.ttk.Checkbutton(
+            checkbox_frame,
+            text="Open after convert",
+            variable=self.open_after_convert_var,
+        ).grid(row=0, column=1, sticky="w", padx=(12, 0))
+
         self.simple_mode_check = self.ttk.Checkbutton(
-            options,
+            checkbox_frame,
             text="Simple mode",
             variable=self.simple_mode_var,
             command=self._toggle_simple_mode,
         )
-        self.simple_mode_check.grid(row=0, column=0, sticky="w")
-
-        self.ttk.Checkbutton(options, text="Small video", variable=self.small_var).grid(
-            row=1, column=0, sticky="w", pady=(8, 0)
-        )
-
-        self.ttk.Checkbutton(
-            options,
-            text="Open after convert",
-            variable=self.open_after_convert_var,
-        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.simple_mode_check.grid(row=0, column=2, sticky="w", padx=(12, 0))
 
         self.advanced_visible = self.tk.BooleanVar(value=False)
         self.advanced_button = self.ttk.Button(
@@ -444,10 +449,10 @@ class TalksReducerGUI:
             text="Advanced",
             command=self._toggle_advanced,
         )
-        self.advanced_button.grid(row=0, column=1, sticky="e")
+        self.advanced_button.grid(row=1, column=1, sticky="e")
 
         self.advanced_frame = self.ttk.Frame(options, padding=self.PADDING)
-        self.advanced_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
+        self.advanced_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
         self.advanced_frame.columnconfigure(1, weight=1)
 
         self.output_var = self.tk.StringVar()
@@ -509,9 +514,10 @@ class TalksReducerGUI:
         status_frame.columnconfigure(1, weight=1)
         status_frame.columnconfigure(2, weight=0)
 
-        
         self.ttk.Label(status_frame, text="Status:").grid(row=0, column=0, sticky="w")
-        self.status_label = self.tk.Label(status_frame, textvariable=self.status_var, anchor="e")
+        self.status_label = self.tk.Label(
+            status_frame, textvariable=self.status_var, anchor="e"
+        )
         self.status_label.grid(row=0, column=1, sticky="e")
 
         # Progress bar
@@ -527,7 +533,9 @@ class TalksReducerGUI:
         self.stop_button = self.ttk.Button(
             status_frame, text="Stop", command=self._stop_processing
         )
-        self.stop_button.grid(row=2, column=0, columnspan=3, sticky="ew", pady=self.PADDING)
+        self.stop_button.grid(
+            row=2, column=0, columnspan=3, sticky="ew", pady=self.PADDING
+        )
         self.stop_button.grid_remove()  # Hidden by default
 
         self.open_button = self.ttk.Button(
@@ -536,7 +544,9 @@ class TalksReducerGUI:
             command=self._open_last_output,
             state=self.tk.DISABLED,
         )
-        self.open_button.grid(row=2, column=0, columnspan=3, sticky="ew", pady=self.PADDING)
+        self.open_button.grid(
+            row=2, column=0, columnspan=3, sticky="ew", pady=self.PADDING
+        )
         self.open_button.grid_remove()
 
         # Button shown when no other action buttons are visible
@@ -545,7 +555,9 @@ class TalksReducerGUI:
             text="Drop video to convert",
             state=self.tk.DISABLED,
         )
-        self.drop_hint_button.grid(row=2, column=0, columnspan=3, sticky="ew", pady=self.PADDING)
+        self.drop_hint_button.grid(
+            row=2, column=0, columnspan=3, sticky="ew", pady=self.PADDING
+        )
         self.drop_hint_button.grid_remove()  # Hidden by default
         self._configure_drop_targets(self.drop_hint_button)
 
@@ -607,11 +619,13 @@ class TalksReducerGUI:
             self.stop_button.grid_remove()
             self.advanced_button.grid_remove()
             self.advanced_frame.grid_remove()
-            if hasattr(self, 'status_frame'):
+            if hasattr(self, "status_frame"):
                 self.status_frame.grid_remove()
             self.run_after_drop_var.set(True)
             self._apply_window_size(simple=True)
-            if self.status_var.get().lower() == "success" and hasattr(self, 'status_frame'):
+            if self.status_var.get().lower() == "success" and hasattr(
+                self, "status_frame"
+            ):
                 self.status_frame.grid()
                 self.open_button.grid()
                 self.drop_hint_button.grid_remove()
@@ -619,7 +633,7 @@ class TalksReducerGUI:
             for widget in widgets:
                 widget.grid()
             self.log_frame.grid()
-            if hasattr(self, 'status_frame'):
+            if hasattr(self, "status_frame"):
                 self.status_frame.grid()
             self.advanced_button.grid()
             if self.advanced_visible.get():
@@ -1012,9 +1026,11 @@ class TalksReducerGUI:
         """Hide Stop button."""
         self.stop_button.grid_remove()
         # Show drop hint when stop button is hidden and no other buttons are visible
-        if (not self.open_button.winfo_viewable() and 
-            hasattr(self, 'drop_hint_button') and
-            not self.drop_hint_button.winfo_viewable()):
+        if (
+            not self.open_button.winfo_viewable()
+            and hasattr(self, "drop_hint_button")
+            and not self.drop_hint_button.winfo_viewable()
+        ):
             self.drop_hint_button.grid()
 
     def _collect_arguments(self) -> dict[str, object]:
@@ -1168,13 +1184,13 @@ class TalksReducerGUI:
             if is_processing:
                 self._start_status_animation()
                 # Show stop button during processing
-                if hasattr(self, 'status_frame'):
+                if hasattr(self, "status_frame"):
                     self.status_frame.grid()
                 self.stop_button.grid()
                 self.drop_hint_button.grid_remove()
 
             if lowered == "success":
-                if self.simple_mode_var.get() and hasattr(self, 'status_frame'):
+                if self.simple_mode_var.get() and hasattr(self, "status_frame"):
                     self.status_frame.grid()
                     self.stop_button.grid_remove()
                 self.drop_hint_button.grid_remove()
@@ -1184,11 +1200,15 @@ class TalksReducerGUI:
             else:
                 self.open_button.grid_remove()
                 print("not success status")
-                if self.simple_mode_var.get() and not is_processing and hasattr(self, 'status_frame'):
+                if (
+                    self.simple_mode_var.get()
+                    and not is_processing
+                    and hasattr(self, "status_frame")
+                ):
                     self.status_frame.grid_remove()
                     self.stop_button.grid_remove()
                     # Show drop hint when no other buttons are visible
-                    if hasattr(self, 'drop_hint_button'):
+                    if hasattr(self, "drop_hint_button"):
                         self.drop_hint_button.grid()
 
         self.root.after(0, apply)
@@ -1219,11 +1239,11 @@ class TalksReducerGUI:
 
     def _calculate_gradient_color(self, percentage: int, darken: float = 1.0) -> str:
         """Calculate color gradient from red (0%) to green (100%).
-        
+
         Args:
             percentage: The position in the gradient (0-100)
             darken: Value between 0.0 (black) and 1.0 (original brightness)
-            
+
         Returns:
             Hex color code string
         """
@@ -1282,10 +1302,11 @@ class TalksReducerGUI:
 
             # Show stop button when progress < 100
             if percentage < 100:
-                if hasattr(self, 'status_frame'):
+                if hasattr(self, "status_frame"):
                     self.status_frame.grid()
                 self.stop_button.grid()
                 self.drop_hint_button.grid_remove()
+
         self.root.after(0, updater)
 
     def _set_progress_bar_style(self, status: str) -> None:
