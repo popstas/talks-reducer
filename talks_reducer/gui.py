@@ -902,15 +902,19 @@ class TalksReducerGUI:
         self.root.mainloop()
 
 
-def main(argv: Optional[Sequence[str]] = None) -> None:
-    """Launch the GUI when run without arguments, otherwise defer to the CLI."""
+def main(argv: Optional[Sequence[str]] = None) -> bool:
+    """Launch the GUI when run without arguments, otherwise defer to the CLI.
+
+    Returns ``True`` if the GUI event loop started successfully. ``False``
+    indicates that execution was delegated to the CLI or aborted early.
+    """
 
     if argv is None:
         argv = sys.argv[1:]
 
     if argv:
         cli_main(argv)
-        return
+        return False
 
     # Skip tkinter check if running as a PyInstaller frozen app
     # In that case, tkinter is bundled and the subprocess check would fail
@@ -945,12 +949,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             except UnicodeEncodeError:
                 # Fallback for extreme encoding issues
                 sys.stderr.write("GUI not available. Use CLI mode instead.\n")
-            return
+            return False
 
     # Catch and report any errors during GUI initialization
     try:
         app = TalksReducerGUI()
         app.run()
+        return True
     except Exception as e:
         import traceback
 

@@ -113,14 +113,22 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     # Launch GUI if no arguments provided
     if not argv_list:
+        gui_launched = False
+
         try:
             from .gui import main as gui_main
 
-            gui_main()
-            return
+            gui_launched = gui_main([])
         except ImportError:
             # GUI dependencies not available, show help instead
-            pass
+            gui_launched = False
+
+        if gui_launched:
+            return
+
+        parser = _build_parser()
+        parser.print_help()
+        return
 
     parser = _build_parser()
     parsed_args = parser.parse_args(argv)
