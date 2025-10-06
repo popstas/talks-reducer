@@ -445,7 +445,9 @@ class TalksReducerGUI:
             variable=self.simple_mode_var,
             command=self._toggle_simple_mode,
         )
-        self.simple_mode_check.grid(row=0, column=2, sticky="w", padx=(12, 0))
+        self.simple_mode_check.grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(8, 0)
+        )
 
         self.advanced_visible = self.tk.BooleanVar(value=False)
         self.advanced_button = self.ttk.Button(
