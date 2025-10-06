@@ -29,9 +29,9 @@ pip install talks-reducer
 The `--small` preset applies a 720p video scale and 128 kbps audio bitrate, making it useful for sharing talks over constrained
 connections. Without `--small`, the script aims to preserve original quality while removing silence.
 
-> **Tip:** Running `talks-reducer-gui` without arguments opens the Tkinter interface. Passing regular CLI options (for example,
-> `talks-reducer-gui --small input.mp4`) now executes the command-line pipeline, so you can keep a single shortcut for both
-> workflows.
+> **Tip:** The `talks-reducer` and `talks-reducer-gui` commands now behave the same way: launching them without arguments opens
+> the Tkinter interface, while passing regular CLI options (for example, `talks-reducer --small input.mp4`) executes the
+> command-line pipeline. You can keep a single shortcut for both workflows.
 
 When CUDA-capable hardware is available the pipeline leans on GPU encoders to keep export times low, but it still runs great on
 CPUs.

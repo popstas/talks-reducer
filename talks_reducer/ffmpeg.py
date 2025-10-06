@@ -38,6 +38,7 @@ def find_ffmpeg() -> Optional[str]:
     # Try bundled ffmpeg from imageio-ffmpeg first
     try:
         import imageio_ffmpeg
+
         bundled_path = imageio_ffmpeg.get_ffmpeg_exe()
         if bundled_path and os.path.isfile(bundled_path):
             return bundled_path
@@ -161,11 +162,11 @@ def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
     try:
         ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
         result = subprocess.run(
-            [ffmpeg_path, "-encoders"], 
-            capture_output=True, 
-            text=True, 
+            [ffmpeg_path, "-encoders"],
+            capture_output=True,
+            text=True,
             timeout=5,
-            creationflags=creationflags
+            creationflags=creationflags,
         )
     except (
         subprocess.TimeoutExpired,
@@ -193,7 +194,7 @@ def run_timed_ffmpeg_command(
     process_callback: Optional[callable] = None,
 ) -> None:
     """Execute an FFmpeg command while streaming progress information.
-    
+
     Args:
         process_callback: Optional callback that receives the subprocess.Popen object
     """
@@ -243,7 +244,7 @@ def run_timed_ffmpeg_command(
 
             sys.stderr.write(line)
             sys.stderr.flush()
-            
+
             # Send FFmpeg output to reporter for GUI display
             progress_reporter.log(line.strip())
 

@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 import time
+from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
@@ -23,19 +24,19 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Modifies a video file to play at different speeds when there is sound vs. silence.",
     )
-    
+
     # Add version argument
     try:
         pkg_version = version("talks-reducer")
     except Exception:
         pkg_version = "unknown"
-    
+
     parser.add_argument(
         "--version",
         action="version",
         version=f"talks-reducer {pkg_version}",
     )
-    
+
     parser.add_argument(
         "input_file",
         type=str,
@@ -113,31 +114,34 @@ def gather_input_files(paths: List[str]) -> List[str]:
     return files
 
 
+def _launch_gui(argv: Sequence[str]) -> bool:
+    """Attempt to launch the GUI with the provided arguments."""
+
+    try:
+        gui_module = import_module(".gui", __package__)
+    except ImportError:
+        return False
+
+    gui_main = getattr(gui_module, "main", None)
+    if gui_main is None:
+        return False
+
+    return bool(gui_main(list(argv)))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     """Entry point for the command line interface.
 
     Launch the GUI when run without arguments, otherwise defer to the CLI.
     """
 
-    # Check if running without arguments
     if argv is None:
         argv_list = sys.argv[1:]
     else:
         argv_list = list(argv)
 
-    # Launch GUI if no arguments provided
     if not argv_list:
-        gui_launched = False
-
-        try:
-            from .gui import main as gui_main
-
-            gui_launched = gui_main([])
-        except ImportError:
-            # GUI dependencies not available, show help instead
-            gui_launched = False
-
-        if gui_launched:
+        if _launch_gui(argv_list):
             return
 
         parser = _build_parser()
@@ -145,7 +149,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         return
 
     parser = _build_parser()
-    parsed_args = parser.parse_args(argv)
+    parsed_args = parser.parse_args(argv_list)
     start_time = time.time()
 
     files = gather_input_files(parsed_args.input_file)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Launcher script for PyInstaller builds."""
 
-import sys
 import io
+import sys
 
 # On Windows, if built with --windowed, stdout/stderr might be None
 # Ensure they always have a valid file-like object to prevent attribute errors
@@ -19,23 +19,23 @@ if sys.platform == "win32":
 if sys.platform == "win32" and len(sys.argv) > 1:
     try:
         import ctypes
-        
+
         kernel32 = ctypes.windll.kernel32
-        
+
         # Try to attach to parent console (only works when launched from cmd/terminal)
         # AttachConsole returns 0 on failure
         if kernel32.AttachConsole(ctypes.c_ulong(-1)):  # ATTACH_PARENT_PROCESS = -1
             # Reopen stdout and stderr to the console
             try:
-                if hasattr(sys.stdout, 'close'):
+                if hasattr(sys.stdout, "close"):
                     sys.stdout.close()
-                if hasattr(sys.stderr, 'close'):
+                if hasattr(sys.stderr, "close"):
                     sys.stderr.close()
-                if hasattr(sys.stdin, 'close'):
+                if hasattr(sys.stdin, "close"):
                     sys.stdin.close()
             except Exception:
                 pass
-            
+
             try:
                 sys.stdout = open("CONOUT$", "w", encoding="utf-8")
                 sys.stderr = open("CONOUT$", "w", encoding="utf-8")
