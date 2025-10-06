@@ -79,6 +79,7 @@ else
         --noconfirm)
 
     if [[ "$OS_NAME" == "macos" ]]; then
+        mkdir -p "dist/talks-reducer.app"
         # Produce the most compatible binary we can. Prefer universal builds
         # when the Python runtime and dependencies contain both arm64 and
         # x86_64 slices, otherwise fall back to the active architecture to
@@ -243,7 +244,7 @@ if [[ -n "$OUTPUT_DIR" && -d "$OUTPUT_DIR" ]]; then
     if mv "$OUTPUT_DIR" "$TARGET" 2>/dev/null; then
         echo "✅ Build complete: $TARGET/"
     else
-        echo "⚠️  Could not move to $TARGET"
+        echo "⚠️  Could not move from $OUTPUT_DIR to $TARGET"
         echo "✅ Build output at: $OUTPUT_DIR/"
     fi
 
