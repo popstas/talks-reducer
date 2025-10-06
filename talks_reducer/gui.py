@@ -191,9 +191,9 @@ class _TkProgressReporter(SignalProgressReporter):
     """Progress reporter that forwards updates to the GUI thread."""
 
     def __init__(
-        self, 
+        self,
         log_callback: Callable[[str], None],
-        process_callback: Optional[Callable] = None
+        process_callback: Optional[Callable] = None,
     ) -> None:
         self._log_callback = log_callback
         self.process_callback = process_callback
@@ -210,10 +210,56 @@ class _TkProgressReporter(SignalProgressReporter):
 
 class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
-    
+
     PADDING = 10
 
+    def _determine_config_path(self) -> Path:
+        if sys.platform == "win32":
+            appdata = os.environ.get("APPDATA")
+            base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        elif sys.platform == "darwin":
+            base = Path.home() / "Library" / "Application Support"
+        else:
+            xdg_config = os.environ.get("XDG_CONFIG_HOME")
+            base = Path(xdg_config) if xdg_config else Path.home() / ".config"
+        return base / "talks-reducer" / "settings.json"
+
+    def _load_settings(self) -> dict[str, object]:
+        try:
+            with self._config_path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            if isinstance(data, dict):
+                return data
+        except FileNotFoundError:
+            return {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return {}
+
+    def _save_settings(self) -> None:
+        try:
+            self._config_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._config_path.open("w", encoding="utf-8") as handle:
+                json.dump(self._settings, handle, indent=2, sort_keys=True)
+        except OSError:
+            pass
+
+    def _get_setting(self, key: str, default: object) -> object:
+        value = self._settings.get(key, default)
+        if key not in self._settings:
+            self._settings[key] = value
+        return value
+
+    def _update_setting(self, key: str, value: object) -> None:
+        if self._settings.get(key) == value:
+            return
+        self._settings[key] = value
+        self._save_settings()
+
     def __init__(self) -> None:
+        self._config_path = self._determine_config_path()
+        self._settings = self._load_settings()
+
         # Import tkinter here to avoid loading it at module import time
         import tkinter as tk
         from tkinter import filedialog, messagebox, ttk
@@ -228,14 +274,14 @@ class TalksReducerGUI:
             self.root = TkinterDnD.Tk()  # type: ignore[call-arg]
         else:
             self.root = tk.Tk()
-        
+
         # Set window title with version
         try:
             app_version = version("talks-reducer")
             self.root.title(f"Talks Reducer v{app_version}")
         except Exception:
             self.root.title("Talks Reducer")
-        
+
         self._apply_window_icon()
 
         self._full_size = (760, 680)
@@ -258,16 +304,26 @@ class TalksReducerGUI:
 
         self._dnd_available = TkinterDnD is not None and DND_FILES is not None
 
-        self.simple_mode_var = tk.BooleanVar(value=True)
+        self.simple_mode_var = tk.BooleanVar(
+            value=self._get_setting("simple_mode", True)
+        )
         self.run_after_drop_var = tk.BooleanVar(value=True)
-        self.small_var = tk.BooleanVar(value=True)
-        self.theme_var = tk.StringVar(value="os")
+        self.small_var = tk.BooleanVar(value=self._get_setting("small_video", True))
+        self.open_after_convert_var = tk.BooleanVar(
+            value=self._get_setting("open_after_convert", True)
+        )
+        self.theme_var = tk.StringVar(value=self._get_setting("theme", "os"))
         self.theme_var.trace_add("write", self._on_theme_change)
+        self.small_var.trace_add("write", self._on_small_video_change)
+        self.open_after_convert_var.trace_add(
+            "write", self._on_open_after_convert_change
+        )
 
         self._build_layout()
         self._apply_simple_mode(initial=True)
         self._apply_status_style(self._status_state)
         self._apply_theme()
+        self._save_settings()
 
         if not self._dnd_available:
             self._append_log(
@@ -375,6 +431,12 @@ class TalksReducerGUI:
             row=1, column=0, sticky="w", pady=(8, 0)
         )
 
+        self.ttk.Checkbutton(
+            options,
+            text="Open after convert",
+            variable=self.open_after_convert_var,
+        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
+
         self.advanced_visible = self.tk.BooleanVar(value=False)
         self.advanced_button = self.ttk.Button(
             options,
@@ -384,7 +446,7 @@ class TalksReducerGUI:
         self.advanced_button.grid(row=0, column=1, sticky="e")
 
         self.advanced_frame = self.ttk.Frame(options, padding=self.PADDING)
-        self.advanced_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        self.advanced_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
         self.advanced_frame.columnconfigure(1, weight=1)
 
         self.output_var = self.tk.StringVar()
@@ -446,7 +508,9 @@ class TalksReducerGUI:
         self.stop_button = self.ttk.Button(
             self.actions_frame, text="Stop", command=self._stop_processing
         )
-        self.stop_button.grid(row=0, column=0, sticky="w", padx=self.PADDING, pady=self.PADDING)
+        self.stop_button.grid(
+            row=0, column=0, sticky="w", padx=self.PADDING, pady=self.PADDING
+        )
         self.stop_button.grid_remove()  # Hidden by default
 
         status_frame = self.ttk.Frame(main, padding=self.PADDING)
@@ -457,7 +521,7 @@ class TalksReducerGUI:
         self.ttk.Label(status_frame, text="Status:").grid(row=0, column=0, sticky="w")
         self.status_label = self.tk.Label(status_frame, textvariable=self.status_var)
         self.status_label.grid(row=0, column=1, sticky="w")
-        
+
         self.open_button = self.ttk.Button(
             status_frame,
             text="Open last",
@@ -466,14 +530,14 @@ class TalksReducerGUI:
         )
         self.open_button.grid(row=0, column=2, sticky="e")
         self.open_button.grid_remove()
-        
+
         # Progress bar
         self.progress_bar = self.ttk.Progressbar(
             status_frame,
             variable=self.progress_var,
             maximum=100,
-            mode='determinate',
-            style='Idle.Horizontal.TProgressbar'
+            mode="determinate",
+            style="Idle.Horizontal.TProgressbar",
         )
         self.progress_bar.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(5, 0))
 
@@ -514,6 +578,7 @@ class TalksReducerGUI:
             button.grid(row=row, column=2, padx=(8, 0))
 
     def _toggle_simple_mode(self) -> None:
+        self._update_setting("simple_mode", self.simple_mode_var.get())
         self._apply_simple_mode()
 
     def _apply_simple_mode(self, *, initial: bool = False) -> None:
@@ -578,7 +643,16 @@ class TalksReducerGUI:
             self.advanced_button.configure(text="Advanced")
 
     def _on_theme_change(self, *_: object) -> None:
+        self._update_setting("theme", self.theme_var.get())
         self._apply_theme()
+
+    def _on_small_video_change(self, *_: object) -> None:
+        self._update_setting("small_video", bool(self.small_var.get()))
+
+    def _on_open_after_convert_change(self, *_: object) -> None:
+        self._update_setting(
+            "open_after_convert", bool(self.open_after_convert_var.get())
+        )
 
     def _apply_theme(self) -> None:
         preference = self.theme_var.get().lower()
@@ -655,7 +729,7 @@ class TalksReducerGUI:
             fieldbackground=palette["surface"],
             foreground=palette["foreground"],
         )
-        
+
         # Configure progress bar styles for different states
         self.style.configure(
             "Idle.Horizontal.TProgressbar",
@@ -835,12 +909,15 @@ class TalksReducerGUI:
 
         self._append_log("Starting processing…")
         self._stop_requested = False
+        open_after_convert = bool(self.open_after_convert_var.get())
 
         def worker() -> None:
             def set_process(proc: subprocess.Popen) -> None:
                 self._ffmpeg_process = proc
-            
-            reporter = _TkProgressReporter(self._append_log, process_callback=set_process)
+
+            reporter = _TkProgressReporter(
+                self._append_log, process_callback=set_process
+            )
             try:
                 files = gather_input_files(self.input_files)
                 if not files:
@@ -860,9 +937,12 @@ class TalksReducerGUI:
                     result = speed_up_video(options, reporter=reporter)
                     self._last_output = result.output_file
                     self._append_log(f"Completed: {result.output_file}")
-                    self._notify(
-                        lambda path=result.output_file: self._open_in_file_manager(path)
-                    )
+                    if open_after_convert:
+                        self._notify(
+                            lambda path=result.output_file: self._open_in_file_manager(
+                                path
+                            )
+                        )
 
                 self._append_log("All jobs finished successfully.")
                 self._notify(lambda: self.open_button.configure(state=self.tk.NORMAL))
@@ -889,14 +969,14 @@ class TalksReducerGUI:
 
         self._processing_thread = threading.Thread(target=worker, daemon=True)
         self._processing_thread.start()
-        
+
         # Show Stop button when processing starts
         self.stop_button.grid()
 
     def _stop_processing(self) -> None:
         """Stop the currently running processing by terminating FFmpeg."""
         import signal
-        
+
         self._stop_requested = True
         if self._ffmpeg_process and self._ffmpeg_process.poll() is None:
             self._append_log("Stopping FFmpeg process...")
@@ -908,15 +988,15 @@ class TalksReducerGUI:
                 else:
                     # Unix-like systems can use SIGTERM
                     self._ffmpeg_process.send_signal(signal.SIGTERM)
-                
+
                 self._append_log("FFmpeg process stopped.")
             except Exception as e:
                 self._append_log(f"Error stopping process: {e}")
         else:
             self._append_log("No active FFmpeg process to stop.")
-        
+
         self._hide_stop_button()
-    
+
     def _hide_stop_button(self) -> None:
         """Hide Stop button."""
         self.stop_button.grid_remove()
@@ -1017,30 +1097,32 @@ class TalksReducerGUI:
             self._set_status("Processing")
             self._set_progress(0)  # 0% on start
             self._video_duration_seconds = None  # Reset for new processing
-        
+
         # Parse video duration from FFmpeg output
-        duration_match = re.search(r'Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)', message)
+        duration_match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)", message)
         if duration_match:
             hours = int(duration_match.group(1))
             minutes = int(duration_match.group(2))
             seconds = float(duration_match.group(3))
             self._video_duration_seconds = hours * 3600 + minutes * 60 + seconds
-        
+
         # Parse FFmpeg progress information (time and speed)
-        time_match = re.search(r'time=(\d{2}):(\d{2}):(\d{2})\.\d+', message)
-        speed_match = re.search(r'speed=\s*([\d.]+)x', message)
-        
+        time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.\d+", message)
+        speed_match = re.search(r"speed=\s*([\d.]+)x", message)
+
         if time_match and speed_match:
             hours = int(time_match.group(1))
             minutes = int(time_match.group(2))
             seconds = int(time_match.group(3))
             time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
             speed_str = speed_match.group(1)
-            
+
             # Calculate percentage if we have duration
             if self._video_duration_seconds and self._video_duration_seconds > 0:
                 current_seconds = hours * 3600 + minutes * 60 + seconds
-                percentage = min(100, int((current_seconds / self._video_duration_seconds) * 100))
+                percentage = min(
+                    100, int((current_seconds / self._video_duration_seconds) * 100)
+                )
                 self._set_status(f"{time_str}, {speed_str}x ({percentage}%)")
                 self._set_progress(percentage)  # Update progress bar
             else:
@@ -1052,7 +1134,9 @@ class TalksReducerGUI:
             self.status_label.configure(fg=color)
         else:
             # For extracting audio or FFmpeg progress messages, use processing color
-            if "extracting audio" in status.lower() or re.search(r'\d{2}:\d{2}:\d{2}.*\d+\.?\d*x', status):
+            if "extracting audio" in status.lower() or re.search(
+                r"\d{2}:\d{2}:\d{2}.*\d+\.?\d*x", status
+            ):
                 self.status_label.configure(fg=STATUS_COLORS["processing"])
 
     def _set_status(self, status: str) -> None:
@@ -1064,7 +1148,7 @@ class TalksReducerGUI:
             self._set_progress_bar_style(status)
             lowered = status.lower()
             is_processing = lowered == "processing" or "extracting audio" in lowered
-            
+
             if is_processing:
                 self._start_status_animation()
                 # Show stop button during processing
@@ -1112,7 +1196,7 @@ class TalksReducerGUI:
         """Calculate color gradient from red (0%) to green (100%)."""
         # Clamp percentage between 0 and 100
         percentage = max(0, min(100, percentage))
-        
+
         if percentage <= 50:
             # Red to Yellow (0% to 50%)
             # Red: (248, 113, 113) -> Yellow: (250, 204, 21)
@@ -1127,19 +1211,26 @@ class TalksReducerGUI:
             r = int(250 + (34 - 250) * ratio)
             g = int(204 + (197 - 204) * ratio)
             b = int(21 + (94 - 21) * ratio)
-        
+
         return f"#{r:02x}{g:02x}{b:02x}"
-    
+
     def _set_progress(self, percentage: int) -> None:
         """Update the progress bar value and color (thread-safe)."""
+
         def updater() -> None:
             self.progress_var.set(percentage)
             # Update color based on percentage gradient
             color = self._calculate_gradient_color(percentage)
-            palette = LIGHT_THEME if self._detect_system_theme() == "light" else DARK_THEME
+            palette = (
+                LIGHT_THEME if self._detect_system_theme() == "light" else DARK_THEME
+            )
             if self.theme_var.get().lower() in {"light", "dark"}:
-                palette = LIGHT_THEME if self.theme_var.get().lower() == "light" else DARK_THEME
-            
+                palette = (
+                    LIGHT_THEME
+                    if self.theme_var.get().lower() == "light"
+                    else DARK_THEME
+                )
+
             self.style.configure(
                 "Dynamic.Horizontal.TProgressbar",
                 background=color,
@@ -1148,16 +1239,17 @@ class TalksReducerGUI:
                 thickness=20,
             )
             self.progress_bar.configure(style="Dynamic.Horizontal.TProgressbar")
-            
+
             # Show stop button when progress < 100
             if percentage < 100:
                 self.actions_frame.grid()
                 self.stop_button.grid()
-        
+
         self.root.after(0, updater)
-    
+
     def _set_progress_bar_style(self, status: str) -> None:
         """Update the progress bar color based on status."""
+
         def updater() -> None:
             # Map status to progress bar style
             status_lower = status.lower()
@@ -1172,9 +1264,9 @@ class TalksReducerGUI:
             else:
                 # For processing states, use dynamic gradient (will be set by _set_progress)
                 return
-            
+
             self.progress_bar.configure(style=style)
-        
+
         self.root.after(0, updater)
 
     def _notify(self, callback: Callable[[], None]) -> None:

@@ -60,6 +60,8 @@ continues to work unchanged for local development.
 - **Input drop zone** — drag files or folders from your desktop or add them via
   the Explorer/Finder dialog; duplicates are ignored.
 - **Small video** — toggles the `--small` preset used by the CLI.
+- **Open after convert** — controls whether the exported file is revealed in
+  your system file manager as soon as each job finishes.
 - **Advanced** — reveals optional controls for the output path, temp folder,
   timing/audio knobs mirrored from the command line, and an appearance picker
   that can force dark or light mode or follow your operating system.
@@ -68,6 +70,10 @@ Progress updates stream into the 10-line log panel while the processing runs in
 a background thread. Once every queued job succeeds an **Open last output**
 button appears so you can jump straight to the exported file in your system
 file manager.
+
+The GUI stores your last-used Simple mode, Small video, Open after convert, and
+theme preferences in a cross-platform configuration file so they persist across
+launches.
 
 ## Repository Structure
 - `talks_reducer/` — Python package that exposes the CLI and reusable pipeline:
