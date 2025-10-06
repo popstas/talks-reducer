@@ -35,8 +35,9 @@ processes.
 
 ## Publishing a Release
 1. Update `pyproject.toml` with the new version number or pass a bump rule to the deploy script.
-2. Ensure development dependencies are installed: `pip install build twine bumpversion pytest`.
-3. Run `python scripts/deploy.py` (optionally with `patch`, `minor`, or `major` to bump the version).
+2. Regenerate the changelog so it reflects the upcoming tag: `python scripts/generate_changelog.py`.
+3. Ensure development dependencies are installed: `pip install build twine bumpversion pytest`.
+4. Run `python scripts/deploy.py` (optionally with `patch`, `minor`, or `major` to bump the version).
 
 The deploy helper automatically runs the test suite, rebuilds the distribution artifacts, validates them with `twine check`, and uploads the release. Provide `TWINE_REPOSITORY_URL` to target TestPyPI instead of PyPI. Ensure you have valid credentials configured in `~/.pypirc` before running the publish step.
 

@@ -98,6 +98,19 @@ file manager.
 - **October 2025** — Added `--small` preset with 720p/128 kbps defaults for bandwidth-friendly exports.
 - **October 2025** — Removed the `--cuda` flag; CUDA/NVENC support is now auto-detected.
 
+## Changelog
+Major and minor releases are tracked in `CHANGELOG.md`. The log is generated from
+Conventional Commits that start with either `feat:` or `fix:`. Only tags in the
+form `v<major>.<minor>.0` are included so patch releases (for example,
+`v1.1.1`) are omitted. Regenerate the file whenever you cut a release:
+
+```bash
+python scripts/generate_changelog.py
+```
+
+CI will fail if the generated changelog does not match the committed version, so
+run the script before opening a pull request that updates release tags.
+
 ## Contributing
 See `CONTRIBUTION.md` for development setup details and guidance on sharing improvements.
 
