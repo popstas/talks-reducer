@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -39,29 +40,70 @@ except ImportError:  # pragma: no cover - handled at runtime
 def _check_tkinter_available() -> tuple[bool, str]:
     """Check if tkinter can create windows without importing it globally."""
     # Test in a subprocess to avoid crashing the main process
-    test_code = """import tkinter as tk
-try:
-    root = tk.Tk()
-    root.destroy()
-    print("SUCCESS")
-except Exception as e:
-    print(f"ERROR: {e}")"""
+    test_code = """
+import json
+
+def run_check():
+    try:
+        import tkinter as tk  # noqa: F401 - imported for side effect
+    except Exception as exc:  # pragma: no cover - runs in subprocess
+        return {
+            "status": "import_error",
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+
+    try:
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.destroy()
+    except Exception as exc:  # pragma: no cover - runs in subprocess
+        return {
+            "status": "init_error",
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+
+    return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    print(json.dumps(run_check()))
+"""
 
     try:
         result = subprocess.run(
             [sys.executable, "-c", test_code], capture_output=True, text=True, timeout=5
         )
 
-        if result.returncode == 0 and "SUCCESS" in result.stdout:
+        output = result.stdout.strip() or result.stderr.strip()
+
+        if not output:
+            return False, "Window creation failed"
+
+        try:
+            payload = json.loads(output)
+        except json.JSONDecodeError:
+            return False, output
+
+        status = payload.get("status")
+
+        if status == "ok":
             return True, ""
-        else:
-            error_output = (
-                result.stdout.strip()
-                or result.stderr.strip()
-                or "Window creation failed"
+
+        if status == "import_error":
+            return (
+                False,
+                f"tkinter is not installed ({payload.get('error', 'unknown error')})",
             )
-            return False, error_output
-    except Exception as e:
+
+        if status == "init_error":
+            return (
+                False,
+                f"tkinter could not open a window ({payload.get('error', 'unknown error')})",
+            )
+
+        return False, output
+    except Exception as e:  # pragma: no cover - defensive fallback
         return False, f"Error testing tkinter: {e}"
 
 
