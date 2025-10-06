@@ -213,17 +213,28 @@ class TalksReducerGUI:
     def _apply_window_icon(self) -> None:
         """Configure the application icon when the asset is available."""
 
-        icon_path = (
-            Path(__file__).resolve().parent.parent / "docs" / "assets" / "icon.png"
+        base_path = Path(
+            getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)
         )
-        if not icon_path.is_file():
-            return
 
-        try:
-            self.root.iconphoto(False, self.tk.PhotoImage(file=str(icon_path)))
-        except self.tk.TclError:
-            # Missing Tk image support (e.g. headless environments) should not crash the GUI.
-            pass
+        icon_candidates: list[tuple[Path, str]] = []
+        if sys.platform.startswith("win"):
+            icon_candidates.append((base_path / "docs" / "assets" / "icon.ico", "ico"))
+        icon_candidates.append((base_path / "docs" / "assets" / "icon.png", "png"))
+
+        for icon_path, icon_type in icon_candidates:
+            if not icon_path.is_file():
+                continue
+
+            try:
+                if icon_type == "ico" and sys.platform.startswith("win"):
+                    self.root.iconbitmap(default=str(icon_path))
+                else:
+                    self.root.iconphoto(False, self.tk.PhotoImage(file=str(icon_path)))
+                break
+            except self.tk.TclError:
+                # Missing Tk image support (e.g. headless environments) should not crash the GUI.
+                continue
 
     def _build_layout(self) -> None:
         main = self.ttk.Frame(self.root, padding=16)
@@ -621,7 +632,7 @@ class TalksReducerGUI:
 
     # -------------------------------------------------------------- actions --
     def _add_files(self) -> None:
-        files = filedialog.askopenfilenames(
+        files = self.filedialog.askopenfilenames(
             title="Select input files",
             filetypes=[
                 ("Video files", "*.mp4 *.mkv *.mov *.avi *.m4v"),
@@ -631,7 +642,7 @@ class TalksReducerGUI:
         self._extend_inputs(files)
 
     def _add_directory(self) -> None:
-        directory = filedialog.askdirectory(title="Select input folder")
+        directory = self.filedialog.askdirectory(title="Select input folder")
         if directory:
             self._extend_inputs([directory])
 
@@ -659,22 +670,26 @@ class TalksReducerGUI:
         cleaned = [path.strip("{}") for path in paths]
         self._extend_inputs(cleaned, auto_run=True)
 
-    def _browse_path(self, variable, label: str) -> None:  # type: (tk.StringVar, str) -> None
+    def _browse_path(
+        self, variable, label: str
+    ) -> None:  # type: (tk.StringVar, str) -> None
         if "folder" in label.lower():
-            result = filedialog.askdirectory()
+            result = self.filedialog.askdirectory()
         else:
             initial = variable.get() or os.getcwd()
-            result = filedialog.asksaveasfilename(initialfile=os.path.basename(initial))
+            result = self.filedialog.asksaveasfilename(
+                initialfile=os.path.basename(initial)
+            )
         if result:
             variable.set(result)
 
     def _start_run(self) -> None:
         if self._processing_thread and self._processing_thread.is_alive():
-            messagebox.showinfo("Processing", "A job is already running.")
+            self.messagebox.showinfo("Processing", "A job is already running.")
             return
 
         if not self.input_files:
-            messagebox.showwarning(
+            self.messagebox.showwarning(
                 "Missing input", "Please add at least one file or folder."
             )
             return
@@ -682,11 +697,11 @@ class TalksReducerGUI:
         try:
             args = self._collect_arguments()
         except ValueError as exc:
-            messagebox.showerror("Invalid value", str(exc))
+            self.messagebox.showerror("Invalid value", str(exc))
             return
 
         self._append_log("Starting processing…")
-        self.run_button.configure(state=tk.DISABLED)
+        self.run_button.configure(state=self.tk.DISABLED)
 
         def worker() -> None:
             reporter = _TkProgressReporter(self._append_log)
@@ -694,7 +709,7 @@ class TalksReducerGUI:
                 files = gather_input_files(self.input_files)
                 if not files:
                     self._notify(
-                        lambda: messagebox.showwarning(
+                        lambda: self.messagebox.showwarning(
                             "No files", "No supported media files were found."
                         )
                     )
@@ -716,11 +731,15 @@ class TalksReducerGUI:
                 self._append_log("All jobs finished successfully.")
                 self._notify(lambda: self.open_button.configure(state=self.tk.NORMAL))
             except FFmpegNotFoundError as exc:
-                self._notify(lambda: messagebox.showerror("FFmpeg not found", str(exc)))
+                self._notify(
+                    lambda: self.messagebox.showerror("FFmpeg not found", str(exc))
+                )
                 self._set_status("Error")
             except Exception as exc:  # pragma: no cover - GUI level safeguard
                 self._notify(
-                    lambda: messagebox.showerror("Error", f"Processing failed: {exc}")
+                    lambda: self.messagebox.showerror(
+                        "Error", f"Processing failed: {exc}"
+                    )
                 )
                 self._set_status("Error")
             finally:
@@ -895,8 +914,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     # Skip tkinter check if running as a PyInstaller frozen app
     # In that case, tkinter is bundled and the subprocess check would fail
-    is_frozen = getattr(sys, 'frozen', False)
-    
+    is_frozen = getattr(sys, "frozen", False)
+
     if not is_frozen:
         # Check if tkinter is available before creating GUI (only when not frozen)
         tkinter_available, error_msg = _check_tkinter_available()
@@ -934,6 +953,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         app.run()
     except Exception as e:
         import traceback
+
         sys.stderr.write(f"Error starting GUI: {e}\n")
         sys.stderr.write(traceback.format_exc())
         sys.stderr.write("\nPlease use the CLI mode instead:\n")
