@@ -11,6 +11,8 @@ import numpy as np
 from audiotsm import phasevocoder
 from audiotsm.io.array import ArrayReader, ArrayWriter
 
+from .ffmpeg import get_ffprobe_path
+
 
 def get_max_volume(samples: np.ndarray) -> float:
     """Return the maximum absolute volume in the provided sample array."""
@@ -20,8 +22,6 @@ def get_max_volume(samples: np.ndarray) -> float:
 
 def is_valid_input_file(filename: str) -> bool:
     """Check whether ``ffprobe`` recognises the input file and finds an audio stream."""
-
-    from .ffmpeg import get_ffprobe_path
 
     ffprobe_path = get_ffprobe_path()
     command = [
@@ -36,29 +36,31 @@ def is_valid_input_file(filename: str) -> bool:
         "-show_entries",
         "stream=codec_type",
     ]
-    
+
     # Hide console window on Windows
     creationflags = 0
     if sys.platform == "win32":
         # CREATE_NO_WINDOW = 0x08000000
         creationflags = 0x08000000
-    
-    process = subprocess.Popen(
-        command, 
-        stdout=subprocess.PIPE, 
-        stderr=subprocess.PIPE,
-        creationflags=creationflags
-    )
-    outs, errs = None, None
+
     try:
-        outs, errs = process.communicate(timeout=1)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=creationflags,
+        )
     except subprocess.TimeoutExpired:
         print("Timeout while checking the input file. Aborting. Command:")
         print(" ".join(command))
-        process.kill()
-        outs, errs = process.communicate()
-    finally:
-        return len(errs) == 0 and len(outs) > 0
+        return False
+
+    if result.returncode != 0:
+        return False
+
+    stdout = result.stdout or ""
+    return "codec_type=audio" in stdout
 
 
 def process_audio_chunks(
