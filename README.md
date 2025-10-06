@@ -26,11 +26,13 @@ pip install talks-reducer
 
 **Note:** FFmpeg is now bundled automatically with the package, so you don't need to install it separately. However, if you have FFmpeg already installed on your system, it will be used instead of the bundled version.
 
+Running the `talks-reducer` command with no arguments now launches the GUI, making the console entry point universal across Windows, macOS, and Linux. Supply a video path or the `--help` flag to stay in CLI mode.
+
 The `--small` preset applies a 720p video scale and 128 kbps audio bitrate, making it useful for sharing talks over constrained
 connections. Without `--small`, the script aims to preserve original quality while removing silence.
 
-> **Tip:** Running `talks-reducer-gui` without arguments opens the Tkinter interface. Passing regular CLI options (for example,
-> `talks-reducer-gui --small input.mp4`) now executes the command-line pipeline, so you can keep a single shortcut for both
+> **Tip:** Running `talks-reducer` or `talks-reducer-gui` without arguments opens the Tkinter interface. Passing regular CLI options (for example,
+> `talks-reducer --small input.mp4`) now executes the command-line pipeline, so you can keep a single shortcut for both
 > workflows.
 
 When CUDA-capable hardware is available the pipeline leans on GPU encoders to keep export times low, but it still runs great on
