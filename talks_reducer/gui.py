@@ -1217,10 +1217,10 @@ class TalksReducerGUI:
                 self.drop_hint_button.grid_remove()
                 self.open_button.grid()
                 self.open_button.lift()  # Ensure open_button is above drop_hint_button
-                print("success status")
+                # print("success status")
             else:
                 self.open_button.grid_remove()
-                print("not success status")
+                # print("not success status")
                 if (
                     self.simple_mode_var.get()
                     and not is_processing
