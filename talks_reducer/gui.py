@@ -201,6 +201,8 @@ class _TkProgressReporter(SignalProgressReporter):
 
 class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
+    
+    PADDING = 10
 
     def __init__(self) -> None:
         # Import tkinter here to avoid loading it at module import time
@@ -289,16 +291,17 @@ class TalksReducerGUI:
                 continue
 
     def _build_layout(self) -> None:
-        main = self.ttk.Frame(self.root, padding=16)
+        main = self.ttk.Frame(self.root, padding=self.PADDING)
         main.grid(row=0, column=0, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
         # Input selection frame
-        input_frame = self.ttk.LabelFrame(main, text="Input files", padding=12)
+        input_frame = self.ttk.Frame(main, padding=self.PADDING)
         input_frame.grid(row=0, column=0, sticky="nsew")
         main.rowconfigure(0, weight=1)
-        for column in range(4):
+        main.columnconfigure(0, weight=1)
+        for column in range(5):
             input_frame.columnconfigure(column, weight=1)
 
         self.input_list = self.tk.Listbox(input_frame, height=5)
@@ -312,13 +315,13 @@ class TalksReducerGUI:
         self.drop_zone = self.tk.Label(
             input_frame,
             text="Drop files or folders here",
-            relief=self.tk.RIDGE,
-            borderwidth=2,
-            padx=16,
-            pady=16,
-            highlightthickness=1,
+            relief=self.tk.FLAT,
+            borderwidth=0,
+            padx=self.PADDING,
+            pady=self.PADDING,
+            highlightthickness=0,
         )
-        self.drop_zone.grid(row=1, column=0, columnspan=4, sticky="nsew")
+        self.drop_zone.grid(row=1, column=0, columnspan=5, sticky="nsew")
         input_frame.rowconfigure(1, weight=1)
         self._configure_drop_targets(self.drop_zone)
         self._configure_drop_targets(self.input_list)
@@ -343,8 +346,8 @@ class TalksReducerGUI:
         self.run_after_drop_check.grid(row=2, column=3, pady=8, sticky="e")
 
         # Options frame
-        options = self.ttk.LabelFrame(main, text="Options", padding=12)
-        options.grid(row=1, column=0, pady=(16, 0), sticky="nsew")
+        options = self.ttk.Frame(main, padding=self.PADDING)
+        options.grid(row=1, column=0, pady=(16, 0), sticky="ew")
         options.columnconfigure(0, weight=1)
 
         self.simple_mode_check = self.ttk.Checkbutton(
@@ -367,7 +370,7 @@ class TalksReducerGUI:
         )
         self.advanced_button.grid(row=0, column=1, sticky="e")
 
-        self.advanced_frame = self.ttk.Frame(options, padding=(0, 12, 0, 0))
+        self.advanced_frame = self.ttk.Frame(options, padding=self.PADDING)
         self.advanced_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
         self.advanced_frame.columnconfigure(1, weight=1)
 
@@ -426,30 +429,31 @@ class TalksReducerGUI:
         # Action buttons and log output
         self.actions_frame = self.ttk.Frame(main)
         self.actions_frame.grid(row=2, column=0, pady=(16, 0), sticky="ew")
-        self.actions_frame.columnconfigure(1, weight=1)
 
         self.run_button = self.ttk.Button(
             self.actions_frame, text="Run", command=self._start_run
         )
         self.run_button.grid(row=0, column=0, sticky="w")
 
-        self.open_button = self.ttk.Button(
-            self.actions_frame,
-            text="Open last output",
-            command=self._open_last_output,
-            state=self.tk.DISABLED,
-        )
-        self.open_button.grid(row=0, column=1, sticky="e")
-        self.open_button.grid_remove()
-
-        status_frame = self.ttk.Frame(main, padding=(0, 8, 0, 0))
+        status_frame = self.ttk.Frame(main, padding=self.PADDING)
         status_frame.grid(row=3, column=0, sticky="ew")
+        status_frame.columnconfigure(0, weight=0)
         status_frame.columnconfigure(1, weight=1)
+        status_frame.columnconfigure(2, weight=0)
         self.ttk.Label(status_frame, text="Status:").grid(row=0, column=0, sticky="w")
         self.status_label = self.tk.Label(status_frame, textvariable=self.status_var)
         self.status_label.grid(row=0, column=1, sticky="w")
+        
+        self.open_button = self.ttk.Button(
+            status_frame,
+            text="Open last",
+            command=self._open_last_output,
+            state=self.tk.DISABLED,
+        )
+        self.open_button.grid(row=0, column=2, sticky="e")
+        self.open_button.grid_remove()
 
-        self.log_frame = self.ttk.LabelFrame(main, text="Log", padding=12)
+        self.log_frame = self.ttk.Frame(main, padding=self.PADDING)
         self.log_frame.grid(row=4, column=0, pady=(16, 0), sticky="nsew")
         main.rowconfigure(4, weight=1)
         self.log_frame.columnconfigure(0, weight=1)
@@ -572,6 +576,8 @@ class TalksReducerGUI:
             "TLabelframe",
             background=palette["background"],
             foreground=palette["foreground"],
+            borderwidth=0,
+            relief="flat",
         )
         self.style.configure(
             "TLabelframe.Label",
@@ -622,8 +628,7 @@ class TalksReducerGUI:
         self.drop_zone.configure(
             bg=palette["surface"],
             fg=palette["foreground"],
-            highlightbackground=palette["border"],
-            highlightcolor=palette["border"],
+            highlightthickness=0,
         )
         self.input_list.configure(
             bg=palette["surface"],
