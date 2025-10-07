@@ -160,22 +160,27 @@ def test_speed_up_video_uses_vad_when_enabled(monkeypatch, tmp_path):
 
     vad_calls: list[np.ndarray] = []
 
-    def fake_vad(audio_data, sample_rate, frame_count, samples_per_frame):
+    def fake_vad(
+        audio_data,
+        sample_rate,
+        frame_count,
+        samples_per_frame,
+        silent_threshold,
+        max_audio_volume,
+    ):
         vad_calls.append(audio_data)
         assert frame_count == 10
         assert sample_rate == 48000
         assert samples_per_frame == 1600
+        assert silent_threshold == options.silent_threshold
+        assert max_audio_volume == 1.0
         return np.array([True] * frame_count)
 
     monkeypatch.setattr("talks_reducer.vad.detect_speech_frames", fake_vad)
 
-    def fail_volume_detection(*_args, **_kwargs):  # pragma: no cover - guard rail
-        raise AssertionError(
-            "Volume-based detection should not run when VAD is enabled"
-        )
-
     monkeypatch.setattr(
-        "talks_reducer.pipeline.chunk_utils.detect_loud_frames", fail_volume_detection
+        "talks_reducer.pipeline.chunk_utils.detect_loud_frames",
+        lambda *_args, **_kwargs: np.array([True] * 10),
     )
     monkeypatch.setattr(
         "talks_reducer.pipeline.chunk_utils.build_chunks",

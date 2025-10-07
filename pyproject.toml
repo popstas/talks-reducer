@@ -22,6 +22,7 @@ dependencies = [
     "imageio-ffmpeg>=0.4.8",
     "torch>=2.0.0",
     "torchaudio>=2.0.0",
+    "gradio>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +39,7 @@ dev = [
 [project.scripts]
 talks-reducer = "talks_reducer.cli:main"
 talks-reducer-gui = "talks_reducer.gui:main"
+talks-reducer-server = "talks_reducer.server:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "talks_reducer.__about__.__version__"}

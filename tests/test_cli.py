@@ -77,3 +77,30 @@ def test_main_runs_cli_with_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     parser_mock.parse_args.assert_called_once_with(["input.mp4"])
     assert len(outputs) == 1
     assert outputs[0].input_file == Path("/tmp/input.mp4")
+
+
+def test_main_launches_server_when_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The server subcommand should dispatch to the Gradio launcher."""
+
+    server_calls: list[list[str]] = []
+
+    def fake_server(argv: list[str]) -> bool:
+        server_calls.append(list(argv))
+        return True
+
+    monkeypatch.setattr(cli, "_launch_server", fake_server)
+    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
+
+    cli.main(["server", "--share"])
+
+    assert server_calls == [["--share"]]
+
+
+def test_main_exits_when_server_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing Gradio server should raise SystemExit to mimic CLI failures."""
+
+    monkeypatch.setattr(cli, "_launch_server", lambda argv: False)
+    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
+
+    with pytest.raises(SystemExit):
+        cli.main(["server"])
