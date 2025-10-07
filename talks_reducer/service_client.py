@@ -7,7 +7,8 @@ import shutil
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
-from gradio_client import Client, file as gradio_file
+from gradio_client import Client
+from gradio_client import file as gradio_file
 
 
 def send_video(

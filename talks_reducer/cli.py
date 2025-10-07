@@ -18,7 +18,7 @@ try:
 except Exception:  # pragma: no cover - fallback if metadata file missing
     _about_version = ""
 from .ffmpeg import FFmpegNotFoundError
-from .models import ProcessingOptions
+from .models import ProcessingOptions, default_temp_folder
 from .pipeline import speed_up_video
 from .progress import TqdmProgressReporter
 
@@ -55,7 +55,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--temp_folder",
         type=str,
-        default="TEMP",
+        default=str(default_temp_folder()),
         help="The file path of the temporary working folder.",
     )
     parser.add_argument(
