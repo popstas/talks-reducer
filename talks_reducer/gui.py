@@ -20,7 +20,7 @@ try:
     from .cli import gather_input_files
     from .cli import main as cli_main
     from .ffmpeg import FFmpegNotFoundError
-    from .models import ProcessingOptions
+    from .models import ProcessingOptions, default_temp_folder
     from .pipeline import speed_up_video
     from .progress import ProgressHandle, SignalProgressReporter
 except ImportError:  # pragma: no cover - handled at runtime
@@ -34,7 +34,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.cli import gather_input_files
     from talks_reducer.cli import main as cli_main
     from talks_reducer.ffmpeg import FFmpegNotFoundError
-    from talks_reducer.models import ProcessingOptions
+    from talks_reducer.models import ProcessingOptions, default_temp_folder
     from talks_reducer.pipeline import speed_up_video
     from talks_reducer.progress import ProgressHandle, SignalProgressReporter
 
@@ -480,7 +480,7 @@ class TalksReducerGUI:
             self.advanced_frame, "Output file", self.output_var, row=0, browse=True
         )
 
-        self.temp_var = self.tk.StringVar(value="TEMP")
+        self.temp_var = self.tk.StringVar(value=str(default_temp_folder()))
         self._add_entry(
             self.advanced_frame, "Temp folder", self.temp_var, row=1, browse=True
         )

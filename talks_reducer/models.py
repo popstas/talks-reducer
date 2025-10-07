@@ -2,9 +2,34 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+import sys
+import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+
+def default_temp_folder() -> Path:
+    """Return an OS-appropriate default temporary workspace directory."""
+
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support" / "talks-reducer"
+    elif sys.platform == "win32":
+        appdata = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        base = (
+            Path(appdata)
+            if appdata
+            else Path.home() / "AppData" / "Local" / "talks-reducer"
+        )
+    else:
+        xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
+        if xdg_runtime:
+            base = Path(xdg_runtime) / "talks-reducer"
+        else:
+            base = Path(tempfile.gettempdir()) / "talks-reducer"
+
+    return base / "temp"
 
 
 @dataclass(frozen=True)
@@ -24,7 +49,7 @@ class ProcessingOptions:
     sounded_speed: float = 1.0
     frame_spreadage: int = 2
     audio_fade_envelope_size: int = 400
-    temp_folder: Path = Path("TEMP")
+    temp_folder: Path = field(default_factory=default_temp_folder)
     small: bool = False
 
 
