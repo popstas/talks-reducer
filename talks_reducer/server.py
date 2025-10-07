@@ -62,6 +62,12 @@ class _GradioProgressHandle(AbstractContextManager[ProgressHandle]):
 
         if self._total is not None:
             self._current = self._total
+        else:
+            # Without a known total, treat the final frame count as the total so the
+            # progress bar reaches 100%.
+            inferred_total = self._current if self._current > 0 else 1
+            self._reporter._update_progress(self._current, inferred_total, self._desc)
+            return
         self._reporter._update_progress(self._current, self._total, self._desc)
 
     def __enter__(self) -> "_GradioProgressHandle":
@@ -120,8 +126,12 @@ class GradioProgressReporter(SignalProgressReporter):
     ) -> None:
         if self._progress_callback is None:
             return
-        total_value = total if total and total > 0 else 1
-        bounded_current = max(0, min(int(current), int(total_value)))
+        if total is None or total <= 0:
+            total_value = max(1, int(current) + 1 if current >= 0 else 1)
+            bounded_current = max(0, int(current))
+        else:
+            total_value = max(int(total), 1, int(current))
+            bounded_current = max(0, min(int(current), int(total_value)))
         display_desc = desc or self._active_desc
         self._progress_callback(bounded_current, total_value, display_desc)
 

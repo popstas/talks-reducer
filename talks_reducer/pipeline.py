@@ -26,7 +26,9 @@ from .models import ProcessingOptions, ProcessingResult
 from .progress import NullProgressReporter, ProgressReporter
 
 
-def _input_to_output_filename(filename: Path, small: bool = False, use_vad: bool = False) -> Path:
+def _input_to_output_filename(
+    filename: Path, small: bool = False, use_vad: bool = False
+) -> Path:
     dot_index = filename.name.rfind(".")
     suffix_parts = []
 
@@ -86,7 +88,7 @@ def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, fl
         "-select_streams",
         "v",
         "-show_entries",
-        "format=duration:stream=avg_frame_rate",
+        "format=duration:stream=avg_frame_rate,nb_frames",
     ]
     process = subprocess.Popen(
         command,
@@ -104,7 +106,14 @@ def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, fl
     match_duration = re.search(r"duration=([\d.]*)", str(stdout))
     original_duration = float(match_duration.group(1)) if match_duration else 0.0
 
-    return {"frame_rate": frame_rate, "duration": original_duration}
+    match_frames = re.search(r"nb_frames=(\d+)", str(stdout))
+    frame_count = int(match_frames.group(1)) if match_frames else 0
+
+    return {
+        "frame_rate": frame_rate,
+        "duration": original_duration,
+        "frame_count": frame_count,
+    }
 
 
 def _ensure_two_dimensional(audio_data: np.ndarray) -> np.ndarray:
@@ -147,6 +156,7 @@ def speed_up_video(
     metadata = _extract_video_metadata(input_path, options.frame_rate)
     frame_rate = metadata["frame_rate"]
     original_duration = metadata["duration"]
+    frame_count = metadata.get("frame_count", 0)
 
     reporter.log("Processing on: {}".format("GPU (CUDA)" if cuda_available else "CPU"))
     if options.small:
@@ -164,7 +174,9 @@ def speed_up_video(
     extraction_sample_rate = options.sample_rate
     if options.use_vad:
         supported_rates = [8000, 16000, 32000, 48000]
-        extraction_sample_rate = min(supported_rates, key=lambda x: abs(x - options.sample_rate))
+        extraction_sample_rate = min(
+            supported_rates, key=lambda x: abs(x - options.sample_rate)
+        )
 
     extract_command = build_extract_audio_command(
         os.fspath(input_path),
@@ -177,10 +189,14 @@ def speed_up_video(
 
     reporter.log("Extracting audio...")
     process_callback = getattr(reporter, "process_callback", None)
+    estimated_total_frames = frame_count
+    if estimated_total_frames <= 0 and original_duration > 0 and frame_rate > 0:
+        estimated_total_frames = int(math.ceil(original_duration * frame_rate))
+
     run_timed_ffmpeg_command(
         extract_command,
         reporter=reporter,
-        total=int(original_duration * frame_rate),
+        total=estimated_total_frames if estimated_total_frames > 0 else None,
         unit="frames",
         desc="Extracting audio:",
         process_callback=process_callback,
@@ -204,7 +220,9 @@ def speed_up_video(
         original_sample_rate = options.sample_rate
 
         # Find closest supported rate
-        vad_sample_rate = min(supported_rates, key=lambda x: abs(x - original_sample_rate))
+        vad_sample_rate = min(
+            supported_rates, key=lambda x: abs(x - original_sample_rate)
+        )
 
         if vad_sample_rate != original_sample_rate:
             reporter.log(
@@ -212,10 +230,11 @@ def speed_up_video(
                 "(required by Silero VAD model)"
             )
 
-        from . import vad as vad_utils
-
         # Run VAD detection with timing
         import time
+
+        from . import vad as vad_utils
+
         vad_start_time = time.time()
         has_loud_audio_vad = vad_utils.detect_speech_frames(
             audio_data,
@@ -255,12 +274,18 @@ def speed_up_video(
         if vad_duration > 0 and traditional_duration > 0:
             if vad_duration < traditional_duration:
                 speedup = traditional_duration / vad_duration
-                performance_msg = f"- VAD is {speedup:.1f}x faster than traditional method"
+                performance_msg = (
+                    f"- VAD is {speedup:.1f}x faster than traditional method"
+                )
             elif traditional_duration < vad_duration:
                 slowdown = vad_duration / traditional_duration
-                performance_msg = f"- VAD is {slowdown:.1f}x slower than traditional method"
+                performance_msg = (
+                    f"- VAD is {slowdown:.1f}x slower than traditional method"
+                )
             else:
-                performance_msg = "- VAD and traditional method have similar performance"
+                performance_msg = (
+                    "- VAD and traditional method have similar performance"
+                )
 
         # Log to both GUI and console
         messages = [comparison_msg, vad_msg, traditional_msg, agreement_msg]
@@ -272,7 +297,9 @@ def speed_up_video(
             print(msg, file=sys.stderr)
 
         # Use VAD results but log if there's significant disagreement
-        if abs(vad_true_count - traditional_true_count) / total_frames > 0.1:  # >10% difference
+        if (
+            abs(vad_true_count - traditional_true_count) / total_frames > 0.1
+        ):  # >10% difference
             warning_msg = "Warning: VAD and traditional detection differ significantly"
             reporter.log(warning_msg)
             print(warning_msg, file=sys.stderr)
