@@ -7,11 +7,16 @@ import os
 import sys
 import time
 from importlib import import_module
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 from . import audio
+
+try:
+    from .__about__ import __version__ as _about_version
+except Exception:  # pragma: no cover - fallback if metadata file missing
+    _about_version = ""
 from .ffmpeg import FFmpegNotFoundError
 from .models import ProcessingOptions
 from .pipeline import speed_up_video
@@ -26,10 +31,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     # Add version argument
-    try:
-        pkg_version = version("talks-reducer")
-    except Exception:
-        pkg_version = "unknown"
+    pkg_version = _resolve_version()
 
     parser.add_argument(
         "--version",
@@ -97,6 +99,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Apply small file optimizations: resize video to 720p, audio to 128k bitrate, best compression (uses CUDA if available).",
     )
     return parser
+
+
+def _resolve_version() -> str:
+    """Determine the package version for CLI reporting."""
+
+    if _about_version:
+        return _about_version
+
+    try:
+        return version("talks-reducer")
+    except (PackageNotFoundError, Exception):
+        return "unknown"
 
 
 def gather_input_files(paths: List[str]) -> List[str]:
