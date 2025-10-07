@@ -42,15 +42,38 @@ cd "$(dirname "$0")/.."
 VERSION=""
 if command -v "$PYTHON_BIN" &> /dev/null; then
     VERSION=$(cat <<'PY' | "$PYTHON_BIN" - 2>/dev/null || true
+import importlib.util
 import pathlib
 import re
 
-path = pathlib.Path("pyproject.toml")
 version = ""
-if path.exists():
-    match = re.search(r"^version\s*=\s*\"([^\"]+)\"", path.read_text(), re.MULTILINE)
+pyproject = pathlib.Path("pyproject.toml")
+if pyproject.exists():
+    text = pyproject.read_text()
+    match = re.search(r"^version\s*=\s*\"([^\"]+)\"", text, re.MULTILINE)
     if match:
         version = match.group(1).strip()
+    else:
+        attr_match = re.search(r"^version\s*=\s*\{[^}]*attr\s*=\s*\"([^\"]+)\"", text, re.MULTILINE)
+        if attr_match:
+            attr_path = attr_match.group(1)
+            module_path, _, attr_name = attr_path.rpartition(".")
+            if module_path:
+                module_file = pathlib.Path(module_path.replace(".", "/") + ".py")
+                if module_file.exists():
+                    about_text = module_file.read_text()
+                    about_match = re.search(r"__version__\s*=\s*\"([^\"]+)\"", about_text)
+                    if about_match:
+                        version = about_match.group(1).strip()
+
+if not version:
+    about_path = pathlib.Path("talks_reducer/__about__.py")
+    if about_path.exists():
+        spec = importlib.util.spec_from_file_location("talks_reducer.__about__", about_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            version = getattr(module, "__version__", "")
 
 print(version)
 PY
