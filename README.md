@@ -17,7 +17,9 @@ See [CHANGELOG.md](CHANGELOG.md).
 Go to the [releases page](https://github.com/popstas/talks-reducer/releases) and download the appropriate artifact:
 
 - **Windows** — `talks-reducer-windows-0.4.0.zip`
-- **macOS** — `talks-reducer.app.zip` (but it doesn't work for me)
+- **macOS** — `talks-reducer.app.zip`
+
+  > **Troubleshooting:** If launching the bundle (or running `python talks_reducer/gui.py`) prints `macOS 26 (2600) or later required, have instead 16 (1600)!`, make sure you're using a Python build that ships a modern Tk. The stock [python.org 3.13.5 installer](https://www.python.org/downloads/release/python-3135/) includes Tk 8.6 and has been verified to work.
 
 When extracted on Windows the bundled `talks-reducer.exe` behaves like the
 `python talks_reducer/gui.py` entry point: double-clicking it launches the GUI
