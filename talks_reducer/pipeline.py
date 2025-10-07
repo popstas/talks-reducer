@@ -158,6 +158,17 @@ def speed_up_video(
     original_duration = metadata["duration"]
     frame_count = metadata.get("frame_count", 0)
 
+    reporter.log(
+        (
+            "Source metadata — duration: {duration:.2f}s, frame rate: {fps:.3f} fps,"
+            " reported frames: {frames}"
+        ).format(
+            duration=original_duration,
+            fps=frame_rate,
+            frames=frame_count if frame_count > 0 else "unknown",
+        )
+    )
+
     reporter.log("Processing on: {}".format("GPU (CUDA)" if cuda_available else "CPU"))
     if options.small:
         reporter.log(
@@ -192,6 +203,11 @@ def speed_up_video(
     estimated_total_frames = frame_count
     if estimated_total_frames <= 0 and original_duration > 0 and frame_rate > 0:
         estimated_total_frames = int(math.ceil(original_duration * frame_rate))
+
+    if estimated_total_frames > 0:
+        reporter.log(f"Extract audio target frames: {estimated_total_frames}")
+    else:
+        reporter.log("Extract audio target frames: unknown")
 
     run_timed_ffmpeg_command(
         extract_command,
@@ -376,10 +392,13 @@ def speed_up_video(
         raise FileNotFoundError("Filter graph file was not generated")
 
     try:
+        final_total_frames = updated_chunks[-1][3]
+        reporter.log(f"Final encode target frames: {final_total_frames}")
+
         run_timed_ffmpeg_command(
             command_str,
             reporter=reporter,
-            total=updated_chunks[-1][3],
+            total=final_total_frames,
             unit="frames",
             desc="Generating final:",
             process_callback=process_callback,
@@ -387,10 +406,11 @@ def speed_up_video(
     except subprocess.CalledProcessError as exc:
         if fallback_command_str and use_cuda_encoder:
             reporter.log("CUDA encoding failed, retrying with CPU encoder...")
+            reporter.log(f"Final encode target frames (fallback): {final_total_frames}")
             run_timed_ffmpeg_command(
                 fallback_command_str,
                 reporter=reporter,
-                total=updated_chunks[-1][3],
+                total=final_total_frames,
                 unit="frames",
                 desc="Generating final (fallback):",
                 process_callback=process_callback,
