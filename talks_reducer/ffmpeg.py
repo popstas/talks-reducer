@@ -270,6 +270,7 @@ def run_timed_ffmpeg_command(
             if match:
                 try:
                     new_frame = int(match.group(1))
+                    progress.ensure_total(new_frame)
                     progress.advance(new_frame - progress.current)
                 except (ValueError, IndexError):
                     pass
