@@ -26,6 +26,7 @@ class ProcessingOptions:
     audio_fade_envelope_size: int = 400
     temp_folder: Path = Path("TEMP")
     small: bool = False
+    use_vad: bool = False
 
 
 @dataclass(frozen=True)

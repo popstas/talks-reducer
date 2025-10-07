@@ -499,11 +499,18 @@ class TalksReducerGUI:
         self.sample_rate_var = self.tk.StringVar()
         self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=6)
 
+        self.vad_var = self.tk.BooleanVar(value=False)
+        self.ttk.Checkbutton(
+            self.advanced_frame,
+            text="Use Silero VAD",
+            variable=self.vad_var,
+        ).grid(row=7, column=1, columnspan=2, sticky="w", pady=4)
+
         self.ttk.Label(self.advanced_frame, text="Theme").grid(
-            row=7, column=0, sticky="w", pady=(8, 0)
+            row=8, column=0, sticky="w", pady=(8, 0)
         )
         theme_choice = self.ttk.Frame(self.advanced_frame)
-        theme_choice.grid(row=7, column=1, columnspan=2, sticky="w", pady=(8, 0))
+        theme_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=(8, 0))
         for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
             self.ttk.Radiobutton(
                 theme_choice,
@@ -1093,6 +1100,8 @@ class TalksReducerGUI:
             )
         if self.small_var.get():
             args["small"] = True
+        if self.vad_var.get():
+            args["use_vad"] = True
 
         return args
 

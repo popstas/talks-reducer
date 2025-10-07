@@ -179,13 +179,24 @@ def speed_up_video(
     samples_per_frame = wav_sample_rate / frame_rate
     audio_frame_count = int(math.ceil(audio_sample_count / samples_per_frame))
 
-    has_loud_audio = chunk_utils.detect_loud_frames(
-        audio_data,
-        audio_frame_count,
-        samples_per_frame,
-        max_audio_volume,
-        options.silent_threshold,
-    )
+    if options.use_vad:
+        reporter.log("Detecting speech with Silero VAD...")
+        from . import vad as vad_utils
+
+        has_loud_audio = vad_utils.detect_speech_frames(
+            audio_data,
+            wav_sample_rate,
+            audio_frame_count,
+            samples_per_frame,
+        )
+    else:
+        has_loud_audio = chunk_utils.detect_loud_frames(
+            audio_data,
+            audio_frame_count,
+            samples_per_frame,
+            max_audio_volume,
+            options.silent_threshold,
+        )
 
     chunks, _ = chunk_utils.build_chunks(has_loud_audio, options.frame_spreadage)
 

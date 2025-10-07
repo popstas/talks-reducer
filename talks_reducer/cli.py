@@ -98,6 +98,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Apply small file optimizations: resize video to 720p, audio to 128k bitrate, best compression (uses CUDA if available).",
     )
+    parser.add_argument(
+        "--vad",
+        action="store_true",
+        dest="use_vad",
+        help="Use Silero voice activity detection for speech detection instead of volume thresholding.",
+    )
     return parser
 
 
@@ -200,6 +206,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             option_kwargs["sample_rate"] = int(local_options["sample_rate"])
         if "small" in local_options:
             option_kwargs["small"] = bool(local_options["small"])
+        if "use_vad" in local_options:
+            option_kwargs["use_vad"] = bool(local_options["use_vad"])
 
         options = ProcessingOptions(**option_kwargs)
 
