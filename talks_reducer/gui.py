@@ -386,7 +386,7 @@ class TalksReducerGUI:
 
         self.drop_zone = self.tk.Label(
             input_frame,
-            text="Drop files or folders here",
+            text="Drop video here",
             relief=self.tk.FLAT,
             borderwidth=0,
             padx=self.PADDING,
