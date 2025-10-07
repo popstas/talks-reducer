@@ -304,6 +304,7 @@ class TalksReducerGUI:
         self._status_animation_job: Optional[str] = None
         self._status_animation_phase = 0
         self._video_duration_seconds: Optional[float] = None
+        self._encode_target_duration_seconds: Optional[float] = None
         self._encode_total_frames: Optional[int] = None
         self._encode_current_frame: Optional[int] = None
         self.progress_var = tk.IntVar(value=0)
@@ -1198,12 +1199,14 @@ class TalksReducerGUI:
             self._set_status("success", status_msg)
             self._set_progress(100)  # 100% on success
             self._video_duration_seconds = None  # Reset for next video
+            self._encode_target_duration_seconds = None
             self._encode_total_frames = None
             self._encode_current_frame = None
         elif normalized.startswith("extracting audio"):
             self._set_status("processing", "Extracting audio...")
             self._set_progress(0)  # 0% on start
             self._video_duration_seconds = None  # Reset for new processing
+            self._encode_target_duration_seconds = None
             self._encode_total_frames = None
             self._encode_current_frame = None
         elif normalized.startswith("starting processing") or normalized.startswith(
@@ -1212,6 +1215,7 @@ class TalksReducerGUI:
             self._set_status("processing", "Processing")
             self._set_progress(0)  # 0% on start
             self._video_duration_seconds = None  # Reset for new processing
+            self._encode_target_duration_seconds = None
             self._encode_total_frames = None
             self._encode_current_frame = None
 
@@ -1247,6 +1251,25 @@ class TalksReducerGUI:
                 else:
                     self._set_status("processing", f"{current_frame} frames encoded")
 
+        # Parse encode target duration reported by the pipeline
+        encode_duration_match = re.search(
+            r"Final encode target duration(?: \(fallback\))?:\s*([\d.]+)s",
+            message,
+        )
+        if encode_duration_match:
+            try:
+                self._encode_target_duration_seconds = float(
+                    encode_duration_match.group(1)
+                )
+            except ValueError:
+                self._encode_target_duration_seconds = None
+
+        if (
+            "final encode target duration" in normalized
+            and "unknown" in normalized
+        ):
+            self._encode_target_duration_seconds = None
+
         # Parse video duration from FFmpeg output
         duration_match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)", message)
         if duration_match:
@@ -1263,10 +1286,18 @@ class TalksReducerGUI:
             hours = int(time_match.group(1))
             minutes = int(time_match.group(2))
             seconds = int(time_match.group(3))
-            time_str = f"{hours:02d}:{minutes:02d}"
+            current_seconds = hours * 3600 + minutes * 60 + seconds
+            time_str = self._format_progress_time(current_seconds)
             speed_str = speed_match.group(1)
 
-            status_msg = f"{time_str}, {speed_str}x"
+            total_seconds = self._encode_target_duration_seconds or self._video_duration_seconds
+            if total_seconds:
+                total_str = self._format_progress_time(total_seconds)
+                time_display = f"{time_str} / {total_str}"
+            else:
+                time_display = time_str
+
+            status_msg = f"{time_display}, {speed_str}x"
 
             if (
                 (
@@ -1274,12 +1305,11 @@ class TalksReducerGUI:
                     or self._encode_total_frames <= 0
                     or self._encode_current_frame is None
                 )
-                and self._video_duration_seconds
-                and self._video_duration_seconds > 0
+                and total_seconds
+                and total_seconds > 0
             ):
-                current_seconds = hours * 3600 + minutes * 60 + seconds
                 percentage = min(
-                    100, int((current_seconds / self._video_duration_seconds) * 100)
+                    100, int((current_seconds / total_seconds) * 100)
                 )
                 self._set_progress(percentage)
 
@@ -1295,7 +1325,7 @@ class TalksReducerGUI:
             status_lower = status.lower()
             if (
                 "extracting audio" in status_lower
-                or re.search(r"\d{2}:\d{2}:\d{2}.*\d+\.?\d*x", status)
+                or re.search(r"\d+:\d{2}(?: / \d+:\d{2})?.*\d+\.?\d*x", status)
                 or ("time:" in status_lower and "size:" in status_lower)
             ):
                 if "time:" in status_lower and "size:" in status_lower:
@@ -1347,6 +1377,23 @@ class TalksReducerGUI:
                         self.drop_hint_button.grid()
 
         self.root.after(0, apply)
+
+    def _format_progress_time(self, total_seconds: float) -> str:
+        """Format a duration in seconds as h:mm or m:ss for status display."""
+
+        try:
+            rounded_seconds = max(0, int(round(total_seconds)))
+        except (TypeError, ValueError):
+            return "0:00"
+
+        hours, remainder = divmod(rounded_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        if hours > 0:
+            return f"{hours}:{minutes:02d}"
+
+        total_minutes = rounded_seconds // 60
+        return f"{total_minutes}:{seconds:02d}"
 
     def _calculate_gradient_color(self, percentage: int, darken: float = 1.0) -> str:
         """Calculate color gradient from red (0%) to green (100%).
