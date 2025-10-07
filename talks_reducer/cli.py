@@ -143,6 +143,22 @@ def _launch_gui(argv: Sequence[str]) -> bool:
     return bool(gui_main(list(argv)))
 
 
+def _launch_server(argv: Sequence[str]) -> bool:
+    """Attempt to launch the Gradio web server with the provided arguments."""
+
+    try:
+        server_module = import_module(".server", __package__)
+    except ImportError:
+        return False
+
+    server_main = getattr(server_module, "main", None)
+    if server_main is None:
+        return False
+
+    server_main(list(argv))
+    return True
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     """Entry point for the command line interface.
 
@@ -153,6 +169,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         argv_list = sys.argv[1:]
     else:
         argv_list = list(argv)
+
+    if argv_list and argv_list[0] in {"server", "serve"}:
+        if not _launch_server(argv_list[1:]):
+            print("Gradio server mode is unavailable.", file=sys.stderr)
+            sys.exit(1)
+        return
 
     if not argv_list:
         if _launch_gui(argv_list):

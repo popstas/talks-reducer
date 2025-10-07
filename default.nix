@@ -22,6 +22,7 @@ let
     numpy
     pillow
     audiotsm
+    gradio
   ]);
   talksReducer = stdenv.mkDerivation {
     pname = "talks-reducer";

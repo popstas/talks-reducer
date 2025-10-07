@@ -38,6 +38,18 @@ talks-reducer --small input.mp4
 When CUDA-capable hardware is available the pipeline leans on GPU encoders to keep export times low, but it still runs great on
 CPUs.
 
+## Simple web server
+
+Prefer a lightweight browser interface? Launch the Gradio-powered simple mode with:
+
+```sh
+talks-reducer server
+```
+
+This opens a local web page featuring a drag-and-drop upload zone, a **Small video** checkbox that mirrors the CLI preset, a live
+progress indicator, and automatic previews of the processed output. Once the job completes you can inspect the resulting compression
+ratio and download the rendered video directly from the page.
+
 ## Contributing
 See `CONTRIBUTION.md` for development setup details and guidance on sharing improvements.
 

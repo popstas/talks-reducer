@@ -20,6 +20,7 @@ dependencies = [
     "tkinterdnd2>=0.3.0",
     "Pillow>=9.0.0",
     "imageio-ffmpeg>=0.4.8",
+    "gradio>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,7 @@ dev = [
 [project.scripts]
 talks-reducer = "talks_reducer.cli:main"
 talks-reducer-gui = "talks_reducer.gui:main"
+talks-reducer-server = "talks_reducer.server:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "talks_reducer.__about__.__version__"}
