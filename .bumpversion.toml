@@ -25,20 +25,20 @@ replace = '__version__ = "{new_version}"'
 
 [[tool.bumpversion.files]]
 filename = "version.txt"
-search = "    filevers=({current_major}, {current_minor}, {current_patch}, 0),"
+search = "    filevers=\\({current_major}, {current_minor}, {current_patch}, 0\\),"
 replace = "    filevers=({new_major}, {new_minor}, {new_patch}, 0),"
 
 [[tool.bumpversion.files]]
 filename = "version.txt"
-search = "    prodvers=({current_major}, {current_minor}, {current_patch}, 0),"
+search = "    prodvers=\\({current_major}, {current_minor}, {current_patch}, 0\\),"
 replace = "    prodvers=({new_major}, {new_minor}, {new_patch}, 0),"
 
 [[tool.bumpversion.files]]
 filename = "version.txt"
-search = "        StringStruct(u'FileVersion', u'{current_version}.0')"
+search = "        StringStruct\\(u'FileVersion', u'{current_version}\\.0'\\)"
 replace = "        StringStruct(u'FileVersion', u'{new_version}.0')"
 
 [[tool.bumpversion.files]]
 filename = "version.txt"
-search = "        StringStruct(u'ProductVersion', u'{current_version}.0')"
+search = "        StringStruct\\(u'ProductVersion', u'{current_version}\\.0'\\)"
 replace = "        StringStruct(u'ProductVersion', u'{new_version}.0')"
