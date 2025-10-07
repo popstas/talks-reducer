@@ -231,9 +231,17 @@ def run_timed_ffmpeg_command(
     if process_callback:
         process_callback(process)
 
+    # ``tqdm`` treats a total of ``0`` as a completed task, which breaks the
+    # progress estimation when FFprobe fails to report a duration.  In that
+    # scenario we run FFmpeg with an indeterminate progress bar instead of
+    # repeatedly shrinking the total to the most recent ``frame`` value.
+    known_total = total if total is not None and total > 0 else None
+
     progress_reporter = reporter or TqdmProgressReporter()
-    task_manager = progress_reporter.task(desc=desc, total=total, unit=unit)
+    task_manager = progress_reporter.task(desc=desc, total=known_total, unit=unit)
     with task_manager as progress:
+        dynamic_total = known_total
+
         while True:
             line = process.stderr.readline()
             if not line and process.poll() is not None:
@@ -243,19 +251,36 @@ def run_timed_ffmpeg_command(
                 continue
 
             # Filter out excessive progress output, only show important lines
-            if any(keyword in line.lower() for keyword in ['error', 'warning', 'encoded successfully', 'frame=', 'time=', 'size=', 'bitrate=', 'speed=']):
+            if any(
+                keyword in line.lower()
+                for keyword in [
+                    "error",
+                    "warning",
+                    "encoded successfully",
+                    "frame=",
+                    "time=",
+                    "size=",
+                    "bitrate=",
+                    "speed=",
+                ]
+            ):
                 sys.stderr.write(line)
                 sys.stderr.flush()
 
             # Send FFmpeg output to reporter for GUI display (filtered)
-            if any(keyword in line.lower() for keyword in ['error', 'warning', 'encoded successfully', 'frame=']):
+            if any(
+                keyword in line.lower()
+                for keyword in ["error", "warning", "encoded successfully", "frame="]
+            ):
                 progress_reporter.log(line.strip())
 
             match = re.search(r"frame=\s*(\d+)", line)
             if match:
                 try:
                     new_frame = int(match.group(1))
-                    progress.ensure_total(new_frame)
+                    if dynamic_total is not None and new_frame > dynamic_total:
+                        dynamic_total = new_frame
+                        progress.ensure_total(dynamic_total)
                     progress.advance(new_frame - progress.current)
                 except (ValueError, IndexError):
                     pass
@@ -368,7 +393,11 @@ def build_video_commands(
             # Use a fast software encoder instead
             video_encoder_args = ["-c:v libx264", "-preset veryfast", "-crf 23"]
 
-    audio_parts = ["-c:a aac", f'"{output_file}"', "-loglevel warning -stats -hide_banner"]
+    audio_parts = [
+        "-c:a aac",
+        f'"{output_file}"',
+        "-loglevel warning -stats -hide_banner",
+    ]
 
     full_command_parts = (
         global_parts + input_parts + output_parts + video_encoder_args + audio_parts
