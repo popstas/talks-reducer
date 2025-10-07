@@ -214,7 +214,9 @@ def speed_up_video(
 
         from . import vad as vad_utils
 
-        # Run VAD detection
+        # Run VAD detection with timing
+        import time
+        vad_start_time = time.time()
         has_loud_audio_vad = vad_utils.detect_speech_frames(
             audio_data,
             wav_sample_rate,
@@ -223,8 +225,11 @@ def speed_up_video(
             options.silent_threshold,
             max_audio_volume,
         )
+        vad_end_time = time.time()
+        vad_duration = vad_end_time - vad_start_time
 
-        # Also run traditional loud frame detection for comparison
+        # Also run traditional loud frame detection for comparison with timing
+        traditional_start_time = time.time()
         has_loud_audio_traditional = chunk_utils.detect_loud_frames(
             audio_data,
             audio_frame_count,
@@ -232,6 +237,8 @@ def speed_up_video(
             max_audio_volume,
             options.silent_threshold,
         )
+        traditional_end_time = time.time()
+        traditional_duration = traditional_end_time - traditional_start_time
 
         # Compare results
         vad_true_count = np.sum(has_loud_audio_vad)
@@ -240,12 +247,27 @@ def speed_up_video(
         total_frames = len(has_loud_audio_vad)
 
         comparison_msg = "VAD Comparison Results:"
-        vad_msg = f"- VAD detected {vad_true_count} loud frames ({vad_true_count/total_frames*100:.1f}%)"
-        traditional_msg = f"- Traditional detected {traditional_true_count} loud frames ({traditional_true_count/total_frames*100:.1f}%)"
+        vad_msg = f"- VAD detected {vad_true_count} loud frames ({vad_true_count/total_frames*100:.1f}%) in {vad_duration:.2f}s"
+        traditional_msg = f"- Traditional detected {traditional_true_count} loud frames ({traditional_true_count/total_frames*100:.1f}%) in {traditional_duration:.2f}s"
         agreement_msg = f"- Agreement: {agreement_count}/{total_frames} frames ({agreement_count/total_frames*100:.1f}%)"
 
+        performance_msg = ""
+        if vad_duration > 0 and traditional_duration > 0:
+            if vad_duration < traditional_duration:
+                speedup = traditional_duration / vad_duration
+                performance_msg = f"- VAD is {speedup:.1f}x faster than traditional method"
+            elif traditional_duration < vad_duration:
+                slowdown = vad_duration / traditional_duration
+                performance_msg = f"- VAD is {slowdown:.1f}x slower than traditional method"
+            else:
+                performance_msg = "- VAD and traditional method have similar performance"
+
         # Log to both GUI and console
-        for msg in [comparison_msg, vad_msg, traditional_msg, agreement_msg]:
+        messages = [comparison_msg, vad_msg, traditional_msg, agreement_msg]
+        if performance_msg:
+            messages.append(performance_msg)
+
+        for msg in messages:
             reporter.log(msg)
             print(msg, file=sys.stderr)
 
