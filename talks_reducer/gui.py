@@ -256,7 +256,12 @@ class TalksReducerGUI:
         self._settings[key] = value
         self._save_settings()
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        initial_inputs: Optional[Sequence[str]] = None,
+        *,
+        auto_run: bool = False,
+    ) -> None:
         self._config_path = self._determine_config_path()
         self._settings = self._load_settings()
 
@@ -332,6 +337,9 @@ class TalksReducerGUI:
             self._append_log(
                 "Drag and drop requires the tkinterdnd2 package. Install it to enable the drop zone."
             )
+
+        if initial_inputs:
+            self._populate_initial_inputs(initial_inputs, auto_run=auto_run)
 
     # ------------------------------------------------------------------ UI --
     def _apply_window_icon(self) -> None:
@@ -862,6 +870,26 @@ class TalksReducerGUI:
         widget.drop_target_register(DND_FILES)  # type: ignore[arg-type]
         widget.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
 
+    def _populate_initial_inputs(
+        self, inputs: Sequence[str], *, auto_run: bool = False
+    ) -> None:
+        """Seed the GUI with preselected inputs and optionally start processing."""
+
+        normalized: list[str] = []
+        for path in inputs:
+            if not path:
+                continue
+            resolved = os.fspath(Path(path))
+            if resolved not in self.input_files:
+                self.input_files.append(resolved)
+                self.input_list.insert(self.tk.END, resolved)
+                normalized.append(resolved)
+
+        if auto_run and normalized:
+            # Kick off processing once the event loop becomes idle so the
+            # interface has a chance to render before the work starts.
+            self.root.after_idle(self._start_run)
+
     # -------------------------------------------------------------- actions --
     def _ask_for_input_files(self) -> tuple[str, ...]:
         """Prompt the user to select input files for processing."""
@@ -1377,6 +1405,24 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
         argv = sys.argv[1:]
 
     if argv:
+        launch_gui = False
+        if sys.platform == "win32" and not any(arg.startswith("-") for arg in argv):
+            # Only attempt to launch the GUI automatically when the arguments
+            # look like file or directory paths. This matches the behaviour of
+            # file association launches on Windows while still allowing the CLI
+            # to be used explicitly with option flags.
+            if any(Path(arg).exists() for arg in argv if arg):
+                launch_gui = True
+
+        if launch_gui:
+            try:
+                app = TalksReducerGUI(argv, auto_run=True)
+                app.run()
+                return True
+            except Exception:
+                # Fall back to the CLI if the GUI cannot be started.
+                pass
+
         cli_main(argv)
         return False
 
