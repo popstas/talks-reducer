@@ -25,20 +25,20 @@ replace = '__version__ = "{new_version}"'
 
 [[tool.bumpversion.files]]
 filename = "version.txt"
-search = "    filevers=({major}, {minor}, {patch}, 0),"
-replace = "    filevers=({major}, {minor}, {patch}, 0),"
+search = "    filevers=({current_version.major}, {current_version.minor}, {current_version.patch}, 0),"
+replace = "    filevers=({new_version.major}, {new_version.minor}, {new_version.patch}, 0),"
 
 [[tool.bumpversion.files]]
 filename = "version.txt"
-search = "    prodvers=({major}, {minor}, {patch}, 0),"
-replace = "    prodvers=({major}, {minor}, {patch}, 0),"
+search = "    prodvers=({current_version.major}, {current_version.minor}, {current_version.patch}, 0),"
+replace = "    prodvers=({new_version.major}, {new_version.minor}, {new_version.patch}, 0),"
 
 [[tool.bumpversion.files]]
 filename = "version.txt"
-search = "        StringStruct(u'FileVersion', u'{major}.{minor}.{patch}.0')"
-replace = "        StringStruct(u'FileVersion', u'{major}.{minor}.{patch}.0')"
+search = "        StringStruct(u'FileVersion', u'{current_version}.0')"
+replace = "        StringStruct(u'FileVersion', u'{new_version}.0')"
 
 [[tool.bumpversion.files]]
 filename = "version.txt"
-search = "        StringStruct(u'ProductVersion', u'{major}.{minor}.{patch}.0')"
-replace = "        StringStruct(u'ProductVersion', u'{major}.{minor}.{patch}.0')"
+search = "        StringStruct(u'ProductVersion', u'{current_version}.0')"
+replace = "        StringStruct(u'ProductVersion', u'{new_version}.0')"
