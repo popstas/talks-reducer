@@ -296,6 +296,7 @@ def build_interface() -> gr.Blocks:
             inputs=[file_input, small_checkbox],
             outputs=[video_output, log_output, summary_output, download_output],
             queue=True,
+            api_name="process_video",
         )
 
     demo.queue(default_concurrency_limit=1)
