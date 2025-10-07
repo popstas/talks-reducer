@@ -54,7 +54,38 @@ if sys.platform == "win32" and len(sys.argv) > 1:
         if sys.stdin is None:
             sys.stdin = io.StringIO()
 
-from talks_reducer.cli import main
+
+def _run_application() -> None:
+    """Entry point used by the PyInstaller launcher."""
+
+    try:
+        from talks_reducer.gui import main as gui_main
+    except Exception:
+        # Fall back to the CLI if the GUI cannot be imported for any reason.
+        from talks_reducer.cli import main as cli_main
+
+        cli_main()
+        return
+
+    try:
+        launched = gui_main()
+    except Exception:
+        # If the GUI fails at runtime (for example due to missing tkinter),
+        # defer to the CLI implementation which will surface the error in the
+        # console when available.
+        from talks_reducer.cli import main as cli_main
+
+        cli_main()
+        return
+
+    # ``gui_main`` returns ``False`` when it explicitly delegated execution to
+    # the CLI (for example when command-line arguments were provided). In that
+    # scenario the CLI has already handled the request, so there is nothing
+    # else to do here. When ``True`` is returned the GUI event loop is running
+    # and control will not return until it exits.
+    if not launched:
+        return
+
 
 if __name__ == "__main__":
-    main()
+    _run_application()
