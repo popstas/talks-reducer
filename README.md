@@ -35,9 +35,9 @@ Example CLI usage:
 talks-reducer --small input.mp4
 ```
 
-### Voice activity detection
+### Speech detection
 
-Pass `--vad` to enable Silero's neural voice activity detector for identifying speech instead of the default volume threshold logic. The flag keeps the CLI and GUI in sync—the advanced options panel exposes the same toggle. Silero VAD requires the optional `torch` dependency, which will be downloaded automatically the first time the model runs.
+Talks Reducer now relies on its built-in volume thresholding to detect speech. Adjust `--silent_threshold` if you need to fine-tune when segments count as silence. Dropping the optional Silero VAD integration keeps the install lightweight and avoids pulling in PyTorch.
 
 When CUDA-capable hardware is available the pipeline leans on GPU encoders to keep export times low, but it still runs great on
 CPUs.

@@ -323,9 +323,7 @@ class TalksReducerGUI:
         self.open_after_convert_var = tk.BooleanVar(
             value=self._get_setting("open_after_convert", True)
         )
-        self.vad_var = self.tk.BooleanVar(value=self._get_setting("use_vad", False))
         self.theme_var = tk.StringVar(value=self._get_setting("theme", "os"))
-        self.vad_var.trace_add("write", self._on_use_vad_change)
         self.theme_var.trace_add("write", self._on_theme_change)
         self.small_var.trace_add("write", self._on_small_video_change)
         self.open_after_convert_var.trace_add(
@@ -513,17 +511,11 @@ class TalksReducerGUI:
         self.sample_rate_var = self.tk.StringVar(value="48000")
         self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=6)
 
-        self.ttk.Checkbutton(
-            self.advanced_frame,
-            text="Use Silero VAD",
-            variable=self.vad_var,
-        ).grid(row=7, column=1, columnspan=2, sticky="w", pady=4)
-
         self.ttk.Label(self.advanced_frame, text="Theme").grid(
-            row=8, column=0, sticky="w", pady=(8, 0)
+            row=7, column=0, sticky="w", pady=(8, 0)
         )
         theme_choice = self.ttk.Frame(self.advanced_frame)
-        theme_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=(8, 0))
+        theme_choice.grid(row=7, column=1, columnspan=2, sticky="w", pady=(8, 0))
         for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
             self.ttk.Radiobutton(
                 theme_choice,
@@ -694,9 +686,6 @@ class TalksReducerGUI:
         else:
             self.advanced_frame.grid_remove()
             self.advanced_button.configure(text="Advanced")
-
-    def _on_use_vad_change(self, *_: object) -> None:
-        self._update_setting("use_vad", bool(self.vad_var.get()))
 
     def _on_theme_change(self, *_: object) -> None:
         self._update_setting("theme", self.theme_var.get())
@@ -1135,9 +1124,6 @@ class TalksReducerGUI:
             )
         if self.small_var.get():
             args["small"] = True
-        if self.vad_var.get():
-            args["use_vad"] = True
-
         return args
 
     def _parse_float(self, value: str, label: str) -> float:
@@ -1264,10 +1250,7 @@ class TalksReducerGUI:
             except ValueError:
                 self._encode_target_duration_seconds = None
 
-        if (
-            "final encode target duration" in normalized
-            and "unknown" in normalized
-        ):
+        if "final encode target duration" in normalized and "unknown" in normalized:
             self._encode_target_duration_seconds = None
 
         # Parse video duration from FFmpeg output
@@ -1290,7 +1273,9 @@ class TalksReducerGUI:
             time_str = self._format_progress_time(current_seconds)
             speed_str = speed_match.group(1)
 
-            total_seconds = self._encode_target_duration_seconds or self._video_duration_seconds
+            total_seconds = (
+                self._encode_target_duration_seconds or self._video_duration_seconds
+            )
             if total_seconds:
                 total_str = self._format_progress_time(total_seconds)
                 time_display = f"{time_str} / {total_str}"
@@ -1308,9 +1293,7 @@ class TalksReducerGUI:
                 and total_seconds
                 and total_seconds > 0
             ):
-                percentage = min(
-                    100, int((current_seconds / total_seconds) * 100)
-                )
+                percentage = min(100, int((current_seconds / total_seconds) * 100))
                 self._set_progress(percentage)
 
             self._set_status("processing", status_msg)
