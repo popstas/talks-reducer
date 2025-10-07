@@ -59,6 +59,30 @@ This opens a local web page featuring a drag-and-drop upload zone, a **Small vid
 progress indicator, and automatic previews of the processed output. Once the job completes you can inspect the resulting compression
 ratio and download the rendered video directly from the page.
 
+### Uploading and retrieving a processed video
+
+1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
+2. Drag a video onto the **Video file** drop zone or click to browse and select one from disk.
+3. (Optional) Enable **Small video** before the upload finishes to apply the 720p/128 kbps preset.
+4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives.
+5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally.
+
+Need to change where the server listens? Run `talks-reducer server --host 0.0.0.0 --port 7860` (or any other port) to bind to a
+different address.
+
+### Automating uploads from the command line
+
+Prefer to script uploads instead of using the browser UI? Start the server and use the bundled helper to submit a job and save
+the processed video locally:
+
+```sh
+python -m talks_reducer.service_client --server http://127.0.0.1:9005/ --input demo.mp4 --output output/demo_processed.mp4
+```
+
+The helper wraps the Gradio API exposed by `server.py`, waits for processing to complete, then copies the rendered file to the
+path you provide. Pass `--small` to mirror the **Small video** checkbox or `--print-log` to stream the server log after the
+download finishes.
+
 ## Contributing
 See `CONTRIBUTION.md` for development setup details and guidance on sharing improvements.
 
