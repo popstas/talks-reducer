@@ -200,6 +200,7 @@ class _TkProgressReporter(SignalProgressReporter):
 
     def log(self, message: str) -> None:
         self._log_callback(message)
+        print(message, flush=True)
 
     def task(
         self, *, desc: str = "", total: Optional[int] = None, unit: str = ""
@@ -303,6 +304,9 @@ class TalksReducerGUI:
         self._status_animation_job: Optional[str] = None
         self._status_animation_phase = 0
         self._video_duration_seconds: Optional[float] = None
+        self._encode_target_duration_seconds: Optional[float] = None
+        self._encode_total_frames: Optional[int] = None
+        self._encode_current_frame: Optional[int] = None
         self.progress_var = tk.IntVar(value=0)
         self._ffmpeg_process: Optional[subprocess.Popen] = None
         self._stop_requested = False
@@ -509,7 +513,8 @@ class TalksReducerGUI:
         self.sample_rate_var = self.tk.StringVar(value="48000")
         self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=6)
 
-        self.ttk.Checkbutton(self.advanced_frame,
+        self.ttk.Checkbutton(
+            self.advanced_frame,
             text="Use Silero VAD",
             variable=self.vad_var,
         ).grid(row=7, column=1, columnspan=2, sticky="w", pady=4)
@@ -1055,11 +1060,7 @@ class TalksReducerGUI:
                     error_msg = f"Processing failed: {exc}"
                     self._append_log(error_msg)
                     print(error_msg, file=sys.stderr)  # Also output to console
-                    self._notify(
-                        lambda: self.messagebox.showerror(
-                            "Error", error_msg
-                        )
-                    )
+                    self._notify(lambda: self.messagebox.showerror("Error", error_msg))
                     self._set_status("Error")
             finally:
                 self._notify(self._hide_stop_button)
@@ -1198,16 +1199,76 @@ class TalksReducerGUI:
             self._set_status("success", status_msg)
             self._set_progress(100)  # 100% on success
             self._video_duration_seconds = None  # Reset for next video
+            self._encode_target_duration_seconds = None
+            self._encode_total_frames = None
+            self._encode_current_frame = None
         elif normalized.startswith("extracting audio"):
             self._set_status("processing", "Extracting audio...")
             self._set_progress(0)  # 0% on start
             self._video_duration_seconds = None  # Reset for new processing
+            self._encode_target_duration_seconds = None
+            self._encode_total_frames = None
+            self._encode_current_frame = None
         elif normalized.startswith("starting processing") or normalized.startswith(
             "processing"
         ):
             self._set_status("processing", "Processing")
             self._set_progress(0)  # 0% on start
             self._video_duration_seconds = None  # Reset for new processing
+            self._encode_target_duration_seconds = None
+            self._encode_total_frames = None
+            self._encode_current_frame = None
+
+        frame_total_match = re.search(
+            r"Final encode target frames(?: \(fallback\))?:\s*(\d+)", message
+        )
+        if frame_total_match:
+            self._encode_total_frames = int(frame_total_match.group(1))
+            return
+
+        if "final encode target frames" in normalized and "unknown" in normalized:
+            self._encode_total_frames = None
+            return
+
+        frame_match = re.search(r"frame=\s*(\d+)", message)
+        if frame_match:
+            try:
+                current_frame = int(frame_match.group(1))
+            except ValueError:
+                current_frame = None
+
+            if current_frame is not None:
+                if self._encode_current_frame == current_frame:
+                    return
+
+                self._encode_current_frame = current_frame
+                if self._encode_total_frames and self._encode_total_frames > 0:
+                    percentage = min(
+                        100,
+                        int((current_frame / self._encode_total_frames) * 100),
+                    )
+                    self._set_progress(percentage)
+                else:
+                    self._set_status("processing", f"{current_frame} frames encoded")
+
+        # Parse encode target duration reported by the pipeline
+        encode_duration_match = re.search(
+            r"Final encode target duration(?: \(fallback\))?:\s*([\d.]+)s",
+            message,
+        )
+        if encode_duration_match:
+            try:
+                self._encode_target_duration_seconds = float(
+                    encode_duration_match.group(1)
+                )
+            except ValueError:
+                self._encode_target_duration_seconds = None
+
+        if (
+            "final encode target duration" in normalized
+            and "unknown" in normalized
+        ):
+            self._encode_target_duration_seconds = None
 
         # Parse video duration from FFmpeg output
         duration_match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)", message)
@@ -1225,21 +1286,34 @@ class TalksReducerGUI:
             hours = int(time_match.group(1))
             minutes = int(time_match.group(2))
             seconds = int(time_match.group(3))
-            time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            current_seconds = hours * 3600 + minutes * 60 + seconds
+            time_str = self._format_progress_time(current_seconds)
             speed_str = speed_match.group(1)
 
-            # Calculate percentage if we have duration
-            if self._video_duration_seconds and self._video_duration_seconds > 0:
-                current_seconds = hours * 3600 + minutes * 60 + seconds
-                percentage = min(
-                    100, int((current_seconds / self._video_duration_seconds) * 100)
-                )
-                self._set_status(
-                    "processing", f"{time_str}, {speed_str}x ({percentage}%)"
-                )
-                self._set_progress(percentage)  # Update progress bar
+            total_seconds = self._encode_target_duration_seconds or self._video_duration_seconds
+            if total_seconds:
+                total_str = self._format_progress_time(total_seconds)
+                time_display = f"{time_str} / {total_str}"
             else:
-                self._set_status("processing", f"{time_str}, {speed_str}x")
+                time_display = time_str
+
+            status_msg = f"{time_display}, {speed_str}x"
+
+            if (
+                (
+                    not self._encode_total_frames
+                    or self._encode_total_frames <= 0
+                    or self._encode_current_frame is None
+                )
+                and total_seconds
+                and total_seconds > 0
+            ):
+                percentage = min(
+                    100, int((current_seconds / total_seconds) * 100)
+                )
+                self._set_progress(percentage)
+
+            self._set_status("processing", status_msg)
 
     def _apply_status_style(self, status: str) -> None:
         color = STATUS_COLORS.get(status.lower())
@@ -1251,7 +1325,7 @@ class TalksReducerGUI:
             status_lower = status.lower()
             if (
                 "extracting audio" in status_lower
-                or re.search(r"\d{2}:\d{2}:\d{2}.*\d+\.?\d*x", status)
+                or re.search(r"\d+:\d{2}(?: / \d+:\d{2})?.*\d+\.?\d*x", status)
                 or ("time:" in status_lower and "size:" in status_lower)
             ):
                 if "time:" in status_lower and "size:" in status_lower:
@@ -1303,6 +1377,23 @@ class TalksReducerGUI:
                         self.drop_hint_button.grid()
 
         self.root.after(0, apply)
+
+    def _format_progress_time(self, total_seconds: float) -> str:
+        """Format a duration in seconds as h:mm or m:ss for status display."""
+
+        try:
+            rounded_seconds = max(0, int(round(total_seconds)))
+        except (TypeError, ValueError):
+            return "0:00"
+
+        hours, remainder = divmod(rounded_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        if hours > 0:
+            return f"{hours}:{minutes:02d}"
+
+        total_minutes = rounded_seconds // 60
+        return f"{total_minutes}:{seconds:02d}"
 
     def _calculate_gradient_color(self, percentage: int, darken: float = 1.0) -> str:
         """Calculate color gradient from red (0%) to green (100%).

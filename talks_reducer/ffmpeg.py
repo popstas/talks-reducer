@@ -243,12 +243,27 @@ def run_timed_ffmpeg_command(
                 continue
 
             # Filter out excessive progress output, only show important lines
-            if any(keyword in line.lower() for keyword in ['error', 'warning', 'encoded successfully', 'frame=', 'time=', 'size=', 'bitrate=', 'speed=']):
+            if any(
+                keyword in line.lower()
+                for keyword in [
+                    "error",
+                    "warning",
+                    "encoded successfully",
+                    "frame=",
+                    "time=",
+                    "size=",
+                    "bitrate=",
+                    "speed=",
+                ]
+            ):
                 sys.stderr.write(line)
                 sys.stderr.flush()
 
             # Send FFmpeg output to reporter for GUI display (filtered)
-            if any(keyword in line.lower() for keyword in ['error', 'warning', 'encoded successfully', 'frame=']):
+            if any(
+                keyword in line.lower()
+                for keyword in ["error", "warning", "encoded successfully", "frame="]
+            ):
                 progress_reporter.log(line.strip())
 
             match = re.search(r"frame=\s*(\d+)", line)
@@ -368,7 +383,11 @@ def build_video_commands(
             # Use a fast software encoder instead
             video_encoder_args = ["-c:v libx264", "-preset veryfast", "-crf 23"]
 
-    audio_parts = ["-c:a aac", f'"{output_file}"', "-loglevel warning -stats -hide_banner"]
+    audio_parts = [
+        "-c:a aac",
+        f'"{output_file}"',
+        "-loglevel warning -stats -hide_banner",
+    ]
 
     full_command_parts = (
         global_parts + input_parts + output_parts + video_encoder_args + audio_parts
