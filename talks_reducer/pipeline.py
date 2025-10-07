@@ -6,6 +6,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Dict
 
@@ -25,9 +26,20 @@ from .models import ProcessingOptions, ProcessingResult
 from .progress import NullProgressReporter, ProgressReporter
 
 
-def _input_to_output_filename(filename: Path, small: bool = False) -> Path:
+def _input_to_output_filename(filename: Path, small: bool = False, use_vad: bool = False) -> Path:
     dot_index = filename.name.rfind(".")
-    suffix = "_speedup_small" if small else "_speedup"
+    suffix_parts = []
+
+    if use_vad:
+        suffix_parts.append("_vad")
+
+    if small:
+        suffix_parts.append("_small")
+
+    if not suffix_parts:
+        suffix_parts.append("")  # Default case
+
+    suffix = "_speedup" + "".join(suffix_parts)
     new_name = (
         filename.name[:dot_index] + suffix + filename.name[dot_index:]
         if dot_index != -1
@@ -121,7 +133,7 @@ def speed_up_video(
     ffmpeg_path = get_ffmpeg_path()
 
     output_path = options.output_file or _input_to_output_filename(
-        input_path, options.small
+        input_path, options.small, options.use_vad
     )
     output_path = Path(output_path)
 
@@ -148,10 +160,16 @@ def speed_up_video(
     audio_bitrate = "128k" if options.small else "160k"
     audio_wav = temp_path / "audio.wav"
 
+    # Adjust sample rate for VAD if needed
+    extraction_sample_rate = options.sample_rate
+    if options.use_vad:
+        supported_rates = [8000, 16000, 32000, 48000]
+        extraction_sample_rate = min(supported_rates, key=lambda x: abs(x - options.sample_rate))
+
     extract_command = build_extract_audio_command(
         os.fspath(input_path),
         os.fspath(audio_wav),
-        options.sample_rate,
+        extraction_sample_rate,
         audio_bitrate,
         hwaccel,
         ffmpeg_path=ffmpeg_path,
@@ -179,13 +197,74 @@ def speed_up_video(
     samples_per_frame = wav_sample_rate / frame_rate
     audio_frame_count = int(math.ceil(audio_sample_count / samples_per_frame))
 
-    has_loud_audio = chunk_utils.detect_loud_frames(
-        audio_data,
-        audio_frame_count,
-        samples_per_frame,
-        max_audio_volume,
-        options.silent_threshold,
-    )
+    if options.use_vad:
+        reporter.log("Detecting speech with Silero VAD...")
+        # Silero VAD requires specific sample rates: 8000 or 16000 (or multiples of 16000)
+        supported_rates = [8000, 16000, 32000, 48000]
+        original_sample_rate = options.sample_rate
+
+        # Find closest supported rate
+        vad_sample_rate = min(supported_rates, key=lambda x: abs(x - original_sample_rate))
+
+        if vad_sample_rate != original_sample_rate:
+            reporter.log(
+                f"VAD sample rate adjusted from {original_sample_rate}Hz to {vad_sample_rate}Hz "
+                "(required by Silero VAD model)"
+            )
+
+        from . import vad as vad_utils
+
+        # Run VAD detection
+        has_loud_audio_vad = vad_utils.detect_speech_frames(
+            audio_data,
+            wav_sample_rate,
+            audio_frame_count,
+            samples_per_frame,
+            options.silent_threshold,
+            max_audio_volume,
+        )
+
+        # Also run traditional loud frame detection for comparison
+        has_loud_audio_traditional = chunk_utils.detect_loud_frames(
+            audio_data,
+            audio_frame_count,
+            samples_per_frame,
+            max_audio_volume,
+            options.silent_threshold,
+        )
+
+        # Compare results
+        vad_true_count = np.sum(has_loud_audio_vad)
+        traditional_true_count = np.sum(has_loud_audio_traditional)
+        agreement_count = np.sum(has_loud_audio_vad == has_loud_audio_traditional)
+        total_frames = len(has_loud_audio_vad)
+
+        comparison_msg = "VAD Comparison Results:"
+        vad_msg = f"- VAD detected {vad_true_count} loud frames ({vad_true_count/total_frames*100:.1f}%)"
+        traditional_msg = f"- Traditional detected {traditional_true_count} loud frames ({traditional_true_count/total_frames*100:.1f}%)"
+        agreement_msg = f"- Agreement: {agreement_count}/{total_frames} frames ({agreement_count/total_frames*100:.1f}%)"
+
+        # Log to both GUI and console
+        for msg in [comparison_msg, vad_msg, traditional_msg, agreement_msg]:
+            reporter.log(msg)
+            print(msg, file=sys.stderr)
+
+        # Use VAD results but log if there's significant disagreement
+        if abs(vad_true_count - traditional_true_count) / total_frames > 0.1:  # >10% difference
+            warning_msg = "Warning: VAD and traditional detection differ significantly"
+            reporter.log(warning_msg)
+            print(warning_msg, file=sys.stderr)
+
+        has_loud_audio = has_loud_audio_vad
+
+    else:
+        has_loud_audio = chunk_utils.detect_loud_frames(
+            audio_data,
+            audio_frame_count,
+            samples_per_frame,
+            max_audio_volume,
+            options.silent_threshold,
+        )
 
     chunks, _ = chunk_utils.build_chunks(has_loud_audio, options.frame_spreadage)
 
@@ -202,9 +281,11 @@ def speed_up_video(
     )
 
     audio_new_path = temp_path / "audioNew.wav"
+    # Use the sample rate that was actually used for processing
+    output_sample_rate = extraction_sample_rate
     wavfile.write(
         os.fspath(audio_new_path),
-        options.sample_rate,
+        output_sample_rate,
         _prepare_output_audio(output_audio_data),
     )
 

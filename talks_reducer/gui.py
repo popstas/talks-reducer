@@ -319,7 +319,9 @@ class TalksReducerGUI:
         self.open_after_convert_var = tk.BooleanVar(
             value=self._get_setting("open_after_convert", True)
         )
+        self.vad_var = self.tk.BooleanVar(value=self._get_setting("use_vad", False))
         self.theme_var = tk.StringVar(value=self._get_setting("theme", "os"))
+        self.vad_var.trace_add("write", self._on_use_vad_change)
         self.theme_var.trace_add("write", self._on_theme_change)
         self.small_var.trace_add("write", self._on_small_video_change)
         self.open_after_convert_var.trace_add(
@@ -504,14 +506,19 @@ class TalksReducerGUI:
             self.advanced_frame, "Frame margin", self.frame_margin_var, row=5
         )
 
-        self.sample_rate_var = self.tk.StringVar()
+        self.sample_rate_var = self.tk.StringVar(value="48000")
         self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=6)
 
+        self.ttk.Checkbutton(self.advanced_frame,
+            text="Use Silero VAD",
+            variable=self.vad_var,
+        ).grid(row=7, column=1, columnspan=2, sticky="w", pady=4)
+
         self.ttk.Label(self.advanced_frame, text="Theme").grid(
-            row=7, column=0, sticky="w", pady=(8, 0)
+            row=8, column=0, sticky="w", pady=(8, 0)
         )
         theme_choice = self.ttk.Frame(self.advanced_frame)
-        theme_choice.grid(row=7, column=1, columnspan=2, sticky="w", pady=(8, 0))
+        theme_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=(8, 0))
         for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
             self.ttk.Radiobutton(
                 theme_choice,
@@ -682,6 +689,9 @@ class TalksReducerGUI:
         else:
             self.advanced_frame.grid_remove()
             self.advanced_button.configure(text="Advanced")
+
+    def _on_use_vad_change(self, *_: object) -> None:
+        self._update_setting("use_vad", bool(self.vad_var.get()))
 
     def _on_theme_change(self, *_: object) -> None:
         self._update_setting("theme", self.theme_var.get())
@@ -1042,9 +1052,12 @@ class TalksReducerGUI:
                     self._append_log("Processing aborted by user.")
                     self._set_status("Aborted")
                 else:
+                    error_msg = f"Processing failed: {exc}"
+                    self._append_log(error_msg)
+                    print(error_msg, file=sys.stderr)  # Also output to console
                     self._notify(
                         lambda: self.messagebox.showerror(
-                            "Error", f"Processing failed: {exc}"
+                            "Error", error_msg
                         )
                     )
                     self._set_status("Error")
@@ -1121,6 +1134,8 @@ class TalksReducerGUI:
             )
         if self.small_var.get():
             args["small"] = True
+        if self.vad_var.get():
+            args["use_vad"] = True
 
         return args
 

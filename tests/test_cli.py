@@ -44,6 +44,7 @@ def test_main_runs_cli_with_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
         frame_spreadage=None,
         sample_rate=None,
         small=False,
+        use_vad=False,
     )
 
     parser_mock = mock.Mock()
