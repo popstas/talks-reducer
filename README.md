@@ -16,7 +16,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 ## Install GUI (Windows, macOS)
 Go to the [releases page](https://github.com/popstas/talks-reducer/releases) and download the appropriate artifact:
 
-- **Windows** — `talks-reducer-windows.zip`
+- **Windows** — `talks-reducer-windows-0.4.0.zip`
 - **macOS** — `talks-reducer.app.zip` (but it doesn't work for me)
 
 ## Install CLI (Linux, Windows, macOS)
