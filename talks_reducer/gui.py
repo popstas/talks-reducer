@@ -284,8 +284,8 @@ class TalksReducerGUI:
 
         self._apply_window_icon()
 
-        self._full_size = (760, 680)
-        self._simple_size = (255, 330)
+        self._full_size = (1000, 800)
+        self._simple_size = (300, 270)
         self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
         self.style = self.ttk.Style(self.root)
 
@@ -423,7 +423,7 @@ class TalksReducerGUI:
 
         # Options frame
         options = self.ttk.Frame(main, padding=self.PADDING)
-        options.grid(row=2, column=0, pady=(16, 0), sticky="ew")
+        options.grid(row=2, column=0, pady=(0, 0), sticky="ew")
         options.columnconfigure(0, weight=1)
 
         checkbox_frame = self.ttk.Frame(options)
