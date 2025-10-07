@@ -304,6 +304,8 @@ class TalksReducerGUI:
         self._status_animation_job: Optional[str] = None
         self._status_animation_phase = 0
         self._video_duration_seconds: Optional[float] = None
+        self._encode_total_frames: Optional[int] = None
+        self._encode_current_frame: Optional[int] = None
         self.progress_var = tk.IntVar(value=0)
         self._ffmpeg_process: Optional[subprocess.Popen] = None
         self._stop_requested = False
@@ -1196,16 +1198,57 @@ class TalksReducerGUI:
             self._set_status("success", status_msg)
             self._set_progress(100)  # 100% on success
             self._video_duration_seconds = None  # Reset for next video
+            self._encode_total_frames = None
+            self._encode_current_frame = None
         elif normalized.startswith("extracting audio"):
             self._set_status("processing", "Extracting audio...")
             self._set_progress(0)  # 0% on start
             self._video_duration_seconds = None  # Reset for new processing
+            self._encode_total_frames = None
+            self._encode_current_frame = None
         elif normalized.startswith("starting processing") or normalized.startswith(
             "processing"
         ):
             self._set_status("processing", "Processing")
             self._set_progress(0)  # 0% on start
             self._video_duration_seconds = None  # Reset for new processing
+            self._encode_total_frames = None
+            self._encode_current_frame = None
+
+        frame_total_match = re.search(
+            r"Final encode target frames(?: \(fallback\))?:\s*(\d+)", message
+        )
+        if frame_total_match:
+            self._encode_total_frames = int(frame_total_match.group(1))
+            return
+
+        if "final encode target frames" in normalized and "unknown" in normalized:
+            self._encode_total_frames = None
+            return
+
+        frame_match = re.search(r"frame=\s*(\d+)", message)
+        if frame_match:
+            try:
+                current_frame = int(frame_match.group(1))
+            except ValueError:
+                current_frame = None
+
+            if current_frame is not None:
+                if self._encode_current_frame == current_frame:
+                    return
+
+                self._encode_current_frame = current_frame
+                if self._encode_total_frames and self._encode_total_frames > 0:
+                    percentage = min(
+                        100,
+                        int((current_frame / self._encode_total_frames) * 100),
+                    )
+                    status_msg = f"{current_frame}/{self._encode_total_frames} frames ({percentage}%)"
+                    self._set_status("processing", status_msg)
+                    self._set_progress(percentage)
+                else:
+                    self._set_status("processing", f"{current_frame} frames encoded")
+            return
 
         # Parse video duration from FFmpeg output
         duration_match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)", message)
