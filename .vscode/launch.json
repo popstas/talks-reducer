@@ -10,6 +10,14 @@
     ],
     "configurations": [
         {
+            "name": "gui",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "talks_reducer.gui",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
             "name": "docs/assets/demo.mp4",
             "type": "debugpy",
             "request": "launch",
@@ -29,14 +37,6 @@
                 "docs/assets/demo.mp4",
                 "--small"
             ],
-            "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "name": "talks-reducer GUI",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "talks_reducer.gui",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}"
         },
