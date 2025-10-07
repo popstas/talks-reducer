@@ -25,13 +25,13 @@ replace = '__version__ = "{new_version}"'
 
 [[tool.bumpversion.files]]
 filename = "version.txt"
-search = "    filevers=({current_version.major}, {current_version.minor}, {current_version.patch}, 0),"
-replace = "    filevers=({new_version.major}, {new_version.minor}, {new_version.patch}, 0),"
+search = "    filevers=({current_major}, {current_minor}, {current_patch}, 0),"
+replace = "    filevers=({new_major}, {new_minor}, {new_patch}, 0),"
 
 [[tool.bumpversion.files]]
 filename = "version.txt"
-search = "    prodvers=({current_version.major}, {current_version.minor}, {current_version.patch}, 0),"
-replace = "    prodvers=({new_version.major}, {new_version.minor}, {new_version.patch}, 0),"
+search = "    prodvers=({current_major}, {current_minor}, {current_patch}, 0),"
+replace = "    prodvers=({new_major}, {new_minor}, {new_patch}, 0),"
 
 [[tool.bumpversion.files]]
 filename = "version.txt"
