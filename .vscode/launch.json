@@ -41,6 +41,17 @@
             "cwd": "${workspaceFolder}"
         },
         {
+            "name": "gui docs/assets/demo.mp4 --small",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "talks_reducer.gui",
+            "args": [
+                "docs/assets/demo.mp4"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
             "name": "pytest -s tests",
             "type": "debugpy",
             "request": "launch",

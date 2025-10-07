@@ -12,10 +12,10 @@ from typing import Callable, Optional, Sequence
 
 import gradio as gr
 
-from .ffmpeg import FFmpegNotFoundError
-from .models import ProcessingOptions, ProcessingResult
-from .pipeline import speed_up_video
-from .progress import ProgressHandle, SignalProgressReporter
+from talks_reducer.ffmpeg import FFmpegNotFoundError
+from talks_reducer.models import ProcessingOptions, ProcessingResult
+from talks_reducer.pipeline import speed_up_video
+from talks_reducer.progress import ProgressHandle, SignalProgressReporter
 
 
 class _GradioProgressHandle(AbstractContextManager[ProgressHandle]):
@@ -296,13 +296,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     """Launch the Gradio server from the command line."""
 
     parser = argparse.ArgumentParser(description="Launch the Talks Reducer web UI.")
-    parser.add_argument("--host", dest="host", default=None, help="Custom host to bind.")
+    parser.add_argument(
+        "--host", dest="host", default=None, help="Custom host to bind."
+    )
     parser.add_argument(
         "--port",
         dest="port",
         type=int,
-        default=None,
-        help="Port number for the web server.",
+        default=9005,
+        help="Port number for the web server (default: 9005).",
     )
     parser.add_argument(
         "--share",
@@ -335,3 +337,7 @@ __all__ = [
     "main",
     "process_video",
 ]
+
+
+if __name__ == "__main__":  # pragma: no cover - convenience entry point
+    main()
