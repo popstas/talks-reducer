@@ -7,6 +7,12 @@ Use your preferred virtual environment and install the required Python packages:
 pip install -r requirements.txt
 ```
 
+For reproducible GUI bundles, also install the pinned PyInstaller toolchain:
+
+```
+pip install -r scripts/requirements-pyinstaller.txt
+```
+
 Ensure FFmpeg is installed and available on your command line. Visit [ffmpeg.org](https://ffmpeg.org) for platform-specific guidance.
 
 ## Running the Tool from Source

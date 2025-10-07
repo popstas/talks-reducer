@@ -29,13 +29,19 @@ case "$OS_TYPE" in
         ;;
 esac
 
+# Pick a Python executable that works across platforms
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+if ! command -v "$PYTHON_BIN" &> /dev/null; then
+    PYTHON_BIN="python"
+fi
+
 # Ensure we're in the project root
 cd "$(dirname "$0")/.."
 
 # Determine the current project version (used for artifact naming)
 VERSION=""
-if command -v python3 &> /dev/null; then
-    VERSION=$(cat <<'PY' | python3 - 2>/dev/null || true
+if command -v "$PYTHON_BIN" &> /dev/null; then
+    VERSION=$(cat <<'PY' | "$PYTHON_BIN" - 2>/dev/null || true
 import pathlib
 import re
 
@@ -54,9 +60,40 @@ PY
 fi
 
 # Check if pyinstaller is installed
+PYINSTALLER_REQUIREMENTS="scripts/requirements-pyinstaller.txt"
+REQUIRED_PYINSTALLER_VERSION=""
+if [[ -f "$PYINSTALLER_REQUIREMENTS" ]]; then
+    REQUIRED_PYINSTALLER_VERSION=$(grep -E '^pyinstaller==' "$PYINSTALLER_REQUIREMENTS" | head -n1 | cut -d= -f3)
+fi
+
+ensure_pinned_pyinstaller() {
+    local install_args=(install)
+    if [[ -n "$PYINSTALLER_REQUIREMENTS" && -f "$PYINSTALLER_REQUIREMENTS" ]]; then
+        install_args+=(-r "$PYINSTALLER_REQUIREMENTS")
+    else
+        if [[ -n "$REQUIRED_PYINSTALLER_VERSION" ]]; then
+            install_args+=("pyinstaller==${REQUIRED_PYINSTALLER_VERSION}")
+        else
+            install_args+=("pyinstaller")
+        fi
+    fi
+
+    "$PYTHON_BIN" -m pip "${install_args[@]}"
+}
+
 if ! command -v pyinstaller &> /dev/null; then
-    echo "❌ PyInstaller not found. Installing..."
-    pip install pyinstaller
+    echo "❌ PyInstaller not found. Installing pinned build dependencies..."
+    ensure_pinned_pyinstaller
+else
+    INSTALLED_PYINSTALLER_VERSION=$(pyinstaller --version 2>/dev/null | tr -d '\r')
+    if [[ -n "$REQUIRED_PYINSTALLER_VERSION" && "$INSTALLED_PYINSTALLER_VERSION" != "$REQUIRED_PYINSTALLER_VERSION" ]]; then
+        echo "♻️  PyInstaller $INSTALLED_PYINSTALLER_VERSION found, but $REQUIRED_PYINSTALLER_VERSION required. Reinstalling..."
+        if [[ -n "$PYINSTALLER_REQUIREMENTS" && -f "$PYINSTALLER_REQUIREMENTS" ]]; then
+            "$PYTHON_BIN" -m pip install --force-reinstall -r "$PYINSTALLER_REQUIREMENTS"
+        else
+            "$PYTHON_BIN" -m pip install --force-reinstall "pyinstaller==${REQUIRED_PYINSTALLER_VERSION}"
+        fi
+    fi
 fi
 
 # Clean previous builds (keep build/ for incremental builds unless --clean flag)
