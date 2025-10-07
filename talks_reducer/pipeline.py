@@ -392,13 +392,29 @@ def speed_up_video(
         raise FileNotFoundError("Filter graph file was not generated")
 
     try:
-        final_total_frames = updated_chunks[-1][3]
-        reporter.log(f"Final encode target frames: {final_total_frames}")
+        final_total_frames = updated_chunks[-1][3] if updated_chunks else 0
+        if final_total_frames > 0:
+            reporter.log(f"Final encode target frames: {final_total_frames}")
+            if frame_rate > 0:
+                final_duration_seconds = final_total_frames / frame_rate
+                reporter.log(
+                    (
+                        "Final encode target duration: {duration:.2f}s at {fps:.3f} fps"
+                    ).format(duration=final_duration_seconds, fps=frame_rate)
+                )
+            else:
+                reporter.log(
+                    "Final encode target duration: unknown (missing frame rate)"
+                )
+        else:
+            reporter.log("Final encode target frames: unknown")
+
+        total_frames_arg = final_total_frames if final_total_frames > 0 else None
 
         run_timed_ffmpeg_command(
             command_str,
             reporter=reporter,
-            total=final_total_frames,
+            total=total_frames_arg,
             unit="frames",
             desc="Generating final:",
             process_callback=process_callback,
@@ -406,11 +422,25 @@ def speed_up_video(
     except subprocess.CalledProcessError as exc:
         if fallback_command_str and use_cuda_encoder:
             reporter.log("CUDA encoding failed, retrying with CPU encoder...")
-            reporter.log(f"Final encode target frames (fallback): {final_total_frames}")
+            if final_total_frames > 0:
+                reporter.log(
+                    f"Final encode target frames (fallback): {final_total_frames}"
+                )
+            else:
+                reporter.log("Final encode target frames (fallback): unknown")
+            if final_total_frames > 0 and frame_rate > 0:
+                reporter.log(
+                    (
+                        "Final encode target duration (fallback): {duration:.2f}s at {fps:.3f} fps"
+                    ).format(
+                        duration=final_total_frames / frame_rate,
+                        fps=frame_rate,
+                    )
+                )
             run_timed_ffmpeg_command(
                 fallback_command_str,
                 reporter=reporter,
-                total=final_total_frames,
+                total=total_frames_arg,
                 unit="frames",
                 desc="Generating final (fallback):",
                 process_callback=process_callback,

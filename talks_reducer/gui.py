@@ -200,6 +200,7 @@ class _TkProgressReporter(SignalProgressReporter):
 
     def log(self, message: str) -> None:
         self._log_callback(message)
+        print(message, flush=True)
 
     def task(
         self, *, desc: str = "", total: Optional[int] = None, unit: str = ""
@@ -509,7 +510,8 @@ class TalksReducerGUI:
         self.sample_rate_var = self.tk.StringVar(value="48000")
         self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=6)
 
-        self.ttk.Checkbutton(self.advanced_frame,
+        self.ttk.Checkbutton(
+            self.advanced_frame,
             text="Use Silero VAD",
             variable=self.vad_var,
         ).grid(row=7, column=1, columnspan=2, sticky="w", pady=4)
@@ -1055,11 +1057,7 @@ class TalksReducerGUI:
                     error_msg = f"Processing failed: {exc}"
                     self._append_log(error_msg)
                     print(error_msg, file=sys.stderr)  # Also output to console
-                    self._notify(
-                        lambda: self.messagebox.showerror(
-                            "Error", error_msg
-                        )
-                    )
+                    self._notify(lambda: self.messagebox.showerror("Error", error_msg))
                     self._set_status("Error")
             finally:
                 self._notify(self._hide_stop_button)
