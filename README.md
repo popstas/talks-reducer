@@ -19,6 +19,11 @@ Go to the [releases page](https://github.com/popstas/talks-reducer/releases) and
 - **Windows** — `talks-reducer-windows-0.4.0.zip`
 - **macOS** — `talks-reducer.app.zip` (but it doesn't work for me)
 
+When extracted on Windows the bundled `talks-reducer.exe` behaves like the
+`python talks_reducer/gui.py` entry point: double-clicking it launches the GUI
+and passing a video file path (for example via *Open with…* or drag-and-drop
+onto the executable) automatically queues that recording for processing.
+
 ## Install CLI (Linux, Windows, macOS)
 ```
 pip install talks-reducer
