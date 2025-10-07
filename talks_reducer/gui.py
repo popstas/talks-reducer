@@ -986,12 +986,12 @@ class TalksReducerGUI:
                     self._last_output = result.output_file
                     self._last_time_ratio = result.time_ratio
                     self._last_size_ratio = result.size_ratio
-                    
+
                     # Create completion message with ratios if available
                     completion_msg = f"Completed: {result.output_file}"
                     if result.time_ratio is not None and result.size_ratio is not None:
                         completion_msg += f" (Time: {result.time_ratio:.2%}, Size: {result.size_ratio:.2%})"
-                    
+
                     self._append_log(completion_msg)
                     if open_after_convert:
                         self._notify(
@@ -1151,7 +1151,7 @@ class TalksReducerGUI:
             status_msg = "Success"
             if self._last_time_ratio is not None and self._last_size_ratio is not None:
                 status_msg = f"Time: {self._last_time_ratio:.0%}, Size: {self._last_size_ratio:.0%}"
-            
+
             self._set_status("success", status_msg)
             self._set_progress(100)  # 100% on success
             self._video_duration_seconds = None  # Reset for next video
@@ -1191,7 +1191,9 @@ class TalksReducerGUI:
                 percentage = min(
                     100, int((current_seconds / self._video_duration_seconds) * 100)
                 )
-                self._set_status("processing", f"{time_str}, {speed_str}x ({percentage}%)")
+                self._set_status(
+                    "processing", f"{time_str}, {speed_str}x ({percentage}%)"
+                )
                 self._set_progress(percentage)  # Update progress bar
             else:
                 self._set_status("processing", f"{time_str}, {speed_str}x")
@@ -1204,9 +1206,11 @@ class TalksReducerGUI:
             # For extracting audio or FFmpeg progress messages, use processing color
             # Also handle the new "Time: X%, Size: Y%" format as success
             status_lower = status.lower()
-            if ("extracting audio" in status_lower or 
-                re.search(r"\d{2}:\d{2}:\d{2}.*\d+\.?\d*x", status) or
-                ("time:" in status_lower and "size:" in status_lower)):
+            if (
+                "extracting audio" in status_lower
+                or re.search(r"\d{2}:\d{2}:\d{2}.*\d+\.?\d*x", status)
+                or ("time:" in status_lower and "size:" in status_lower)
+            ):
                 if "time:" in status_lower and "size:" in status_lower:
                     # This is our new success format with ratios
                     self.status_label.configure(fg=STATUS_COLORS["success"])
@@ -1219,7 +1223,9 @@ class TalksReducerGUI:
             # Use status_msg if provided, otherwise use status
             display_text = status_msg if status_msg else status
             self.status_var.set(display_text)
-            self._apply_status_style(status)  # Colors depend on status, not display text
+            self._apply_status_style(
+                status
+            )  # Colors depend on status, not display text
             self._set_progress_bar_style(status)
             lowered = status.lower()
             is_processing = lowered == "processing" or "extracting audio" in lowered
@@ -1333,7 +1339,9 @@ class TalksReducerGUI:
         def updater() -> None:
             # Map status to progress bar style
             status_lower = status.lower()
-            if status_lower == "success" or ("time:" in status_lower and "size:" in status_lower):
+            if status_lower == "success" or (
+                "time:" in status_lower and "size:" in status_lower
+            ):
                 style = "Success.Horizontal.TProgressbar"
             elif status_lower == "error":
                 style = "Error.Horizontal.TProgressbar"
