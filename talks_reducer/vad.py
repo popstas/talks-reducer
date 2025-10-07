@@ -8,17 +8,14 @@ from typing import Tuple
 
 import numpy as np
 
+from .audio import get_max_volume
+
 
 @lru_cache(maxsize=1)
 def _load_silero_model() -> Tuple[object, object]:
     """Load and cache the Silero VAD model and timestamp helper."""
 
-    try:
-        import torch
-    except ImportError as exc:  # pragma: no cover - optional dependency
-        raise RuntimeError(
-            "Silero VAD requires the 'torch' package to be installed."
-        ) from exc
+    import torch
 
     try:
         model, utils = torch.hub.load(  # type: ignore[attr-defined]
@@ -27,7 +24,12 @@ def _load_silero_model() -> Tuple[object, object]:
             verbose=False,
         )
     except Exception as exc:  # pragma: no cover - network or torch hub failure
-        raise RuntimeError("Unable to load Silero VAD model") from exc
+        import sys
+        error_msg = (
+            f"Unable to load Silero VAD model: \n{exc}. "
+        )
+        print(error_msg, file=sys.stderr)  # Also output to console
+        raise RuntimeError(error_msg) from exc
 
     try:
         (get_speech_timestamps, *_rest) = utils
@@ -63,17 +65,14 @@ def detect_speech_frames(
     sample_rate: int,
     audio_frame_count: int,
     samples_per_frame: float,
+    silent_threshold: float = 0.03,
+    max_audio_volume: float = 1.0,
 ) -> np.ndarray:
-    """Return a boolean array of frames containing speech using Silero VAD."""
+    """Return a boolean array of frames containing speech using Silero VAD with volume filtering."""
 
     model, get_speech_timestamps = _load_silero_model()
 
-    try:
-        import torch
-    except ImportError as exc:  # pragma: no cover - optional dependency
-        raise RuntimeError(
-            "Silero VAD requires the 'torch' package to be installed."
-        ) from exc
+    import torch
 
     prepared = _prepare_audio_for_vad(audio_data)
     tensor = torch.from_numpy(prepared)  # type: ignore[attr-defined]
@@ -84,6 +83,9 @@ def detect_speech_frames(
 
     has_loud_audio = np.zeros(audio_frame_count, dtype=bool)
 
+    # Apply volume threshold filtering to VAD results
+    normaliser = max(max_audio_volume, 1e-9)
+
     for segment in speech_segments:
         start_sample = int(segment.get("start", 0))
         end_sample = int(segment.get("end", 0))
@@ -91,6 +93,7 @@ def detect_speech_frames(
         if end_sample <= start_sample:
             continue
 
+        # Check volume for this speech segment
         start_frame = max(
             0, int(math.floor(start_sample / max(samples_per_frame, 1e-9)))
         )
@@ -99,7 +102,19 @@ def detect_speech_frames(
             int(math.ceil(end_sample / max(samples_per_frame, 1e-9))),
         )
 
-        if end_frame > start_frame:
+        # Check if any frame in this segment has sufficient volume
+        segment_has_loud_audio = False
+        for frame_index in range(start_frame, end_frame):
+            frame_start = int(frame_index * samples_per_frame)
+            frame_end = min(int((frame_index + 1) * samples_per_frame), audio_data.shape[0])
+            audio_chunk = audio_data[frame_start:frame_end]
+            chunk_max_volume = float(get_max_volume(audio_chunk)) / normaliser
+            if chunk_max_volume >= silent_threshold:
+                segment_has_loud_audio = True
+                break
+
+        if segment_has_loud_audio:
+            # Mark all frames in this segment as loud
             has_loud_audio[start_frame:end_frame] = True
 
     return has_loud_audio

@@ -18,8 +18,8 @@ class ProcessingOptions:
     input_file: Path
     output_file: Optional[Path] = None
     frame_rate: float = 30.0
-    sample_rate: int = 44100
-    silent_threshold: float = 0.03
+    sample_rate: int = 48000
+    silent_threshold: float = 0.05
     silent_speed: float = 4.0
     sounded_speed: float = 1.0
     frame_spreadage: int = 2
