@@ -288,7 +288,7 @@ def build_interface() -> gr.Blocks:
             queue=True,
         )
 
-    demo.queue(concurrency_count=1)
+    demo.queue(default_concurrency_limit=1)
     return demo
 
 
