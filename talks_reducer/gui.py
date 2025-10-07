@@ -1243,12 +1243,9 @@ class TalksReducerGUI:
                         100,
                         int((current_frame / self._encode_total_frames) * 100),
                     )
-                    status_msg = f"{current_frame}/{self._encode_total_frames} frames ({percentage}%)"
-                    self._set_status("processing", status_msg)
                     self._set_progress(percentage)
                 else:
                     self._set_status("processing", f"{current_frame} frames encoded")
-            return
 
         # Parse video duration from FFmpeg output
         duration_match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)", message)
@@ -1266,21 +1263,27 @@ class TalksReducerGUI:
             hours = int(time_match.group(1))
             minutes = int(time_match.group(2))
             seconds = int(time_match.group(3))
-            time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            time_str = f"{hours:02d}:{minutes:02d}"
             speed_str = speed_match.group(1)
 
-            # Calculate percentage if we have duration
-            if self._video_duration_seconds and self._video_duration_seconds > 0:
+            status_msg = f"{time_str}, {speed_str}x"
+
+            if (
+                (
+                    not self._encode_total_frames
+                    or self._encode_total_frames <= 0
+                    or self._encode_current_frame is None
+                )
+                and self._video_duration_seconds
+                and self._video_duration_seconds > 0
+            ):
                 current_seconds = hours * 3600 + minutes * 60 + seconds
                 percentage = min(
                     100, int((current_seconds / self._video_duration_seconds) * 100)
                 )
-                self._set_status(
-                    "processing", f"{time_str}, {speed_str}x ({percentage}%)"
-                )
-                self._set_progress(percentage)  # Update progress bar
-            else:
-                self._set_status("processing", f"{time_str}, {speed_str}x")
+                self._set_progress(percentage)
+
+            self._set_status("processing", status_msg)
 
     def _apply_status_style(self, status: str) -> None:
         color = STATUS_COLORS.get(status.lower())
