@@ -52,6 +52,9 @@ def find_ffmpeg() -> Optional[str]:
         "C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe",
         "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe",
         "C:\\ffmpeg\\bin\\ffmpeg.exe",
+        "/usr/local/bin/ffmpeg",
+        "/opt/homebrew/bin/ffmpeg",
+        "/usr/bin/ffmpeg",
         "ffmpeg",
     ]
 
@@ -92,6 +95,9 @@ def find_ffprobe() -> Optional[str]:
         "C:\\ProgramData\\chocolatey\\bin\\ffprobe.exe",
         "C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe",
         "C:\\ffmpeg\\bin\\ffprobe.exe",
+        "/usr/local/bin/ffprobe",
+        "/opt/homebrew/bin/ffprobe",
+        "/usr/bin/ffprobe",
         "ffprobe",
     ]
 
