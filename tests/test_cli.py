@@ -96,6 +96,41 @@ def test_main_launches_server_when_requested(monkeypatch: pytest.MonkeyPatch) ->
     assert server_calls == [["--share"]]
 
 
+def test_main_launches_server_tray_when_flag_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The --server flag should launch the system tray helper."""
+
+    tray_calls: list[list[str]] = []
+
+    def fake_tray(argv: list[str]) -> bool:
+        tray_calls.append(list(argv))
+        return True
+
+    def fail_build_parser() -> None:
+        raise AssertionError("Parser should not be built when launching the tray")
+
+    monkeypatch.setattr(cli, "_launch_server_tray", fake_tray)
+    monkeypatch.setattr(cli, "_build_parser", fail_build_parser)
+    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
+
+    cli.main(["--server", "--share", "--port", "9005"])
+
+    assert tray_calls == [["--share", "--port", "9005"]]
+
+
+def test_main_exits_when_server_tray_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tray startup failure should mimic a CLI error."""
+
+    monkeypatch.setattr(cli, "_launch_server_tray", lambda argv: False)
+    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
+
+    with pytest.raises(SystemExit):
+        cli.main(["--server"])
+
+
 def test_main_exits_when_server_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     """A missing Gradio server should raise SystemExit to mimic CLI failures."""
 
@@ -148,3 +183,79 @@ def test_main_uses_remote_server_when_url_provided(
     assert len(calls) == 1
     assert calls[0].input_path == Path("/tmp/input.mp4")
     assert calls[0].small is True
+
+
+def test_launch_server_tray_prefers_external_binary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The packaged binary should be used when available."""
+
+    binary_path = Path("/tmp/talks-reducer-server-tray")
+    monkeypatch.setattr(cli, "_find_server_tray_binary", lambda: binary_path)
+
+    run_calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(args: list[str], **kwargs: object) -> SimpleNamespace:
+        run_calls.append((list(args), dict(kwargs)))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    assert cli._launch_server_tray_binary(["--foo"]) is True
+    assert run_calls[0][0] == [str(binary_path), "--foo"]
+
+
+def test_launch_server_tray_binary_hides_console_without_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows launches should hide the console when detached."""
+
+    binary_path = Path("C:/tray.exe")
+    monkeypatch.setattr(cli, "_find_server_tray_binary", lambda: binary_path)
+    monkeypatch.setattr(cli, "_should_hide_subprocess_console", lambda: True)
+    monkeypatch.setattr(cli, "sys", SimpleNamespace(platform="win32"))
+
+    calls: list[dict[str, object]] = []
+
+    class DummySubprocess:
+        CREATE_NO_WINDOW = 0x08000000
+
+        @staticmethod
+        def run(args: list[str], **kwargs: object) -> SimpleNamespace:
+            calls.append(dict(kwargs))
+            return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli, "subprocess", DummySubprocess)
+
+    assert cli._launch_server_tray_binary([]) is True
+    assert calls and calls[0].get("creationflags") == DummySubprocess.CREATE_NO_WINDOW
+
+
+def test_launch_server_tray_binary_handles_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing executable should fall back to the Python module."""
+
+    monkeypatch.setattr(cli, "_find_server_tray_binary", lambda: None)
+
+    assert cli._launch_server_tray_binary([]) is False
+
+
+def test_launch_server_tray_falls_back_to_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the binary is unavailable, the module entry point is invoked."""
+
+    monkeypatch.setattr(cli, "_launch_server_tray_binary", lambda argv: False)
+
+    calls: list[list[str]] = []
+
+    class DummyModule:
+        @staticmethod
+        def main(argv: list[str]) -> None:
+            calls.append(list(argv))
+
+    monkeypatch.setattr(cli, "import_module", lambda name, package=None: DummyModule)
+
+    assert cli._launch_server_tray(["--bar"]) is True
+    assert calls == [["--bar"]]

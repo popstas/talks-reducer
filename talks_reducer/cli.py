@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
+import subprocess
 import sys
 import time
 from importlib import import_module
@@ -246,6 +248,103 @@ def _launch_server(argv: Sequence[str]) -> bool:
     return True
 
 
+def _launch_server_tray(argv: Sequence[str]) -> bool:
+    """Attempt to launch the server tray helper with the provided arguments."""
+
+    if _launch_server_tray_binary(argv):
+        return True
+
+    try:
+        tray_module = import_module(".server_tray", __package__)
+    except ImportError:
+        return False
+
+    tray_main = getattr(tray_module, "main", None)
+    if tray_main is None:
+        return False
+
+    tray_main(list(argv))
+    return True
+
+
+def _launch_server_tray_binary(argv: Sequence[str]) -> bool:
+    """Launch the packaged server tray executable when available."""
+
+    command = _find_server_tray_binary()
+    if command is None:
+        return False
+
+    tray_args = [str(command), *list(argv)]
+
+    run_kwargs: Dict[str, object] = {"check": False}
+
+    if sys.platform == "win32":
+        no_window_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if no_window_flag and _should_hide_subprocess_console():
+            run_kwargs["creationflags"] = no_window_flag
+
+    try:
+        result = subprocess.run(tray_args, **run_kwargs)
+    except OSError:
+        return False
+
+    return result.returncode == 0
+
+
+def _find_server_tray_binary() -> Optional[Path]:
+    """Return the best available path to the server tray executable."""
+
+    binary_name = "talks-reducer-server-tray"
+    candidates: List[Path] = []
+
+    which_path = shutil.which(binary_name)
+    if which_path:
+        candidates.append(Path(which_path))
+
+    try:
+        launcher_dir = Path(sys.argv[0]).resolve().parent
+    except Exception:
+        launcher_dir = None
+
+    potential_names = [binary_name]
+    if sys.platform == "win32":
+        potential_names = [f"{binary_name}.exe", binary_name]
+
+    if launcher_dir is not None:
+        for name in potential_names:
+            candidates.append(launcher_dir / name)
+
+    for candidate in candidates:
+        if candidate and candidate.exists() and os.access(candidate, os.X_OK):
+            return candidate
+
+    return None
+
+
+def _should_hide_subprocess_console() -> bool:
+    """Return ``True`` when a detached Windows launch should hide the console."""
+
+    if sys.platform != "win32":
+        return False
+
+    try:
+        import ctypes
+    except Exception:  # pragma: no cover - optional runtime dependency
+        return False
+
+    try:
+        get_console_window = ctypes.windll.kernel32.GetConsoleWindow  # type: ignore[attr-defined]
+    except Exception:  # pragma: no cover - platform specific guard
+        return False
+
+    try:
+        handle = get_console_window()
+    except Exception:  # pragma: no cover - defensive fallback
+        return False
+
+    return handle == 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     """Entry point for the command line interface.
 
@@ -256,6 +355,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         argv_list = sys.argv[1:]
     else:
         argv_list = list(argv)
+
+    if "--server" in argv_list:
+        index = argv_list.index("--server")
+        tray_args = argv_list[index + 1 :]
+        if not _launch_server_tray(tray_args):
+            print("Server tray mode is unavailable.", file=sys.stderr)
+            sys.exit(1)
+        return
 
     if argv_list and argv_list[0] in {"server", "serve"}:
         if not _launch_server(argv_list[1:]):
