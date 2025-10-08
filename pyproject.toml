@@ -19,6 +19,7 @@ dependencies = [
     "tqdm>=4.65.0",
     "tkinterdnd2>=0.3.0",
     "Pillow>=9.0.0",
+    "pystray>=0.19.5",
     "imageio-ffmpeg>=0.4.8",
     "gradio>=4.0.0",
 ]
@@ -38,6 +39,7 @@ dev = [
 talks-reducer = "talks_reducer.cli:main"
 talks-reducer-gui = "talks_reducer.gui:main"
 talks-reducer-server = "talks_reducer.server:main"
+talks-reducer-server-tray = "talks_reducer.server_tray:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "talks_reducer.__about__.__version__"}

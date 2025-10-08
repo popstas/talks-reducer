@@ -57,6 +57,12 @@ Prefer a lightweight browser interface? Launch the Gradio-powered simple mode wi
 talks-reducer server
 ```
 
+Want the server to live in your system tray instead of a terminal window? Use:
+
+```sh
+talks-reducer server-tray
+```
+
 This opens a local web page featuring a drag-and-drop upload zone, a **Small video** checkbox that mirrors the CLI preset, a live
 progress indicator, and automatic previews of the processed output. Once the job completes you can inspect the resulting compression
 ratio and download the rendered video directly from the page.
@@ -65,7 +71,7 @@ ratio and download the rendered video directly from the page.
 
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
 2. Drag a video onto the **Video file** drop zone or click to browse and select one from disk.
-3. (Optional) Enable **Small video** before the upload finishes to apply the 720p/128 kbps preset.
+3. **Small video** starts enabled to apply the 720p/128 kbps preset. Clear the box before the upload finishes if you want to keep the original resolution and bitrate.
 4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives.
 5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally.
 

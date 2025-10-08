@@ -273,8 +273,9 @@ def build_interface() -> gr.Blocks:
         gr.Markdown(
             """
             ## Talks Reducer — Simple Server
-            Drop a video into the zone below or click to browse. Toggle **Small video** to
-            apply the 720p/128k preset before processing starts.
+            Drop a video into the zone below or click to browse. **Small video** is enabled
+            by default to apply the 720p/128k preset before processing starts—clear it to
+            keep the original resolution.
             """.strip()
         )
 
@@ -284,7 +285,7 @@ def build_interface() -> gr.Blocks:
                 file_types=["video"],
                 type="filepath",
             )
-            small_checkbox = gr.Checkbox(label="Small video", value=False)
+            small_checkbox = gr.Checkbox(label="Small video", value=True)
 
         video_output = gr.Video(label="Processed video")
         summary_output = gr.Markdown()
