@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import shutil
+import socket
 import tempfile
 from contextlib import AbstractContextManager, suppress
 from pathlib import Path
@@ -136,6 +137,10 @@ class GradioProgressReporter(SignalProgressReporter):
         self._progress_callback(bounded_current, total_value, display_desc)
 
 
+_FAVICON_PATH = (
+    Path(__file__).resolve().parent.parent / "docs" / "assets" / "icon.ico"
+)
+_FAVICON_PATH_STR = str(_FAVICON_PATH) if _FAVICON_PATH.exists() else None
 _WORKSPACES: list[Path] = []
 
 
@@ -155,6 +160,26 @@ def _cleanup_workspaces() -> None:
             with suppress(Exception):
                 shutil.rmtree(workspace)
     _WORKSPACES.clear()
+
+
+def _describe_server_host() -> str:
+    """Return a human-readable description of the server hostname and IP."""
+
+    hostname = socket.gethostname().strip()
+    ip_address = ""
+
+    with suppress(OSError):
+        resolved_ip = socket.gethostbyname(hostname or "localhost")
+        if resolved_ip:
+            ip_address = resolved_ip
+
+    if hostname and ip_address and hostname != ip_address:
+        return f"{hostname} ({ip_address})"
+    if ip_address:
+        return ip_address
+    if hostname:
+        return hostname
+    return "unknown"
 
 
 def _build_output_path(input_path: Path, workspace: Path, small: bool) -> Path:
@@ -269,13 +294,17 @@ def process_video(
 def build_interface() -> gr.Blocks:
     """Construct the Gradio Blocks application for the simple web UI."""
 
+    server_identity = _describe_server_host()
+
     with gr.Blocks(title="Talks Reducer Web UI") as demo:
         gr.Markdown(
-            """
-            ## Talks Reducer — Simple Server
+            f"""
+            ## Talks Reducer Web UI
             Drop a video into the zone below or click to browse. **Small video** is enabled
             by default to apply the 720p/128k preset before processing starts—clear it to
             keep the original resolution.
+
+            Video will be rendered on server **{server_identity}**.
             """.strip()
         )
 
@@ -337,6 +366,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         server_port=args.port,
         share=args.share,
         inbrowser=not args.no_browser,
+        favicon_path=_FAVICON_PATH_STR,
     )
 
 
