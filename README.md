@@ -63,6 +63,11 @@ Want the server to live in your system tray instead of a terminal window? Use:
 talks-reducer server-tray
 ```
 
+Pass `--debug` to print verbose logs about the tray icon lifecycle, and
+`--tray-mode pystray-detached` to try pystray's alternate detached runner. If
+the icon backend refuses to appear, fall back to `--tray-mode headless` to keep
+the web server running without a tray process.
+
 This opens a local web page featuring a drag-and-drop upload zone, a **Small video** checkbox that mirrors the CLI preset, a live
 progress indicator, and automatic previews of the processed output. Once the job completes you can inspect the resulting compression
 ratio and download the rendered video directly from the page.

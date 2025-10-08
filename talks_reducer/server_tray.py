@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import logging
 import threading
 import time
 import webbrowser
 from contextlib import suppress
+from importlib import resources
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
@@ -24,6 +26,9 @@ else:
     PYSTRAY_IMPORT_ERROR = None
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 def _guess_local_url(host: Optional[str], port: int) -> str:
     """Return the URL the server is most likely reachable at locally."""
 
@@ -37,16 +42,37 @@ def _guess_local_url(host: Optional[str], port: int) -> str:
 def _load_icon() -> Image.Image:
     """Load the tray icon image, falling back to a solid accent square."""
 
+    LOGGER.debug("Attempting to load tray icon image.")
+
     candidates = [
         Path(__file__).resolve().parent.parent / "docs" / "assets" / "icon.png",
         Path(__file__).resolve().parent / "icon.png",
     ]
 
     for candidate in candidates:
+        LOGGER.debug("Checking icon candidate at %s", candidate)
         if candidate.exists():
-            with suppress(Exception):
-                return Image.open(candidate).copy()
+            try:
+                image = Image.open(candidate).copy()
+            except Exception as exc:  # pragma: no cover - diagnostic log
+                LOGGER.warning("Failed to load tray icon from %s: %s", candidate, exc)
+            else:
+                LOGGER.debug("Loaded tray icon from %s", candidate)
+                return image
 
+    with suppress(FileNotFoundError):
+        resource_icon = resources.files("talks_reducer") / "assets" / "icon.png"
+        if resource_icon.is_file():
+            LOGGER.debug("Loading tray icon from package resources")
+            with resource_icon.open("rb") as handle:
+                try:
+                    return Image.open(handle).copy()
+                except Exception as exc:  # pragma: no cover - diagnostic log
+                    LOGGER.warning(
+                        "Failed to load tray icon from package resources: %s", exc
+                    )
+
+    LOGGER.warning("Falling back to generated tray icon; packaged image not found")
     # Fallback to a simple accent-colored square to avoid import errors
     image = Image.new("RGBA", (64, 64), color=(37, 99, 235, 255))
     return image
@@ -62,11 +88,13 @@ class _ServerTrayApplication:
         port: int,
         share: bool,
         open_browser: bool,
+        tray_mode: str,
     ) -> None:
         self._host = host
         self._port = port
         self._share = share
         self._open_browser_on_start = open_browser
+        self._tray_mode = tray_mode
 
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
@@ -81,6 +109,12 @@ class _ServerTrayApplication:
     def _launch_server(self) -> None:
         """Start the Gradio server in the background and record its URLs."""
 
+        LOGGER.info(
+            "Starting Talks Reducer server on host=%s port=%s share=%s",
+            self._host or "127.0.0.1",
+            self._port,
+            self._share,
+        )
         demo = build_interface()
         server = demo.launch(
             server_name=self._host,
@@ -97,12 +131,14 @@ class _ServerTrayApplication:
         )
         self._share_url = getattr(server, "share_url", None)
         self._ready_event.set()
+        LOGGER.info("Server ready at %s", self._local_url)
 
         # Keep checking for a share URL while the server is running.
         while not self._stop_event.is_set():
             share_url = getattr(server, "share_url", None)
             if share_url:
                 self._share_url = share_url
+                LOGGER.info("Share URL available: %s", share_url)
             time.sleep(0.5)
 
     # Tray helpers -----------------------------------------------------
@@ -120,6 +156,7 @@ class _ServerTrayApplication:
         url = self._resolve_url()
         if url:
             webbrowser.open(url)
+            LOGGER.debug("Opened browser to %s", url)
 
     def _handle_quit(
         self,
@@ -148,6 +185,17 @@ class _ServerTrayApplication:
         if self._open_browser_on_start:
             self._handle_open()
 
+        if self._tray_mode == "headless":
+            LOGGER.warning(
+                "Tray icon disabled (tray_mode=headless); press Ctrl+C to stop the server."
+            )
+            try:
+                while not self._stop_event.wait(0.5):
+                    pass
+            finally:
+                self.stop()
+            return
+
         icon_image = _load_icon()
         menu = pystray.Menu(
             pystray.MenuItem("Open Talks Reducer", self._handle_open),
@@ -156,6 +204,18 @@ class _ServerTrayApplication:
         self._icon = pystray.Icon(
             "talks-reducer", icon_image, "Talks Reducer Server", menu=menu
         )
+
+        if self._tray_mode == "pystray-detached":
+            LOGGER.info("Running tray icon in detached mode")
+            self._icon.run_detached()
+            try:
+                while not self._stop_event.wait(0.5):
+                    pass
+            finally:
+                self.stop()
+            return
+
+        LOGGER.info("Running tray icon in blocking mode")
         self._icon.run()
 
     def stop(self) -> None:
@@ -172,16 +232,11 @@ class _ServerTrayApplication:
         if self._server_handle is not None:
             with suppress(Exception):
                 self._server_handle.close()
+            LOGGER.info("Shut down Talks Reducer server")
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     """Launch the Gradio server with a companion system tray icon."""
-
-    if PYSTRAY_IMPORT_ERROR is not None:  # pragma: no cover - import-time guard
-        raise RuntimeError(
-            "System tray mode requires the 'pystray' dependency. Install it with "
-            "`pip install pystray` or `pip install talks-reducer[dev]` and try again."
-        ) from PYSTRAY_IMPORT_ERROR
 
     parser = argparse.ArgumentParser(
         description="Launch the Talks Reducer server with a system tray icon."
@@ -206,14 +261,41 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         action="store_true",
         help="Do not automatically open the browser window.",
     )
+    parser.add_argument(
+        "--tray-mode",
+        choices=("pystray", "pystray-detached", "headless"),
+        default="pystray",
+        help=(
+            "Select how the tray runs: foreground pystray (default), detached "
+            "pystray worker, or disable the tray entirely."
+        ),
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose logging for troubleshooting.",
+    )
 
     args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    if args.tray_mode != "headless" and PYSTRAY_IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "System tray mode requires the 'pystray' dependency. Install it with "
+            "`pip install pystray` or `pip install talks-reducer[dev]` and try again."
+        ) from PYSTRAY_IMPORT_ERROR
 
     app = _ServerTrayApplication(
         host=args.host,
         port=args.port,
         share=args.share,
         open_browser=not args.no_browser,
+        tray_mode=args.tray_mode,
     )
 
     atexit.register(app.stop)
