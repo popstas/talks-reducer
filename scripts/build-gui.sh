@@ -145,6 +145,7 @@ if [[ "$OS_NAME" == "windows" ]]; then
     pyinstaller launcher.py --name talks-reducer --windowed \
         --hidden-import=tkinterdnd2 \
         --collect-submodules talks_reducer \
+        --collect-data gradio_client \
         --icon=docs/assets/icon.ico \
         --version-file=version.txt \
         --add-data="docs/assets/icon.png;docs/assets" \
@@ -157,6 +158,7 @@ else
     PYINSTALLER_ARGS=(launcher.py --name talks-reducer --windowed \
         --hidden-import=tkinterdnd2 \
         --collect-submodules talks_reducer \
+        --collect-data gradio_client \
         --icon=docs/assets/icon.ico \
         --add-data="docs/assets/icon.png:docs/assets" \
         --add-data="docs/assets/icon.ico:docs/assets" \
