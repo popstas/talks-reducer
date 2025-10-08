@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -10,7 +11,7 @@ import sys
 import threading
 from importlib.metadata import version
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Iterable, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, List, Optional, Sequence
 
 if TYPE_CHECKING:
     import tkinter as tk
@@ -147,6 +148,32 @@ DARK_THEME = {
     "selection_background": "#333333",
     "selection_foreground": "#f3f4f6",
 }
+
+
+_TRAY_LOCK = threading.Lock()
+_TRAY_PROCESS: Optional[subprocess.Popen[Any]] = None
+
+
+def _ensure_server_tray_running(extra_args: Optional[Sequence[str]] = None) -> None:
+    """Start the server tray in a background process if one is not active."""
+
+    global _TRAY_PROCESS
+
+    with _TRAY_LOCK:
+        if _TRAY_PROCESS is not None and _TRAY_PROCESS.poll() is None:
+            return
+
+        command = [sys.executable, "-m", "talks_reducer.server_tray"]
+        if extra_args:
+            command.extend(extra_args)
+
+        try:
+            _TRAY_PROCESS = subprocess.Popen(command)
+        except Exception as exc:  # pragma: no cover - best-effort fallback
+            _TRAY_PROCESS = None
+            sys.stderr.write(
+                f"Warning: failed to launch Talks Reducer server tray: {exc}\n"
+            )
 
 
 class _GuiProgressHandle(ProgressHandle):
@@ -1493,6 +1520,17 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
     if argv is None:
         argv = sys.argv[1:]
 
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        "--no-tray",
+        action="store_true",
+        help="Do not start the Talks Reducer server tray alongside the GUI.",
+    )
+
+    parsed_args, remaining = parser.parse_known_args(argv)
+    no_tray = parsed_args.no_tray
+    argv = remaining
+
     if argv:
         launch_gui = False
         if sys.platform == "win32" and not any(arg.startswith("-") for arg in argv):
@@ -1506,6 +1544,8 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
         if launch_gui:
             try:
                 app = TalksReducerGUI(argv, auto_run=True)
+                if not no_tray:
+                    _ensure_server_tray_running()
                 app.run()
                 return True
             except Exception:
@@ -1567,6 +1607,8 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
     # Catch and report any errors during GUI initialization
     try:
         app = TalksReducerGUI()
+        if not no_tray:
+            _ensure_server_tray_running()
         app.run()
         return True
     except Exception as e:

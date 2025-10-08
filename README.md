@@ -70,11 +70,14 @@ the web server running without a tray process. The tray menu includes an **Open 
 item (also triggered by double-clicking the icon) that launches the desktop
 Talks Reducer interface alongside an **Open WebUI** entry that opens the Gradio
 page in your browser. Close the GUI window to return to the tray without
-stopping the server. The GUI now launches automatically when the tray starts;
-pass `--no-gui` if you prefer to spawn it manually, or `--open-gui` to override
-other presets. The tray no longer opens a browser automatically—pass
-`--open-browser` if you prefer the web page to launch as soon as the server is
-ready.
+stopping the server. Launching the GUI directly now starts the tray-backed
+server in the background before the window appears so the icon stays available
+after you close it; add `--no-tray` when running `python -m talks_reducer.gui`
+if you prefer to skip the background server entirely. The tray command itself
+never launches the GUI automatically, so use the menu item (or rerun the GUI
+with `--no-tray`) whenever you want to reopen it. The tray no longer opens a
+browser automatically—pass `--open-browser` if you prefer the web page to
+launch as soon as the server is ready.
 
 This opens a local web page featuring a drag-and-drop upload zone, a **Small video** checkbox that mirrors the CLI preset, a live
 progress indicator, and automatic previews of the processed output. Once the job completes you can inspect the resulting compression

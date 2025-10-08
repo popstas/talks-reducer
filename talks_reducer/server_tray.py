@@ -91,14 +91,12 @@ class _ServerTrayApplication:
         share: bool,
         open_browser: bool,
         tray_mode: str,
-        open_gui: bool,
     ) -> None:
         self._host = host
         self._port = port
         self._share = share
         self._open_browser_on_start = open_browser
         self._tray_mode = tray_mode
-        self._open_gui_on_start = open_gui
 
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
@@ -206,7 +204,9 @@ class _ServerTrayApplication:
 
             try:
                 LOGGER.info("Launching Talks Reducer GUI via %s", sys.executable)
-                process = subprocess.Popen([sys.executable, "-m", "talks_reducer.gui"])
+                process = subprocess.Popen(
+                    [sys.executable, "-m", "talks_reducer.gui", "--no-tray"]
+                )
             except Exception as exc:  # pragma: no cover - platform specific
                 LOGGER.error("Failed to launch Talks Reducer GUI: %s", exc)
                 self._gui_process = None
@@ -248,9 +248,6 @@ class _ServerTrayApplication:
 
         if self._open_browser_on_start:
             self._handle_open_webui()
-
-        if self._open_gui_on_start:
-            self._launch_gui()
 
         if self._tray_mode == "headless":
             LOGGER.warning(
@@ -377,20 +374,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "pystray worker, or disable the tray entirely."
         ),
     )
-    gui_group = parser.add_mutually_exclusive_group()
-    gui_group.add_argument(
-        "--open-gui",
-        dest="open_gui",
-        action="store_true",
-        help="Launch the Talks Reducer desktop GUI after startup (default).",
-    )
-    gui_group.add_argument(
-        "--no-gui",
-        dest="open_gui",
-        action="store_false",
-        help="Skip launching the desktop GUI automatically.",
-    )
-    parser.set_defaults(open_gui=True)
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -417,7 +400,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         share=args.share,
         open_browser=args.open_browser,
         tray_mode=args.tray_mode,
-        open_gui=args.open_gui,
     )
 
     atexit.register(app.stop)
