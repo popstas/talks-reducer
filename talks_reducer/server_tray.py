@@ -157,6 +157,8 @@ class _ServerTrayApplication:
         if url:
             webbrowser.open(url)
             LOGGER.debug("Opened browser to %s", url)
+        else:
+            LOGGER.warning("Server URL not yet available; please try again.")
 
     def _handle_quit(
         self,
@@ -198,7 +200,11 @@ class _ServerTrayApplication:
 
         icon_image = _load_icon()
         menu = pystray.Menu(
-            pystray.MenuItem("Open Talks Reducer", self._handle_open),
+            pystray.MenuItem(
+                "Open WebUI",
+                self._handle_open,
+                default=True,
+            ),
             pystray.MenuItem("Quit", self._handle_quit),
         )
         self._icon = pystray.Icon(
