@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 try:
     from .cli import gather_input_files
     from .cli import main as cli_main
+    from .discovery import discover_servers
     from .ffmpeg import FFmpegNotFoundError
     from .models import ProcessingOptions, default_temp_folder
     from .pipeline import speed_up_video
@@ -35,6 +36,7 @@ except ImportError:  # pragma: no cover - handled at runtime
 
     from talks_reducer.cli import gather_input_files
     from talks_reducer.cli import main as cli_main
+    from talks_reducer.discovery import discover_servers
     from talks_reducer.ffmpeg import FFmpegNotFoundError
     from talks_reducer.models import ProcessingOptions, default_temp_folder
     from talks_reducer.pipeline import speed_up_video
@@ -357,6 +359,11 @@ class TalksReducerGUI:
         self.open_after_convert_var.trace_add(
             "write", self._on_open_after_convert_change
         )
+        self.server_url_var = tk.StringVar(
+            value=str(self._get_setting("server_url", ""))
+        )
+        self.server_url_var.trace_add("write", self._on_server_url_change)
+        self._discovery_thread: Optional[threading.Thread] = None
 
         self._build_layout()
         self._apply_simple_mode(initial=True)
@@ -539,11 +546,23 @@ class TalksReducerGUI:
         self.sample_rate_var = self.tk.StringVar(value="48000")
         self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=6)
 
+        self.ttk.Label(self.advanced_frame, text="Server URL").grid(
+            row=7, column=0, sticky="w", pady=4
+        )
+        self.server_url_entry = self.ttk.Entry(
+            self.advanced_frame, textvariable=self.server_url_var
+        )
+        self.server_url_entry.grid(row=7, column=1, sticky="ew", pady=4)
+        self.server_discover_button = self.ttk.Button(
+            self.advanced_frame, text="Discover", command=self._start_discovery
+        )
+        self.server_discover_button.grid(row=7, column=2, padx=(8, 0))
+
         self.ttk.Label(self.advanced_frame, text="Theme").grid(
-            row=7, column=0, sticky="w", pady=(8, 0)
+            row=8, column=0, sticky="w", pady=(8, 0)
         )
         theme_choice = self.ttk.Frame(self.advanced_frame)
-        theme_choice.grid(row=7, column=1, columnspan=2, sticky="w", pady=(8, 0))
+        theme_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=(8, 0))
         for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
             self.ttk.Radiobutton(
                 theme_choice,
@@ -645,6 +664,110 @@ class TalksReducerGUI:
             )
             button.grid(row=row, column=2, padx=(8, 0))
 
+    def _start_discovery(self) -> None:
+        """Search the local network for running Talks Reducer servers."""
+
+        if self._discovery_thread and self._discovery_thread.is_alive():
+            return
+
+        self.server_discover_button.configure(
+            state=self.tk.DISABLED, text="Discovering…"
+        )
+        self._append_log("Discovering Talks Reducer servers on port 9005…")
+
+        def worker() -> None:
+            try:
+                urls = discover_servers()
+            except Exception as exc:  # pragma: no cover - network failure safeguard
+                self._notify(lambda: self._on_discovery_failed(exc))
+                return
+            self._notify(lambda: self._on_discovery_complete(urls))
+
+        self._discovery_thread = threading.Thread(target=worker, daemon=True)
+        self._discovery_thread.start()
+
+    def _on_discovery_failed(self, exc: Exception) -> None:
+        self.server_discover_button.configure(state=self.tk.NORMAL, text="Discover")
+        message = f"Discovery failed: {exc}"
+        self._append_log(message)
+        self.messagebox.showerror("Discovery failed", message)
+
+    def _on_discovery_complete(self, urls: List[str]) -> None:
+        self.server_discover_button.configure(state=self.tk.NORMAL, text="Discover")
+        if not urls:
+            self._append_log("No Talks Reducer servers were found.")
+            self.messagebox.showinfo(
+                "No servers found",
+                "No Talks Reducer servers responded on port 9005.",
+            )
+            return
+
+        self._append_log(
+            f"Discovered {len(urls)} server{'s' if len(urls) != 1 else ''}."
+        )
+
+        if len(urls) == 1:
+            self.server_url_var.set(urls[0])
+            return
+
+        self._show_discovery_results(urls)
+
+    def _show_discovery_results(self, urls: List[str]) -> None:
+        dialog = self.tk.Toplevel(self.root)
+        dialog.title("Select server")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        self.ttk.Label(dialog, text="Select a Talks Reducer server:").grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=self.PADDING, pady=(12, 4)
+        )
+
+        listbox = self.tk.Listbox(
+            dialog,
+            height=min(10, len(urls)),
+            selectmode=self.tk.SINGLE,
+        )
+        listbox.grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            padx=self.PADDING,
+            sticky="nsew",
+        )
+        dialog.columnconfigure(0, weight=1)
+        dialog.columnconfigure(1, weight=1)
+        dialog.rowconfigure(1, weight=1)
+
+        for url in urls:
+            listbox.insert(self.tk.END, url)
+        listbox.select_set(0)
+
+        def choose(_: object | None = None) -> None:
+            selection = listbox.curselection()
+            if not selection:
+                return
+            index = selection[0]
+            self.server_url_var.set(urls[index])
+            dialog.grab_release()
+            dialog.destroy()
+
+        def cancel() -> None:
+            dialog.grab_release()
+            dialog.destroy()
+
+        listbox.bind("<Double-Button-1>", choose)
+        listbox.bind("<Return>", choose)
+
+        button_frame = self.ttk.Frame(dialog)
+        button_frame.grid(row=2, column=0, columnspan=2, pady=(8, 12))
+        self.ttk.Button(button_frame, text="Use server", command=choose).pack(
+            side=self.tk.LEFT, padx=(0, 8)
+        )
+        self.ttk.Button(button_frame, text="Cancel", command=cancel).pack(
+            side=self.tk.LEFT
+        )
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+
     def _toggle_simple_mode(self) -> None:
         self._update_setting("simple_mode", self.simple_mode_var.get())
         self._apply_simple_mode()
@@ -726,6 +849,10 @@ class TalksReducerGUI:
         self._update_setting(
             "open_after_convert", bool(self.open_after_convert_var.get())
         )
+
+    def _on_server_url_change(self, *_: object) -> None:
+        value = self.server_url_var.get().strip()
+        self._update_setting("server_url", value)
 
     def _apply_theme(self) -> None:
         preference = self.theme_var.get().lower()
@@ -1018,14 +1145,12 @@ class TalksReducerGUI:
         self._append_log("Starting processing…")
         self._stop_requested = False
         open_after_convert = bool(self.open_after_convert_var.get())
+        server_url = self.server_url_var.get().strip()
 
         def worker() -> None:
             def set_process(proc: subprocess.Popen) -> None:
                 self._ffmpeg_process = proc
 
-            reporter = _TkProgressReporter(
-                self._append_log, process_callback=set_process
-            )
             try:
                 files = gather_input_files(self.input_files)
                 if not files:
@@ -1037,6 +1162,20 @@ class TalksReducerGUI:
                     self._set_status("Idle")
                     return
 
+                if server_url:
+                    success = self._process_files_via_server(
+                        files,
+                        args,
+                        server_url,
+                        open_after_convert=open_after_convert,
+                    )
+                    if success:
+                        self._notify(self._hide_stop_button)
+                    return
+
+                reporter = _TkProgressReporter(
+                    self._append_log, process_callback=set_process
+                )
                 for index, file in enumerate(files, start=1):
                     self._append_log(
                         f"Processing {index}/{len(files)}: {os.path.basename(file)}"
@@ -1086,7 +1225,10 @@ class TalksReducerGUI:
         self._processing_thread.start()
 
         # Show Stop button when processing starts
-        self.stop_button.grid()
+        if server_url:
+            self.stop_button.grid_remove()
+        else:
+            self.stop_button.grid()
 
     def _stop_processing(self) -> None:
         """Stop the currently running processing by terminating FFmpeg."""
@@ -1153,6 +1295,80 @@ class TalksReducerGUI:
         if self.small_var.get():
             args["small"] = True
         return args
+
+    def _process_files_via_server(
+        self,
+        files: List[str],
+        args: dict[str, object],
+        server_url: str,
+        *,
+        open_after_convert: bool,
+    ) -> bool:
+        """Send *files* to the configured server for processing."""
+
+        try:
+            service_module = importlib.import_module("talks_reducer.service_client")
+        except ModuleNotFoundError as exc:
+            self._append_log(f"Server client unavailable: {exc}")
+            self._notify(
+                lambda: self.messagebox.showerror(
+                    "Server unavailable",
+                    "Remote processing requires the gradio_client package.",
+                )
+            )
+            self._notify(lambda: self._set_status("Error"))
+            return False
+
+        output_override = args.get("output_file") if len(files) == 1 else None
+        ignored = [key for key in args if key not in {"output_file", "small"}]
+        if ignored:
+            ignored_options = ", ".join(sorted(ignored))
+            self._append_log(
+                f"Server mode ignores the following options: {ignored_options}"
+            )
+
+        for index, file in enumerate(files, start=1):
+            basename = os.path.basename(file)
+            self._append_log(
+                f"Uploading {index}/{len(files)}: {basename} to {server_url}"
+            )
+            try:
+                destination, summary, log_text = service_module.send_video(
+                    input_path=Path(file),
+                    output_path=output_override,
+                    server_url=server_url,
+                    small=bool(args.get("small", False)),
+                )
+            except Exception as exc:  # pragma: no cover - network safeguard
+                error_msg = f"Processing failed: {exc}"
+                self._append_log(error_msg)
+                self._notify(lambda: self._set_status("Error"))
+                self._notify(
+                    lambda: self.messagebox.showerror(
+                        "Server error",
+                        f"Failed to process {basename}: {exc}",
+                    )
+                )
+                return False
+
+            self._last_output = Path(destination)
+            self._last_time_ratio = None
+            self._last_size_ratio = None
+            for line in summary.splitlines():
+                self._append_log(line)
+            if log_text.strip():
+                self._append_log("Server log:")
+                for line in log_text.splitlines():
+                    self._append_log(line)
+            if open_after_convert:
+                self._notify(
+                    lambda path=self._last_output: self._open_in_file_manager(path)
+                )
+
+        self._append_log("All jobs finished successfully.")
+        self._notify(lambda: self.open_button.configure(state=self.tk.NORMAL))
+        self._notify(self._clear_input_files)
+        return True
 
     def _parse_float(self, value: str, label: str) -> float:
         try:

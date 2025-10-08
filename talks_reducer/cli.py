@@ -98,6 +98,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Apply small file optimizations: resize video to 720p, audio to 128k bitrate, best compression (uses CUDA if available).",
     )
+    parser.add_argument(
+        "--url",
+        dest="server_url",
+        default=None,
+        help="Process videos via a Talks Reducer server at the provided base URL (for example, http://localhost:9005).",
+    )
     return parser
 
 
@@ -126,6 +132,86 @@ def gather_input_files(paths: List[str]) -> List[str]:
                 if audio.is_valid_input_file(candidate):
                     files.append(candidate)
     return files
+
+
+def _print_total_time(start_time: float) -> None:
+    """Print the elapsed processing time since *start_time*."""
+
+    end_time = time.time()
+    total_time = end_time - start_time
+    hours, remainder = divmod(total_time, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    print(f"\nTime: {int(hours)}h {int(minutes)}m {seconds:.2f}s")
+
+
+def _process_via_server(
+    files: Sequence[str], parsed_args: argparse.Namespace, *, start_time: float
+) -> None:
+    """Upload *files* to the configured server and download the results."""
+
+    try:
+        from . import service_client
+    except ImportError as exc:  # pragma: no cover - optional dependency guard
+        print(
+            "Server mode requires the gradio_client dependency." f" ({exc})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    server_url = parsed_args.server_url
+    if not server_url:
+        return
+
+    output_override: Optional[Path] = None
+    if parsed_args.output_file and len(files) == 1:
+        output_override = Path(parsed_args.output_file).expanduser()
+    elif parsed_args.output_file and len(files) > 1:
+        print(
+            "Warning: --output is ignored when processing multiple files via the server.",
+            file=sys.stderr,
+        )
+
+    unsupported_options = []
+    for name in (
+        "silent_threshold",
+        "silent_speed",
+        "sounded_speed",
+        "frame_spreadage",
+        "sample_rate",
+        "temp_folder",
+    ):
+        if getattr(parsed_args, name) is not None:
+            unsupported_options.append(f"--{name.replace('_', '-')}")
+
+    if unsupported_options:
+        print(
+            "Warning: the following options are ignored when using --url: "
+            + ", ".join(sorted(unsupported_options)),
+            file=sys.stderr,
+        )
+
+    for index, file in enumerate(files, start=1):
+        basename = os.path.basename(file)
+        print(
+            f"Processing file {index}/{len(files)} '{basename}' via server {server_url}"
+        )
+        try:
+            destination, summary, log_text = service_client.send_video(
+                input_path=Path(file),
+                output_path=output_override,
+                server_url=server_url,
+                small=bool(parsed_args.small),
+            )
+        except Exception as exc:  # pragma: no cover - network failure safeguard
+            print(f"Failed to process {basename}: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        print(summary)
+        print(f"Saved processed video to {destination}")
+        if log_text.strip():
+            print("\nServer log:\n" + log_text)
+
+    _print_total_time(start_time)
 
 
 def _launch_gui(argv: Sequence[str]) -> bool:
@@ -198,6 +284,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if len(files) > 1 and "output_file" in args:
         del args["output_file"]
 
+    if parsed_args.server_url:
+        _process_via_server(files, parsed_args, start_time=start_time)
+        return
+
     reporter = TqdmProgressReporter()
 
     for index, file in enumerate(files):
@@ -241,11 +331,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         if summary_parts:
             reporter.log("Result: " + ", ".join(summary_parts))
 
-    end_time = time.time()
-    total_time = end_time - start_time
-    hours, remainder = divmod(total_time, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    print(f"\nTime: {int(hours)}h {int(minutes)}m {seconds:.2f}s")
+    _print_total_time(start_time)
 
 
 if __name__ == "__main__":

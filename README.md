@@ -42,6 +42,14 @@ Example CLI usage:
 talks-reducer --small input.mp4
 ```
 
+Need to offload work to a remote Talks Reducer server? Pass `--url` with the
+server address and the CLI will upload the input, wait for processing to finish,
+and download the rendered video:
+
+```sh
+talks-reducer --url http://localhost:9005 demo.mp4
+```
+
 ### Speech detection
 
 Talks Reducer now relies on its built-in volume thresholding to detect speech. Adjust `--silent_threshold` if you need to fine-tune when segments count as silence. Dropping the optional Silero VAD integration keeps the install lightweight and avoids pulling in PyTorch.
@@ -86,6 +94,12 @@ launch as soon as the server is ready.
 This opens a local web page featuring a drag-and-drop upload zone, a **Small video** checkbox that mirrors the CLI preset, a live
 progress indicator, and automatic previews of the processed output. Once the job completes you can inspect the resulting compression
 ratio and download the rendered video directly from the page.
+
+The desktop GUI mirrors this behaviour. Open **Advanced** settings to provide a
+server URL and click **Discover** to scan your local network for Talks Reducer
+instances listening on port `9005`. Leaving the field blank keeps processing
+local; selecting a discovered server delegates rendering to that machine while
+the GUI downloads the finished files automatically.
 
 ### Uploading and retrieving a processed video
 
