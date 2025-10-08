@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Sequence
@@ -176,17 +177,75 @@ def test_launch_server_tray_prefers_external_binary(
 ) -> None:
     """A packaged tray binary should be executed when present."""
 
-    recorded: list[list[str]] = []
+    recorded: list[tuple[list[str], dict[str, object]]] = []
 
-    def fake_run(cmd, check=False):  # type: ignore[no-untyped-def]
-        recorded.append(list(cmd))
+    def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        recorded.append((list(cmd), dict(kwargs)))
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(cli, "_find_server_tray_binary", lambda: Path("/tmp/tray.exe"))
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
 
     assert cli._launch_server_tray_binary(["--foo"])
-    assert recorded == [["/tmp/tray.exe", "--foo"]]
+    assert recorded == [(["/tmp/tray.exe", "--foo"], {"check": False})]
+
+
+def test_launch_server_tray_binary_hides_console_without_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows launches without an attached console should hide the tray window."""
+
+    recorded: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        recorded.append((list(cmd), dict(kwargs)))
+        return SimpleNamespace(returncode=0)
+
+    fake_ctypes = SimpleNamespace(
+        windll=SimpleNamespace(kernel32=SimpleNamespace(GetConsoleWindow=lambda: 0))
+    )
+    monkeypatch.setitem(sys.modules, "ctypes", fake_ctypes)
+    monkeypatch.setattr(cli, "_find_server_tray_binary", lambda: Path("/tmp/tray.exe"))
+    monkeypatch.setattr(cli, "_should_hide_subprocess_console", lambda: True)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    monkeypatch.setattr(cli.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    assert cli._launch_server_tray_binary([])
+    assert recorded == [
+        (
+            ["/tmp/tray.exe"],
+            {"check": False, "creationflags": cli.subprocess.CREATE_NO_WINDOW},
+        )
+    ]
+
+
+def test_should_hide_subprocess_console_reflects_console_presence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Console detection should return False when the window handle is available."""
+
+    fake_ctypes = SimpleNamespace(
+        windll=SimpleNamespace(kernel32=SimpleNamespace(GetConsoleWindow=lambda: 1))
+    )
+    monkeypatch.setitem(sys.modules, "ctypes", fake_ctypes)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+
+    assert not cli._should_hide_subprocess_console()
+
+
+def test_should_hide_subprocess_console_detects_detached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Console detection should return True when no console window is attached."""
+
+    fake_ctypes = SimpleNamespace(
+        windll=SimpleNamespace(kernel32=SimpleNamespace(GetConsoleWindow=lambda: 0))
+    )
+    monkeypatch.setitem(sys.modules, "ctypes", fake_ctypes)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+
+    assert cli._should_hide_subprocess_console()
 
 
 def test_launch_server_tray_falls_back_to_module(

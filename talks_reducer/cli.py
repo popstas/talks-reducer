@@ -281,8 +281,15 @@ def _launch_server_tray_binary(argv: Sequence[str]) -> bool:
 
     tray_args = [str(command), *list(argv)]
 
+    run_kwargs: dict[str, object] = {"check": False}
+
+    if sys.platform == "win32":
+        no_window_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if no_window_flag and _should_hide_subprocess_console():
+            run_kwargs["creationflags"] = no_window_flag
+
     try:
-        result = subprocess.run(tray_args, check=False)
+        result = subprocess.run(tray_args, **run_kwargs)
     except OSError:
         return False
 
@@ -318,6 +325,30 @@ def _find_server_tray_binary() -> Optional[Path]:
             return candidate
 
     return None
+
+
+def _should_hide_subprocess_console() -> bool:
+    """Return ``True`` when a detached Windows launch should hide the console."""
+
+    if sys.platform != "win32":
+        return False
+
+    try:
+        import ctypes
+    except Exception:  # pragma: no cover - optional runtime dependency
+        return False
+
+    try:
+        get_console_window = ctypes.windll.kernel32.GetConsoleWindow  # type: ignore[attr-defined]
+    except Exception:  # pragma: no cover - platform specific guard
+        return False
+
+    try:
+        handle = get_console_window()
+    except Exception:  # pragma: no cover - defensive fallback
+        return False
+
+    return handle == 0
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:

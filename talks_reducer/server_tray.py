@@ -13,7 +13,7 @@ import webbrowser
 from contextlib import suppress
 from importlib import resources
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Optional, Sequence
+from typing import Any, Iterator, Optional, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 from PIL import Image
@@ -91,23 +91,45 @@ def _iter_icon_candidates() -> Iterator[Path]:
     with suppress(Exception):
         executable_root = Path(sys.executable).resolve().parent
 
-    search_roots: Iterable[Optional[Path]] = (
+    launcher_root: Optional[Path] = None
+    with suppress(Exception):
+        launcher_root = Path(sys.argv[0]).resolve().parent
+
+    base_roots: list[Path] = []
+    for candidate in (
         package_root,
         project_root,
         frozen_root,
         executable_root,
+        launcher_root,
+    ):
+        if candidate and candidate not in base_roots:
+            base_roots.append(candidate)
+
+    expanded_roots: list[Path] = []
+    suffixes = (
+        Path(""),
+        Path("_internal"),
+        Path("Contents") / "Resources",
+        Path("Resources"),
     )
+    for root in base_roots:
+        for suffix in suffixes:
+            candidate_root = (root / suffix).resolve()
+            if candidate_root not in expanded_roots:
+                expanded_roots.append(candidate_root)
 
     icon_names = ("icon.png", "icon.ico")
     relative_paths = (
         Path("docs") / "assets",
         Path("assets"),
+        Path("talks_reducer") / "assets",
         Path(""),
     )
 
     seen: set[Path] = set()
-    for root in search_roots:
-        if root is None:
+    for root in expanded_roots:
+        if not root.exists():
             continue
         for relative in relative_paths:
             for icon_name in icon_names:

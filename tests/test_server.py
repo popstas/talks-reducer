@@ -93,6 +93,7 @@ def test_iter_icon_candidates_include_packaged_roots(
 ) -> None:
     module_dir = tmp_path / "package" / "talks_reducer"
     module_dir.mkdir(parents=True)
+    (module_dir.parent / "docs").mkdir(exist_ok=True)
     monkeypatch.setattr(server_tray, "__file__", str(module_dir / "server_tray.py"))
     monkeypatch.setattr(
         server_tray.sys,
@@ -100,10 +101,18 @@ def test_iter_icon_candidates_include_packaged_roots(
         str(tmp_path / "frozen"),
         raising=False,
     )
+    (tmp_path / "frozen").mkdir()
     monkeypatch.setattr(
         server_tray.sys,
         "executable",
         str(tmp_path / "dist" / "talks-reducer.exe"),
+    )
+    (tmp_path / "dist").mkdir()
+    (tmp_path / "dist" / "_internal").mkdir()
+    monkeypatch.setattr(
+        server_tray.sys,
+        "argv",
+        [str(tmp_path / "dist" / "talks-reducer.exe")],
     )
 
     candidates = list(server_tray._iter_icon_candidates())
@@ -111,10 +120,14 @@ def test_iter_icon_candidates_include_packaged_roots(
     project_icon = (module_dir.parent / "docs" / "assets" / "icon.png").resolve()
     frozen_icon = (tmp_path / "frozen" / "assets" / "icon.png").resolve()
     binary_icon = (tmp_path / "dist" / "assets" / "icon.png").resolve()
+    internal_icon = (
+        tmp_path / "dist" / "_internal" / "docs" / "assets" / "icon.png"
+    ).resolve()
 
     assert project_icon in candidates
     assert frozen_icon in candidates
     assert binary_icon in candidates
+    assert internal_icon in candidates
 
 
 def test_load_icon_uses_first_existing_candidate(monkeypatch, tmp_path: Path) -> None:
