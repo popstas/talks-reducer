@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Sequence
 from unittest import mock
 
 import pytest
@@ -107,6 +108,7 @@ def test_main_launches_server_tray_when_flag_set(
         tray_calls.append(list(argv))
         return True
 
+    monkeypatch.setattr(cli, "_launch_server_tray_binary", lambda argv: False)
     monkeypatch.setattr(cli, "_launch_server_tray", fake_tray)
     monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
 
@@ -167,3 +169,43 @@ def test_main_uses_remote_server_when_url_provided(
     assert len(calls) == 1
     assert calls[0].input_path == Path("/tmp/input.mp4")
     assert calls[0].small is True
+
+
+def test_launch_server_tray_prefers_external_binary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A packaged tray binary should be executed when present."""
+
+    recorded: list[list[str]] = []
+
+    def fake_run(cmd, check=False):  # type: ignore[no-untyped-def]
+        recorded.append(list(cmd))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli, "_find_server_tray_binary", lambda: Path("/tmp/tray.exe"))
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    assert cli._launch_server_tray_binary(["--foo"])
+    assert recorded == [["/tmp/tray.exe", "--foo"]]
+
+
+def test_launch_server_tray_falls_back_to_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When no binary is available the Python tray module should be used."""
+
+    called: list[list[str]] = []
+
+    def fake_binary_launcher(_argv: Sequence[str]) -> bool:
+        return False
+
+    def fake_tray(argv: list[str]) -> None:
+        called.append(list(argv))
+
+    monkeypatch.setattr(cli, "_launch_server_tray_binary", fake_binary_launcher)
+    monkeypatch.setattr(
+        cli, "import_module", lambda name, package=None: SimpleNamespace(main=fake_tray)
+    )
+
+    assert cli._launch_server_tray(["--bar"])
+    assert called == [["--bar"]]

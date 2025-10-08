@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
+import subprocess
 import sys
 import time
 from importlib import import_module
@@ -249,6 +251,9 @@ def _launch_server(argv: Sequence[str]) -> bool:
 def _launch_server_tray(argv: Sequence[str]) -> bool:
     """Attempt to launch the server tray helper with the provided arguments."""
 
+    if _launch_server_tray_binary(argv):
+        return True
+
     try:
         tray_module = import_module(".server_tray", __package__)
     except ImportError:
@@ -260,6 +265,59 @@ def _launch_server_tray(argv: Sequence[str]) -> bool:
 
     tray_main(list(argv))
     return True
+
+
+def _launch_server_tray_binary(argv: Sequence[str]) -> bool:
+    """Launch the packaged server tray executable when available.
+
+    Returns ``True`` when a packaged binary was found and exited successfully.
+    ``False`` indicates the caller should fall back to the Python module
+    implementation.
+    """
+
+    command = _find_server_tray_binary()
+    if command is None:
+        return False
+
+    tray_args = [str(command), *list(argv)]
+
+    try:
+        result = subprocess.run(tray_args, check=False)
+    except OSError:
+        return False
+
+    return result.returncode == 0
+
+
+def _find_server_tray_binary() -> Optional[Path]:
+    """Return the best available path to the server tray executable."""
+
+    binary_name = "talks-reducer-server-tray"
+    candidates: List[Path] = []
+
+    which_path = shutil.which(binary_name)
+    if which_path:
+        candidates.append(Path(which_path))
+
+    try:
+        launcher_dir = Path(sys.argv[0]).resolve().parent
+    except Exception:
+        launcher_dir = None
+
+    potential_names = [binary_name]
+    if sys.platform == "win32":
+        potential_names = [f"{binary_name}.exe", binary_name]
+
+    if launcher_dir is not None:
+        for name in potential_names:
+            candidate = launcher_dir / name
+            candidates.append(candidate)
+
+    for candidate in candidates:
+        if candidate and candidate.exists() and os.access(candidate, os.X_OK):
+            return candidate
+
+    return None
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
