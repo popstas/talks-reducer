@@ -418,7 +418,7 @@ if [[ "$*" == *"--zip"* ]]; then
         TARGET_NAME=$(basename "$TARGET")
         ZIP_NAME="$TARGET_NAME"
 
-        if [[ "$OS_NAME" == "windows" && -n "$VERSION" ]]; then
+        if [ -n "$VERSION" ]; then
             ZIP_NAME="${TARGET_NAME}-${VERSION}"
         fi
 
