@@ -35,7 +35,7 @@ def _guess_local_url(host: Optional[str], port: int) -> str:
     """Return the URL the server is most likely reachable at locally."""
 
     if host in (None, "", "0.0.0.0", "::"):
-        hostname = "127.0.0.1"
+        hostname = "0.0.0.0"
     else:
         hostname = host
     return f"http://{hostname}:{port}/"
