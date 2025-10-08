@@ -18,6 +18,17 @@
             "cwd": "${workspaceFolder}"
         },
         {
+            "name": "gui --server",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "talks_reducer.gui",
+            "args": [
+                "--server"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
             "name": "server",
             "type": "debugpy",
             "request": "launch",

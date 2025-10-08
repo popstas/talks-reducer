@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import base64
 import logging
 import subprocess
 import sys
@@ -11,9 +12,9 @@ import threading
 import time
 import webbrowser
 from contextlib import suppress
-from importlib import resources
+from io import BytesIO
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Iterator, Optional, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 from PIL import Image
@@ -74,8 +75,171 @@ def _normalize_local_url(url: str, host: Optional[str], port: int) -> str:
     return url
 
 
+def _iter_icon_candidates() -> Iterator[Path]:
+    """Yield possible tray icon paths ordered from most to least specific."""
+
+    module_path = Path(__file__).resolve()
+    package_root = module_path.parent
+    project_root = package_root.parent
+
+    frozen_root: Optional[Path] = None
+    frozen_value = getattr(sys, "_MEIPASS", None)
+    if frozen_value:
+        with suppress(Exception):
+            frozen_root = Path(str(frozen_value)).resolve()
+
+    executable_root: Optional[Path] = None
+    with suppress(Exception):
+        executable_root = Path(sys.executable).resolve().parent
+
+    launcher_root: Optional[Path] = None
+    with suppress(Exception):
+        launcher_root = Path(sys.argv[0]).resolve().parent
+
+    base_roots: list[Path] = []
+    for candidate in (
+        package_root,
+        project_root,
+        frozen_root,
+        executable_root,
+        launcher_root,
+    ):
+        if candidate and candidate not in base_roots:
+            base_roots.append(candidate)
+
+    expanded_roots: list[Path] = []
+    suffixes = (
+        Path(""),
+        Path("_internal"),
+        Path("Contents") / "Resources",
+        Path("Resources"),
+    )
+    for root in base_roots:
+        for suffix in suffixes:
+            candidate_root = (root / suffix).resolve()
+            if candidate_root not in expanded_roots:
+                expanded_roots.append(candidate_root)
+
+    icon_names = ("icon.png", "icon.ico")
+    relative_paths = (
+        Path("docs") / "assets",
+        Path("assets"),
+        Path("talks_reducer") / "assets",
+        Path(""),
+    )
+
+    seen: set[Path] = set()
+    for root in expanded_roots:
+        if not root.exists():
+            continue
+        for relative in relative_paths:
+            for icon_name in icon_names:
+                candidate = (root / relative / icon_name).resolve()
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                yield candidate
+
+
 def _load_icon() -> Image.Image:
-    """Load the tray icon image, falling back to a solid accent square."""
+    """Load the tray icon image, falling back to the embedded pen artwork."""
+
+    LOGGER.debug("Attempting to load tray icon image.")
+
+    for candidate in _iter_icon_candidates():
+        LOGGER.debug("Checking icon candidate at %s", candidate)
+        if candidate.exists():
+            try:
+                with Image.open(candidate) as image:
+                    loaded = image.copy()
+            except Exception as exc:  # pragma: no cover - diagnostic log
+                LOGGER.warning("Failed to load tray icon from %s: %s", candidate, exc)
+            else:
+                LOGGER.debug("Loaded tray icon from %s", candidate)
+                return loaded
+
+    LOGGER.warning("Falling back to embedded tray icon; packaged image not found")
+    return _load_embedded_icon()
+
+
+_EMBEDDED_ICON_BASE64 = (
+    "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"
+)
+
+
+def _load_embedded_icon() -> Image.Image:
+    """Decode and return the embedded Talks Reducer tray icon."""
+
+    data = base64.b64decode(_EMBEDDED_ICON_BASE64)
+    with Image.open(BytesIO(data)) as image:
+        return image.copy()
+
+
+def _load_icon() -> Image.Image:
+    """Load the tray icon image, falling back to the embedded pen artwork."""
 
     LOGGER.debug("Attempting to load tray icon image.")
 
