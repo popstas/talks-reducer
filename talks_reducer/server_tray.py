@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import atexit
 import logging
+import subprocess
+import sys
 import threading
 import time
 import webbrowser
@@ -98,11 +100,13 @@ class _ServerTrayApplication:
 
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
+        self._gui_lock = threading.Lock()
 
         self._server_handle: Optional[Any] = None
         self._local_url: Optional[str] = None
         self._share_url: Optional[str] = None
         self._icon: Optional[pystray.Icon] = None
+        self._gui_process: Optional[subprocess.Popen[Any]] = None
 
     # Server lifecycle -------------------------------------------------
 
@@ -148,7 +152,7 @@ class _ServerTrayApplication:
             return self._share_url
         return self._local_url
 
-    def _handle_open(
+    def _handle_open_webui(
         self,
         _icon: Optional[pystray.Icon] = None,
         _item: Optional[pystray.MenuItem] = None,
@@ -159,6 +163,62 @@ class _ServerTrayApplication:
             LOGGER.debug("Opened browser to %s", url)
         else:
             LOGGER.warning("Server URL not yet available; please try again.")
+
+    def _gui_is_running(self) -> bool:
+        """Return whether the GUI subprocess is currently active."""
+
+        process = self._gui_process
+        if process is None:
+            return False
+        if process.poll() is None:
+            return True
+        self._gui_process = None
+        return False
+
+    def _monitor_gui_process(self, process: subprocess.Popen[Any]) -> None:
+        """Reset the GUI handle once the subprocess exits."""
+
+        try:
+            process.wait()
+        except Exception as exc:  # pragma: no cover - best-effort cleanup
+            LOGGER.debug("GUI process monitor exited with %s", exc)
+        finally:
+            with self._gui_lock:
+                if self._gui_process is process:
+                    self._gui_process = None
+            LOGGER.info("Talks Reducer GUI closed")
+
+    def _launch_gui(
+        self,
+        _icon: Optional[pystray.Icon] = None,
+        _item: Optional[pystray.MenuItem] = None,
+    ) -> None:
+        """Launch the Talks Reducer GUI in a background subprocess."""
+
+        with self._gui_lock:
+            if self._gui_is_running():
+                LOGGER.info(
+                    "Talks Reducer GUI already running; focusing existing window"
+                )
+                return
+
+            try:
+                LOGGER.info("Launching Talks Reducer GUI via %s", sys.executable)
+                process = subprocess.Popen([sys.executable, "-m", "talks_reducer.gui"])
+            except Exception as exc:  # pragma: no cover - platform specific
+                LOGGER.error("Failed to launch Talks Reducer GUI: %s", exc)
+                self._gui_process = None
+                return
+
+            self._gui_process = process
+
+        watcher = threading.Thread(
+            target=self._monitor_gui_process,
+            args=(process,),
+            name="talks-reducer-gui-monitor",
+            daemon=True,
+        )
+        watcher.start()
 
     def _handle_quit(
         self,
@@ -185,7 +245,7 @@ class _ServerTrayApplication:
             )
 
         if self._open_browser_on_start:
-            self._handle_open()
+            self._handle_open_webui()
 
         if self._tray_mode == "headless":
             LOGGER.warning(
@@ -201,10 +261,11 @@ class _ServerTrayApplication:
         icon_image = _load_icon()
         menu = pystray.Menu(
             pystray.MenuItem(
-                "Open WebUI",
-                self._handle_open,
+                "Open GUI",
+                self._launch_gui,
                 default=True,
             ),
+            pystray.MenuItem("Open WebUI", self._handle_open_webui),
             pystray.MenuItem("Quit", self._handle_quit),
         )
         self._icon = pystray.Icon(
@@ -235,10 +296,36 @@ class _ServerTrayApplication:
             with suppress(Exception):
                 self._icon.stop()
 
+        self._stop_gui()
+
         if self._server_handle is not None:
             with suppress(Exception):
                 self._server_handle.close()
             LOGGER.info("Shut down Talks Reducer server")
+
+    def _stop_gui(self) -> None:
+        """Terminate the GUI subprocess if it is still running."""
+
+        with self._gui_lock:
+            process = self._gui_process
+            if process is None:
+                return
+
+            if process.poll() is None:
+                LOGGER.info("Stopping Talks Reducer GUI")
+                try:
+                    process.terminate()
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    LOGGER.warning(
+                        "GUI process did not exit cleanly; forcing termination"
+                    )
+                    process.kill()
+                    process.wait(timeout=5)
+                except Exception as exc:  # pragma: no cover - defensive cleanup
+                    LOGGER.debug("Error while terminating GUI process: %s", exc)
+
+            self._gui_process = None
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
@@ -262,11 +349,20 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         action="store_true",
         help="Create a temporary public Gradio link.",
     )
-    parser.add_argument(
-        "--no-browser",
+    browser_group = parser.add_mutually_exclusive_group()
+    browser_group.add_argument(
+        "--open-browser",
+        dest="open_browser",
         action="store_true",
-        help="Do not automatically open the browser window.",
+        help="Automatically open the web interface after startup.",
     )
+    browser_group.add_argument(
+        "--no-browser",
+        dest="open_browser",
+        action="store_false",
+        help="Do not open the web interface automatically (default).",
+    )
+    parser.set_defaults(open_browser=False)
     parser.add_argument(
         "--tray-mode",
         choices=("pystray", "pystray-detached", "headless"),
@@ -300,7 +396,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         host=args.host,
         port=args.port,
         share=args.share,
-        open_browser=not args.no_browser,
+        open_browser=args.open_browser,
         tray_mode=args.tray_mode,
     )
 

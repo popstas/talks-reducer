@@ -66,7 +66,13 @@ talks-reducer server-tray
 Pass `--debug` to print verbose logs about the tray icon lifecycle, and
 `--tray-mode pystray-detached` to try pystray's alternate detached runner. If
 the icon backend refuses to appear, fall back to `--tray-mode headless` to keep
-the web server running without a tray process.
+the web server running without a tray process. The tray menu includes an **Open GUI**
+item (also triggered by double-clicking the icon) that launches the desktop
+Talks Reducer interface alongside an **Open WebUI** entry that opens the Gradio
+page in your browser. Close the GUI window to return to the tray without
+stopping the server. The tray no longer opens a browser automatically—pass
+`--open-browser` if you prefer the web page to launch as soon as the server is
+ready.
 
 This opens a local web page featuring a drag-and-drop upload zone, a **Small video** checkbox that mirrors the CLI preset, a live
 progress indicator, and automatic previews of the processed output. Once the job completes you can inspect the resulting compression
