@@ -44,6 +44,7 @@ def test_main_runs_cli_with_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
         frame_spreadage=None,
         sample_rate=None,
         small=False,
+        server_url=None,
     )
 
     parser_mock = mock.Mock()
@@ -103,3 +104,47 @@ def test_main_exits_when_server_unavailable(monkeypatch: pytest.MonkeyPatch) -> 
 
     with pytest.raises(SystemExit):
         cli.main(["server"])
+
+
+def test_main_uses_remote_server_when_url_provided(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CLI should delegate to the remote server client when --url is set."""
+
+    parsed_args = SimpleNamespace(
+        input_file=["input.mp4"],
+        output_file=None,
+        temp_folder=None,
+        silent_threshold=None,
+        silent_speed=None,
+        sounded_speed=None,
+        frame_spreadage=None,
+        sample_rate=None,
+        small=True,
+        server_url="http://localhost:9005/",
+    )
+
+    parser_mock = mock.Mock()
+    parser_mock.parse_args.return_value = parsed_args
+
+    def fake_gather_input_files(_paths: list[str]) -> list[str]:
+        return ["/tmp/input.mp4"]
+
+    calls: list[SimpleNamespace] = []
+
+    def fake_send_video(**kwargs):
+        calls.append(SimpleNamespace(**kwargs))
+        return Path("/tmp/result.mp4"), "Summary", "Log"
+
+    monkeypatch.setattr(cli, "_build_parser", lambda: parser_mock)
+    monkeypatch.setattr(cli, "gather_input_files", fake_gather_input_files)
+    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
+    import talks_reducer.service_client as service_client_module
+
+    monkeypatch.setattr(service_client_module, "send_video", fake_send_video)
+
+    cli.main(["input.mp4", "--url", "http://localhost:9005/"])
+
+    assert len(calls) == 1
+    assert calls[0].input_path == Path("/tmp/input.mp4")
+    assert calls[0].small is True
