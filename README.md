@@ -57,6 +57,28 @@ Prefer a lightweight browser interface? Launch the Gradio-powered simple mode wi
 talks-reducer server
 ```
 
+Want the server to live in your system tray instead of a terminal window? Use:
+
+```sh
+talks-reducer server-tray
+```
+
+Pass `--debug` to print verbose logs about the tray icon lifecycle, and
+`--tray-mode pystray-detached` to try pystray's alternate detached runner. If
+the icon backend refuses to appear, fall back to `--tray-mode headless` to keep
+the web server running without a tray process. The tray menu includes an **Open GUI**
+item (also triggered by double-clicking the icon) that launches the desktop
+Talks Reducer interface alongside an **Open WebUI** entry that opens the Gradio
+page in your browser. Close the GUI window to return to the tray without
+stopping the server. Launching the GUI directly now starts the tray-backed
+server in the background before the window appears so the icon stays available
+after you close it; add `--no-tray` when running `python -m talks_reducer.gui`
+if you prefer to skip the background server entirely. The tray command itself
+never launches the GUI automatically, so use the menu item (or rerun the GUI
+with `--no-tray`) whenever you want to reopen it. The tray no longer opens a
+browser automatically—pass `--open-browser` if you prefer the web page to
+launch as soon as the server is ready.
+
 This opens a local web page featuring a drag-and-drop upload zone, a **Small video** checkbox that mirrors the CLI preset, a live
 progress indicator, and automatic previews of the processed output. Once the job completes you can inspect the resulting compression
 ratio and download the rendered video directly from the page.
@@ -65,7 +87,7 @@ ratio and download the rendered video directly from the page.
 
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
 2. Drag a video onto the **Video file** drop zone or click to browse and select one from disk.
-3. (Optional) Enable **Small video** before the upload finishes to apply the 720p/128 kbps preset.
+3. **Small video** starts enabled to apply the 720p/128 kbps preset. Clear the box before the upload finishes if you want to keep the original resolution and bitrate.
 4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives.
 5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally.
 

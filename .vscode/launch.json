@@ -29,6 +29,21 @@
             "cwd": "${workspaceFolder}"
         },
         {
+            "name": "server-tray",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "talks_reducer.server_tray",
+            "args": [
+                "--host",
+                "0.0.0.0",
+                "--tray-mode",
+                "pystray-detached",
+                "--debug"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
             "name": "docs/assets/demo.mp4",
             "type": "debugpy",
             "request": "launch",
