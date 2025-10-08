@@ -96,6 +96,25 @@ def test_main_launches_server_when_requested(monkeypatch: pytest.MonkeyPatch) ->
     assert server_calls == [["--share"]]
 
 
+def test_main_launches_server_tray_when_flag_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The --server flag should launch the tray helper and skip CLI parsing."""
+
+    tray_calls: list[list[str]] = []
+
+    def fake_tray(argv: list[str]) -> bool:
+        tray_calls.append(list(argv))
+        return True
+
+    monkeypatch.setattr(cli, "_launch_server_tray", fake_tray)
+    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
+
+    cli.main(["--server", "--tray-mode", "headless"])
+
+    assert tray_calls == [["--tray-mode", "headless"]]
+
+
 def test_main_exits_when_server_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     """A missing Gradio server should raise SystemExit to mimic CLI failures."""
 
