@@ -88,6 +88,7 @@ def test_main_launches_server_when_requested(monkeypatch: pytest.MonkeyPatch) ->
         return True
 
     monkeypatch.setattr(cli, "_launch_server", fake_server)
+    monkeypatch.setattr(cli, "_launch_server_tray", lambda argv: False)
     monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
 
     cli.main(["server", "--share"])
@@ -99,7 +100,44 @@ def test_main_exits_when_server_unavailable(monkeypatch: pytest.MonkeyPatch) -> 
     """A missing Gradio server should raise SystemExit to mimic CLI failures."""
 
     monkeypatch.setattr(cli, "_launch_server", lambda argv: False)
+    monkeypatch.setattr(cli, "_launch_server_tray", lambda argv: False)
     monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
 
     with pytest.raises(SystemExit):
         cli.main(["server"])
+
+
+def test_main_launches_server_tray_with_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ``--server`` flag should dispatch to the tray launcher."""
+
+    tray_calls: list[list[str]] = []
+
+    def fake_tray(argv: list[str]) -> bool:
+        tray_calls.append(list(argv))
+        return True
+
+    monkeypatch.setattr(cli, "_launch_server_tray", fake_tray)
+    monkeypatch.setattr(cli, "_launch_server", lambda argv: False)
+    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
+
+    cli.main(["--server", "--share"])
+
+    assert tray_calls == [["--share"]]
+
+
+def test_main_launches_server_tray_subcommand(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ``server-tray`` subcommand should invoke the tray helper."""
+
+    tray_calls: list[list[str]] = []
+
+    def fake_tray(argv: list[str]) -> bool:
+        tray_calls.append(list(argv))
+        return True
+
+    monkeypatch.setattr(cli, "_launch_server_tray", fake_tray)
+    monkeypatch.setattr(cli, "_launch_server", lambda argv: False)
+    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
+
+    cli.main(["server-tray", "--debug"])
+
+    assert tray_calls == [["--debug"]]

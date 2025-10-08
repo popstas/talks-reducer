@@ -159,6 +159,22 @@ def _launch_server(argv: Sequence[str]) -> bool:
     return True
 
 
+def _launch_server_tray(argv: Sequence[str]) -> bool:
+    """Attempt to launch the system tray-managed Gradio server."""
+
+    try:
+        tray_module = import_module(".server_tray", __package__)
+    except ImportError:
+        return False
+
+    tray_main = getattr(tray_module, "main", None)
+    if tray_main is None:
+        return False
+
+    tray_main(list(argv))
+    return True
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     """Entry point for the command line interface.
 
@@ -173,6 +189,18 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if argv_list and argv_list[0] in {"server", "serve"}:
         if not _launch_server(argv_list[1:]):
             print("Gradio server mode is unavailable.", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if argv_list and argv_list[0] in {"server-tray", "tray"}:
+        if not _launch_server_tray(argv_list[1:]):
+            print("Server tray mode is unavailable.", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if argv_list and argv_list[0] == "--server":
+        if not _launch_server_tray(argv_list[1:]):
+            print("Server tray mode is unavailable.", file=sys.stderr)
             sys.exit(1)
         return
 
