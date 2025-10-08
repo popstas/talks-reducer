@@ -70,7 +70,9 @@ the web server running without a tray process. The tray menu includes an **Open 
 item (also triggered by double-clicking the icon) that launches the desktop
 Talks Reducer interface alongside an **Open WebUI** entry that opens the Gradio
 page in your browser. Close the GUI window to return to the tray without
-stopping the server. The tray no longer opens a browser automatically—pass
+stopping the server. The GUI now launches automatically when the tray starts;
+pass `--no-gui` if you prefer to spawn it manually, or `--open-gui` to override
+other presets. The tray no longer opens a browser automatically—pass
 `--open-browser` if you prefer the web page to launch as soon as the server is
 ready.
 
