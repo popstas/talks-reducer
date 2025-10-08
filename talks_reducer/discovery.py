@@ -12,6 +12,16 @@ from typing import Iterable, Iterator, List, Optional, Set
 DEFAULT_PORT = 9005
 DEFAULT_TIMEOUT = 0.4
 
+_EXCLUDED_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0"}
+
+
+def _should_include_host(host: Optional[str]) -> bool:
+    """Return ``True`` when *host* should be scanned for discovery."""
+
+    if not host:
+        return False
+    return host not in _EXCLUDED_HOSTS
+
 
 def _iter_local_ipv4_addresses() -> Iterator[str]:
     """Yield IPv4 addresses that belong to the local machine."""
@@ -43,16 +53,19 @@ def _iter_local_ipv4_addresses() -> Iterator[str]:
 def _build_default_host_candidates(prefix_length: int = 24) -> List[str]:
     """Return a list of host candidates based on detected local networks."""
 
-    hosts: Set[str] = {"127.0.0.1", "localhost"}
+    hosts: Set[str] = set()
 
     for address in _iter_local_ipv4_addresses():
-        hosts.add(address)
+        if _should_include_host(address):
+            hosts.add(address)
         try:
             network = ipaddress.ip_network(f"{address}/{prefix_length}", strict=False)
         except ValueError:
             continue
         for host in network.hosts():
-            hosts.add(str(host))
+            host_str = str(host)
+            if _should_include_host(host_str):
+                hosts.add(host_str)
 
     return sorted(hosts)
 
@@ -91,18 +104,21 @@ def discover_servers(
     """Scan *hosts* for running Talks Reducer servers on *port*.
 
     When *hosts* is omitted, the local /24 networks derived from available IPv4
-    addresses are scanned. ``localhost`` and ``127.0.0.1`` are always included.
-    The function returns a sorted list of unique base URLs.
+    addresses are scanned. ``127.0.0.1``, ``localhost``, and ``0.0.0.0`` are
+    excluded to avoid duplicating local endpoints. The function returns a sorted
+    list of unique base URLs.
     """
 
     if hosts is None:
-        candidates = _build_default_host_candidates()
+        candidates = sorted(
+            {
+                host
+                for host in _build_default_host_candidates()
+                if _should_include_host(host)
+            }
+        )
     else:
-        candidates = sorted(set(hosts))
-        if "127.0.0.1" not in candidates:
-            candidates.append("127.0.0.1")
-        if "localhost" not in candidates:
-            candidates.append("localhost")
+        candidates = sorted({host for host in hosts if _should_include_host(host)})
 
     results: List[str] = []
 
