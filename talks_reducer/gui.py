@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import re
@@ -1526,9 +1527,20 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
         action="store_true",
         help="Do not start the Talks Reducer server tray alongside the GUI.",
     )
+    parser.add_argument(
+        "--server",
+        action="store_true",
+        help="Launch the Talks Reducer server tray instead of the desktop GUI.",
+    )
 
     parsed_args, remaining = parser.parse_known_args(argv)
     no_tray = parsed_args.no_tray
+    if parsed_args.server:
+        package_name = __package__ or "talks_reducer"
+        tray_module = importlib.import_module(f"{package_name}.server_tray")
+        tray_main = getattr(tray_module, "main")
+        tray_main(remaining)
+        return False
     argv = remaining
 
     if argv:
