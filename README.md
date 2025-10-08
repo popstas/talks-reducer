@@ -63,6 +63,10 @@ Want the server to live in your system tray instead of a terminal window? Use:
 talks-reducer server-tray
 ```
 
+Bundled Windows builds include the same behaviour: run
+`talks-reducer.exe --server` to launch the tray-managed server directly from the
+desktop shortcut without opening the GUI first.
+
 Pass `--debug` to print verbose logs about the tray icon lifecycle, and
 `--tray-mode pystray-detached` to try pystray's alternate detached runner. If
 the icon backend refuses to appear, fall back to `--tray-mode headless` to keep
