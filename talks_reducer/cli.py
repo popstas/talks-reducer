@@ -9,7 +9,7 @@ import time
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import audio
 
@@ -146,21 +146,22 @@ def _print_total_time(start_time: float) -> None:
 
 def _process_via_server(
     files: Sequence[str], parsed_args: argparse.Namespace, *, start_time: float
-) -> None:
-    """Upload *files* to the configured server and download the results."""
+) -> Tuple[bool, Optional[str]]:
+    """Upload *files* to the configured server and download the results.
+
+    Returns a tuple of (success, error_message). When *success* is ``False``,
+    ``error_message`` contains the reason and the caller should fall back to the
+    local processing pipeline.
+    """
 
     try:
         from . import service_client
     except ImportError as exc:  # pragma: no cover - optional dependency guard
-        print(
-            "Server mode requires the gradio_client dependency." f" ({exc})",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        return False, ("Server mode requires the gradio_client dependency. " f"({exc})")
 
     server_url = parsed_args.server_url
     if not server_url:
-        return
+        return False, "Server URL was not provided."
 
     output_override: Optional[Path] = None
     if parsed_args.output_file and len(files) == 1:
@@ -203,8 +204,7 @@ def _process_via_server(
                 small=bool(parsed_args.small),
             )
         except Exception as exc:  # pragma: no cover - network failure safeguard
-            print(f"Failed to process {basename}: {exc}", file=sys.stderr)
-            sys.exit(1)
+            return False, f"Failed to process {basename} via server: {exc}"
 
         print(summary)
         print(f"Saved processed video to {destination}")
@@ -212,6 +212,7 @@ def _process_via_server(
             print("\nServer log:\n" + log_text)
 
     _print_total_time(start_time)
+    return True, None
 
 
 def _launch_gui(argv: Sequence[str]) -> bool:
@@ -284,11 +285,26 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if len(files) > 1 and "output_file" in args:
         del args["output_file"]
 
+    fallback_messages: List[str] = []
     if parsed_args.server_url:
-        _process_via_server(files, parsed_args, start_time=start_time)
-        return
+        server_success, error_message = _process_via_server(
+            files, parsed_args, start_time=start_time
+        )
+        if server_success:
+            return
+
+        fallback_reason = error_message or "Server processing is unavailable."
+        print(fallback_reason, file=sys.stderr)
+        fallback_messages.append(fallback_reason)
+
+        fallback_notice = "Falling back to local processing pipeline."
+        print(fallback_notice, file=sys.stderr)
+        fallback_messages.append(fallback_notice)
 
     reporter = TqdmProgressReporter()
+
+    for message in fallback_messages:
+        reporter.log(message)
 
     for index, file in enumerate(files):
         print(f"Processing file {index + 1}/{len(files)} '{os.path.basename(file)}'")
