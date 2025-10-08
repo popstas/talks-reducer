@@ -534,7 +534,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         description="Launch the Talks Reducer server with a system tray icon."
     )
     parser.add_argument(
-        "--host", dest="host", default=None, help="Custom host to bind."
+        "--host", dest="host", default="0.0.0.0", help="Custom host to bind."
     )
     parser.add_argument(
         "--port",
