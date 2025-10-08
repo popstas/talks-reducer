@@ -13,7 +13,7 @@ import webbrowser
 from contextlib import suppress
 from importlib import resources
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Iterable, Iterator, Optional, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 from PIL import Image
@@ -74,26 +74,66 @@ def _normalize_local_url(url: str, host: Optional[str], port: int) -> str:
     return url
 
 
+def _iter_icon_candidates() -> Iterator[Path]:
+    """Yield possible tray icon paths ordered from most to least specific."""
+
+    module_path = Path(__file__).resolve()
+    package_root = module_path.parent
+    project_root = package_root.parent
+
+    frozen_root: Optional[Path] = None
+    frozen_value = getattr(sys, "_MEIPASS", None)
+    if frozen_value:
+        with suppress(Exception):
+            frozen_root = Path(str(frozen_value)).resolve()
+
+    executable_root: Optional[Path] = None
+    with suppress(Exception):
+        executable_root = Path(sys.executable).resolve().parent
+
+    search_roots: Iterable[Optional[Path]] = (
+        package_root,
+        project_root,
+        frozen_root,
+        executable_root,
+    )
+
+    icon_names = ("icon.png", "icon.ico")
+    relative_paths = (
+        Path("docs") / "assets",
+        Path("assets"),
+        Path(""),
+    )
+
+    seen: set[Path] = set()
+    for root in search_roots:
+        if root is None:
+            continue
+        for relative in relative_paths:
+            for icon_name in icon_names:
+                candidate = (root / relative / icon_name).resolve()
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                yield candidate
+
+
 def _load_icon() -> Image.Image:
     """Load the tray icon image, falling back to a solid accent square."""
 
     LOGGER.debug("Attempting to load tray icon image.")
 
-    candidates = [
-        Path(__file__).resolve().parent.parent / "docs" / "assets" / "icon.png",
-        Path(__file__).resolve().parent / "icon.png",
-    ]
-
-    for candidate in candidates:
+    for candidate in _iter_icon_candidates():
         LOGGER.debug("Checking icon candidate at %s", candidate)
         if candidate.exists():
             try:
-                image = Image.open(candidate).copy()
+                with Image.open(candidate) as image:
+                    loaded = image.copy()
             except Exception as exc:  # pragma: no cover - diagnostic log
                 LOGGER.warning("Failed to load tray icon from %s: %s", candidate, exc)
             else:
                 LOGGER.debug("Loaded tray icon from %s", candidate)
-                return image
+                return loaded
 
     with suppress(FileNotFoundError):
         resource_icon = resources.files("talks_reducer") / "assets" / "icon.png"
@@ -101,7 +141,8 @@ def _load_icon() -> Image.Image:
             LOGGER.debug("Loading tray icon from package resources")
             with resource_icon.open("rb") as handle:
                 try:
-                    return Image.open(handle).copy()
+                    with Image.open(handle) as image:
+                        return image.copy()
                 except Exception as exc:  # pragma: no cover - diagnostic log
                     LOGGER.warning(
                         "Failed to load tray icon from package resources: %s", exc

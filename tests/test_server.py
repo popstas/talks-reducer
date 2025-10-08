@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PIL import Image
+
 from talks_reducer import server, server_tray
 from talks_reducer.models import ProcessingResult
 
@@ -84,3 +86,47 @@ def test_normalize_local_url_rewrites_wildcard_host() -> None:
         "http://192.0.2.1:9005/", "192.0.2.1", 9005
     )
     assert unchanged == "http://192.0.2.1:9005/"
+
+
+def test_iter_icon_candidates_include_packaged_roots(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module_dir = tmp_path / "package" / "talks_reducer"
+    module_dir.mkdir(parents=True)
+    monkeypatch.setattr(server_tray, "__file__", str(module_dir / "server_tray.py"))
+    monkeypatch.setattr(
+        server_tray.sys,
+        "_MEIPASS",
+        str(tmp_path / "frozen"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        server_tray.sys,
+        "executable",
+        str(tmp_path / "dist" / "talks-reducer.exe"),
+    )
+
+    candidates = list(server_tray._iter_icon_candidates())
+
+    project_icon = (module_dir.parent / "docs" / "assets" / "icon.png").resolve()
+    frozen_icon = (tmp_path / "frozen" / "assets" / "icon.png").resolve()
+    binary_icon = (tmp_path / "dist" / "assets" / "icon.png").resolve()
+
+    assert project_icon in candidates
+    assert frozen_icon in candidates
+    assert binary_icon in candidates
+
+
+def test_load_icon_uses_first_existing_candidate(monkeypatch, tmp_path: Path) -> None:
+    icon_path = tmp_path / "icon.png"
+    Image.new("RGBA", (3, 5), color=(10, 20, 30, 255)).save(icon_path)
+
+    monkeypatch.setattr(
+        server_tray,
+        "_iter_icon_candidates",
+        lambda: iter([icon_path]),
+    )
+
+    icon = server_tray._load_icon()
+
+    assert icon.size == (3, 5)
