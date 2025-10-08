@@ -9,7 +9,9 @@ import socket
 import tempfile
 from contextlib import AbstractContextManager, suppress
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from queue import SimpleQueue
+from threading import Thread
+from typing import Callable, Iterator, Optional, Sequence
 
 import gradio as gr
 
@@ -87,10 +89,12 @@ class GradioProgressReporter(SignalProgressReporter):
         self,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
         *,
+        log_callback: Optional[Callable[[str], None]] = None,
         max_log_lines: int = 500,
     ) -> None:
         super().__init__()
         self._progress_callback = progress_callback
+        self._log_callback = log_callback
         self._max_log_lines = max_log_lines
         self._active_desc = "Processing"
         self.logs: list[str] = []
@@ -104,6 +108,8 @@ class GradioProgressReporter(SignalProgressReporter):
         self.logs.append(text)
         if len(self.logs) > self._max_log_lines:
             self.logs = self.logs[-self._max_log_lines :]
+        if self._log_callback is not None:
+            self._log_callback(text)
 
     def task(
         self,
@@ -137,9 +143,7 @@ class GradioProgressReporter(SignalProgressReporter):
         self._progress_callback(bounded_current, total_value, display_desc)
 
 
-_FAVICON_PATH = (
-    Path(__file__).resolve().parent.parent / "docs" / "assets" / "icon.ico"
-)
+_FAVICON_PATH = Path(__file__).resolve().parent.parent / "docs" / "assets" / "icon.ico"
 _FAVICON_PATH_STR = str(_FAVICON_PATH) if _FAVICON_PATH.exists() else None
 _WORKSPACES: list[Path] = []
 
@@ -238,7 +242,7 @@ def process_video(
     file_path: Optional[str],
     small_video: bool,
     progress: Optional[gr.Progress] = gr.Progress(track_tqdm=False),
-) -> tuple[Optional[str], str, str, Optional[str]]:
+) -> Iterator[tuple[Optional[str], str, str, Optional[str]]]:
     """Run the Talks Reducer pipeline for a single uploaded file."""
 
     if not file_path:
@@ -260,7 +264,15 @@ def process_video(
 
         progress_callback = _callback
 
-    reporter = GradioProgressReporter(progress_callback=progress_callback)
+    events: "SimpleQueue[tuple[str, object]]" = SimpleQueue()
+
+    def _log_callback(message: str) -> None:
+        events.put(("log", message))
+
+    reporter = GradioProgressReporter(
+        progress_callback=progress_callback,
+        log_callback=_log_callback,
+    )
 
     options = ProcessingOptions(
         input_file=input_path,
@@ -269,25 +281,64 @@ def process_video(
         small=small_video,
     )
 
-    try:
-        result = speed_up_video(options, reporter=reporter)
-    except FFmpegNotFoundError as exc:  # pragma: no cover - depends on runtime env
-        raise gr.Error(str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise gr.Error(str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - defensive fallback
-        reporter.log(f"Error: {exc}")
-        raise gr.Error(f"Failed to process the video: {exc}") from exc
+    def _worker() -> None:
+        try:
+            result = speed_up_video(options, reporter=reporter)
+        except FFmpegNotFoundError as exc:  # pragma: no cover - depends on runtime env
+            events.put(("error", gr.Error(str(exc))))
+        except FileNotFoundError as exc:
+            events.put(("error", gr.Error(str(exc))))
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            reporter.log(f"Error: {exc}")
+            events.put(("error", gr.Error(f"Failed to process the video: {exc}")))
+        else:
+            reporter.log("Processing complete.")
+            events.put(("result", result))
+        finally:
+            events.put(("done", None))
 
-    reporter.log("Processing complete.")
-    log_text = "\n".join(reporter.logs)
-    summary = _format_summary(result)
+    worker = Thread(target=_worker, daemon=True)
+    worker.start()
 
-    return (
-        str(result.output_file),
+    collected_logs: list[str] = []
+    final_result: Optional[ProcessingResult] = None
+    error: Optional[gr.Error] = None
+
+    while True:
+        kind, payload = events.get()
+        if kind == "log":
+            text = str(payload).strip()
+            if text:
+                collected_logs.append(text)
+                yield (
+                    gr.update(),
+                    "\n".join(collected_logs),
+                    gr.update(),
+                    gr.update(),
+                )
+        elif kind == "result":
+            final_result = payload  # type: ignore[assignment]
+        elif kind == "error":
+            error = payload  # type: ignore[assignment]
+        elif kind == "done":
+            break
+
+    worker.join()
+
+    if error is not None:
+        raise error
+
+    if final_result is None:
+        raise gr.Error("Failed to process the video.")
+
+    log_text = "\n".join(collected_logs)
+    summary = _format_summary(final_result)
+
+    yield (
+        str(final_result.output_file),
         log_text,
         summary,
-        str(result.output_file),
+        str(final_result.output_file),
     )
 
 

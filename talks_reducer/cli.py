@@ -198,19 +198,29 @@ def _process_via_server(
         print(
             f"Processing file {index}/{len(files)} '{basename}' via server {server_url}"
         )
+        printed_log_header = False
+
+        def _stream_server_log(line: str) -> None:
+            nonlocal printed_log_header
+            if not printed_log_header:
+                print("\nServer log:", flush=True)
+                printed_log_header = True
+            print(line, flush=True)
+
         try:
             destination, summary, log_text = service_client.send_video(
                 input_path=Path(file),
                 output_path=output_override,
                 server_url=server_url,
                 small=bool(parsed_args.small),
+                log_callback=_stream_server_log,
             )
         except Exception as exc:  # pragma: no cover - network failure safeguard
             return False, f"Failed to process {basename} via server: {exc}"
 
         print(summary)
         print(f"Saved processed video to {destination}")
-        if log_text.strip():
+        if log_text.strip() and not printed_log_header:
             print("\nServer log:\n" + log_text)
 
     _print_total_time(start_time)
@@ -230,6 +240,22 @@ def _launch_gui(argv: Sequence[str]) -> bool:
         return False
 
     return bool(gui_main(list(argv)))
+
+
+def _launch_server(argv: Sequence[str]) -> bool:
+    """Attempt to launch the Gradio server with the provided arguments."""
+
+    try:
+        server_module = import_module(".server", __package__)
+    except ImportError:
+        return False
+
+    server_main = getattr(server_module, "main", None)
+    if server_main is None:
+        return False
+
+    server_main(list(argv))
+    return True
 
 
 def _find_server_tray_binary() -> Optional[Path]:
@@ -327,8 +353,6 @@ def _launch_server_tray(argv: Sequence[str]) -> bool:
 
     tray_main(list(argv))
     return True
-
-
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
