@@ -6,6 +6,8 @@ import http.server
 import threading
 from contextlib import contextmanager
 
+import pytest
+
 from talks_reducer import discovery
 
 
@@ -35,14 +37,13 @@ def _http_server() -> tuple[str, int]:
         thread.join(timeout=2)
 
 
-def test_discover_servers_detects_running_instance() -> None:
-    """The discovery helper should report a reachable local server."""
+def test_probe_host_detects_running_instance() -> None:
+    """The host probe should report a reachable local server."""
 
     with _http_server() as (host, port):
-        results = discovery.discover_servers(port=port, hosts=[host])
+        result = discovery._probe_host(host, port, timeout=0.5)
 
-    expected_url = f"http://{host}:{port}/"
-    assert expected_url in results
+    assert result == f"http://{host}:{port}/"
 
 
 def test_discover_servers_handles_missing_hosts() -> None:
@@ -50,3 +51,47 @@ def test_discover_servers_handles_missing_hosts() -> None:
 
     results = discovery.discover_servers(port=65500, hosts=["192.0.2.123"])
     assert results == []
+
+
+def test_discover_servers_skips_local_endpoints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Local-only hosts should be filtered from the scan list."""
+
+    observed_hosts: list[str] = []
+
+    def fake_probe(host: str, port: int, timeout: float) -> str:
+        observed_hosts.append(host)
+        return f"http://{host}:{port}/"
+
+    monkeypatch.setattr(discovery, "_probe_host", fake_probe)
+
+    results = discovery.discover_servers(
+        port=9005,
+        hosts=["localhost", "127.0.0.1", "0.0.0.0", "192.0.2.42"],
+    )
+
+    assert observed_hosts == ["192.0.2.42"]
+    assert results == ["http://192.0.2.42:9005/"]
+
+
+def test_discover_servers_filters_default_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Automatically detected hosts should also respect the exclusion list."""
+
+    monkeypatch.setattr(
+        discovery,
+        "_build_default_host_candidates",
+        lambda prefix_length=24: ["localhost", "127.0.0.1", "192.0.2.99"],
+    )
+
+    monkeypatch.setattr(
+        discovery,
+        "_probe_host",
+        lambda host, port, timeout: f"http://{host}:{port}/",
+    )
+
+    results = discovery.discover_servers(port=8080)
+
+    assert results == ["http://192.0.2.99:8080/"]

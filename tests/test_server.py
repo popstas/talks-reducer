@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from talks_reducer import server
+from talks_reducer import server, server_tray
 from talks_reducer.models import ProcessingResult
 
 
@@ -66,3 +66,21 @@ def test_gradio_progress_reporter_updates_progress() -> None:
 
     assert progress.calls[0] == (0, 10, "Stage")
     assert progress.calls[-1] == (12, 12, "Stage")
+
+
+def test_guess_local_url_uses_loopback_for_wildcard() -> None:
+    assert server_tray._guess_local_url("0.0.0.0", 8080) == "http://127.0.0.1:8080/"
+    assert server_tray._guess_local_url(None, 9005) == "http://127.0.0.1:9005/"
+    assert (
+        server_tray._guess_local_url("example.com", 9005) == "http://example.com:9005/"
+    )
+
+
+def test_normalize_local_url_rewrites_wildcard_host() -> None:
+    url = server_tray._normalize_local_url("http://0.0.0.0:9005/", "0.0.0.0", 9005)
+    assert url == "http://127.0.0.1:9005/"
+
+    unchanged = server_tray._normalize_local_url(
+        "http://192.0.2.1:9005/", "192.0.2.1", 9005
+    )
+    assert unchanged == "http://192.0.2.1:9005/"

@@ -14,6 +14,7 @@ from contextlib import suppress
 from importlib import resources
 from pathlib import Path
 from typing import Any, Optional, Sequence
+from urllib.parse import urlsplit, urlunsplit
 
 from PIL import Image
 
@@ -22,6 +23,9 @@ from .server import build_interface
 try:  # pragma: no cover - import guarded for clearer error message at runtime
     import pystray
 except ModuleNotFoundError as exc:  # pragma: no cover - handled in ``main``
+    PYSTRAY_IMPORT_ERROR = exc
+    pystray = None  # type: ignore[assignment]
+except Exception as exc:  # pragma: no cover - handled in ``main``
     PYSTRAY_IMPORT_ERROR = exc
     pystray = None  # type: ignore[assignment]
 else:
@@ -34,11 +38,40 @@ LOGGER = logging.getLogger(__name__)
 def _guess_local_url(host: Optional[str], port: int) -> str:
     """Return the URL the server is most likely reachable at locally."""
 
-    if host in (None, "", "0.0.0.0", "::"):
-        hostname = "0.0.0.0"
+    if host in (None, "", "0.0.0.0"):
+        hostname = "127.0.0.1"
+    elif host == "::":
+        hostname = "::1"
     else:
         hostname = host
     return f"http://{hostname}:{port}/"
+
+
+def _normalize_local_url(url: str, host: Optional[str], port: int) -> str:
+    """Rewrite *url* when a wildcard host should map to the loopback address."""
+
+    if host not in (None, "", "0.0.0.0"):
+        return url
+
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return _guess_local_url(host, port)
+
+    hostname = parsed.hostname or ""
+    if hostname in ("", "0.0.0.0"):
+        netloc = f"127.0.0.1:{parsed.port or port}"
+        return urlunsplit(
+            (
+                parsed.scheme or "http",
+                netloc,
+                parsed.path or "/",
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+
+    return url
 
 
 def _load_icon() -> Image.Image:
@@ -130,9 +163,9 @@ class _ServerTrayApplication:
         )
 
         self._server_handle = server
-        self._local_url = getattr(
-            server, "local_url", _guess_local_url(self._host, self._port)
-        )
+        fallback_url = _guess_local_url(self._host, self._port)
+        local_url = getattr(server, "local_url", fallback_url)
+        self._local_url = _normalize_local_url(local_url, self._host, self._port)
         self._share_url = getattr(server, "share_url", None)
         self._ready_event.set()
         LOGGER.info("Server ready at %s", self._local_url)
