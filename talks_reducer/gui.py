@@ -696,7 +696,11 @@ class TalksReducerGUI:
 
         def worker() -> None:
             try:
-                urls = discover_servers()
+                urls = discover_servers(
+                    progress_callback=lambda current, total: self._notify(
+                        lambda c=current, t=total: self._on_discovery_progress(c, t)
+                    )
+                )
             except Exception as exc:  # pragma: no cover - network failure safeguard
                 self._notify(lambda: self._on_discovery_failed(exc))
                 return
@@ -710,6 +714,14 @@ class TalksReducerGUI:
         message = f"Discovery failed: {exc}"
         self._append_log(message)
         self.messagebox.showerror("Discovery failed", message)
+
+    def _on_discovery_progress(self, current: int, total: int) -> None:
+        if total > 0:
+            bounded = max(0, min(current, total))
+            label = f"{bounded} / {total}"
+        else:
+            label = "Discovering…"
+        self.server_discover_button.configure(text=label)
 
     def _on_discovery_complete(self, urls: List[str]) -> None:
         self.server_discover_button.configure(state=self.tk.NORMAL, text="Discover")

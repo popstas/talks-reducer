@@ -95,3 +95,25 @@ def test_discover_servers_filters_default_candidates(
     results = discovery.discover_servers(port=8080)
 
     assert results == ["http://192.0.2.99:8080/"]
+
+
+def test_discover_servers_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Discovery should surface progress updates as hosts are scanned."""
+
+    monkeypatch.setattr(
+        discovery,
+        "_probe_host",
+        lambda host, port, timeout: None,
+    )
+
+    progress_updates: list[tuple[int, int]] = []
+
+    discovery.discover_servers(
+        port=9005,
+        hosts=["192.0.2.10", "192.0.2.11"],
+        progress_callback=lambda current, total: progress_updates.append(
+            (current, total)
+        ),
+    )
+
+    assert progress_updates == [(0, 2), (1, 2), (2, 2)]

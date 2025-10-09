@@ -7,7 +7,7 @@ import socket
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from http.client import HTTPConnection
-from typing import Iterable, Iterator, List, Optional, Set
+from typing import Callable, Iterable, Iterator, List, Optional, Set
 
 DEFAULT_PORT = 9005
 DEFAULT_TIMEOUT = 0.4
@@ -95,17 +95,23 @@ def _probe_host(host: str, port: int, timeout: float) -> Optional[str]:
     return None
 
 
+ProgressCallback = Callable[[int, int], None]
+
+
 def discover_servers(
     *,
     port: int = DEFAULT_PORT,
     timeout: float = DEFAULT_TIMEOUT,
     hosts: Optional[Iterable[str]] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> List[str]:
     """Scan *hosts* for running Talks Reducer servers on *port*.
 
     When *hosts* is omitted, the local /24 networks derived from available IPv4
     addresses are scanned. ``127.0.0.1``, ``localhost``, and ``0.0.0.0`` are
-    excluded to avoid duplicating local endpoints. The function returns a sorted
+    excluded to avoid duplicating local endpoints. The optional
+    *progress_callback* receives the number of scanned hosts and the total
+    candidate count whenever discovery advances. The function returns a sorted
     list of unique base URLs.
     """
 
@@ -121,13 +127,21 @@ def discover_servers(
         candidates = sorted({host for host in hosts if _should_include_host(host)})
 
     results: List[str] = []
+    total = len(candidates)
+
+    if progress_callback is not None:
+        progress_callback(0, total)
 
     with ThreadPoolExecutor(max_workers=32) as executor:
+        scanned = 0
         for url in executor.map(
             lambda host: _probe_host(host, port, timeout), candidates
         ):
             if url and url not in results:
                 results.append(url)
+            scanned += 1
+            if progress_callback is not None:
+                progress_callback(scanned, total)
 
     return results
 
