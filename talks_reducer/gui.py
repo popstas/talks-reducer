@@ -15,7 +15,16 @@ import urllib.parse
 import urllib.request
 from importlib.metadata import version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterable, List, Optional, Sequence
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 if TYPE_CHECKING:
     import tkinter as tk
@@ -200,6 +209,31 @@ def _ensure_server_tray_running(extra_args: Optional[Sequence[str]] = None) -> N
             sys.stderr.write(
                 f"Warning: failed to launch Talks Reducer server tray: {exc}\n"
             )
+
+
+def _parse_ratios_from_summary(summary: str) -> Tuple[Optional[float], Optional[float]]:
+    """Extract time and size ratios from a Markdown *summary* string."""
+
+    time_ratio: Optional[float] = None
+    size_ratio: Optional[float] = None
+
+    for line in summary.splitlines():
+        if "**Duration:**" in line:
+            match = re.search(r"—\s*([0-9]+(?:\.[0-9]+)?)% of the original", line)
+            if match:
+                try:
+                    time_ratio = float(match.group(1)) / 100
+                except ValueError:
+                    time_ratio = None
+        elif "**Size:**" in line:
+            match = re.search(r"\*\*Size:\*\*\s*([0-9]+(?:\.[0-9]+)?)%", line)
+            if match:
+                try:
+                    size_ratio = float(match.group(1)) / 100
+                except ValueError:
+                    size_ratio = None
+
+    return time_ratio, size_ratio
 
 
 class _GuiProgressHandle(ProgressHandle):
@@ -1685,8 +1719,9 @@ class TalksReducerGUI:
                 return False
 
             self._last_output = Path(destination)
-            self._last_time_ratio = None
-            self._last_size_ratio = None
+            time_ratio, size_ratio = _parse_ratios_from_summary(summary)
+            self._last_time_ratio = time_ratio
+            self._last_size_ratio = size_ratio
             for line in summary.splitlines():
                 self._append_log(line)
             if log_text.strip():
