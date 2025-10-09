@@ -263,8 +263,8 @@ class TalksReducerGUI:
 
     PADDING = 10
     AUDIO_PROCESSING_RATIO = 0.02
-    AUDIO_PROGRESS_STEPS = 10
-    MIN_AUDIO_INTERVAL_MS = 50
+    AUDIO_PROGRESS_STEPS = 20
+    MIN_AUDIO_INTERVAL_MS = 10
     DEFAULT_AUDIO_INTERVAL_MS = 200
 
     def _determine_config_path(self) -> Path:
@@ -1497,6 +1497,8 @@ class TalksReducerGUI:
             self._encode_total_frames = None
             self._encode_current_frame = None
             self._start_audio_progress()
+        elif normalized.startswith("uploading"):
+            self._set_status("processing", "Uploading...")
         elif normalized.startswith("starting processing"):
             self._reset_audio_progress_state(clear_source=True)
             self._set_status("processing", "Processing")
