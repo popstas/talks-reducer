@@ -409,9 +409,11 @@ class TalksReducerGUI:
         self._hide_stop_button()
 
         # Ping server on startup if in remote mode
-        if (self.processing_mode_var.get() == "remote" and
-            self.server_url_var.get().strip() and
-            hasattr(self, "_ping_server")):
+        if (
+            self.processing_mode_var.get() == "remote"
+            and self.server_url_var.get().strip()
+            and hasattr(self, "_ping_server")
+        ):
             server_url = self.server_url_var.get().strip()
             host_label = self._format_server_host(server_url)
 
@@ -419,16 +421,31 @@ class TalksReducerGUI:
                 try:
                     if self._ping_server(server_url):
                         self._set_status("Idle", f"Server {host_label} is reachable")
-                        self._notify(lambda: self._append_log(f"Server {host_label} ready"))
+                        self._notify(
+                            lambda: self._append_log(f"Server {host_label} ready")
+                        )
                     else:
-                        self._set_status("Error", f"Server {host_label} is not reachable")
-                        self._notify(lambda: self._append_log(f"Server {host_label} is not reachable"))
+                        self._set_status(
+                            "Error", f"Server {host_label} is not reachable"
+                        )
+                        self._notify(
+                            lambda: self._append_log(
+                                f"Server {host_label} is not reachable"
+                            )
+                        )
                         ping_worker()
                 except Exception as exc:
-                    self._set_status("Idle", f"Error pinging server {host_label}: {exc}")
-                    self._notify(lambda: self._append_log(f"Error pinging server {host_label}: {exc}"))
+                    self._set_status(
+                        "Idle", f"Error pinging server {host_label}: {exc}"
+                    )
+                    self._notify(
+                        lambda: self._append_log(
+                            f"Error pinging server {host_label}: {exc}"
+                        )
+                    )
 
             import threading
+
             ping_thread = threading.Thread(target=ping_worker, daemon=True)
             ping_thread.start()
 
@@ -480,16 +497,8 @@ class TalksReducerGUI:
         input_frame.grid(row=0, column=0, sticky="nsew")
         main.rowconfigure(0, weight=1)
         main.columnconfigure(0, weight=1)
-        for column in range(5):
-            input_frame.columnconfigure(column, weight=1)
-
-        self.input_list = self.tk.Listbox(input_frame, height=5)
-        self.input_list.grid(row=0, column=0, columnspan=4, sticky="nsew", pady=(0, 12))
-        self.input_scrollbar = self.ttk.Scrollbar(
-            input_frame, orient=self.tk.VERTICAL, command=self.input_list.yview
-        )
-        self.input_scrollbar.grid(row=0, column=4, sticky="ns", pady=(0, 12))
-        self.input_list.configure(yscrollcommand=self.input_scrollbar.set)
+        input_frame.columnconfigure(0, weight=1)
+        input_frame.rowconfigure(0, weight=1)
 
         self.drop_zone = self.tk.Label(
             input_frame,
@@ -500,40 +509,19 @@ class TalksReducerGUI:
             pady=self.PADDING,
             highlightthickness=0,
         )
-        self.drop_zone.grid(row=1, column=0, columnspan=5, sticky="nsew")
-        input_frame.rowconfigure(1, weight=1)
+        self.drop_zone.grid(row=0, column=0, sticky="nsew")
         self._configure_drop_targets(self.drop_zone)
-        self._configure_drop_targets(self.input_list)
         self.drop_zone.configure(cursor="hand2", takefocus=1)
         self.drop_zone.bind("<Button-1>", self._on_drop_zone_click)
         self.drop_zone.bind("<Return>", self._on_drop_zone_click)
         self.drop_zone.bind("<space>", self._on_drop_zone_click)
 
-        self.add_files_button = self.ttk.Button(
-            input_frame, text="Add files", command=self._add_files
-        )
-        self.add_files_button.grid(row=2, column=0, pady=8, sticky="w")
-        self.add_folder_button = self.ttk.Button(
-            input_frame, text="Add folder", command=self._add_directory
-        )
-        self.add_folder_button.grid(row=2, column=1, pady=8)
-        self.remove_selected_button = self.ttk.Button(
-            input_frame, text="Remove selected", command=self._remove_selected
-        )
-        self.remove_selected_button.grid(row=2, column=2, pady=8, sticky="w")
-        self.run_after_drop_check = self.ttk.Checkbutton(
-            input_frame,
-            text="Run after drop",
-            variable=self.run_after_drop_var,
-        )
-        self.run_after_drop_check.grid(row=2, column=3, pady=8, sticky="e")
-
         # Options frame
-        options = self.ttk.Frame(main, padding=self.PADDING)
-        options.grid(row=2, column=0, pady=(0, 0), sticky="ew")
-        options.columnconfigure(0, weight=1)
+        self.options_frame = self.ttk.Frame(main, padding=self.PADDING)
+        self.options_frame.grid(row=2, column=0, pady=(0, 0), sticky="ew")
+        self.options_frame.columnconfigure(0, weight=1)
 
-        checkbox_frame = self.ttk.Frame(options)
+        checkbox_frame = self.ttk.Frame(self.options_frame)
         checkbox_frame.grid(row=0, column=0, columnspan=2, sticky="w")
 
         self.ttk.Checkbutton(
@@ -560,69 +548,74 @@ class TalksReducerGUI:
 
         self.advanced_visible = self.tk.BooleanVar(value=False)
         self.advanced_button = self.ttk.Button(
-            options,
+            self.options_frame,
             text="Advanced",
             command=self._toggle_advanced,
         )
         self.advanced_button.grid(row=1, column=1, sticky="e")
 
-        self.advanced_frame = self.ttk.Frame(options, padding=self.PADDING)
-        self.advanced_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
-        self.advanced_frame.columnconfigure(1, weight=1)
-
-        self.output_var = self.tk.StringVar()
-        self._add_entry(
-            self.advanced_frame, "Output file", self.output_var, row=0, browse=True
+        self.basic_options_frame = self.ttk.Labelframe(
+            self.options_frame, text="Basic options", padding=self.PADDING
         )
-
-        self.temp_var = self.tk.StringVar(value=str(default_temp_folder()))
-        self._add_entry(
-            self.advanced_frame, "Temp folder", self.temp_var, row=1, browse=True
+        self.basic_options_frame.grid(
+            row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0)
         )
+        self.basic_options_frame.columnconfigure(1, weight=1)
 
-        self.silent_threshold_var = self.tk.StringVar()
+        self.silent_threshold_var = self.tk.StringVar(
+            value=str(self._get_setting("silent_threshold", "0.05"))
+        )
         self._add_entry(
-            self.advanced_frame,
+            self.basic_options_frame,
             "Silent threshold",
             self.silent_threshold_var,
+            row=0,
+        )
+
+        self.sounded_speed_var = self.tk.StringVar(
+            value=str(self._get_setting("sounded_speed", "1.0"))
+        )
+        self._add_entry(
+            self.basic_options_frame,
+            "Sounded speed",
+            self.sounded_speed_var,
+            row=1,
+        )
+
+        self.silent_speed_var = self.tk.StringVar(
+            value=str(self._get_setting("silent_speed", "4.0"))
+        )
+        self._add_entry(
+            self.basic_options_frame,
+            "Silent speed",
+            self.silent_speed_var,
             row=2,
         )
 
-        self.sounded_speed_var = self.tk.StringVar()
-        self._add_entry(
-            self.advanced_frame, "Sounded speed", self.sounded_speed_var, row=3
+        self.ttk.Label(self.basic_options_frame, text="Server URL").grid(
+            row=3, column=0, sticky="w", pady=4
         )
-
-        self.silent_speed_var = self.tk.StringVar()
-        self._add_entry(
-            self.advanced_frame, "Silent speed", self.silent_speed_var, row=4
+        stored_server_url = str(
+            self._get_setting("server_url", "http://localhost:9005")
         )
-
-        self.frame_margin_var = self.tk.StringVar()
-        self._add_entry(
-            self.advanced_frame, "Frame margin", self.frame_margin_var, row=5
-        )
-
-        self.sample_rate_var = self.tk.StringVar(value="48000")
-        self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=6)
-
-        self.ttk.Label(self.advanced_frame, text="Server URL").grid(
-            row=7, column=0, sticky="w", pady=4
-        )
+        if not stored_server_url:
+            stored_server_url = "http://localhost:9005"
+            self._update_setting("server_url", stored_server_url)
+        self.server_url_var.set(stored_server_url)
         self.server_url_entry = self.ttk.Entry(
-            self.advanced_frame, textvariable=self.server_url_var
+            self.basic_options_frame, textvariable=self.server_url_var
         )
-        self.server_url_entry.grid(row=7, column=1, sticky="ew", pady=4)
+        self.server_url_entry.grid(row=3, column=1, sticky="ew", pady=4)
         self.server_discover_button = self.ttk.Button(
-            self.advanced_frame, text="Discover", command=self._start_discovery
+            self.basic_options_frame, text="Discover", command=self._start_discovery
         )
-        self.server_discover_button.grid(row=7, column=2, padx=(8, 0))
+        self.server_discover_button.grid(row=3, column=2, padx=(8, 0))
 
-        self.ttk.Label(self.advanced_frame, text="Processing mode").grid(
-            row=8, column=0, sticky="w", pady=4
+        self.ttk.Label(self.basic_options_frame, text="Processing mode").grid(
+            row=4, column=0, sticky="w", pady=4
         )
-        mode_choice = self.ttk.Frame(self.advanced_frame)
-        mode_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=4)
+        mode_choice = self.ttk.Frame(self.basic_options_frame)
+        mode_choice.grid(row=4, column=1, columnspan=2, sticky="w", pady=4)
         self.ttk.Radiobutton(
             mode_choice,
             text="Local",
@@ -637,11 +630,11 @@ class TalksReducerGUI:
         )
         self.remote_mode_button.pack(side=self.tk.LEFT, padx=(0, 8))
 
-        self.ttk.Label(self.advanced_frame, text="Theme").grid(
-            row=9, column=0, sticky="w", pady=(8, 0)
+        self.ttk.Label(self.basic_options_frame, text="Theme").grid(
+            row=5, column=0, sticky="w", pady=(8, 0)
         )
-        theme_choice = self.ttk.Frame(self.advanced_frame)
-        theme_choice.grid(row=9, column=1, columnspan=2, sticky="w", pady=(8, 0))
+        theme_choice = self.ttk.Frame(self.basic_options_frame)
+        theme_choice.grid(row=5, column=1, columnspan=2, sticky="w", pady=(8, 0))
         for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
             self.ttk.Radiobutton(
                 theme_choice,
@@ -650,6 +643,28 @@ class TalksReducerGUI:
                 variable=self.theme_var,
                 command=self._apply_theme,
             ).pack(side=self.tk.LEFT, padx=(0, 8))
+
+        self.advanced_frame = self.ttk.Frame(self.options_frame, padding=self.PADDING)
+        self.advanced_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
+        self.advanced_frame.columnconfigure(1, weight=1)
+
+        self.output_var = self.tk.StringVar()
+        self._add_entry(
+            self.advanced_frame, "Output file", self.output_var, row=0, browse=True
+        )
+
+        self.temp_var = self.tk.StringVar(value=str(default_temp_folder()))
+        self._add_entry(
+            self.advanced_frame, "Temp folder", self.temp_var, row=1, browse=True
+        )
+
+        self.sample_rate_var = self.tk.StringVar(value="48000")
+        self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=2)
+
+        self.frame_margin_var = self.tk.StringVar()
+        self._add_entry(
+            self.advanced_frame, "Frame margin", self.frame_margin_var, row=3
+        )
 
         self._toggle_advanced(initial=True)
         self._update_processing_mode_state()
@@ -660,6 +675,7 @@ class TalksReducerGUI:
         status_frame.columnconfigure(0, weight=0)
         status_frame.columnconfigure(1, weight=1)
         status_frame.columnconfigure(2, weight=0)
+        self.status_frame = status_frame
 
         self.ttk.Label(status_frame, text="Status:").grid(row=0, column=0, sticky="w")
         self.status_label = self.tk.Label(
@@ -920,18 +936,8 @@ class TalksReducerGUI:
 
     def _apply_simple_mode(self, *, initial: bool = False) -> None:
         simple = self.simple_mode_var.get()
-        widgets = [
-            self.input_list,
-            self.input_scrollbar,
-            self.add_files_button,
-            self.add_folder_button,
-            self.remove_selected_button,
-            self.run_after_drop_check,
-        ]
-
         if simple:
-            for widget in widgets:
-                widget.grid_remove()
+            self.basic_options_frame.grid_remove()
             self.log_frame.grid_remove()
             self.stop_button.grid_remove()
             self.advanced_button.grid_remove()
@@ -947,8 +953,7 @@ class TalksReducerGUI:
                 self.open_button.grid()
                 self.drop_hint_button.grid_remove()
         else:
-            for widget in widgets:
-                widget.grid()
+            self.basic_options_frame.grid()
             self.log_frame.grid()
             if hasattr(self, "status_frame"):
                 self.status_frame.grid()
@@ -1127,14 +1132,6 @@ class TalksReducerGUI:
             fg=palette["foreground"],
             highlightthickness=0,
         )
-        self.input_list.configure(
-            bg=palette["surface"],
-            fg=palette["foreground"],
-            selectbackground=palette.get("selection_background", palette["accent"]),
-            selectforeground=palette.get("selection_foreground", palette["surface"]),
-            highlightbackground=palette["border"],
-            highlightcolor=palette["border"],
-        )
         self.log_text.configure(
             bg=palette["surface"],
             fg=palette["foreground"],
@@ -1196,7 +1193,6 @@ class TalksReducerGUI:
             resolved = os.fspath(Path(path))
             if resolved not in self.input_files:
                 self.input_files.append(resolved)
-                self.input_list.insert(self.tk.END, resolved)
                 normalized.append(resolved)
 
         if auto_run and normalized:
@@ -1230,21 +1226,13 @@ class TalksReducerGUI:
         for path in paths:
             if path and path not in self.input_files:
                 self.input_files.append(path)
-                self.input_list.insert(self.tk.END, path)
                 added = True
         if auto_run and added and self.run_after_drop_var.get():
             self._start_run()
 
-    def _remove_selected(self) -> None:
-        selection = list(self.input_list.curselection())
-        for index in reversed(selection):
-            self.input_list.delete(index)
-            del self.input_files[index]
-
     def _clear_input_files(self) -> None:
-        """Clear all input files from the list."""
+        """Clear all queued input files."""
         self.input_files.clear()
-        self.input_list.delete(0, self.tk.END)
 
     def _on_drop(self, event: object) -> None:
         data = getattr(event, "data", "")
@@ -1254,7 +1242,6 @@ class TalksReducerGUI:
         cleaned = [path.strip("{}") for path in paths]
         # Clear existing files before adding dropped files
         self.input_files.clear()
-        self.input_list.delete(0, self.tk.END)
         self._extend_inputs(cleaned, auto_run=True)
 
     def _on_drop_zone_click(self, event: object) -> str | None:
@@ -1492,9 +1479,7 @@ class TalksReducerGUI:
             )
             return False
 
-        self._notify(
-            lambda: self._set_status("waiting", f"Server {host_label} ready")
-        )
+        self._notify(lambda: self._set_status("waiting", f"Server {host_label} ready"))
 
         output_override = args.get("output_file") if len(files) == 1 else None
         ignored = [key for key in args if key not in {"output_file", "small"}]
