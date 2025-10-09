@@ -262,6 +262,10 @@ class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
 
     PADDING = 10
+    AUDIO_PROCESSING_RATIO = 0.033
+    AUDIO_PROGRESS_STEPS = 5
+    MIN_AUDIO_INTERVAL_MS = 50
+    DEFAULT_AUDIO_INTERVAL_MS = 200
 
     def _determine_config_path(self) -> Path:
         if sys.platform == "win32":
@@ -356,6 +360,10 @@ class TalksReducerGUI:
         self._encode_target_duration_seconds: Optional[float] = None
         self._encode_total_frames: Optional[int] = None
         self._encode_current_frame: Optional[int] = None
+        self._source_duration_seconds: Optional[float] = None
+        self._audio_progress_job: Optional[str] = None
+        self._audio_progress_interval_ms: Optional[int] = None
+        self._audio_progress_steps_completed = 0
         self.progress_var = tk.IntVar(value=0)
         self._ffmpeg_process: Optional[subprocess.Popen] = None
         self._stop_requested = False
@@ -1457,12 +1465,23 @@ class TalksReducerGUI:
 
     def _update_status_from_message(self, message: str) -> None:
         normalized = message.strip().lower()
+        metadata_match = re.search(
+            r"source metadata [—-] duration:\s*([\d.]+)s",
+            message,
+            re.IGNORECASE,
+        )
+        if metadata_match:
+            try:
+                self._source_duration_seconds = float(metadata_match.group(1))
+            except ValueError:
+                self._source_duration_seconds = None
         if "all jobs finished successfully" in normalized:
             # Create status message with ratios if available
             status_msg = "Success"
             if self._last_time_ratio is not None and self._last_size_ratio is not None:
                 status_msg = f"Time: {self._last_time_ratio:.0%}, Size: {self._last_size_ratio:.0%}"
 
+            self._reset_audio_progress_state(clear_source=True)
             self._set_status("success", status_msg)
             self._set_progress(100)  # 100% on success
             self._video_duration_seconds = None  # Reset for next video
@@ -1470,21 +1489,34 @@ class TalksReducerGUI:
             self._encode_total_frames = None
             self._encode_current_frame = None
         elif normalized.startswith("extracting audio"):
+            self._reset_audio_progress_state(clear_source=False)
             self._set_status("processing", "Extracting audio...")
             self._set_progress(0)  # 0% on start
             self._video_duration_seconds = None  # Reset for new processing
             self._encode_target_duration_seconds = None
             self._encode_total_frames = None
             self._encode_current_frame = None
-        elif normalized.startswith("starting processing") or normalized.startswith(
-            "processing"
-        ):
+            self._start_audio_progress()
+        elif normalized.startswith("starting processing"):
+            self._reset_audio_progress_state(clear_source=True)
             self._set_status("processing", "Processing")
             self._set_progress(0)  # 0% on start
             self._video_duration_seconds = None  # Reset for new processing
             self._encode_target_duration_seconds = None
             self._encode_total_frames = None
             self._encode_current_frame = None
+        elif normalized.startswith("processing"):
+            is_new_job = bool(re.match(r"processing \d+/\d+:", normalized))
+            should_reset = self._status_state.lower() != "processing" or is_new_job
+            if should_reset:
+                self._set_progress(0)  # 0% on start
+                self._video_duration_seconds = None  # Reset for new processing
+                self._encode_target_duration_seconds = None
+                self._encode_total_frames = None
+                self._encode_current_frame = None
+            if is_new_job:
+                self._reset_audio_progress_state(clear_source=True)
+            self._set_status("processing", "Processing")
 
         frame_total_match = re.search(
             r"Final encode target frames(?: \(fallback\))?:\s*(\d+)", message
@@ -1510,12 +1542,12 @@ class TalksReducerGUI:
 
                 self._encode_current_frame = current_frame
                 if self._encode_total_frames and self._encode_total_frames > 0:
-                    percentage = min(
-                        100,
-                        int((current_frame / self._encode_total_frames) * 100),
-                    )
+                    self._complete_audio_phase()
+                    frame_ratio = min(current_frame / self._encode_total_frames, 1.0)
+                    percentage = min(100, 5 + int(frame_ratio * 95))
                     self._set_progress(percentage)
                 else:
+                    self._complete_audio_phase()
                     self._set_status("processing", f"{current_frame} frames encoded")
 
         # Parse encode target duration reported by the pipeline
@@ -1574,10 +1606,92 @@ class TalksReducerGUI:
                 and total_seconds
                 and total_seconds > 0
             ):
-                percentage = min(100, int((current_seconds / total_seconds) * 100))
+                self._complete_audio_phase()
+                time_ratio = min(current_seconds / total_seconds, 1.0)
+                percentage = min(100, 5 + int(time_ratio * 95))
                 self._set_progress(percentage)
 
             self._set_status("processing", status_msg)
+
+    def _compute_audio_progress_interval(self) -> int:
+        duration = self._source_duration_seconds or self._video_duration_seconds
+        if duration and duration > 0:
+            audio_seconds = max(duration * self.AUDIO_PROCESSING_RATIO, 0.0)
+            interval_seconds = audio_seconds / self.AUDIO_PROGRESS_STEPS
+            interval_ms = int(round(interval_seconds * 1000))
+            return max(self.MIN_AUDIO_INTERVAL_MS, interval_ms)
+        return self.DEFAULT_AUDIO_INTERVAL_MS
+
+    def _start_audio_progress(self) -> None:
+        interval_ms = self._compute_audio_progress_interval()
+
+        def _start() -> None:
+            if self._audio_progress_job is not None:
+                self.root.after_cancel(self._audio_progress_job)
+            self._audio_progress_steps_completed = 0
+            self._audio_progress_interval_ms = interval_ms
+            self._audio_progress_job = self.root.after(
+                interval_ms, self._advance_audio_progress
+            )
+
+        self._notify(_start)
+
+    def _advance_audio_progress(self) -> None:
+        self._audio_progress_job = None
+        if self._audio_progress_steps_completed >= self.AUDIO_PROGRESS_STEPS:
+            self._audio_progress_interval_ms = None
+            return
+
+        self._audio_progress_steps_completed += 1
+        percentage = min(
+            self.AUDIO_PROGRESS_STEPS, self._audio_progress_steps_completed
+        )
+        self._set_progress(percentage)
+
+        if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
+            interval_ms = (
+                self._audio_progress_interval_ms or self.DEFAULT_AUDIO_INTERVAL_MS
+            )
+            self._audio_progress_job = self.root.after(
+                interval_ms, self._advance_audio_progress
+            )
+        else:
+            self._audio_progress_interval_ms = None
+
+    def _cancel_audio_progress(self) -> None:
+        if self._audio_progress_job is None:
+            self._audio_progress_interval_ms = None
+            return
+
+        def _cancel() -> None:
+            if self._audio_progress_job is not None:
+                self.root.after_cancel(self._audio_progress_job)
+                self._audio_progress_job = None
+            self._audio_progress_interval_ms = None
+
+        self._notify(_cancel)
+
+    def _reset_audio_progress_state(self, *, clear_source: bool) -> None:
+        if clear_source:
+            self._source_duration_seconds = None
+        self._audio_progress_steps_completed = 0
+        self._audio_progress_interval_ms = None
+        if self._audio_progress_job is not None:
+            self._cancel_audio_progress()
+
+    def _complete_audio_phase(self) -> None:
+        def _complete() -> None:
+            if self._audio_progress_job is not None:
+                self.root.after_cancel(self._audio_progress_job)
+                self._audio_progress_job = None
+            self._audio_progress_interval_ms = None
+            if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
+                self._audio_progress_steps_completed = self.AUDIO_PROGRESS_STEPS
+                current_value = self.progress_var.get()
+                if current_value < self.AUDIO_PROGRESS_STEPS:
+                    self._set_progress(self.AUDIO_PROGRESS_STEPS)
+
+        self._notify(_complete)
 
     def _apply_status_style(self, status: str) -> None:
         color = STATUS_COLORS.get(status.lower())
@@ -1617,6 +1731,8 @@ class TalksReducerGUI:
                     self.status_frame.grid()
                 self.stop_button.grid()
                 self.drop_hint_button.grid_remove()
+            else:
+                self._reset_audio_progress_state(clear_source=True)
 
             if lowered == "success" or "time:" in lowered and "size:" in lowered:
                 if self.simple_mode_var.get() and hasattr(self, "status_frame"):
