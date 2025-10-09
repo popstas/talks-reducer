@@ -1338,15 +1338,19 @@ class TalksReducerGUI:
                     output_path=output_override,
                     server_url=server_url,
                     small=bool(args.get("small", False)),
+                    stream_updates=True,
+                    log_callback=self._append_log,
+                    # progress_callback=self._handle_service_progress,
                 )
             except Exception as exc:  # pragma: no cover - network safeguard
-                error_msg = f"Processing failed: {exc}"
+                error_detail = f"{exc.__class__.__name__}: {exc}"
+                error_msg = f"Processing failed: {error_detail}"
                 self._append_log(error_msg)
                 self._notify(lambda: self._set_status("Error"))
                 self._notify(
                     lambda: self.messagebox.showerror(
                         "Server error",
-                        f"Failed to process {basename}: {exc}",
+                        f"Failed to process {basename}: {error_detail}",
                     )
                 )
                 return False

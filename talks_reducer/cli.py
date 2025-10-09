@@ -106,6 +106,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Process videos via a Talks Reducer server at the provided base URL (for example, http://localhost:9005).",
     )
+    parser.add_argument(
+        "--server-stream",
+        action="store_true",
+        help="Stream remote progress updates when using --url.",
+    )
     return parser
 
 
@@ -198,19 +203,54 @@ def _process_via_server(
         print(
             f"Processing file {index}/{len(files)} '{basename}' via server {server_url}"
         )
+        printed_log_header = False
+        progress_state: dict[str, tuple[Optional[int], Optional[int], str]] = {}
+        stream_updates = bool(getattr(parsed_args, "server_stream", False))
+
+        def _stream_server_log(line: str) -> None:
+            nonlocal printed_log_header
+            if not printed_log_header:
+                print("\nServer log:", flush=True)
+                printed_log_header = True
+            print(line, flush=True)
+
+        def _stream_progress(
+            desc: str, current: Optional[int], total: Optional[int], unit: str
+        ) -> None:
+            key = desc or "Processing"
+            state = (current, total, unit)
+            if progress_state.get(key) == state:
+                return
+            progress_state[key] = state
+
+            parts: list[str] = []
+            if current is not None and total and total > 0:
+                percent = (current / total) * 100
+                parts.append(f"{current}/{total}")
+                parts.append(f"{percent:.1f}%")
+            elif current is not None:
+                parts.append(str(current))
+            if unit:
+                parts.append(unit)
+            message = " ".join(parts).strip()
+            print(f"{key}: {message or 'update'}", flush=True)
+
         try:
             destination, summary, log_text = service_client.send_video(
                 input_path=Path(file),
                 output_path=output_override,
                 server_url=server_url,
                 small=bool(parsed_args.small),
+                log_callback=_stream_server_log,
+                stream_updates=stream_updates,
+                progress_callback=_stream_progress if stream_updates else None,
             )
         except Exception as exc:  # pragma: no cover - network failure safeguard
             return False, f"Failed to process {basename} via server: {exc}"
 
         print(summary)
         print(f"Saved processed video to {destination}")
-        if log_text.strip():
+        if log_text.strip() and not printed_log_header:
             print("\nServer log:\n" + log_text)
 
     _print_total_time(start_time)
@@ -230,6 +270,22 @@ def _launch_gui(argv: Sequence[str]) -> bool:
         return False
 
     return bool(gui_main(list(argv)))
+
+
+def _launch_server(argv: Sequence[str]) -> bool:
+    """Attempt to launch the Gradio server with the provided arguments."""
+
+    try:
+        server_module = import_module(".server", __package__)
+    except ImportError:
+        return False
+
+    server_main = getattr(server_module, "main", None)
+    if server_main is None:
+        return False
+
+    server_main(list(argv))
+    return True
 
 
 def _find_server_tray_binary() -> Optional[Path]:
@@ -327,8 +383,6 @@ def _launch_server_tray(argv: Sequence[str]) -> bool:
 
     tray_main(list(argv))
     return True
-
-
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:

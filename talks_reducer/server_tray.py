@@ -12,6 +12,7 @@ import threading
 import time
 import webbrowser
 from contextlib import suppress
+from importlib import resources
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterator, Optional, Sequence
@@ -158,8 +159,11 @@ def _load_icon() -> Image.Image:
                 LOGGER.debug("Loaded tray icon from %s", candidate)
                 return loaded
 
-    LOGGER.warning("Falling back to embedded tray icon; packaged image not found")
-    return _load_embedded_icon()
+    LOGGER.warning("Falling back to generated tray icon; packaged image not found")
+    image = Image.new("RGBA", (64, 64), color=(37, 99, 235, 255))
+    image.putpixel((0, 0), (255, 255, 255, 255))
+    image.putpixel((63, 63), (17, 24, 39, 255))
+    return image
 
 
 _EMBEDDED_ICON_BASE64 = (
@@ -243,21 +247,17 @@ def _load_icon() -> Image.Image:
 
     LOGGER.debug("Attempting to load tray icon image.")
 
-    candidates = [
-        Path(__file__).resolve().parent.parent / "docs" / "assets" / "icon.png",
-        Path(__file__).resolve().parent / "icon.png",
-    ]
-
-    for candidate in candidates:
+    for candidate in _iter_icon_candidates():
         LOGGER.debug("Checking icon candidate at %s", candidate)
         if candidate.exists():
             try:
-                image = Image.open(candidate).copy()
+                with Image.open(candidate) as image:
+                    loaded = image.copy()
             except Exception as exc:  # pragma: no cover - diagnostic log
                 LOGGER.warning("Failed to load tray icon from %s: %s", candidate, exc)
             else:
                 LOGGER.debug("Loaded tray icon from %s", candidate)
-                return image
+                return loaded
 
     with suppress(FileNotFoundError):
         resource_icon = resources.files("talks_reducer") / "assets" / "icon.png"
@@ -265,15 +265,17 @@ def _load_icon() -> Image.Image:
             LOGGER.debug("Loading tray icon from package resources")
             with resource_icon.open("rb") as handle:
                 try:
-                    return Image.open(handle).copy()
+                    with Image.open(handle) as image:
+                        return image.copy()
                 except Exception as exc:  # pragma: no cover - diagnostic log
                     LOGGER.warning(
                         "Failed to load tray icon from package resources: %s", exc
                     )
 
     LOGGER.warning("Falling back to generated tray icon; packaged image not found")
-    # Fallback to a simple accent-colored square to avoid import errors
     image = Image.new("RGBA", (64, 64), color=(37, 99, 235, 255))
+    image.putpixel((0, 0), (255, 255, 255, 255))
+    image.putpixel((63, 63), (17, 24, 39, 255))
     return image
 
 

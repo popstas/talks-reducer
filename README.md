@@ -50,6 +50,9 @@ and download the rendered video:
 talks-reducer --url http://localhost:9005 demo.mp4
 ```
 
+Want to see progress as the remote server works? Add `--server-stream` so the
+CLI prints live progress bars and log lines while you wait for the download.
+
 ### Speech detection
 
 Talks Reducer now relies on its built-in volume thresholding to detect speech. Adjust `--silent_threshold` if you need to fine-tune when segments count as silence. Dropping the optional Silero VAD integration keeps the install lightweight and avoids pulling in PyTorch.
