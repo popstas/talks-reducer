@@ -46,6 +46,18 @@
             "module": "talks_reducer.server_tray",
             "args": [
                 "--host",
+                "0.0.0.0"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "server-tray pystray-detached",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "talks_reducer.server_tray",
+            "args": [
+                "--host",
                 "0.0.0.0",
                 "--tray-mode",
                 "pystray-detached",
