@@ -167,10 +167,6 @@ DARK_THEME = {
 }
 
 
-_TRAY_LOCK = threading.Lock()
-_TRAY_PROCESS: Optional[subprocess.Popen[Any]] = None
-
-
 def _default_remote_destination(input_file: Path, *, small: bool) -> Path:
     """Return the default remote output path for *input_file*.
 
@@ -188,34 +184,6 @@ def _default_remote_destination(input_file: Path, *, small: bool) -> Path:
         new_name = name + suffix
 
     return input_file.with_name(new_name)
-
-
-def _ensure_server_tray_running(extra_args: Optional[Sequence[str]] = None) -> None:
-    """Start the server tray in a background process if one is not active."""
-
-    global _TRAY_PROCESS
-
-    with _TRAY_LOCK:
-        if _TRAY_PROCESS is not None and _TRAY_PROCESS.poll() is None:
-            return
-
-        package_name = __package__ or "talks_reducer"
-
-        if getattr(sys, "frozen", False):
-            command = [sys.executable, "--server"]
-        else:
-            command = [sys.executable, "-m", f"{package_name}.server_tray"]
-
-        if extra_args:
-            command.extend(extra_args)
-
-        try:
-            _TRAY_PROCESS = subprocess.Popen(command)
-        except Exception as exc:  # pragma: no cover - best-effort fallback
-            _TRAY_PROCESS = None
-            sys.stderr.write(
-                f"Warning: failed to launch Talks Reducer server tray: {exc}\n"
-            )
 
 
 def _parse_ratios_from_summary(summary: str) -> Tuple[Optional[float], Optional[float]]:
@@ -2265,24 +2233,27 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
 
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
-        "--no-tray",
-        action="store_true",
-        help="Do not start the Talks Reducer server tray alongside the GUI.",
-    )
-    parser.add_argument(
         "--server",
         action="store_true",
         help="Launch the Talks Reducer server tray instead of the desktop GUI.",
     )
+    parser.add_argument(
+        "--no-tray",
+        action="store_true",
+        help="Deprecated: the GUI no longer starts the server tray automatically.",
+    )
 
     parsed_args, remaining = parser.parse_known_args(argv)
-    no_tray = parsed_args.no_tray
     if parsed_args.server:
         package_name = __package__ or "talks_reducer"
         tray_module = importlib.import_module(f"{package_name}.server_tray")
         tray_main = getattr(tray_module, "main")
         tray_main(remaining)
         return False
+    if parsed_args.no_tray:
+        sys.stderr.write(
+            "Warning: --no-tray is deprecated; the GUI no longer starts the server tray automatically.\n"
+        )
     argv = remaining
 
     if argv:
@@ -2298,8 +2269,6 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
         if launch_gui:
             try:
                 app = TalksReducerGUI(argv, auto_run=True)
-                if not no_tray:
-                    _ensure_server_tray_running()
                 app.run()
                 return True
             except Exception:
@@ -2361,8 +2330,6 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
     # Catch and report any errors during GUI initialization
     try:
         app = TalksReducerGUI()
-        if not no_tray:
-            _ensure_server_tray_running()
         app.run()
         return True
     except Exception as e:
