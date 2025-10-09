@@ -308,6 +308,21 @@ class TalksReducerGUI:
             self._settings[key] = value
         return value
 
+    def _get_float_setting(self, key: str, default: float) -> float:
+        """Return *key* as a float, coercing stored strings when necessary."""
+
+        raw_value = self._get_setting(key, default)
+        try:
+            number = float(raw_value)
+        except (TypeError, ValueError):
+            number = float(default)
+
+        if self._settings.get(key) != number:
+            self._settings[key] = number
+            self._save_settings()
+
+        return number
+
     def _update_setting(self, key: str, value: object) -> None:
         if self._settings.get(key) == value:
             return
@@ -401,6 +416,10 @@ class TalksReducerGUI:
         self.server_url_var.trace_add("write", self._on_server_url_change)
         self._discovery_thread: Optional[threading.Thread] = None
 
+        self._basic_defaults: dict[str, float] = {}
+        self._basic_variables: dict[str, tk.DoubleVar] = {}
+        self._slider_updaters: dict[str, Callable[[str], None]] = {}
+
         self._build_layout()
         self._apply_simple_mode(initial=True)
         self._apply_status_style(self._status_state)
@@ -409,9 +428,11 @@ class TalksReducerGUI:
         self._hide_stop_button()
 
         # Ping server on startup if in remote mode
-        if (self.processing_mode_var.get() == "remote" and
-            self.server_url_var.get().strip() and
-            hasattr(self, "_ping_server")):
+        if (
+            self.processing_mode_var.get() == "remote"
+            and self.server_url_var.get().strip()
+            and hasattr(self, "_ping_server")
+        ):
             server_url = self.server_url_var.get().strip()
             host_label = self._format_server_host(server_url)
 
@@ -419,16 +440,31 @@ class TalksReducerGUI:
                 try:
                     if self._ping_server(server_url):
                         self._set_status("Idle", f"Server {host_label} is reachable")
-                        self._notify(lambda: self._append_log(f"Server {host_label} ready"))
+                        self._notify(
+                            lambda: self._append_log(f"Server {host_label} ready")
+                        )
                     else:
-                        self._set_status("Error", f"Server {host_label} is not reachable")
-                        self._notify(lambda: self._append_log(f"Server {host_label} is not reachable"))
+                        self._set_status(
+                            "Error", f"Server {host_label} is not reachable"
+                        )
+                        self._notify(
+                            lambda: self._append_log(
+                                f"Server {host_label} is not reachable"
+                            )
+                        )
                         ping_worker()
                 except Exception as exc:
-                    self._set_status("Idle", f"Error pinging server {host_label}: {exc}")
-                    self._notify(lambda: self._append_log(f"Error pinging server {host_label}: {exc}"))
+                    self._set_status(
+                        "Idle", f"Error pinging server {host_label}: {exc}"
+                    )
+                    self._notify(
+                        lambda: self._append_log(
+                            f"Error pinging server {host_label}: {exc}"
+                        )
+                    )
 
             import threading
+
             ping_thread = threading.Thread(target=ping_worker, daemon=True)
             ping_thread.start()
 
@@ -480,16 +516,8 @@ class TalksReducerGUI:
         input_frame.grid(row=0, column=0, sticky="nsew")
         main.rowconfigure(0, weight=1)
         main.columnconfigure(0, weight=1)
-        for column in range(5):
-            input_frame.columnconfigure(column, weight=1)
-
-        self.input_list = self.tk.Listbox(input_frame, height=5)
-        self.input_list.grid(row=0, column=0, columnspan=4, sticky="nsew", pady=(0, 12))
-        self.input_scrollbar = self.ttk.Scrollbar(
-            input_frame, orient=self.tk.VERTICAL, command=self.input_list.yview
-        )
-        self.input_scrollbar.grid(row=0, column=4, sticky="ns", pady=(0, 12))
-        self.input_list.configure(yscrollcommand=self.input_scrollbar.set)
+        input_frame.columnconfigure(0, weight=1)
+        input_frame.rowconfigure(0, weight=1)
 
         self.drop_zone = self.tk.Label(
             input_frame,
@@ -500,40 +528,19 @@ class TalksReducerGUI:
             pady=self.PADDING,
             highlightthickness=0,
         )
-        self.drop_zone.grid(row=1, column=0, columnspan=5, sticky="nsew")
-        input_frame.rowconfigure(1, weight=1)
+        self.drop_zone.grid(row=0, column=0, sticky="nsew")
         self._configure_drop_targets(self.drop_zone)
-        self._configure_drop_targets(self.input_list)
         self.drop_zone.configure(cursor="hand2", takefocus=1)
         self.drop_zone.bind("<Button-1>", self._on_drop_zone_click)
         self.drop_zone.bind("<Return>", self._on_drop_zone_click)
         self.drop_zone.bind("<space>", self._on_drop_zone_click)
 
-        self.add_files_button = self.ttk.Button(
-            input_frame, text="Add files", command=self._add_files
-        )
-        self.add_files_button.grid(row=2, column=0, pady=8, sticky="w")
-        self.add_folder_button = self.ttk.Button(
-            input_frame, text="Add folder", command=self._add_directory
-        )
-        self.add_folder_button.grid(row=2, column=1, pady=8)
-        self.remove_selected_button = self.ttk.Button(
-            input_frame, text="Remove selected", command=self._remove_selected
-        )
-        self.remove_selected_button.grid(row=2, column=2, pady=8, sticky="w")
-        self.run_after_drop_check = self.ttk.Checkbutton(
-            input_frame,
-            text="Run after drop",
-            variable=self.run_after_drop_var,
-        )
-        self.run_after_drop_check.grid(row=2, column=3, pady=8, sticky="e")
-
         # Options frame
-        options = self.ttk.Frame(main, padding=self.PADDING)
-        options.grid(row=2, column=0, pady=(0, 0), sticky="ew")
-        options.columnconfigure(0, weight=1)
+        self.options_frame = self.ttk.Frame(main, padding=self.PADDING)
+        self.options_frame.grid(row=2, column=0, pady=(0, 0), sticky="ew")
+        self.options_frame.columnconfigure(0, weight=1)
 
-        checkbox_frame = self.ttk.Frame(options)
+        checkbox_frame = self.ttk.Frame(self.options_frame)
         checkbox_frame.grid(row=0, column=0, columnspan=2, sticky="w")
 
         self.ttk.Checkbutton(
@@ -559,70 +566,100 @@ class TalksReducerGUI:
         )
 
         self.advanced_visible = self.tk.BooleanVar(value=False)
-        self.advanced_button = self.ttk.Button(
-            options,
-            text="Advanced",
-            command=self._toggle_advanced,
-        )
-        self.advanced_button.grid(row=1, column=1, sticky="e")
 
-        self.advanced_frame = self.ttk.Frame(options, padding=self.PADDING)
-        self.advanced_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
-        self.advanced_frame.columnconfigure(1, weight=1)
+        basic_label_container = self.ttk.Frame(self.options_frame)
+        basic_label = self.ttk.Label(basic_label_container, text="Basic options")
+        basic_label.pack(side=self.tk.LEFT)
 
-        self.output_var = self.tk.StringVar()
-        self._add_entry(
-            self.advanced_frame, "Output file", self.output_var, row=0, browse=True
+        self.reset_basic_button = self.ttk.Button(
+            basic_label_container,
+            text="Reset to defaults",
+            command=self._reset_basic_defaults,
+            state=self.tk.DISABLED,
         )
 
-        self.temp_var = self.tk.StringVar(value=str(default_temp_folder()))
-        self._add_entry(
-            self.advanced_frame, "Temp folder", self.temp_var, row=1, browse=True
+        self.basic_options_frame = self.ttk.Labelframe(
+            self.options_frame, padding=0, labelwidget=basic_label_container
+        )
+        self.basic_options_frame.grid(
+            row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        )
+        self.basic_options_frame.columnconfigure(1, weight=1)
+
+        self._reset_button_visible = False
+
+        self.silent_speed_var = self.tk.DoubleVar(
+            value=min(max(self._get_float_setting("silent_speed", 4.0), 1.0), 10.0)
+        )
+        self._add_slider(
+            self.basic_options_frame,
+            "Silent speed",
+            self.silent_speed_var,
+            row=0,
+            setting_key="silent_speed",
+            minimum=1.0,
+            maximum=10.0,
+            resolution=0.5,
+            display_format="{:.1f}×",
+            default_value=4.0,
         )
 
-        self.silent_threshold_var = self.tk.StringVar()
-        self._add_entry(
-            self.advanced_frame,
+        self.sounded_speed_var = self.tk.DoubleVar(
+            value=min(max(self._get_float_setting("sounded_speed", 1.0), 0.75), 2.0)
+        )
+        self._add_slider(
+            self.basic_options_frame,
+            "Sounded speed",
+            self.sounded_speed_var,
+            row=1,
+            setting_key="sounded_speed",
+            minimum=0.75,
+            maximum=2.0,
+            resolution=0.25,
+            display_format="{:.2f}×",
+            default_value=1.0,
+        )
+
+        self.silent_threshold_var = self.tk.DoubleVar(
+            value=min(max(self._get_float_setting("silent_threshold", 0.05), 0.0), 1.0)
+        )
+        self._add_slider(
+            self.basic_options_frame,
             "Silent threshold",
             self.silent_threshold_var,
             row=2,
+            setting_key="silent_threshold",
+            minimum=0.0,
+            maximum=1.0,
+            resolution=0.01,
+            display_format="{:.2f}",
+            default_value=0.05,
         )
 
-        self.sounded_speed_var = self.tk.StringVar()
-        self._add_entry(
-            self.advanced_frame, "Sounded speed", self.sounded_speed_var, row=3
+        self.ttk.Label(self.basic_options_frame, text="Server URL").grid(
+            row=3, column=0, sticky="w", pady=4
         )
-
-        self.silent_speed_var = self.tk.StringVar()
-        self._add_entry(
-            self.advanced_frame, "Silent speed", self.silent_speed_var, row=4
+        stored_server_url = str(
+            self._get_setting("server_url", "http://localhost:9005")
         )
-
-        self.frame_margin_var = self.tk.StringVar()
-        self._add_entry(
-            self.advanced_frame, "Frame margin", self.frame_margin_var, row=5
-        )
-
-        self.sample_rate_var = self.tk.StringVar(value="48000")
-        self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=6)
-
-        self.ttk.Label(self.advanced_frame, text="Server URL").grid(
-            row=7, column=0, sticky="w", pady=4
-        )
+        if not stored_server_url:
+            stored_server_url = "http://localhost:9005"
+            self._update_setting("server_url", stored_server_url)
+        self.server_url_var.set(stored_server_url)
         self.server_url_entry = self.ttk.Entry(
-            self.advanced_frame, textvariable=self.server_url_var
+            self.basic_options_frame, textvariable=self.server_url_var, width=30
         )
-        self.server_url_entry.grid(row=7, column=1, sticky="ew", pady=4)
+        self.server_url_entry.grid(row=3, column=1, sticky="w", pady=4)
         self.server_discover_button = self.ttk.Button(
-            self.advanced_frame, text="Discover", command=self._start_discovery
+            self.basic_options_frame, text="Discover", command=self._start_discovery
         )
-        self.server_discover_button.grid(row=7, column=2, padx=(8, 0))
+        self.server_discover_button.grid(row=3, column=2, padx=(8, 0))
 
-        self.ttk.Label(self.advanced_frame, text="Processing mode").grid(
-            row=8, column=0, sticky="w", pady=4
+        self.ttk.Label(self.basic_options_frame, text="Processing mode").grid(
+            row=4, column=0, sticky="w", pady=4
         )
-        mode_choice = self.ttk.Frame(self.advanced_frame)
-        mode_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=4)
+        mode_choice = self.ttk.Frame(self.basic_options_frame)
+        mode_choice.grid(row=4, column=1, columnspan=2, sticky="w", pady=4)
         self.ttk.Radiobutton(
             mode_choice,
             text="Local",
@@ -637,11 +674,11 @@ class TalksReducerGUI:
         )
         self.remote_mode_button.pack(side=self.tk.LEFT, padx=(0, 8))
 
-        self.ttk.Label(self.advanced_frame, text="Theme").grid(
-            row=9, column=0, sticky="w", pady=(8, 0)
+        self.ttk.Label(self.basic_options_frame, text="Theme").grid(
+            row=5, column=0, sticky="w", pady=(8, 0)
         )
-        theme_choice = self.ttk.Frame(self.advanced_frame)
-        theme_choice.grid(row=9, column=1, columnspan=2, sticky="w", pady=(8, 0))
+        theme_choice = self.ttk.Frame(self.basic_options_frame)
+        theme_choice.grid(row=5, column=1, columnspan=2, sticky="w", pady=(8, 0))
         for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
             self.ttk.Radiobutton(
                 theme_choice,
@@ -651,8 +688,47 @@ class TalksReducerGUI:
                 command=self._apply_theme,
             ).pack(side=self.tk.LEFT, padx=(0, 8))
 
+        self.advanced_button = self.ttk.Button(
+            self.options_frame,
+            text="Advanced",
+            command=self._toggle_advanced,
+        )
+        self.advanced_button.grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=(12, 0)
+        )
+
+        self.advanced_frame = self.ttk.Frame(self.options_frame, padding=0)
+        self.advanced_frame.grid(row=4, column=0, columnspan=2, sticky="nsew")
+        self.advanced_frame.columnconfigure(1, weight=1)
+
+        self.output_var = self.tk.StringVar()
+        self._add_entry(
+            self.advanced_frame, "Output file", self.output_var, row=0, browse=True
+        )
+
+        self.temp_var = self.tk.StringVar(value=str(default_temp_folder()))
+        self._add_entry(
+            self.advanced_frame, "Temp folder", self.temp_var, row=1, browse=True
+        )
+
+        self.sample_rate_var = self.tk.StringVar(value="48000")
+        self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=2)
+
+        frame_margin_setting = self._get_setting("frame_margin", 2)
+        try:
+            frame_margin_default = int(frame_margin_setting)
+        except (TypeError, ValueError):
+            frame_margin_default = 2
+            self._update_setting("frame_margin", frame_margin_default)
+
+        self.frame_margin_var = self.tk.StringVar(value=str(frame_margin_default))
+        self._add_entry(
+            self.advanced_frame, "Frame margin", self.frame_margin_var, row=3
+        )
+
         self._toggle_advanced(initial=True)
         self._update_processing_mode_state()
+        self._update_basic_reset_state()
 
         # Action buttons and log output
         status_frame = self.ttk.Frame(main, padding=self.PADDING)
@@ -660,6 +736,7 @@ class TalksReducerGUI:
         status_frame.columnconfigure(0, weight=0)
         status_frame.columnconfigure(1, weight=1)
         status_frame.columnconfigure(2, weight=0)
+        self.status_frame = status_frame
 
         self.ttk.Label(status_frame, text="Status:").grid(row=0, column=0, sticky="w")
         self.status_label = self.tk.Label(
@@ -743,6 +820,112 @@ class TalksReducerGUI:
                 command=lambda var=variable: self._browse_path(var, label),
             )
             button.grid(row=row, column=2, padx=(8, 0))
+
+    def _add_slider(
+        self,
+        parent,  # type: tk.Misc
+        label: str,
+        variable,  # type: tk.DoubleVar
+        *,
+        row: int,
+        setting_key: str,
+        minimum: float,
+        maximum: float,
+        resolution: float,
+        display_format: str,
+        default_value: float,
+    ) -> None:
+        self.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=4)
+
+        value_label = self.ttk.Label(parent)
+        value_label.grid(row=row, column=2, sticky="e", pady=4)
+
+        def update(value: str) -> None:
+            numeric = float(value)
+            clamped = max(minimum, min(maximum, numeric))
+            steps = round((clamped - minimum) / resolution)
+            quantized = minimum + steps * resolution
+            if abs(variable.get() - quantized) > 1e-9:
+                variable.set(quantized)
+            value_label.configure(text=display_format.format(quantized))
+            self._update_setting(setting_key, float(f"{quantized:.6f}"))
+            self._update_basic_reset_state()
+
+        slider = self.tk.Scale(
+            parent,
+            variable=variable,
+            from_=minimum,
+            to=maximum,
+            orient=self.tk.HORIZONTAL,
+            resolution=resolution,
+            showvalue=False,
+            command=update,
+            length=240,
+        )
+        slider.grid(row=row, column=1, sticky="ew", pady=4, padx=(0, 8))
+
+        update(str(variable.get()))
+
+        self._slider_updaters[setting_key] = update
+        self._basic_defaults[setting_key] = default_value
+        self._basic_variables[setting_key] = variable
+        variable.trace_add("write", lambda *_: self._update_basic_reset_state())
+
+    def _update_basic_reset_state(self) -> None:
+        """Enable or disable the reset control based on slider values."""
+
+        if not hasattr(self, "reset_basic_button"):
+            return
+
+        should_enable = False
+        for key, default_value in self._basic_defaults.items():
+            variable = self._basic_variables.get(key)
+            if variable is None:
+                continue
+            try:
+                current_value = float(variable.get())
+            except (TypeError, ValueError):
+                should_enable = True
+                break
+            if abs(current_value - default_value) > 1e-9:
+                should_enable = True
+                break
+
+        if should_enable:
+            if not getattr(self, "_reset_button_visible", False):
+                self.reset_basic_button.pack(side=self.tk.LEFT, padx=(8, 0))
+                self._reset_button_visible = True
+            self.reset_basic_button.configure(state=self.tk.NORMAL)
+        else:
+            if getattr(self, "_reset_button_visible", False):
+                self.reset_basic_button.pack_forget()
+                self._reset_button_visible = False
+            self.reset_basic_button.configure(state=self.tk.DISABLED)
+
+    def _reset_basic_defaults(self) -> None:
+        """Restore the basic numeric controls to their default values."""
+
+        for key, default_value in self._basic_defaults.items():
+            variable = self._basic_variables.get(key)
+            if variable is None:
+                continue
+
+            try:
+                current_value = float(variable.get())
+            except (TypeError, ValueError):
+                current_value = default_value
+
+            if abs(current_value - default_value) <= 1e-9:
+                continue
+
+            variable.set(default_value)
+            updater = self._slider_updaters.get(key)
+            if updater is not None:
+                updater(str(default_value))
+            else:
+                self._update_setting(key, float(f"{default_value:.6f}"))
+
+        self._update_basic_reset_state()
 
     def _update_processing_mode_state(self) -> None:
         has_url = bool(self.server_url_var.get().strip())
@@ -920,38 +1103,17 @@ class TalksReducerGUI:
 
     def _apply_simple_mode(self, *, initial: bool = False) -> None:
         simple = self.simple_mode_var.get()
-        widgets = [
-            self.input_list,
-            self.input_scrollbar,
-            self.add_files_button,
-            self.add_folder_button,
-            self.remove_selected_button,
-            self.run_after_drop_check,
-        ]
-
         if simple:
-            for widget in widgets:
-                widget.grid_remove()
+            self.basic_options_frame.grid_remove()
             self.log_frame.grid_remove()
             self.stop_button.grid_remove()
             self.advanced_button.grid_remove()
             self.advanced_frame.grid_remove()
-            if hasattr(self, "status_frame"):
-                self.status_frame.grid_remove()
             self.run_after_drop_var.set(True)
             self._apply_window_size(simple=True)
-            if self.status_var.get().lower() == "success" and hasattr(
-                self, "status_frame"
-            ):
-                self.status_frame.grid()
-                self.open_button.grid()
-                self.drop_hint_button.grid_remove()
         else:
-            for widget in widgets:
-                widget.grid()
+            self.basic_options_frame.grid()
             self.log_frame.grid()
-            if hasattr(self, "status_frame"):
-                self.status_frame.grid()
             self.advanced_button.grid()
             if self.advanced_visible.get():
                 self.advanced_frame.grid()
@@ -1127,14 +1289,6 @@ class TalksReducerGUI:
             fg=palette["foreground"],
             highlightthickness=0,
         )
-        self.input_list.configure(
-            bg=palette["surface"],
-            fg=palette["foreground"],
-            selectbackground=palette.get("selection_background", palette["accent"]),
-            selectforeground=palette.get("selection_foreground", palette["surface"]),
-            highlightbackground=palette["border"],
-            highlightcolor=palette["border"],
-        )
         self.log_text.configure(
             bg=palette["surface"],
             fg=palette["foreground"],
@@ -1196,7 +1350,6 @@ class TalksReducerGUI:
             resolved = os.fspath(Path(path))
             if resolved not in self.input_files:
                 self.input_files.append(resolved)
-                self.input_list.insert(self.tk.END, resolved)
                 normalized.append(resolved)
 
         if auto_run and normalized:
@@ -1230,21 +1383,13 @@ class TalksReducerGUI:
         for path in paths:
             if path and path not in self.input_files:
                 self.input_files.append(path)
-                self.input_list.insert(self.tk.END, path)
                 added = True
         if auto_run and added and self.run_after_drop_var.get():
             self._start_run()
 
-    def _remove_selected(self) -> None:
-        selection = list(self.input_list.curselection())
-        for index in reversed(selection):
-            self.input_list.delete(index)
-            del self.input_files[index]
-
     def _clear_input_files(self) -> None:
-        """Clear all input files from the list."""
+        """Clear all queued input files."""
         self.input_files.clear()
-        self.input_list.delete(0, self.tk.END)
 
     def _on_drop(self, event: object) -> None:
         data = getattr(event, "data", "")
@@ -1254,7 +1399,6 @@ class TalksReducerGUI:
         cleaned = [path.strip("{}") for path in paths]
         # Clear existing files before adding dropped files
         self.input_files.clear()
-        self.input_list.delete(0, self.tk.END)
         self._extend_inputs(cleaned, auto_run=True)
 
     def _on_drop_zone_click(self, event: object) -> str | None:
@@ -1434,18 +1578,14 @@ class TalksReducerGUI:
             args["output_file"] = Path(self.output_var.get())
         if self.temp_var.get():
             args["temp_folder"] = Path(self.temp_var.get())
-        if self.silent_threshold_var.get():
-            args["silent_threshold"] = self._parse_float(
-                self.silent_threshold_var.get(), "Silent threshold"
-            )
-        if self.sounded_speed_var.get():
-            args["sounded_speed"] = self._parse_float(
-                self.sounded_speed_var.get(), "Sounded speed"
-            )
-        if self.silent_speed_var.get():
-            args["silent_speed"] = self._parse_float(
-                self.silent_speed_var.get(), "Silent speed"
-            )
+        silent_threshold = float(self.silent_threshold_var.get())
+        args["silent_threshold"] = round(silent_threshold, 2)
+
+        sounded_speed = float(self.sounded_speed_var.get())
+        args["sounded_speed"] = round(sounded_speed, 2)
+
+        silent_speed = float(self.silent_speed_var.get())
+        args["silent_speed"] = round(silent_speed, 2)
         if self.frame_margin_var.get():
             args["frame_spreadage"] = int(
                 round(self._parse_float(self.frame_margin_var.get(), "Frame margin"))
@@ -1492,9 +1632,7 @@ class TalksReducerGUI:
             )
             return False
 
-        self._notify(
-            lambda: self._set_status("waiting", f"Server {host_label} ready")
-        )
+        self._notify(lambda: self._set_status("waiting", f"Server {host_label} ready"))
 
         output_override = args.get("output_file") if len(files) == 1 else None
         ignored = [key for key in args if key not in {"output_file", "small"}]
@@ -1899,12 +2037,7 @@ class TalksReducerGUI:
             else:
                 self.open_button.grid_remove()
                 # print("not success status")
-                if (
-                    self.simple_mode_var.get()
-                    and not is_processing
-                    and hasattr(self, "status_frame")
-                ):
-                    self.status_frame.grid_remove()
+                if self.simple_mode_var.get() and not is_processing:
                     self.stop_button.grid_remove()
                     # Show drop hint when no other buttons are visible
                     if hasattr(self, "drop_hint_button"):
