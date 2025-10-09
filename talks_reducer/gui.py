@@ -262,8 +262,8 @@ class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
 
     PADDING = 10
-    AUDIO_PROCESSING_RATIO = 0.033
-    AUDIO_PROGRESS_STEPS = 5
+    AUDIO_PROCESSING_RATIO = 0.02
+    AUDIO_PROGRESS_STEPS = 10
     MIN_AUDIO_INTERVAL_MS = 50
     DEFAULT_AUDIO_INTERVAL_MS = 200
 
@@ -1643,10 +1643,10 @@ class TalksReducerGUI:
             return
 
         self._audio_progress_steps_completed += 1
-        percentage = min(
-            self.AUDIO_PROGRESS_STEPS, self._audio_progress_steps_completed
-        )
+        audio_percentage = self._audio_progress_steps_completed / self.AUDIO_PROGRESS_STEPS * 100
+        percentage = (audio_percentage / 100) * 5
         self._set_progress(percentage)
+        self._set_status("processing", "Audio processing: %d%%" % (audio_percentage))
 
         if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
             interval_ms = (
