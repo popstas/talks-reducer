@@ -416,6 +416,10 @@ class TalksReducerGUI:
         self.server_url_var.trace_add("write", self._on_server_url_change)
         self._discovery_thread: Optional[threading.Thread] = None
 
+        self._basic_defaults: dict[str, float] = {}
+        self._basic_variables: dict[str, tk.DoubleVar] = {}
+        self._slider_updaters: dict[str, Callable[[str], None]] = {}
+
         self._build_layout()
         self._apply_simple_mode(initial=True)
         self._apply_status_style(self._status_state)
@@ -590,6 +594,7 @@ class TalksReducerGUI:
             maximum=1.0,
             resolution=0.01,
             display_format="{:.2f}",
+            default_value=0.05,
         )
 
         self.sounded_speed_var = self.tk.DoubleVar(
@@ -605,6 +610,7 @@ class TalksReducerGUI:
             maximum=2.0,
             resolution=0.25,
             display_format="{:.2f}×",
+            default_value=1.0,
         )
 
         self.silent_speed_var = self.tk.DoubleVar(
@@ -620,10 +626,21 @@ class TalksReducerGUI:
             maximum=10.0,
             resolution=0.5,
             display_format="{:.1f}×",
+            default_value=4.0,
+        )
+
+        self.reset_basic_button = self.ttk.Button(
+            self.basic_options_frame,
+            text="Reset to defaults",
+            command=self._reset_basic_defaults,
+            state=self.tk.DISABLED,
+        )
+        self.reset_basic_button.grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(4, 0)
         )
 
         self.ttk.Label(self.basic_options_frame, text="Server URL").grid(
-            row=3, column=0, sticky="w", pady=4
+            row=4, column=0, sticky="w", pady=4
         )
         stored_server_url = str(
             self._get_setting("server_url", "http://localhost:9005")
@@ -633,19 +650,19 @@ class TalksReducerGUI:
             self._update_setting("server_url", stored_server_url)
         self.server_url_var.set(stored_server_url)
         self.server_url_entry = self.ttk.Entry(
-            self.basic_options_frame, textvariable=self.server_url_var
+            self.basic_options_frame, textvariable=self.server_url_var, width=30
         )
-        self.server_url_entry.grid(row=3, column=1, sticky="ew", pady=4)
+        self.server_url_entry.grid(row=4, column=1, sticky="w", pady=4)
         self.server_discover_button = self.ttk.Button(
             self.basic_options_frame, text="Discover", command=self._start_discovery
         )
-        self.server_discover_button.grid(row=3, column=2, padx=(8, 0))
+        self.server_discover_button.grid(row=4, column=2, padx=(8, 0))
 
         self.ttk.Label(self.basic_options_frame, text="Processing mode").grid(
-            row=4, column=0, sticky="w", pady=4
+            row=5, column=0, sticky="w", pady=4
         )
         mode_choice = self.ttk.Frame(self.basic_options_frame)
-        mode_choice.grid(row=4, column=1, columnspan=2, sticky="w", pady=4)
+        mode_choice.grid(row=5, column=1, columnspan=2, sticky="w", pady=4)
         self.ttk.Radiobutton(
             mode_choice,
             text="Local",
@@ -661,10 +678,10 @@ class TalksReducerGUI:
         self.remote_mode_button.pack(side=self.tk.LEFT, padx=(0, 8))
 
         self.ttk.Label(self.basic_options_frame, text="Theme").grid(
-            row=5, column=0, sticky="w", pady=(8, 0)
+            row=6, column=0, sticky="w", pady=(8, 0)
         )
         theme_choice = self.ttk.Frame(self.basic_options_frame)
-        theme_choice.grid(row=5, column=1, columnspan=2, sticky="w", pady=(8, 0))
+        theme_choice.grid(row=6, column=1, columnspan=2, sticky="w", pady=(8, 0))
         for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
             self.ttk.Radiobutton(
                 theme_choice,
@@ -705,6 +722,7 @@ class TalksReducerGUI:
 
         self._toggle_advanced(initial=True)
         self._update_processing_mode_state()
+        self._update_basic_reset_state()
 
         # Action buttons and log output
         status_frame = self.ttk.Frame(main, padding=self.PADDING)
@@ -809,6 +827,7 @@ class TalksReducerGUI:
         maximum: float,
         resolution: float,
         display_format: str,
+        default_value: float,
     ) -> None:
         self.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=4)
 
@@ -824,6 +843,7 @@ class TalksReducerGUI:
                 variable.set(quantized)
             value_label.configure(text=display_format.format(quantized))
             self._update_setting(setting_key, float(f"{quantized:.6f}"))
+            self._update_basic_reset_state()
 
         slider = self.tk.Scale(
             parent,
@@ -839,6 +859,59 @@ class TalksReducerGUI:
         slider.grid(row=row, column=1, sticky="ew", pady=4, padx=(0, 8))
 
         update(str(variable.get()))
+
+        self._slider_updaters[setting_key] = update
+        self._basic_defaults[setting_key] = default_value
+        self._basic_variables[setting_key] = variable
+        variable.trace_add("write", lambda *_: self._update_basic_reset_state())
+
+    def _update_basic_reset_state(self) -> None:
+        """Enable or disable the reset control based on slider values."""
+
+        if not hasattr(self, "reset_basic_button"):
+            return
+
+        should_enable = False
+        for key, default_value in self._basic_defaults.items():
+            variable = self._basic_variables.get(key)
+            if variable is None:
+                continue
+            try:
+                current_value = float(variable.get())
+            except (TypeError, ValueError):
+                should_enable = True
+                break
+            if abs(current_value - default_value) > 1e-9:
+                should_enable = True
+                break
+
+        state = self.tk.NORMAL if should_enable else self.tk.DISABLED
+        self.reset_basic_button.configure(state=state)
+
+    def _reset_basic_defaults(self) -> None:
+        """Restore the basic numeric controls to their default values."""
+
+        for key, default_value in self._basic_defaults.items():
+            variable = self._basic_variables.get(key)
+            if variable is None:
+                continue
+
+            try:
+                current_value = float(variable.get())
+            except (TypeError, ValueError):
+                current_value = default_value
+
+            if abs(current_value - default_value) <= 1e-9:
+                continue
+
+            variable.set(default_value)
+            updater = self._slider_updaters.get(key)
+            if updater is not None:
+                updater(str(default_value))
+            else:
+                self._update_setting(key, float(f"{default_value:.6f}"))
+
+        self._update_basic_reset_state()
 
     def _update_processing_mode_state(self) -> None:
         has_url = bool(self.server_url_var.get().strip())
