@@ -103,9 +103,12 @@ ratio and download the rendered video directly from the page.
 The desktop GUI mirrors this behaviour. Open **Advanced** settings to provide a
 server URL and click **Discover** to scan your local network for Talks Reducer
 instances listening on port `9005`. The button now updates with the discovery
-progress, showing the scanned/total host count as `scanned / total`. Leaving the field
-blank keeps processing local; selecting a discovered server delegates rendering
-to that machine while the GUI downloads the finished files automatically.
+progress, showing the scanned/total host count as `scanned / total`. A new
+**Processing mode** toggle lets you decide whether work stays local or uploads
+to the configured server—the **Remote** option becomes available as soon as a
+URL is supplied. Leave the toggle on **Local** to keep rendering on this
+machine even if a server is saved; switch to **Remote** to hand jobs off while
+the GUI downloads the finished files automatically.
 
 ### Uploading and retrieving a processed video
 
