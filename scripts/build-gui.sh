@@ -146,8 +146,10 @@ if [[ "$OS_NAME" == "windows" ]]; then
         --hidden-import=tkinterdnd2 \
         --collect-submodules talks_reducer \
         --collect-data gradio_client \
-        --icon=docs/assets/icon.ico \
+        --icon=talks_reducer/resources/icons/icon.ico \
         --version-file=version.txt \
+        --add-data="talks_reducer/resources/icons/icon.png;talks_reducer/resources/icons" \
+        --add-data="talks_reducer/resources/icons/icon.ico;talks_reducer/resources/icons" \
         --add-data="docs/assets/icon.png;docs/assets" \
         --add-data="docs/assets/icon.ico;docs/assets" \
         $EXCLUDES \
@@ -159,7 +161,9 @@ else
         --hidden-import=tkinterdnd2 \
         --collect-submodules talks_reducer \
         --collect-data gradio_client \
-        --icon=docs/assets/icon.ico \
+        --icon=talks_reducer/resources/icons/icon.ico \
+        --add-data="talks_reducer/resources/icons/icon.png:talks_reducer/resources/icons" \
+        --add-data="talks_reducer/resources/icons/icon.ico:talks_reducer/resources/icons" \
         --add-data="docs/assets/icon.png:docs/assets" \
         --add-data="docs/assets/icon.ico:docs/assets" \
         $EXCLUDES \

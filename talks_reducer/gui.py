@@ -496,8 +496,26 @@ class TalksReducerGUI:
 
         icon_candidates: list[tuple[Path, str]] = []
         if sys.platform.startswith("win"):
-            icon_candidates.append((base_path / "docs" / "assets" / "icon.ico", "ico"))
-        icon_candidates.append((base_path / "docs" / "assets" / "icon.png", "png"))
+            icon_candidates.append(
+                (
+                    base_path
+                    / "talks_reducer"
+                    / "resources"
+                    / "icons"
+                    / "icon.ico",
+                    "ico",
+                )
+            )
+        icon_candidates.append(
+            (
+                base_path
+                / "talks_reducer"
+                / "resources"
+                / "icons"
+                / "icon.png",
+                "png",
+            )
+        )
 
         for icon_path, icon_type in icon_candidates:
             if not icon_path.is_file():

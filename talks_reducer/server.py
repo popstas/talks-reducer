@@ -144,8 +144,14 @@ class GradioProgressReporter(SignalProgressReporter):
         self._progress_callback(bounded_current, total_value, display_desc)
 
 
-_FAVICON_PATH = Path(__file__).resolve().parent.parent / "docs" / "assets" / "icon.ico"
-_FAVICON_PATH_STR = str(_FAVICON_PATH) if _FAVICON_PATH.exists() else None
+_FAVICON_CANDIDATES = (
+    Path(__file__).resolve().parent / "resources" / "icons" / "icon.ico",
+    Path(__file__).resolve().parent.parent / "docs" / "assets" / "icon.ico",
+)
+_FAVICON_PATH: Optional[Path] = next(
+    (path for path in _FAVICON_CANDIDATES if path.exists()), None
+)
+_FAVICON_PATH_STR = str(_FAVICON_PATH) if _FAVICON_PATH else None
 _WORKSPACES: list[Path] = []
 
 

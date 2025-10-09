@@ -123,14 +123,12 @@ def _iter_icon_candidates() -> Iterator[Path]:
             if candidate_root not in expanded_roots:
                 expanded_roots.append(candidate_root)
 
-    if sys.platform == "win32":
-        icon_names = ("icon.ico", "icon.png")
-    else:
-        icon_names = ("icon.png", "icon.ico")
+    icon_names = ("icon.ico", "icon.png") if sys.platform == "win32" else ("icon.png", "icon.ico")
     relative_paths = (
+        Path("talks_reducer") / "resources" / "icons",
+        Path("talks_reducer") / "assets",
         Path("docs") / "assets",
         Path("assets"),
-        Path("talks_reducer") / "assets",
         Path(""),
     )
 
@@ -409,7 +407,7 @@ class _ServerTrayApplication:
             try:
                 LOGGER.info("Launching Talks Reducer GUI via %s", sys.executable)
                 process = subprocess.Popen(
-                    [sys.executable, "-m", "talks_reducer.gui", "--no-tray"]
+                    [sys.executable, "-m", "talks_reducer.gui"]
                 )
             except Exception as exc:  # pragma: no cover - platform specific
                 LOGGER.error("Failed to launch Talks Reducer GUI: %s", exc)
