@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import shutil
+import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Callable, Optional, Sequence, Tuple
 
 from gradio_client import Client
 from gradio_client import file as gradio_file
+from gradio_client.client import Status, StatusUpdate
 
 
 def send_video(
@@ -18,6 +22,10 @@ def send_video(
     small: bool = False,
     *,
     log_callback: Optional[Callable[[str], None]] = None,
+    stream_updates: bool = False,
+    progress_callback: Optional[
+        Callable[[str, Optional[int], Optional[int], str], None]
+    ] = None,
 ) -> Tuple[Path, str, str]:
     """Upload *input_path* to the Gradio server and download the processed video."""
 
@@ -43,12 +51,22 @@ def send_video(
                 log_callback(line)
             printed_lines = len(lines)
 
-    for output in job:
-        if not isinstance(output, (list, tuple)) or len(output) != 4:
-            continue
-        log_text_candidate = output[1] or ""
-        if isinstance(log_text_candidate, str):
-            _emit_new_lines(log_text_candidate)
+    consumed_stream = False
+
+    if stream_updates:
+        consumed_stream = _stream_job_updates(
+            job,
+            _emit_new_lines,
+            progress_callback=progress_callback,
+        )
+
+    if not consumed_stream:
+        for output in job:
+            if not isinstance(output, (list, tuple)) or len(output) != 4:
+                continue
+            log_text_candidate = output[1] or ""
+            if isinstance(log_text_candidate, str):
+                _emit_new_lines(log_text_candidate)
 
     prediction = job.result()
 
@@ -88,6 +106,166 @@ def send_video(
     return destination, summary, log_text
 
 
+def _coerce_int(value: object) -> Optional[int]:
+    """Return *value* as an ``int`` when possible."""
+
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _emit_progress_update(
+    callback: Callable[[str, Optional[int], Optional[int], str], None],
+    unit: object,
+) -> None:
+    """Normalize a progress unit and forward it to *callback*."""
+
+    if unit is None:
+        return
+
+    if hasattr(unit, "__dict__"):
+        data = unit
+        desc = getattr(data, "desc", None)
+        length = getattr(data, "length", None)
+        index = getattr(data, "index", None)
+        progress = getattr(data, "progress", None)
+        unit_name = getattr(data, "unit", None)
+    elif isinstance(unit, dict):
+        desc = unit.get("desc")
+        length = unit.get("length")
+        index = unit.get("index")
+        progress = unit.get("progress")
+        unit_name = unit.get("unit")
+    else:
+        return
+
+    total = _coerce_int(length)
+    current = _coerce_int(index)
+    if current is None and isinstance(progress, (int, float)) and total:
+        current = int(progress * total)
+
+    callback(desc or "Processing", current, total, str(unit_name or ""))
+
+
+async def _pump_job_updates(
+    job,
+    emit_log: Callable[[str], None],
+    progress_callback: Optional[
+        Callable[[str, Optional[int], Optional[int], str], None]
+    ],
+) -> None:
+    """Consume asynchronous updates from *job* and emit logs and progress."""
+
+    async for update in job:  # type: ignore[async-for]
+        update_type = getattr(update, "type", "status")
+        if update_type == "output":
+            outputs = getattr(update, "outputs", None) or []
+            if isinstance(outputs, (list, tuple)) and len(outputs) == 4:
+                log_text_candidate = outputs[1] or ""
+                if isinstance(log_text_candidate, str):
+                    emit_log(log_text_candidate)
+            if getattr(update, "final", False):
+                break
+            continue
+
+        status_update: StatusUpdate = update  # type: ignore[assignment]
+        log_entry = getattr(status_update, "log", None)
+        if log_entry:
+            message = (
+                log_entry[0] if isinstance(log_entry, (list, tuple)) else log_entry
+            )
+            if isinstance(message, str):
+                emit_log(message)
+
+        if progress_callback and status_update.progress_data:
+            for unit in status_update.progress_data:
+                _emit_progress_update(progress_callback, unit)
+
+        if status_update.code in {Status.FINISHED, Status.CANCELLED}:
+            break
+
+
+def _poll_job_updates(
+    job,
+    emit_log: Callable[[str], None],
+    progress_callback: Optional[
+        Callable[[str, Optional[int], Optional[int], str], None]
+    ],
+    *,
+    interval: float = 0.25,
+) -> None:
+    """Poll *job* for outputs and status updates when async streaming is unavailable."""
+
+    while True:
+        if job.done():
+            break
+
+        status: Optional[StatusUpdate] = None
+        with suppress(Exception):
+            status = job.status()  # type: ignore[assignment]
+
+        if status is not None:
+            if progress_callback:
+                progress_data = getattr(status, "progress_data", None)
+                if progress_data:
+                    for unit in progress_data:
+                        _emit_progress_update(progress_callback, unit)
+            log_entry = getattr(status, "log", None)
+            if log_entry:
+                message = (
+                    log_entry[0] if isinstance(log_entry, (list, tuple)) else log_entry
+                )
+                if isinstance(message, str):
+                    emit_log(message)
+
+        outputs = []
+        with suppress(Exception):
+            outputs = job.outputs()
+        if outputs:
+            latest = outputs[-1]
+            if isinstance(latest, (list, tuple)) and len(latest) == 4:
+                log_text_candidate = latest[1] or ""
+                if isinstance(log_text_candidate, str):
+                    emit_log(log_text_candidate)
+
+        time.sleep(interval)
+
+
+def _stream_job_updates(
+    job,
+    emit_log: Callable[[str], None],
+    *,
+    progress_callback: Optional[
+        Callable[[str, Optional[int], Optional[int], str], None]
+    ] = None,
+) -> bool:
+    """Attempt to stream updates directly from *job*.
+
+    Returns ``True`` when streaming occurred, ``False`` when the legacy
+    generator-based fallback should be used.
+    """
+
+    communicator = getattr(job, "communicator", None)
+    if communicator is None:
+        return False
+
+    try:
+        asyncio.run(
+            _pump_job_updates(
+                job,
+                emit_log,
+                progress_callback,
+            )
+        )
+    except RuntimeError:
+        _poll_job_updates(job, emit_log, progress_callback)
+
+    return True
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Send a video to a running talks-reducer server and download the result.",
@@ -114,6 +292,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the server log after processing completes.",
     )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream remote progress updates while waiting for the result.",
+    )
     return parser
 
 
@@ -130,12 +313,37 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             printed_log_header = True
         print(line, flush=True)
 
+    progress_state: dict[str, tuple[Optional[int], Optional[int], str]] = {}
+
+    def _progress(
+        desc: str, current: Optional[int], total: Optional[int], unit: str
+    ) -> None:
+        key = desc or "Processing"
+        state = (current, total, unit)
+        if progress_state.get(key) == state:
+            return
+        progress_state[key] = state
+
+        parts: list[str] = []
+        if current is not None and total and total > 0:
+            percent = (current / total) * 100
+            parts.append(f"{current}/{total}")
+            parts.append(f"{percent:.1f}%")
+        elif current is not None:
+            parts.append(str(current))
+        if unit:
+            parts.append(unit)
+        message = " ".join(parts).strip()
+        print(f"{key}: {message or 'update'}", flush=True)
+
     destination, summary, log_text = send_video(
         input_path=args.input.expanduser(),
         output_path=args.output.expanduser() if args.output else None,
         server_url=args.server,
         small=args.small,
         log_callback=_stream if args.print_log else None,
+        stream_updates=args.stream,
+        progress_callback=_progress if args.stream else None,
     )
 
     print(summary)
