@@ -459,6 +459,7 @@ class TalksReducerGUI:
         self._basic_defaults: dict[str, float] = {}
         self._basic_variables: dict[str, tk.DoubleVar] = {}
         self._slider_updaters: dict[str, Callable[[str], None]] = {}
+        self._sliders: list[tk.Scale] = []
 
         self._build_layout()
         self._apply_simple_mode(initial=True)
@@ -616,6 +617,7 @@ class TalksReducerGUI:
             text="Reset to defaults",
             command=self._reset_basic_defaults,
             state=self.tk.DISABLED,
+            style="Link.TButton",
         )
 
         self.basic_options_frame = self.ttk.Labelframe(
@@ -901,6 +903,7 @@ class TalksReducerGUI:
             showvalue=False,
             command=update,
             length=240,
+            highlightthickness=0,
         )
         slider.grid(row=row, column=1, sticky="ew", pady=4, padx=(0, 8))
 
@@ -910,6 +913,7 @@ class TalksReducerGUI:
         self._basic_defaults[setting_key] = default_value
         self._basic_variables[setting_key] = variable
         variable.trace_add("write", lambda *_: self._update_basic_reset_state())
+        self._sliders.append(slider)
 
     def _update_basic_reset_state(self) -> None:
         """Enable or disable the reset control based on slider values."""
@@ -1260,10 +1264,32 @@ class TalksReducerGUI:
             background=[("active", palette.get("hover", palette["background"]))],
         )
         self.style.configure(
+            "Link.TButton",
+            background=palette["background"],
+            foreground=palette["accent"],
+            borderwidth=0,
+            relief="flat",
+            highlightthickness=0,
+            padding=2,
+            font=("TkDefaultFont", 8, "underline"),
+        )
+        self.style.map(
+            "Link.TButton",
+            background=[
+                ("active", palette.get("hover", palette["background"])),
+                ("disabled", palette["background"]),
+            ],
+            foreground=[
+                ("active", palette.get("accent", palette["foreground"])),
+                ("disabled", palette["foreground"]),
+            ],
+        )
+        self.style.configure(
             "TButton",
             background=palette["surface"],
             foreground=palette["foreground"],
-            padding=6,
+            padding=4,
+            font=("TkDefaultFont", 8),
         )
         self.style.map(
             "TButton",
@@ -1329,6 +1355,24 @@ class TalksReducerGUI:
             fg=palette["foreground"],
             highlightthickness=0,
         )
+
+        slider_relief = self.tk.FLAT if mode == "dark" else self.tk.RAISED
+        active_background = (
+            palette.get("accent", palette["surface"])
+            if mode == "dark"
+            else palette.get("hover", palette["surface"])
+        )
+        for slider in getattr(self, "_sliders", []):
+            slider.configure(
+                # background=palette["background"],
+                # foreground=palette["foreground"],
+                troughcolor=palette["surface"],
+                # activebackground=active_background,
+                # highlightbackground=palette["background"],
+                highlightcolor=palette["background"],
+                sliderrelief=slider_relief,
+                bd=0,
+            )
         self.log_text.configure(
             bg=palette["surface"],
             fg=palette["foreground"],
