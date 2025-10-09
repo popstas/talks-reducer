@@ -617,6 +617,7 @@ class TalksReducerGUI:
             text="Reset to defaults",
             command=self._reset_basic_defaults,
             state=self.tk.DISABLED,
+            style="Link.TButton",
         )
 
         self.basic_options_frame = self.ttk.Labelframe(
@@ -1263,10 +1264,32 @@ class TalksReducerGUI:
             background=[("active", palette.get("hover", palette["background"]))],
         )
         self.style.configure(
+            "Link.TButton",
+            background=palette["background"],
+            foreground=palette["accent"],
+            borderwidth=0,
+            relief="flat",
+            highlightthickness=0,
+            padding=2,
+            font=("TkDefaultFont", 8, "underline"),
+        )
+        self.style.map(
+            "Link.TButton",
+            background=[
+                ("active", palette.get("hover", palette["background"])),
+                ("disabled", palette["background"]),
+            ],
+            foreground=[
+                ("active", palette.get("accent", palette["foreground"])),
+                ("disabled", palette["foreground"]),
+            ],
+        )
+        self.style.configure(
             "TButton",
             background=palette["surface"],
             foreground=palette["foreground"],
-            padding=6,
+            padding=4,
+            font=("TkDefaultFont", 8),
         )
         self.style.map(
             "TButton",
@@ -1341,11 +1364,11 @@ class TalksReducerGUI:
         )
         for slider in getattr(self, "_sliders", []):
             slider.configure(
-                background=palette["background"],
-                foreground=palette["foreground"],
+                # background=palette["background"],
+                # foreground=palette["foreground"],
                 troughcolor=palette["surface"],
-                activebackground=active_background,
-                highlightbackground=palette["background"],
+                # activebackground=active_background,
+                # highlightbackground=palette["background"],
                 highlightcolor=palette["background"],
                 sliderrelief=slider_relief,
                 bd=0,
