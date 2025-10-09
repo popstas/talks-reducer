@@ -1338,6 +1338,9 @@ class TalksReducerGUI:
                     output_path=output_override,
                     server_url=server_url,
                     small=bool(args.get("small", False)),
+                    stream_updates=True,
+                    log_callback=self._append_log,
+                    # progress_callback=self._handle_service_progress,
                 )
             except Exception as exc:  # pragma: no cover - network safeguard
                 error_detail = f"{exc.__class__.__name__}: {exc}"

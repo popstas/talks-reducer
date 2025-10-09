@@ -145,9 +145,9 @@ def _emit_progress_update(
     total = _coerce_int(length)
     current = _coerce_int(index)
     if current is None and isinstance(progress, (int, float)) and total:
-        current = int(progress * total)
+        current = int(progress / total)
 
-    callback(desc or "Processing", current, total, str(unit_name or ""))
+    callback(desc or "Processing", progress, total, str(unit_name or ""))
 
 
 async def _pump_job_updates(
