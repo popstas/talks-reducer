@@ -44,10 +44,12 @@ talks-reducer --small input.mp4
 
 Need to offload work to a remote Talks Reducer server? Pass `--url` with the
 server address and the CLI will upload the input, wait for processing to finish,
-and download the rendered video:
+and download the rendered video. You can also provide `--host` to expand to the
+default Talks Reducer port (`http://<host>:9005`):
 
 ```sh
 talks-reducer --url http://localhost:9005 demo.mp4
+talks-reducer --host 192.168.1.42 demo.mp4
 ```
 
 Want to see progress as the remote server works? Add `--server-stream` so the

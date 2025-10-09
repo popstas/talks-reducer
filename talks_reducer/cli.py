@@ -107,6 +107,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Process videos via a Talks Reducer server at the provided base URL (for example, http://localhost:9005).",
     )
     parser.add_argument(
+        "--host",
+        dest="host",
+        default=None,
+        help="Shortcut for --url when targeting a Talks Reducer server on port 9005 (for example, localhost).",
+    )
+    parser.add_argument(
         "--server-stream",
         action="store_true",
         help="Stream remote progress updates when using --url.",
@@ -420,6 +426,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     parser = _build_parser()
     parsed_args = parser.parse_args(argv_list)
+
+    host_value = getattr(parsed_args, "host", None)
+    if host_value:
+        parsed_args.server_url = f"http://{host_value}:9005"
+
     start_time = time.time()
 
     files = gather_input_files(parsed_args.input_file)
@@ -428,6 +439,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         k: v for k, v in vars(parsed_args).items() if v is not None
     }
     del args["input_file"]
+
+    if "host" in args:
+        del args["host"]
 
     if len(files) > 1 and "output_file" in args:
         del args["output_file"]
