@@ -9,20 +9,16 @@ import subprocess
 import sys
 import time
 from importlib import import_module
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import audio
 
-try:
-    from .__about__ import __version__ as _about_version
-except Exception:  # pragma: no cover - fallback if metadata file missing
-    _about_version = ""
 from .ffmpeg import FFmpegNotFoundError
 from .models import ProcessingOptions, default_temp_folder
 from .pipeline import speed_up_video
 from .progress import TqdmProgressReporter
+from .version_utils import resolve_version
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -33,7 +29,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     # Add version argument
-    pkg_version = _resolve_version()
+    pkg_version = resolve_version()
 
     parser.add_argument(
         "--version",
@@ -118,18 +114,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Stream remote progress updates when using --url.",
     )
     return parser
-
-
-def _resolve_version() -> str:
-    """Determine the package version for CLI reporting."""
-
-    if _about_version:
-        return _about_version
-
-    try:
-        return version("talks-reducer")
-    except (PackageNotFoundError, Exception):
-        return "unknown"
 
 
 def gather_input_files(paths: List[str]) -> List[str]:

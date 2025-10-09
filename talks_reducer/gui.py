@@ -13,7 +13,6 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from importlib.metadata import version
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -38,6 +37,7 @@ try:
     from .models import ProcessingOptions, default_temp_folder
     from .pipeline import speed_up_video
     from .progress import ProgressHandle, SignalProgressReporter
+    from .version_utils import resolve_version
 except ImportError:  # pragma: no cover - handled at runtime
     if __package__ not in (None, ""):
         raise
@@ -53,6 +53,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.models import ProcessingOptions, default_temp_folder
     from talks_reducer.pipeline import speed_up_video
     from talks_reducer.progress import ProgressHandle, SignalProgressReporter
+    from talks_reducer.version_utils import resolve_version
 
 
 def _check_tkinter_available() -> tuple[bool, str]:
@@ -393,11 +394,11 @@ class TalksReducerGUI:
         else:
             self.root = tk.Tk()
 
-        # Set window title with version
-        try:
-            app_version = version("talks-reducer")
+        # Set window title with version information
+        app_version = resolve_version()
+        if app_version and app_version != "unknown":
             self.root.title(f"Talks Reducer v{app_version}")
-        except Exception:
+        else:
             self.root.title("Talks Reducer")
 
         self._apply_window_icon()

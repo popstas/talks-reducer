@@ -21,6 +21,7 @@ from urllib.parse import urlsplit, urlunsplit
 from PIL import Image
 
 from .server import build_interface
+from .version_utils import resolve_version
 
 try:  # pragma: no cover - import guarded for clearer error message at runtime
     import pystray
@@ -35,6 +36,7 @@ else:
 
 
 LOGGER = logging.getLogger(__name__)
+APP_VERSION = resolve_version()
 
 
 def _guess_local_url(host: Optional[str], port: int) -> str:
@@ -463,7 +465,12 @@ class _ServerTrayApplication:
             return
 
         icon_image = _load_icon()
+        version_suffix = (
+            f" v{APP_VERSION}" if APP_VERSION and APP_VERSION != "unknown" else ""
+        )
+        version_label = f"Talks Reducer{version_suffix}"
         menu = pystray.Menu(
+            pystray.MenuItem(version_label, None, enabled=False),
             pystray.MenuItem(
                 "Open GUI",
                 self._launch_gui,
@@ -473,7 +480,10 @@ class _ServerTrayApplication:
             pystray.MenuItem("Quit", self._handle_quit),
         )
         self._icon = pystray.Icon(
-            "talks-reducer", icon_image, "Talks Reducer Server", menu=menu
+            "talks-reducer",
+            icon_image,
+            f"{version_label} Server",
+            menu=menu,
         )
 
         if self._tray_mode == "pystray-detached":

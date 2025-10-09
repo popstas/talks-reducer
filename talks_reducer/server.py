@@ -19,6 +19,7 @@ from talks_reducer.ffmpeg import FFmpegNotFoundError
 from talks_reducer.models import ProcessingOptions, ProcessingResult
 from talks_reducer.pipeline import speed_up_video
 from talks_reducer.progress import ProgressHandle, SignalProgressReporter
+from talks_reducer.version_utils import resolve_version
 
 
 class _GradioProgressHandle(AbstractContextManager[ProgressHandle]):
@@ -347,10 +348,15 @@ def build_interface() -> gr.Blocks:
 
     server_identity = _describe_server_host()
 
-    with gr.Blocks(title="Talks Reducer Web UI") as demo:
+    app_version = resolve_version()
+    version_suffix = (
+        f" v{app_version}" if app_version and app_version != "unknown" else ""
+    )
+
+    with gr.Blocks(title=f"Talks Reducer Web UI{version_suffix}") as demo:
         gr.Markdown(
             f"""
-            ## Talks Reducer Web UI
+            ## Talks Reducer Web UI{version_suffix}
             Drop a video into the zone below or click to browse. **Small video** is enabled
             by default to apply the 720p/128k preset before processing starts—clear it to
             keep the original resolution.
