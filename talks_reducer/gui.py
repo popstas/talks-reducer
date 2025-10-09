@@ -10,6 +10,9 @@ import re
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable, List, Optional, Sequence
@@ -122,6 +125,7 @@ except ModuleNotFoundError:  # pragma: no cover - runtime dependency
 
 STATUS_COLORS = {
     "idle": "#9ca3af",
+    "waiting": "#9ca3af",
     "processing": "#af8e0e",
     "success": "#178941",
     "error": "#ad4f4f",
@@ -380,6 +384,11 @@ class TalksReducerGUI:
         self.open_after_convert_var = tk.BooleanVar(
             value=self._get_setting("open_after_convert", True)
         )
+        stored_mode = str(self._get_setting("processing_mode", "local"))
+        if stored_mode not in {"local", "remote"}:
+            stored_mode = "local"
+        self.processing_mode_var = tk.StringVar(value=stored_mode)
+        self.processing_mode_var.trace_add("write", self._on_processing_mode_change)
         self.theme_var = tk.StringVar(value=self._get_setting("theme", "os"))
         self.theme_var.trace_add("write", self._on_theme_change)
         self.small_var.trace_add("write", self._on_small_video_change)
@@ -585,11 +594,30 @@ class TalksReducerGUI:
         )
         self.server_discover_button.grid(row=7, column=2, padx=(8, 0))
 
+        self.ttk.Label(self.advanced_frame, text="Processing mode").grid(
+            row=8, column=0, sticky="w", pady=4
+        )
+        mode_choice = self.ttk.Frame(self.advanced_frame)
+        mode_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=4)
+        self.ttk.Radiobutton(
+            mode_choice,
+            text="Local",
+            value="local",
+            variable=self.processing_mode_var,
+        ).pack(side=self.tk.LEFT, padx=(0, 8))
+        self.remote_mode_button = self.ttk.Radiobutton(
+            mode_choice,
+            text="Remote",
+            value="remote",
+            variable=self.processing_mode_var,
+        )
+        self.remote_mode_button.pack(side=self.tk.LEFT, padx=(0, 8))
+
         self.ttk.Label(self.advanced_frame, text="Theme").grid(
-            row=8, column=0, sticky="w", pady=(8, 0)
+            row=9, column=0, sticky="w", pady=(8, 0)
         )
         theme_choice = self.ttk.Frame(self.advanced_frame)
-        theme_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=(8, 0))
+        theme_choice.grid(row=9, column=1, columnspan=2, sticky="w", pady=(8, 0))
         for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
             self.ttk.Radiobutton(
                 theme_choice,
@@ -600,6 +628,7 @@ class TalksReducerGUI:
             ).pack(side=self.tk.LEFT, padx=(0, 8))
 
         self._toggle_advanced(initial=True)
+        self._update_processing_mode_state()
 
         # Action buttons and log output
         status_frame = self.ttk.Frame(main, padding=self.PADDING)
@@ -690,6 +719,60 @@ class TalksReducerGUI:
                 command=lambda var=variable: self._browse_path(var, label),
             )
             button.grid(row=row, column=2, padx=(8, 0))
+
+    def _update_processing_mode_state(self) -> None:
+        has_url = bool(self.server_url_var.get().strip())
+        if not has_url and self.processing_mode_var.get() == "remote":
+            self.processing_mode_var.set("local")
+            return
+
+        if hasattr(self, "remote_mode_button"):
+            state = self.tk.NORMAL if has_url else self.tk.DISABLED
+            self.remote_mode_button.configure(state=state)
+
+    def _normalize_server_url(self, server_url: str) -> str:
+        parsed = urllib.parse.urlsplit(server_url)
+        if not parsed.scheme:
+            parsed = urllib.parse.urlsplit(f"http://{server_url}")
+
+        netloc = parsed.netloc or parsed.path
+        if not netloc:
+            return server_url
+
+        path = parsed.path if parsed.netloc else ""
+        normalized_path = path or "/"
+        return urllib.parse.urlunsplit((parsed.scheme, netloc, normalized_path, "", ""))
+
+    def _format_server_host(self, server_url: str) -> str:
+        parsed = urllib.parse.urlsplit(server_url)
+        if not parsed.scheme:
+            parsed = urllib.parse.urlsplit(f"http://{server_url}")
+
+        host = parsed.netloc or parsed.path or server_url
+        if parsed.netloc and parsed.path and parsed.path not in {"", "/"}:
+            host = f"{parsed.netloc}{parsed.path}"
+
+        host = host.rstrip("/")
+        return host or server_url
+
+    def _ping_server(self, server_url: str, *, timeout: float = 5.0) -> bool:
+        normalized = self._normalize_server_url(server_url)
+        request = urllib.request.Request(
+            normalized,
+            headers={"User-Agent": "talks-reducer-gui"},
+            method="GET",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                status = getattr(response, "status", None)
+                if status is None:
+                    status = response.getcode()
+                if status is None:
+                    return False
+                return 200 <= int(status) < 500
+        except (urllib.error.URLError, ValueError):
+            return False
 
     def _start_discovery(self) -> None:
         """Search the local network for running Talks Reducer servers."""
@@ -889,9 +972,18 @@ class TalksReducerGUI:
             "open_after_convert", bool(self.open_after_convert_var.get())
         )
 
+    def _on_processing_mode_change(self, *_: object) -> None:
+        value = self.processing_mode_var.get()
+        if value not in {"local", "remote"}:
+            self.processing_mode_var.set("local")
+            return
+        self._update_setting("processing_mode", value)
+        self._update_processing_mode_state()
+
     def _on_server_url_change(self, *_: object) -> None:
         value = self.server_url_var.get().strip()
         self._update_setting("server_url", value)
+        self._update_processing_mode_state()
 
     def _apply_theme(self) -> None:
         preference = self.theme_var.get().lower()
@@ -1185,6 +1277,13 @@ class TalksReducerGUI:
         self._stop_requested = False
         open_after_convert = bool(self.open_after_convert_var.get())
         server_url = self.server_url_var.get().strip()
+        remote_mode = self.processing_mode_var.get() == "remote"
+        if remote_mode and not server_url:
+            self.messagebox.showerror(
+                "Missing server URL", "Remote mode requires a server URL."
+            )
+            return
+        remote_mode = remote_mode and bool(server_url)
 
         def worker() -> None:
             def set_process(proc: subprocess.Popen) -> None:
@@ -1201,7 +1300,7 @@ class TalksReducerGUI:
                     self._set_status("Idle")
                     return
 
-                if server_url:
+                if remote_mode:
                     success = self._process_files_via_server(
                         files,
                         args,
@@ -1264,7 +1363,7 @@ class TalksReducerGUI:
         self._processing_thread.start()
 
         # Show Stop button when processing starts
-        if server_url:
+        if remote_mode:
             self.stop_button.grid_remove()
         else:
             self.stop_button.grid()
@@ -1357,6 +1456,21 @@ class TalksReducerGUI:
             )
             self._notify(lambda: self._set_status("Error"))
             return False
+
+        host_label = self._format_server_host(server_url)
+        self._notify(
+            lambda: self._set_status("waiting", f"Waiting server [{host_label}]...")
+        )
+        if not self._ping_server(server_url):
+            self._append_log(f"Server unreachable: {server_url}")
+            self._notify(
+                lambda: self._set_status("Error", f"Server [{host_label}] unreachable")
+            )
+            return False
+
+        self._notify(
+            lambda: self._set_status("waiting", f"Server [{host_label}] ready")
+        )
 
         output_override = args.get("output_file") if len(files) == 1 else None
         ignored = [key for key in args if key not in {"output_file", "small"}]
@@ -1657,7 +1771,9 @@ class TalksReducerGUI:
             return
 
         self._audio_progress_steps_completed += 1
-        audio_percentage = self._audio_progress_steps_completed / self.AUDIO_PROGRESS_STEPS * 100
+        audio_percentage = (
+            self._audio_progress_steps_completed / self.AUDIO_PROGRESS_STEPS * 100
+        )
         percentage = (audio_percentage / 100) * 5
         self._set_progress(percentage)
         self._set_status("processing", "Audio processing: %d%%" % (audio_percentage))
