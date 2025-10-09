@@ -408,6 +408,30 @@ class TalksReducerGUI:
         self._save_settings()
         self._hide_stop_button()
 
+        # Ping server on startup if in remote mode
+        if (self.processing_mode_var.get() == "remote" and
+            self.server_url_var.get().strip() and
+            hasattr(self, "_ping_server")):
+            server_url = self.server_url_var.get().strip()
+            host_label = self._format_server_host(server_url)
+
+            def ping_worker() -> None:
+                try:
+                    if self._ping_server(server_url):
+                        self._set_status("Idle", f"Server {host_label} is reachable")
+                        self._notify(lambda: self._append_log(f"Server {host_label} ready"))
+                    else:
+                        self._set_status("Error", f"Server {host_label} is not reachable")
+                        self._notify(lambda: self._append_log(f"Server {host_label} is not reachable"))
+                        ping_worker()
+                except Exception as exc:
+                    self._set_status("Idle", f"Error pinging server {host_label}: {exc}")
+                    self._notify(lambda: self._append_log(f"Error pinging server {host_label}: {exc}"))
+
+            import threading
+            ping_thread = threading.Thread(target=ping_worker, daemon=True)
+            ping_thread.start()
+
         if not self._dnd_available:
             self._append_log(
                 "Drag and drop requires the tkinterdnd2 package. Install it to enable the drop zone."
@@ -752,7 +776,7 @@ class TalksReducerGUI:
         if parsed.netloc and parsed.path and parsed.path not in {"", "/"}:
             host = f"{parsed.netloc}{parsed.path}"
 
-        host = host.rstrip("/")
+        host = host.rstrip("/").split(":")[0]
         return host or server_url
 
     def _ping_server(self, server_url: str, *, timeout: float = 5.0) -> bool:
@@ -1459,17 +1483,17 @@ class TalksReducerGUI:
 
         host_label = self._format_server_host(server_url)
         self._notify(
-            lambda: self._set_status("waiting", f"Waiting server [{host_label}]...")
+            lambda: self._set_status("waiting", f"Waiting server {host_label}...")
         )
         if not self._ping_server(server_url):
             self._append_log(f"Server unreachable: {server_url}")
             self._notify(
-                lambda: self._set_status("Error", f"Server [{host_label}] unreachable")
+                lambda: self._set_status("Error", f"Server {host_label} unreachable")
             )
             return False
 
         self._notify(
-            lambda: self._set_status("waiting", f"Server [{host_label}] ready")
+            lambda: self._set_status("waiting", f"Server {host_label} ready")
         )
 
         output_override = args.get("output_file") if len(files) == 1 else None
