@@ -157,6 +157,25 @@ _TRAY_LOCK = threading.Lock()
 _TRAY_PROCESS: Optional[subprocess.Popen[Any]] = None
 
 
+def _default_remote_destination(input_file: Path, *, small: bool) -> Path:
+    """Return the default remote output path for *input_file*.
+
+    Mirrors the naming scheme from the local pipeline so that remote jobs save
+    next to the source media with the expected suffix.
+    """
+
+    name = input_file.name
+    dot_index = name.rfind(".")
+    suffix = "_speedup_small" if small else "_speedup"
+
+    if dot_index != -1:
+        new_name = name[:dot_index] + suffix + name[dot_index:]
+    else:
+        new_name = name + suffix
+
+    return input_file.with_name(new_name)
+
+
 def _ensure_server_tray_running(extra_args: Optional[Sequence[str]] = None) -> None:
     """Start the server tray in a background process if one is not active."""
 
@@ -1327,17 +1346,31 @@ class TalksReducerGUI:
                 f"Server mode ignores the following options: {ignored_options}"
             )
 
+        small_mode = bool(args.get("small", False))
+
         for index, file in enumerate(files, start=1):
             basename = os.path.basename(file)
             self._append_log(
                 f"Uploading {index}/{len(files)}: {basename} to {server_url}"
             )
+            input_path = Path(file)
+
+            if output_override is not None:
+                output_path = Path(output_override)
+                if output_path.is_dir():
+                    output_path = (
+                        output_path
+                        / _default_remote_destination(input_path, small=small_mode).name
+                    )
+            else:
+                output_path = _default_remote_destination(input_path, small=small_mode)
+
             try:
                 destination, summary, log_text = service_module.send_video(
-                    input_path=Path(file),
-                    output_path=output_override,
+                    input_path=input_path,
+                    output_path=output_path,
                     server_url=server_url,
-                    small=bool(args.get("small", False)),
+                    small=small_mode,
                     stream_updates=True,
                     log_callback=self._append_log,
                     # progress_callback=self._handle_service_progress,
