@@ -88,14 +88,15 @@ running Talks Reducer version and includes an **Open GUI**
 item (also triggered by double-clicking the icon) that launches the desktop
 Talks Reducer interface alongside an **Open WebUI** entry that opens the Gradio
 page in your browser. Close the GUI window to return to the tray without
-stopping the server. Launching the GUI directly now starts the tray-backed
-server in the background before the window appears so the icon stays available
-after you close it; add `--no-tray` when running `python -m talks_reducer.gui`
-if you prefer to skip the background server entirely. The tray command itself
-never launches the GUI automatically, so use the menu item (or rerun the GUI
-with `--no-tray`) whenever you want to reopen it. The tray no longer opens a
-browser automatically—pass `--open-browser` if you prefer the web page to
-launch as soon as the server is ready.
+stopping the server. Launch the tray explicitly whenever you need it—either run
+`talks-reducer server-tray` directly or start the GUI with
+`python -m talks_reducer.gui --server` to boot the tray-managed server instead
+of the desktop window. The GUI now runs standalone and no longer spawns the tray
+automatically; the deprecated `--no-tray` flag is ignored for compatibility.
+The tray command itself never launches the GUI automatically, so use the menu
+item (or relaunch the GUI separately) whenever you want to reopen it. The tray
+no longer opens a browser automatically—pass `--open-browser` if you prefer the
+web page to launch as soon as the server is ready.
 
 This opens a local web page featuring a drag-and-drop upload zone, a **Small video** checkbox that mirrors the CLI preset, a live
 progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current
