@@ -211,7 +211,7 @@ def speed_up_video(
     audio_sample_count = audio_data.shape[0]
     max_audio_volume = audio_utils.get_max_volume(audio_data)
 
-    reporter.log("\nProcessing Information:")
+    reporter.log("\nInformation:")
     reporter.log(f"- Max Audio Volume: {max_audio_volume}")
 
     samples_per_frame = wav_sample_rate / frame_rate
