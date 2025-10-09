@@ -308,6 +308,21 @@ class TalksReducerGUI:
             self._settings[key] = value
         return value
 
+    def _get_float_setting(self, key: str, default: float) -> float:
+        """Return *key* as a float, coercing stored strings when necessary."""
+
+        raw_value = self._get_setting(key, default)
+        try:
+            number = float(raw_value)
+        except (TypeError, ValueError):
+            number = float(default)
+
+        if self._settings.get(key) != number:
+            self._settings[key] = number
+            self._save_settings()
+
+        return number
+
     def _update_setting(self, key: str, value: object) -> None:
         if self._settings.get(key) == value:
             return
@@ -555,41 +570,56 @@ class TalksReducerGUI:
         self.advanced_button.grid(row=1, column=1, sticky="e")
 
         self.basic_options_frame = self.ttk.Labelframe(
-            self.options_frame, text="Basic options", padding=self.PADDING
+            self.options_frame, text="Basic options", padding=0
         )
         self.basic_options_frame.grid(
             row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0)
         )
         self.basic_options_frame.columnconfigure(1, weight=1)
 
-        self.silent_threshold_var = self.tk.StringVar(
-            value=str(self._get_setting("silent_threshold", "0.05"))
+        self.silent_threshold_var = self.tk.DoubleVar(
+            value=min(max(self._get_float_setting("silent_threshold", 0.05), 0.0), 1.0)
         )
-        self._add_entry(
+        self._add_slider(
             self.basic_options_frame,
             "Silent threshold",
             self.silent_threshold_var,
             row=0,
+            setting_key="silent_threshold",
+            minimum=0.0,
+            maximum=1.0,
+            resolution=0.01,
+            display_format="{:.2f}",
         )
 
-        self.sounded_speed_var = self.tk.StringVar(
-            value=str(self._get_setting("sounded_speed", "1.0"))
+        self.sounded_speed_var = self.tk.DoubleVar(
+            value=min(max(self._get_float_setting("sounded_speed", 1.0), 0.75), 2.0)
         )
-        self._add_entry(
+        self._add_slider(
             self.basic_options_frame,
             "Sounded speed",
             self.sounded_speed_var,
             row=1,
+            setting_key="sounded_speed",
+            minimum=0.75,
+            maximum=2.0,
+            resolution=0.25,
+            display_format="{:.2f}×",
         )
 
-        self.silent_speed_var = self.tk.StringVar(
-            value=str(self._get_setting("silent_speed", "4.0"))
+        self.silent_speed_var = self.tk.DoubleVar(
+            value=min(max(self._get_float_setting("silent_speed", 4.0), 1.0), 10.0)
         )
-        self._add_entry(
+        self._add_slider(
             self.basic_options_frame,
             "Silent speed",
             self.silent_speed_var,
             row=2,
+            setting_key="silent_speed",
+            minimum=1.0,
+            maximum=10.0,
+            resolution=0.5,
+            display_format="{:.1f}×",
         )
 
         self.ttk.Label(self.basic_options_frame, text="Server URL").grid(
@@ -644,7 +674,7 @@ class TalksReducerGUI:
                 command=self._apply_theme,
             ).pack(side=self.tk.LEFT, padx=(0, 8))
 
-        self.advanced_frame = self.ttk.Frame(self.options_frame, padding=self.PADDING)
+        self.advanced_frame = self.ttk.Frame(self.options_frame, padding=0)
         self.advanced_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
         self.advanced_frame.columnconfigure(1, weight=1)
 
@@ -661,7 +691,14 @@ class TalksReducerGUI:
         self.sample_rate_var = self.tk.StringVar(value="48000")
         self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=2)
 
-        self.frame_margin_var = self.tk.StringVar()
+        frame_margin_setting = self._get_setting("frame_margin", 2)
+        try:
+            frame_margin_default = int(frame_margin_setting)
+        except (TypeError, ValueError):
+            frame_margin_default = 2
+            self._update_setting("frame_margin", frame_margin_default)
+
+        self.frame_margin_var = self.tk.StringVar(value=str(frame_margin_default))
         self._add_entry(
             self.advanced_frame, "Frame margin", self.frame_margin_var, row=3
         )
@@ -759,6 +796,49 @@ class TalksReducerGUI:
                 command=lambda var=variable: self._browse_path(var, label),
             )
             button.grid(row=row, column=2, padx=(8, 0))
+
+    def _add_slider(
+        self,
+        parent,  # type: tk.Misc
+        label: str,
+        variable,  # type: tk.DoubleVar
+        *,
+        row: int,
+        setting_key: str,
+        minimum: float,
+        maximum: float,
+        resolution: float,
+        display_format: str,
+    ) -> None:
+        self.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=4)
+
+        value_label = self.ttk.Label(parent)
+        value_label.grid(row=row, column=2, sticky="e", pady=4)
+
+        def update(value: str) -> None:
+            numeric = float(value)
+            clamped = max(minimum, min(maximum, numeric))
+            steps = round((clamped - minimum) / resolution)
+            quantized = minimum + steps * resolution
+            if abs(variable.get() - quantized) > 1e-9:
+                variable.set(quantized)
+            value_label.configure(text=display_format.format(quantized))
+            self._update_setting(setting_key, float(f"{quantized:.6f}"))
+
+        slider = self.tk.Scale(
+            parent,
+            variable=variable,
+            from_=minimum,
+            to=maximum,
+            orient=self.tk.HORIZONTAL,
+            resolution=resolution,
+            showvalue=False,
+            command=update,
+            length=240,
+        )
+        slider.grid(row=row, column=1, sticky="ew", pady=4, padx=(0, 8))
+
+        update(str(variable.get()))
 
     def _update_processing_mode_state(self) -> None:
         has_url = bool(self.server_url_var.get().strip())
@@ -942,21 +1022,11 @@ class TalksReducerGUI:
             self.stop_button.grid_remove()
             self.advanced_button.grid_remove()
             self.advanced_frame.grid_remove()
-            if hasattr(self, "status_frame"):
-                self.status_frame.grid_remove()
             self.run_after_drop_var.set(True)
             self._apply_window_size(simple=True)
-            if self.status_var.get().lower() == "success" and hasattr(
-                self, "status_frame"
-            ):
-                self.status_frame.grid()
-                self.open_button.grid()
-                self.drop_hint_button.grid_remove()
         else:
             self.basic_options_frame.grid()
             self.log_frame.grid()
-            if hasattr(self, "status_frame"):
-                self.status_frame.grid()
             self.advanced_button.grid()
             if self.advanced_visible.get():
                 self.advanced_frame.grid()
@@ -1421,18 +1491,14 @@ class TalksReducerGUI:
             args["output_file"] = Path(self.output_var.get())
         if self.temp_var.get():
             args["temp_folder"] = Path(self.temp_var.get())
-        if self.silent_threshold_var.get():
-            args["silent_threshold"] = self._parse_float(
-                self.silent_threshold_var.get(), "Silent threshold"
-            )
-        if self.sounded_speed_var.get():
-            args["sounded_speed"] = self._parse_float(
-                self.sounded_speed_var.get(), "Sounded speed"
-            )
-        if self.silent_speed_var.get():
-            args["silent_speed"] = self._parse_float(
-                self.silent_speed_var.get(), "Silent speed"
-            )
+        silent_threshold = float(self.silent_threshold_var.get())
+        args["silent_threshold"] = round(silent_threshold, 2)
+
+        sounded_speed = float(self.sounded_speed_var.get())
+        args["sounded_speed"] = round(sounded_speed, 2)
+
+        silent_speed = float(self.silent_speed_var.get())
+        args["silent_speed"] = round(silent_speed, 2)
         if self.frame_margin_var.get():
             args["frame_spreadage"] = int(
                 round(self._parse_float(self.frame_margin_var.get(), "Frame margin"))
@@ -1884,12 +1950,7 @@ class TalksReducerGUI:
             else:
                 self.open_button.grid_remove()
                 # print("not success status")
-                if (
-                    self.simple_mode_var.get()
-                    and not is_processing
-                    and hasattr(self, "status_frame")
-                ):
-                    self.status_frame.grid_remove()
+                if self.simple_mode_var.get() and not is_processing:
                     self.stop_button.grid_remove()
                     # Show drop hint when no other buttons are visible
                     if hasattr(self, "drop_hint_button"):
