@@ -121,7 +121,10 @@ def _iter_icon_candidates() -> Iterator[Path]:
             if candidate_root not in expanded_roots:
                 expanded_roots.append(candidate_root)
 
-    icon_names = ("icon.png", "icon.ico")
+    if sys.platform == "win32":
+        icon_names = ("icon.ico", "icon.png")
+    else:
+        icon_names = ("icon.png", "icon.ico")
     relative_paths = (
         Path("docs") / "assets",
         Path("assets"),

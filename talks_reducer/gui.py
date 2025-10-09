@@ -198,7 +198,13 @@ def _ensure_server_tray_running(extra_args: Optional[Sequence[str]] = None) -> N
         if _TRAY_PROCESS is not None and _TRAY_PROCESS.poll() is None:
             return
 
-        command = [sys.executable, "-m", "talks_reducer.server_tray"]
+        package_name = __package__ or "talks_reducer"
+
+        if getattr(sys, "frozen", False):
+            command = [sys.executable, "--server"]
+        else:
+            command = [sys.executable, "-m", f"{package_name}.server_tray"]
+
         if extra_args:
             command.extend(extra_args)
 
