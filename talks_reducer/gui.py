@@ -718,7 +718,7 @@ class TalksReducerGUI:
     def _on_discovery_progress(self, current: int, total: int) -> None:
         if total > 0:
             bounded = max(0, min(current, total))
-            label = f"Discovering… ({bounded}/{total})"
+            label = f"{bounded} / {total}"
         else:
             label = "Discovering…"
         self.server_discover_button.configure(text=label)
