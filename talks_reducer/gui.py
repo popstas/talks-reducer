@@ -479,7 +479,7 @@ class TalksReducerGUI:
             def ping_worker() -> None:
                 try:
                     if self._ping_server(server_url):
-                        self._set_status("Idle", f"Server {host_label} is reachable")
+                        self._set_status("Idle", f"Server {host_label} is ready")
                         self._notify(
                             lambda: self._append_log(f"Server {host_label} ready")
                         )
