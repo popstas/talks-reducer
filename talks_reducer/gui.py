@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -395,6 +396,8 @@ class TalksReducerGUI:
         self.progress_var = tk.IntVar(value=0)
         self._ffmpeg_process: Optional[subprocess.Popen] = None
         self._stop_requested = False
+        self._ping_worker_stop_requested = False
+        self._current_remote_mode = False
 
         self.input_files: List[str] = []
 
@@ -446,7 +449,11 @@ class TalksReducerGUI:
             server_url = self.server_url_var.get().strip()
             host_label = self._format_server_host(server_url)
 
-            def ping_worker() -> None:
+            def ping_worker(attempts: int = 1) -> None:
+                # Check if processing has started and we should stop pinging
+                if self._ping_worker_stop_requested:
+                    return
+
                 try:
                     if self._ping_server(server_url):
                         self._set_status("Idle", f"Server {host_label} is ready")
@@ -454,15 +461,29 @@ class TalksReducerGUI:
                             lambda: self._append_log(f"Server {host_label} ready")
                         )
                     else:
-                        self._set_status(
-                            "Error", f"Server {host_label} is not reachable"
-                        )
-                        self._notify(
-                            lambda: self._append_log(
-                                f"Server {host_label} is not reachable"
+                        if attempts < 5:
+                            # Check stop flag again before making recursive call
+                            if self._ping_worker_stop_requested:
+                                return
+
+                            self._set_status(
+                                "Error", f"Waiting server {host_label} (attempt {attempts}/5)"
                             )
-                        )
-                        ping_worker()
+                            self._notify(
+                                lambda: self._append_log(
+                                    f"Waiting server {host_label} (attempt {attempts}/5)"
+                                )
+                            )
+                            ping_worker(attempts + 1)
+                        else:
+                            self._set_status(
+                                "Error", f"Server {host_label} is unreachable"
+                            )
+                            self._notify(
+                                lambda: self._append_log(
+                                    f"Server {host_label} is unreachable"
+                                )
+                            )
                 except Exception as exc:
                     self._set_status(
                         "Idle", f"Error pinging server {host_label}: {exc}"
@@ -1513,7 +1534,7 @@ class TalksReducerGUI:
             return
 
         self._append_log("Starting processing…")
-        self._stop_requested = False
+        self._ping_worker_stop_requested = True
         open_after_convert = bool(self.open_after_convert_var.get())
         server_url = self.server_url_var.get().strip()
         remote_mode = self.processing_mode_var.get() == "remote"
@@ -1521,8 +1542,10 @@ class TalksReducerGUI:
             self.messagebox.showerror(
                 "Missing server URL", "Remote mode requires a server URL."
             )
-            return
         remote_mode = remote_mode and bool(server_url)
+
+        # Store remote_mode for use after thread starts
+        self._current_remote_mode = remote_mode
 
         def worker() -> None:
             def set_process(proc: subprocess.Popen) -> None:
@@ -1539,16 +1562,20 @@ class TalksReducerGUI:
                     self._set_status("Idle")
                     return
 
-                if remote_mode:
+                if self._current_remote_mode:
                     success = self._process_files_via_server(
                         files,
                         args,
                         server_url,
                         open_after_convert=open_after_convert,
-                    )
+                    )               
                     if success:
                         self._notify(self._hide_stop_button)
-                    return
+                        return
+                    # If server processing failed, fall back to local processing
+                    # The _process_files_via_server function already switched to local mode
+                    # Update remote_mode variable to reflect the change
+                    self._current_remote_mode = False
 
                 reporter = _TkProgressReporter(
                     self._append_log, process_callback=set_process
@@ -1602,7 +1629,7 @@ class TalksReducerGUI:
         self._processing_thread.start()
 
         # Show Stop button when processing starts
-        if remote_mode:
+        if self._current_remote_mode:
             self.stop_button.grid_remove()
         else:
             self.stop_button.grid()
@@ -1696,11 +1723,33 @@ class TalksReducerGUI:
         self._notify(
             lambda: self._set_status("waiting", f"Waiting server {host_label}...")
         )
-        if not self._ping_server(server_url):
-            self._append_log(f"Server unreachable: {server_url}")
+
+        # Try to ping server with limited attempts
+        ping_attempts = 0
+        max_ping_attempts = 5
+
+        while not self._ping_server(server_url) and ping_attempts < max_ping_attempts:
+            ping_attempts += 1
+            self._append_log(f"Waiting server {host_label} (attempt {ping_attempts}/{max_ping_attempts})")
             self._notify(
-                lambda: self._set_status("Error", f"Server {host_label} unreachable")
+                lambda: self._set_status("Error", f"Waiting server {host_label} (attempt {ping_attempts}/{max_ping_attempts})")
             )
+            time.sleep(1)
+
+        if ping_attempts >= max_ping_attempts:
+            # Server is not reachable after max attempts, fall back to local mode
+            self._append_log(f"Server {host_label} is not reachable after {max_ping_attempts} attempts. Switching to local mode.")
+            self._notify(
+                lambda: self._set_status("Error", f"Server {host_label} unreachable after {max_ping_attempts} attempts. Switching to local mode.")
+            )
+            self._notify(
+                lambda: self.messagebox.showwarning(
+                    "Server unavailable",
+                    f"Server {host_label} is not reachable. Switching to local processing mode."
+                )
+            )
+            # Switch to local mode and return False to indicate fallback
+            self._notify(lambda: self.processing_mode_var.set("local"))
             return False
 
         self._notify(lambda: self._set_status("waiting", f"Server {host_label} ready"))

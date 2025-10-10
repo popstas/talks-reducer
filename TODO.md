@@ -1,0 +1,1 @@
+- ping server immediately when switch to remote mode. Make common ping function for 3 places: on app start, on start processing, on remote mode enable. Switch to local mode when unreachable
