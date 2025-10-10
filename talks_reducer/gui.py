@@ -456,61 +456,26 @@ class TalksReducerGUI:
         if (
             self.processing_mode_var.get() == "remote"
             and self.server_url_var.get().strip()
-            and hasattr(self, "_ping_server")
         ):
             server_url = self.server_url_var.get().strip()
-            host_label = self._format_server_host(server_url)
 
-            def ping_worker(attempts: int = 1) -> None:
-                # Check if processing has started and we should stop pinging
-                if self._ping_worker_stop_requested:
-                    return
-
+            def ping_worker() -> None:
                 try:
-                    if self._ping_server(server_url):
-                        self._set_status("Idle", f"Server {host_label} is ready")
-                        self._notify(
-                            lambda: self._append_log(f"Server {host_label} ready")
-                        )
-                    else:
-                        if attempts < 5:
-                            # Check stop flag again before making recursive call
-                            if self._ping_worker_stop_requested:
-                                return
-
-                            self._set_status(
-                                "Error",
-                                f"Waiting server {host_label} (attempt {attempts}/5)",
-                            )
-                            self._notify(
-                                lambda: self._append_log(
-                                    f"Waiting server {host_label} (attempt {attempts}/5)"
-                                )
-                            )
-                            ping_worker(attempts + 1)
-                        else:
-                            self._set_status(
-                                "Error", f"Server {host_label} is unreachable"
-                            )
-                            self._notify(
-                                lambda: self._append_log(
-                                    f"Server {host_label} is unreachable"
-                                )
-                            )
-                except Exception as exc:
-                    self._set_status(
-                        "Idle", f"Error pinging server {host_label}: {exc}"
+                    self._check_remote_server(
+                        server_url,
+                        success_status="Idle",
+                        waiting_status="Error",
+                        failure_status="Error",
+                        stop_check=lambda: self._ping_worker_stop_requested,
+                        switch_to_local_on_failure=True,
                     )
-                    self._notify(
-                        lambda: self._append_log(
-                            f"Error pinging server {host_label}: {exc}"
-                        )
-                    )
+                except Exception as exc:  # pragma: no cover - defensive safeguard
+                    host_label = self._format_server_host(server_url)
+                    message = f"Error pinging server {host_label}: {exc}"
+                    self._notify(lambda msg=message: self._append_log(msg))
+                    self._notify(lambda msg=message: self._set_status("Idle", msg))
 
-            import threading
-
-            ping_thread = threading.Thread(target=ping_worker, daemon=True)
-            ping_thread.start()
+            threading.Thread(target=ping_worker, daemon=True).start()
 
         if not self._dnd_available:
             self._append_log(
@@ -1019,6 +984,89 @@ class TalksReducerGUI:
         host = host.rstrip("/").split(":")[0]
         return host or server_url
 
+    def _check_remote_server(
+        self,
+        server_url: str,
+        *,
+        success_status: str,
+        waiting_status: str,
+        failure_status: str,
+        success_message: Optional[str] = None,
+        waiting_message_template: str = "Waiting server {host} (attempt {attempt}/{max_attempts})",
+        failure_message: Optional[str] = None,
+        stop_check: Optional[Callable[[], bool]] = None,
+        on_stop: Optional[Callable[[], None]] = None,
+        switch_to_local_on_failure: bool = False,
+        alert_on_failure: bool = False,
+        warning_title: str = "Server unavailable",
+        warning_message: Optional[str] = None,
+        max_attempts: int = 5,
+        delay: float = 1.0,
+    ) -> bool:
+        """Ping *server_url* until it responds or attempts are exhausted."""
+
+        host_label = self._format_server_host(server_url)
+        format_kwargs = {"host": host_label, "max_attempts": max_attempts}
+
+        success_text = (
+            success_message.format(**format_kwargs)
+            if success_message
+            else f"Server {host_label} is ready"
+        )
+        failure_text = (
+            failure_message.format(**format_kwargs)
+            if failure_message
+            else f"Server {host_label} is unreachable"
+        )
+
+        for attempt in range(1, max_attempts + 1):
+            if stop_check and stop_check():
+                if on_stop:
+                    on_stop()
+                return False
+
+            if self._ping_server(server_url):
+                self._notify(lambda msg=success_text: self._append_log(msg))
+                self._notify(
+                    lambda msg=success_text: self._set_status(success_status, msg)
+                )
+                return True
+
+            if attempt < max_attempts:
+                wait_text = waiting_message_template.format(
+                    attempt=attempt, max_attempts=max_attempts, host=host_label
+                )
+                self._notify(lambda msg=wait_text: self._append_log(msg))
+                self._notify(
+                    lambda msg=wait_text: self._set_status(waiting_status, msg)
+                )
+                if stop_check and stop_check():
+                    if on_stop:
+                        on_stop()
+                    return False
+                if delay:
+                    time.sleep(delay)
+
+        self._notify(lambda msg=failure_text: self._append_log(msg))
+        self._notify(lambda msg=failure_text: self._set_status(failure_status, msg))
+
+        if switch_to_local_on_failure:
+            self._notify(lambda: self.processing_mode_var.set("local"))
+
+        if alert_on_failure:
+
+            def warn() -> None:
+                message = (
+                    warning_message.format(**format_kwargs)
+                    if warning_message
+                    else failure_text
+                )
+                self.messagebox.showwarning(warning_title, message)
+
+            self._notify(warn)
+
+        return False
+
     def _ping_server(self, server_url: str, *, timeout: float = 5.0) -> bool:
         normalized = self._normalize_server_url(server_url)
         request = urllib.request.Request(
@@ -1223,6 +1271,25 @@ class TalksReducerGUI:
         self._update_setting("processing_mode", value)
         self._update_processing_mode_state()
 
+        if self.processing_mode_var.get() == "remote":
+            server_url = self.server_url_var.get().strip()
+            if not server_url:
+                return
+
+            def ping_remote_mode() -> None:
+                self._check_remote_server(
+                    server_url,
+                    success_status="Idle",
+                    waiting_status="Error",
+                    failure_status="Error",
+                    failure_message="Server {host} is unreachable. Switching to local mode.",
+                    switch_to_local_on_failure=True,
+                    alert_on_failure=True,
+                    warning_message="Server {host} is unreachable. Switching to local mode.",
+                )
+
+            threading.Thread(target=ping_remote_mode, daemon=True).start()
+
     def _on_server_url_change(self, *_: object) -> None:
         value = self.server_url_var.get().strip()
         self._update_setting("server_url", value)
@@ -1369,7 +1436,7 @@ class TalksReducerGUI:
             highlightthickness=0,
         )
 
-        slider_relief = self.tk.FLAT # if mode == "dark" else self.tk.RAISED
+        slider_relief = self.tk.FLAT  # if mode == "dark" else self.tk.RAISED
         active_background = (
             palette.get("accent", palette["surface"])
             if mode == "dark"
@@ -1377,9 +1444,9 @@ class TalksReducerGUI:
         )
         for slider in getattr(self, "_sliders", []):
             slider.configure(
-                background=palette["border"], # slider inactive
-                troughcolor=palette["surface"], # slider background
-                activebackground=palette["border"], # slider active
+                background=palette["border"],  # slider inactive
+                troughcolor=palette["surface"],  # slider background
+                activebackground=palette["border"],  # slider active
                 sliderrelief=slider_relief,
                 bd=0,
             )
@@ -1738,48 +1805,23 @@ class TalksReducerGUI:
             lambda: self._set_status("waiting", f"Waiting server {host_label}...")
         )
 
-        # Try to ping server with limited attempts
-        ping_attempts = 0
-        max_ping_attempts = 5
-
-        while not self._ping_server(server_url) and ping_attempts < max_ping_attempts:
-            ping_attempts += 1
-            self._append_log(
-                f"Waiting server {host_label} (attempt {ping_attempts}/{max_ping_attempts})"
-            )
-            self._notify(
-                lambda: self._set_status(
-                    "Error",
-                    f"Waiting server {host_label} (attempt {ping_attempts}/{max_ping_attempts})",
-                )
-            )
-            _ensure_not_stopped()
-            time.sleep(1)
+        available = self._check_remote_server(
+            server_url,
+            success_status="waiting",
+            waiting_status="Error",
+            failure_status="Error",
+            failure_message="Server {host} is unreachable after {max_attempts} attempts. Switching to local mode.",
+            stop_check=lambda: self._stop_requested,
+            on_stop=_ensure_not_stopped,
+            switch_to_local_on_failure=True,
+            alert_on_failure=True,
+            warning_message="Server {host} is not reachable. Switching to local processing mode.",
+        )
 
         _ensure_not_stopped()
 
-        if ping_attempts >= max_ping_attempts:
-            # Server is not reachable after max attempts, fall back to local mode
-            self._append_log(
-                f"Server {host_label} is not reachable after {max_ping_attempts} attempts. Switching to local mode."
-            )
-            self._notify(
-                lambda: self._set_status(
-                    "Error",
-                    f"Server {host_label} unreachable after {max_ping_attempts} attempts. Switching to local mode.",
-                )
-            )
-            self._notify(
-                lambda: self.messagebox.showwarning(
-                    "Server unavailable",
-                    f"Server {host_label} is not reachable. Switching to local processing mode.",
-                )
-            )
-            # Switch to local mode and return False to indicate fallback
-            self._notify(lambda: self.processing_mode_var.set("local"))
+        if not available:
             return False
-
-        self._notify(lambda: self._set_status("waiting", f"Server {host_label} ready"))
 
         output_override = args.get("output_file") if len(files) == 1 else None
         allowed_remote_keys = {
