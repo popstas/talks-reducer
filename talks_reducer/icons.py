@@ -10,7 +10,10 @@ from typing import Iterator, Optional, Sequence
 
 LOGGER = logging.getLogger(__name__)
 
-_ICON_RELATIVE_PATHS: Sequence[Path] = (Path("talks_reducer") / "resources" / "icons",)
+_ICON_RELATIVE_PATHS: Sequence[Path] = (
+    Path("talks_reducer") / "resources" / "icons",
+    Path("docs") / "assets",
+)
 _ICON_PATH_SUFFIXES: Sequence[Path] = (
     Path(""),
     Path("_internal"),
@@ -19,10 +22,10 @@ _ICON_PATH_SUFFIXES: Sequence[Path] = (
 )
 
 
-def _iter_base_roots() -> Iterator[Path]:
+def _iter_base_roots(module_file: Optional[Path | str] = None) -> Iterator[Path]:
     """Yield base directories where icon assets may live."""
 
-    module_path = Path(__file__).resolve()
+    module_path = Path(module_file or __file__).resolve()
     package_root = module_path.parent
     project_root = package_root.parent
 
@@ -64,6 +67,7 @@ def iter_icon_candidates(
     *,
     filenames: Sequence[str],
     relative_paths: Sequence[Path] | None = None,
+    module_file: Optional[Path | str] = None,
 ) -> Iterator[Path]:
     """Yield possible icon paths ordered from most to least specific."""
 
@@ -71,7 +75,7 @@ def iter_icon_candidates(
         relative_paths = _ICON_RELATIVE_PATHS
 
     seen: set[Path] = set()
-    for base_root in _iter_base_roots():
+    for base_root in _iter_base_roots(module_file=module_file):
         for suffix in _ICON_PATH_SUFFIXES:
             candidate_root = (base_root / suffix).resolve()
             if candidate_root in seen:
@@ -98,11 +102,14 @@ def find_icon_path(
     *,
     filenames: Sequence[str],
     relative_paths: Sequence[Path] | None = None,
+    module_file: Optional[Path | str] = None,
 ) -> Optional[Path]:
     """Return the first existing icon path matching *filenames* or ``None``."""
 
     for candidate in iter_icon_candidates(
-        filenames=filenames, relative_paths=relative_paths
+        filenames=filenames,
+        relative_paths=relative_paths,
+        module_file=module_file,
     ):
         if candidate.is_file():
             LOGGER.info("Found icon at %s", candidate)

@@ -11,12 +11,13 @@ import threading
 import time
 import webbrowser
 from contextlib import suppress
-from typing import Any, Optional, Sequence
+from pathlib import Path
+from typing import Any, Iterator, Optional, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 from PIL import Image
 
-from .icons import find_icon_path
+from .icons import iter_icon_candidates
 from .server import build_interface
 from .version_utils import resolve_version
 
@@ -75,29 +76,59 @@ def _normalize_local_url(url: str, host: Optional[str], port: int) -> str:
     return url
 
 
-_TRAY_ICON_FILENAMES = (
-    ("app.ico", "app.png") if sys.platform.startswith("win") else ("app.png", "app.ico")
+if sys.platform.startswith("win"):
+    _TRAY_ICON_FILENAMES = ("icon.ico", "icon.png", "app.ico", "app.png", "app-256.png")
+else:
+    _TRAY_ICON_FILENAMES = ("icon.png", "icon.ico", "app.png", "app.ico", "app-256.png")
+_ICON_RELATIVE_PATHS = (
+    Path("talks_reducer") / "resources" / "icons",
+    Path("docs") / "assets",
 )
 
 
+def _iter_icon_candidates() -> Iterator[Path]:
+    """Yield possible tray icon paths ordered from most to least specific."""
+
+    yield from iter_icon_candidates(
+        filenames=_TRAY_ICON_FILENAMES,
+        relative_paths=_ICON_RELATIVE_PATHS,
+        module_file=Path(__file__),
+    )
+
+
+def _generate_fallback_icon() -> Image.Image:
+    """Return a simple multi-color square used when packaged icons are missing."""
+
+    image = Image.new("RGBA", (64, 64), color=(37, 99, 235, 255))
+    for index in range(64):
+        image.putpixel((index, index), (17, 24, 39, 255))
+        image.putpixel((63 - index, index), (59, 130, 246, 255))
+    image.putpixel((0, 0), (255, 255, 255, 255))
+    image.putpixel((63, 63), (59, 130, 246, 255))
+    return image
+
+
 def _load_icon() -> Image.Image:
-    """Load the tray icon image from the installed asset."""
+    """Load the tray icon image, falling back to a generated placeholder."""
 
     LOGGER.info("Attempting to load tray icon image.")
-    icon_path = find_icon_path(filenames=_TRAY_ICON_FILENAMES)
-    if icon_path is None:
-        raise FileNotFoundError(
-            "Talks Reducer icon could not be found in any known locations."
-        )
 
-    try:
-        with Image.open(icon_path) as image:
-            loaded = image.copy()
-    except Exception as exc:  # pragma: no cover - diagnostic log
-        raise RuntimeError(f"Failed to load tray icon from {icon_path}") from exc
+    for candidate in _iter_icon_candidates():
+        LOGGER.info("Checking icon candidate at %s", candidate)
+        if not candidate.exists():
+            continue
+        try:
+            with Image.open(candidate) as image:
+                loaded = image.copy()
+        except Exception as exc:  # pragma: no cover - diagnostic log
+            LOGGER.warning("Failed to load tray icon from %s: %s", candidate, exc)
+            continue
 
-    LOGGER.info("Loaded tray icon from %s", icon_path)
-    return loaded
+        LOGGER.info("Loaded tray icon from %s", candidate)
+        return loaded
+
+    LOGGER.warning("Falling back to generated tray icon; packaged image not found")
+    return _generate_fallback_icon()
 
 
 class _ServerTrayApplication:
