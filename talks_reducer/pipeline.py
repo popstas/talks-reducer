@@ -6,11 +6,14 @@ import math
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
+from typing import Callable, Dict
 
 import numpy as np
 from scipy.io import wavfile
+
+from talks_reducer.version_utils import resolve_version
 
 from . import audio as audio_utils
 from . import chunks as chunk_utils
@@ -23,11 +26,31 @@ from .ffmpeg import (
 )
 from .models import ProcessingOptions, ProcessingResult
 from .progress import NullProgressReporter, ProgressReporter
-from talks_reducer.version_utils import resolve_version
 
 
 class ProcessingAborted(RuntimeError):
     """Raised when processing is cancelled by the caller."""
+
+
+@dataclass
+class PipelineDependencies:
+    """Bundle of external dependencies used by :func:`speed_up_video`."""
+
+    get_ffmpeg_path: Callable[[], str] = get_ffmpeg_path
+    check_cuda_available: Callable[[str], bool] = check_cuda_available
+    build_extract_audio_command: Callable[..., str] = build_extract_audio_command
+    build_video_commands: Callable[..., tuple[str, str | None, bool]] = (
+        build_video_commands
+    )
+    run_timed_ffmpeg_command: Callable[..., None] = run_timed_ffmpeg_command
+    create_path: Callable[[Path], None] | None = None
+    delete_path: Callable[[Path], None] | None = None
+
+    def __post_init__(self) -> None:
+        if self.create_path is None:
+            self.create_path = _create_path
+        if self.delete_path is None:
+            self.delete_path = _delete_path
 
 
 def _stop_requested(reporter: ProgressReporter | None) -> bool:
@@ -46,7 +69,10 @@ def _stop_requested(reporter: ProgressReporter | None) -> bool:
 
 
 def _raise_if_stopped(
-    reporter: ProgressReporter | None, *, temp_path: Path | None = None
+    reporter: ProgressReporter | None,
+    *,
+    temp_path: Path | None = None,
+    dependencies: PipelineDependencies | None = None,
 ) -> None:
     """Abort processing when the user has requested a stop."""
 
@@ -54,34 +80,40 @@ def _raise_if_stopped(
         return
 
     if temp_path is not None and temp_path.exists():
-        _delete_path(temp_path)
+        if dependencies is not None:
+            dependencies.delete_path(temp_path)
+        else:
+            _delete_path(temp_path)
     raise ProcessingAborted("Processing aborted by user request.")
 
 
 def speed_up_video(
-    options: ProcessingOptions, reporter: ProgressReporter | None = None
+    options: ProcessingOptions,
+    reporter: ProgressReporter | None = None,
+    dependencies: PipelineDependencies | None = None,
 ) -> ProcessingResult:
     """Speed up a video by shortening silent sections while keeping sounded sections intact."""
 
     reporter = reporter or NullProgressReporter()
+    dependencies = dependencies or PipelineDependencies()
 
     input_path = Path(options.input_file)
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    ffmpeg_path = get_ffmpeg_path()
+    ffmpeg_path = dependencies.get_ffmpeg_path()
 
     output_path = options.output_file or _input_to_output_filename(
         input_path, options.small
     )
     output_path = Path(output_path)
 
-    cuda_available = check_cuda_available(ffmpeg_path)
+    cuda_available = dependencies.check_cuda_available(ffmpeg_path)
 
     temp_path = Path(options.temp_folder)
     if temp_path.exists():
-        _delete_path(temp_path)
-    _create_path(temp_path)
+        dependencies.delete_path(temp_path)
+    dependencies.create_path(temp_path)
 
     metadata = _extract_video_metadata(input_path, options.frame_rate)
     frame_rate = metadata["frame_rate"]
@@ -117,7 +149,7 @@ def speed_up_video(
 
     extraction_sample_rate = options.sample_rate
 
-    extract_command = build_extract_audio_command(
+    extract_command = dependencies.build_extract_audio_command(
         os.fspath(input_path),
         os.fspath(audio_wav),
         extraction_sample_rate,
@@ -126,7 +158,7 @@ def speed_up_video(
         ffmpeg_path=ffmpeg_path,
     )
 
-    _raise_if_stopped(reporter, temp_path=temp_path)
+    _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
     reporter.log("Extracting audio...")
     process_callback = getattr(reporter, "process_callback", None)
     estimated_total_frames = frame_count
@@ -138,7 +170,7 @@ def speed_up_video(
     else:
         reporter.log("Extract audio target frames: unknown")
 
-    run_timed_ffmpeg_command(
+    dependencies.run_timed_ffmpeg_command(
         extract_command,
         reporter=reporter,
         total=estimated_total_frames if estimated_total_frames > 0 else None,
@@ -157,7 +189,7 @@ def speed_up_video(
     samples_per_frame = wav_sample_rate / frame_rate
     audio_frame_count = int(math.ceil(audio_sample_count / samples_per_frame))
 
-    _raise_if_stopped(reporter, temp_path=temp_path)
+    _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
 
     has_loud_audio = chunk_utils.detect_loud_frames(
         audio_data,
@@ -171,7 +203,7 @@ def speed_up_video(
 
     reporter.log(f"Processing {len(chunks)} chunks...")
 
-    _raise_if_stopped(reporter, temp_path=temp_path)
+    _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
 
     new_speeds = [options.silent_speed, options.sounded_speed]
     output_audio_data, updated_chunks = audio_utils.process_audio_chunks(
@@ -192,7 +224,7 @@ def speed_up_video(
         _prepare_output_audio(output_audio_data),
     )
 
-    _raise_if_stopped(reporter, temp_path=temp_path)
+    _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
 
     expression = chunk_utils.get_tree_expression(updated_chunks)
     filter_graph_path = temp_path / "filterGraph.txt"
@@ -205,14 +237,16 @@ def speed_up_video(
         filter_parts.append(f"setpts={escaped_expression}")
         filter_graph_file.write(",".join(filter_parts))
 
-    command_str, fallback_command_str, use_cuda_encoder = build_video_commands(
-        os.fspath(input_path),
-        os.fspath(audio_new_path),
-        os.fspath(filter_graph_path),
-        os.fspath(output_path),
-        ffmpeg_path=ffmpeg_path,
-        cuda_available=cuda_available,
-        small=options.small,
+    command_str, fallback_command_str, use_cuda_encoder = (
+        dependencies.build_video_commands(
+            os.fspath(input_path),
+            os.fspath(audio_new_path),
+            os.fspath(filter_graph_path),
+            os.fspath(output_path),
+            ffmpeg_path=ffmpeg_path,
+            cuda_available=cuda_available,
+            small=options.small,
+        )
     )
 
     output_dir = output_path.parent.resolve()
@@ -224,14 +258,14 @@ def speed_up_video(
     reporter.log(command_str)
 
     if not audio_new_path.exists():
-        _delete_path(temp_path)
+        dependencies.delete_path(temp_path)
         raise FileNotFoundError("Audio intermediate file was not generated")
 
     if not filter_graph_path.exists():
-        _delete_path(temp_path)
+        dependencies.delete_path(temp_path)
         raise FileNotFoundError("Filter graph file was not generated")
 
-    _raise_if_stopped(reporter, temp_path=temp_path)
+    _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
 
     try:
         final_total_frames = updated_chunks[-1][3] if updated_chunks else 0
@@ -253,7 +287,7 @@ def speed_up_video(
 
         total_frames_arg = final_total_frames if final_total_frames > 0 else None
 
-        run_timed_ffmpeg_command(
+        dependencies.run_timed_ffmpeg_command(
             command_str,
             reporter=reporter,
             total=total_frames_arg,
@@ -261,9 +295,9 @@ def speed_up_video(
             desc="Generating final:",
             process_callback=process_callback,
         )
-    except subprocess.CalledProcessError as exc:
+    except subprocess.CalledProcessError:
         if fallback_command_str and use_cuda_encoder:
-            _raise_if_stopped(reporter, temp_path=temp_path)
+            _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
 
             reporter.log("CUDA encoding failed, retrying with CPU encoder...")
             if final_total_frames > 0:
@@ -281,7 +315,7 @@ def speed_up_video(
                         fps=frame_rate,
                     )
                 )
-            run_timed_ffmpeg_command(
+            dependencies.run_timed_ffmpeg_command(
                 fallback_command_str,
                 reporter=reporter,
                 total=total_frames_arg,
@@ -292,7 +326,7 @@ def speed_up_video(
         else:
             raise
     finally:
-        _delete_path(temp_path)
+        dependencies.delete_path(temp_path)
 
     output_metadata = _extract_video_metadata(output_path, frame_rate)
     output_duration = output_metadata.get("duration", 0.0)
