@@ -381,6 +381,8 @@ class TalksReducerGUI:
         self._last_output: Optional[Path] = None
         self._last_time_ratio: Optional[float] = None
         self._last_size_ratio: Optional[float] = None
+        self._last_progress_seconds: Optional[int] = None
+        self._run_start_time: Optional[float] = None
         self._status_state = "Idle"
         self.status_var = tk.StringVar(value=self._status_state)
         self._status_animation_job: Optional[str] = None
@@ -519,21 +521,13 @@ class TalksReducerGUI:
         if sys.platform.startswith("win"):
             icon_candidates.append(
                 (
-                    base_path
-                    / "talks_reducer"
-                    / "resources"
-                    / "icons"
-                    / "icon.ico",
+                    base_path / "talks_reducer" / "resources" / "icons" / "icon.ico",
                     "ico",
                 )
             )
         icon_candidates.append(
             (
-                base_path
-                / "talks_reducer"
-                / "resources"
-                / "icons"
-                / "icon.png",
+                base_path / "talks_reducer" / "resources" / "icons" / "icon.png",
                 "png",
             )
         )
@@ -1534,6 +1528,8 @@ class TalksReducerGUI:
             return
 
         self._append_log("Starting processing…")
+        self._stop_requested = False
+        self._run_start_time = time.monotonic()
         self._ping_worker_stop_requested = True
         open_after_convert = bool(self.open_after_convert_var.get())
         server_url = self.server_url_var.get().strip()
@@ -1582,7 +1578,7 @@ class TalksReducerGUI:
                 )
                 for index, file in enumerate(files, start=1):
                     self._append_log(
-                        f"Processing {index}/{len(files)}: {os.path.basename(file)}"
+                        f"Processing: {os.path.basename(file)}"
                     )
                     options = self._build_options(Path(file), args)
                     result = speed_up_video(options, reporter=reporter)
@@ -1623,6 +1619,7 @@ class TalksReducerGUI:
                     self._notify(lambda: self.messagebox.showerror("Error", error_msg))
                     self._set_status("Error")
             finally:
+                self._run_start_time = None
                 self._notify(self._hide_stop_button)
 
         self._processing_thread = threading.Thread(target=worker, daemon=True)
@@ -1885,7 +1882,7 @@ class TalksReducerGUI:
     def _update_status_from_message(self, message: str) -> None:
         normalized = message.strip().lower()
         metadata_match = re.search(
-            r"source metadata [—-] duration:\s*([\d.]+)s",
+            r"source metadata: duration:\s*([\d.]+)s",
             message,
             re.IGNORECASE,
         )
@@ -1895,18 +1892,48 @@ class TalksReducerGUI:
             except ValueError:
                 self._source_duration_seconds = None
         if "all jobs finished successfully" in normalized:
-            # Create status message with ratios if available
-            status_msg = "Success"
+            status_components: List[str] = []
+            if self._run_start_time is not None:
+                finish_time = time.monotonic()
+                runtime_seconds = max(0.0, finish_time - self._run_start_time)
+                duration_str = self._format_progress_time(runtime_seconds)
+                status_components.append(f"Finished for {duration_str}")
+            else:
+                finished_seconds = next(
+                    (
+                        value
+                        for value in (
+                            self._last_progress_seconds,
+                            self._encode_target_duration_seconds,
+                            self._video_duration_seconds,
+                        )
+                        if value is not None
+                    ),
+                    None,
+                )
+
+                if finished_seconds is not None:
+                    duration_str = self._format_progress_time(finished_seconds)
+                    status_components.append(f"Finished for {duration_str}")
+                else:
+                    status_components.append("Finished")
+
             if self._last_time_ratio is not None and self._last_size_ratio is not None:
-                status_msg = f"Time: {self._last_time_ratio:.0%}, Size: {self._last_size_ratio:.0%}"
+                status_components.append(
+                    f"time: {self._last_time_ratio:.0%}, size: {self._last_size_ratio:.0%}"
+                )
+
+            status_msg = ", ".join(status_components)
 
             self._reset_audio_progress_state(clear_source=True)
             self._set_status("success", status_msg)
             self._set_progress(100)  # 100% on success
+            self._run_start_time = None
             self._video_duration_seconds = None  # Reset for next video
             self._encode_target_duration_seconds = None
             self._encode_total_frames = None
             self._encode_current_frame = None
+            self._last_progress_seconds = None
         elif normalized.startswith("extracting audio"):
             self._reset_audio_progress_state(clear_source=False)
             self._set_status("processing", "Extracting audio...")
@@ -1915,6 +1942,7 @@ class TalksReducerGUI:
             self._encode_target_duration_seconds = None
             self._encode_total_frames = None
             self._encode_current_frame = None
+            self._last_progress_seconds = None
             self._start_audio_progress()
         elif normalized.startswith("uploading"):
             self._set_status("processing", "Uploading...")
@@ -1926,6 +1954,7 @@ class TalksReducerGUI:
             self._encode_target_duration_seconds = None
             self._encode_total_frames = None
             self._encode_current_frame = None
+            self._last_progress_seconds = None
         elif normalized.startswith("processing"):
             is_new_job = bool(re.match(r"processing \d+/\d+:", normalized))
             should_reset = self._status_state.lower() != "processing" or is_new_job
@@ -1935,6 +1964,7 @@ class TalksReducerGUI:
                 self._encode_target_duration_seconds = None
                 self._encode_total_frames = None
                 self._encode_current_frame = None
+                self._last_progress_seconds = None
             if is_new_job:
                 self._reset_audio_progress_state(clear_source=True)
             self._set_status("processing", "Processing")
@@ -2006,6 +2036,8 @@ class TalksReducerGUI:
             current_seconds = hours * 3600 + minutes * 60 + seconds
             time_str = self._format_progress_time(current_seconds)
             speed_str = speed_match.group(1)
+
+            self._last_progress_seconds = current_seconds
 
             total_seconds = (
                 self._encode_target_duration_seconds or self._video_duration_seconds
@@ -2126,7 +2158,10 @@ class TalksReducerGUI:
             status_lower = status.lower()
             if (
                 "extracting audio" in status_lower
-                or re.search(r"\d+:\d{2}(?: / \d+:\d{2})?.*\d+\.?\d*x", status)
+                or re.search(
+                    r"\d+:\d{2}(?::\d{2})?(?: / \d+:\d{2}(?::\d{2})?)?.*\d+\.?\d*x",
+                    status,
+                )
                 or ("time:" in status_lower and "size:" in status_lower)
             ):
                 if "time:" in status_lower and "size:" in status_lower:
@@ -2177,7 +2212,7 @@ class TalksReducerGUI:
         self.root.after(0, apply)
 
     def _format_progress_time(self, total_seconds: float) -> str:
-        """Format a duration in seconds as h:mm or m:ss for status display."""
+        """Format a duration in seconds as h:mm:ss or m:ss for status display."""
 
         try:
             rounded_seconds = max(0, int(round(total_seconds)))
@@ -2188,7 +2223,7 @@ class TalksReducerGUI:
         minutes, seconds = divmod(remainder, 60)
 
         if hours > 0:
-            return f"{hours}:{minutes:02d}"
+            return f"{hours}:{minutes:02d}:{seconds:02d}"
 
         total_minutes = rounded_seconds // 60
         return f"{total_minutes}:{seconds:02d}"
