@@ -338,7 +338,8 @@ def process_video(
         elif kind == "progress":
             if progress is not None:
                 current, total, desc = cast(tuple[int, int, str], payload)
-                progress(current, total=total, desc=desc)
+                percent = current / total if total > 0 else 0
+                progress(percent, total=total, desc=desc)
         elif kind == "result":
             final_result = payload  # type: ignore[assignment]
         elif kind == "error":
