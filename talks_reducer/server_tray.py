@@ -183,6 +183,7 @@ class _ServerTrayApplication:
         self._open_browser = open_browser_callback
 
         self._stop_event = threading.Event()
+        self._server_ready_event = threading.Event()
         self._ready_event = threading.Event()
         self._gui_lock = threading.Lock()
 
@@ -219,7 +220,7 @@ class _ServerTrayApplication:
         local_url = _coerce_url(getattr(server, "local_url", fallback_url))
         self._local_url = _normalize_local_url(local_url, self._host, self._port)
         self._share_url = _coerce_url(getattr(server, "share_url", None))
-        self._ready_event.set()
+        self._server_ready_event.set()
         LOGGER.info("Server ready at %s", self._local_url)
 
         # Keep checking for a share URL while the server is running.
@@ -322,9 +323,12 @@ class _ServerTrayApplication:
     def _await_server_start(self, icon: Optional[Any]) -> None:
         """Wait for the server to signal readiness or trigger shutdown on failure."""
 
-        if self._ready_event.wait(timeout=30):
-            if self._open_browser_on_start and not self._stop_event.is_set():
-                self._handle_open_webui()
+        if self._server_ready_event.wait(timeout=30):
+            try:
+                if self._open_browser_on_start and not self._stop_event.is_set():
+                    self._handle_open_webui()
+            finally:
+                self._ready_event.set()
             return
 
         if self._stop_event.is_set():
@@ -418,6 +422,8 @@ class _ServerTrayApplication:
         """Stop the tray icon and shut down the Gradio server."""
 
         self._stop_event.set()
+        self._server_ready_event.set()
+        self._ready_event.set()
 
         if self._icon is not None:
             with suppress(Exception):
