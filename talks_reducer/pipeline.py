@@ -25,6 +25,38 @@ from .models import ProcessingOptions, ProcessingResult
 from .progress import NullProgressReporter, ProgressReporter
 
 
+class ProcessingAborted(RuntimeError):
+    """Raised when processing is cancelled by the caller."""
+
+
+def _stop_requested(reporter: ProgressReporter | None) -> bool:
+    """Return ``True`` when *reporter* indicates that processing should stop."""
+
+    if reporter is None:
+        return False
+
+    flag = getattr(reporter, "stop_requested", None)
+    if callable(flag):
+        try:
+            flag = flag()
+        except Exception:  # pragma: no cover - defensive
+            flag = False
+    return bool(flag)
+
+
+def _raise_if_stopped(
+    reporter: ProgressReporter | None, *, temp_path: Path | None = None
+) -> None:
+    """Abort processing when the user has requested a stop."""
+
+    if not _stop_requested(reporter):
+        return
+
+    if temp_path is not None and temp_path.exists():
+        _delete_path(temp_path)
+    raise ProcessingAborted("Processing aborted by user request.")
+
+
 def speed_up_video(
     options: ProcessingOptions, reporter: ProgressReporter | None = None
 ) -> ProcessingResult:
@@ -49,6 +81,8 @@ def speed_up_video(
     if temp_path.exists():
         _delete_path(temp_path)
     _create_path(temp_path)
+
+    _raise_if_stopped(reporter, temp_path=temp_path)
 
     metadata = _extract_video_metadata(input_path, options.frame_rate)
     frame_rate = metadata["frame_rate"]
@@ -100,6 +134,8 @@ def speed_up_video(
     else:
         reporter.log("Extract audio target frames: unknown")
 
+    _raise_if_stopped(reporter, temp_path=temp_path)
+
     run_timed_ffmpeg_command(
         extract_command,
         reporter=reporter,
@@ -119,6 +155,8 @@ def speed_up_video(
     samples_per_frame = wav_sample_rate / frame_rate
     audio_frame_count = int(math.ceil(audio_sample_count / samples_per_frame))
 
+    _raise_if_stopped(reporter, temp_path=temp_path)
+
     has_loud_audio = chunk_utils.detect_loud_frames(
         audio_data,
         audio_frame_count,
@@ -131,6 +169,8 @@ def speed_up_video(
 
     reporter.log(f"Processing {len(chunks)} chunks...")
 
+    _raise_if_stopped(reporter, temp_path=temp_path)
+
     new_speeds = [options.silent_speed, options.sounded_speed]
     output_audio_data, updated_chunks = audio_utils.process_audio_chunks(
         audio_data,
@@ -141,6 +181,8 @@ def speed_up_video(
         max_audio_volume,
     )
 
+    _raise_if_stopped(reporter, temp_path=temp_path)
+
     audio_new_path = temp_path / "audioNew.wav"
     # Use the sample rate that was actually used for processing
     output_sample_rate = extraction_sample_rate
@@ -149,6 +191,8 @@ def speed_up_video(
         output_sample_rate,
         _prepare_output_audio(output_audio_data),
     )
+
+    _raise_if_stopped(reporter, temp_path=temp_path)
 
     expression = chunk_utils.get_tree_expression(updated_chunks)
     filter_graph_path = temp_path / "filterGraph.txt"
@@ -187,6 +231,8 @@ def speed_up_video(
         _delete_path(temp_path)
         raise FileNotFoundError("Filter graph file was not generated")
 
+    _raise_if_stopped(reporter, temp_path=temp_path)
+
     try:
         final_total_frames = updated_chunks[-1][3] if updated_chunks else 0
         if final_total_frames > 0:
@@ -217,6 +263,8 @@ def speed_up_video(
         )
     except subprocess.CalledProcessError as exc:
         if fallback_command_str and use_cuda_encoder:
+            _raise_if_stopped(reporter, temp_path=temp_path)
+
             reporter.log("CUDA encoding failed, retrying with CPU encoder...")
             if final_total_frames > 0:
                 reporter.log(
@@ -267,6 +315,7 @@ def speed_up_video(
         size_ratio=size_ratio,
     )
 
+
 def _input_to_output_filename(filename: Path, small: bool = False) -> Path:
     dot_index = filename.name.rfind(".")
     suffix_parts = []
@@ -298,6 +347,9 @@ def _create_path(path: Path) -> None:
 def _delete_path(path: Path) -> None:
     import time
     from shutil import rmtree
+
+    if not path.exists():
+        return
 
     try:
         rmtree(path, ignore_errors=False)

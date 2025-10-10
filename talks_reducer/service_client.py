@@ -14,6 +14,11 @@ from gradio_client import Client
 from gradio_client import file as gradio_file
 from gradio_client.client import Status, StatusUpdate
 
+try:
+    from .pipeline import ProcessingAborted
+except ImportError:  # pragma: no cover - allow running as script
+    from talks_reducer.pipeline import ProcessingAborted
+
 
 def send_video(
     input_path: Path,
@@ -26,11 +31,16 @@ def send_video(
     silent_speed: Optional[float] = None,
     log_callback: Optional[Callable[[str], None]] = None,
     stream_updates: bool = False,
+    should_cancel: Optional[Callable[[], bool]] = None,
     progress_callback: Optional[
         Callable[[str, Optional[int], Optional[int], str], None]
     ] = None,
 ) -> Tuple[Path, str, str]:
-    """Upload *input_path* to the Gradio server and download the processed video."""
+    """Upload *input_path* to the Gradio server and download the processed video.
+
+    When *should_cancel* returns ``True`` the remote job is cancelled and a
+    :class:`ProcessingAborted` exception is raised.
+    """
 
     if not input_path.exists():
         raise FileNotFoundError(f"Input file does not exist: {input_path}")
@@ -44,6 +54,17 @@ def send_video(
         silent_speed,
         api_name="/process_video",
     )
+
+    cancelled = False
+
+    def _cancel_if_requested() -> None:
+        nonlocal cancelled
+        if should_cancel and should_cancel():
+            if not cancelled:
+                with suppress(Exception):
+                    job.cancel()
+                cancelled = True
+            raise ProcessingAborted("Remote processing cancelled by user.")
 
     printed_lines = 0
 
@@ -60,21 +81,31 @@ def send_video(
     consumed_stream = False
 
     if stream_updates:
+        stream_kwargs: dict[str, object] = {"progress_callback": progress_callback}
+        if should_cancel is not None:
+            stream_kwargs["cancel_callback"] = _cancel_if_requested
         consumed_stream = _stream_job_updates(
             job,
             _emit_new_lines,
-            progress_callback=progress_callback,
+            **stream_kwargs,
         )
 
     if not consumed_stream:
         for output in job:
+            _cancel_if_requested()
             if not isinstance(output, (list, tuple)) or len(output) != 4:
                 continue
             log_text_candidate = output[1] or ""
             if isinstance(log_text_candidate, str):
                 _emit_new_lines(log_text_candidate)
 
-    prediction = job.result()
+    _cancel_if_requested()
+
+    try:
+        prediction = job.result()
+    except Exception:
+        _cancel_if_requested()
+        raise
 
     try:
         video_path, log_text, summary, download_path = prediction
@@ -91,6 +122,8 @@ def send_video(
 
     if not download_path:
         raise RuntimeError("Server did not return a processed file")
+
+    _cancel_if_requested()
 
     download_source = Path(str(download_path))
     if output_path is None:
@@ -162,10 +195,13 @@ async def _pump_job_updates(
     progress_callback: Optional[
         Callable[[str, Optional[int], Optional[int], str], None]
     ],
+    cancel_callback: Optional[Callable[[], None]] = None,
 ) -> None:
     """Consume asynchronous updates from *job* and emit logs and progress."""
 
     async for update in job:  # type: ignore[async-for]
+        if cancel_callback:
+            cancel_callback()
         update_type = getattr(update, "type", "status")
         if update_type == "output":
             outputs = getattr(update, "outputs", None) or []
@@ -201,11 +237,14 @@ def _poll_job_updates(
         Callable[[str, Optional[int], Optional[int], str], None]
     ],
     *,
+    cancel_callback: Optional[Callable[[], None]] = None,
     interval: float = 0.25,
 ) -> None:
     """Poll *job* for outputs and status updates when async streaming is unavailable."""
 
     while True:
+        if cancel_callback:
+            cancel_callback()
         if job.done():
             break
 
@@ -247,6 +286,7 @@ def _stream_job_updates(
     progress_callback: Optional[
         Callable[[str, Optional[int], Optional[int], str], None]
     ] = None,
+    cancel_callback: Optional[Callable[[], None]] = None,
 ) -> bool:
     """Attempt to stream updates directly from *job*.
 
@@ -264,10 +304,16 @@ def _stream_job_updates(
                 job,
                 emit_log,
                 progress_callback,
+                cancel_callback,
             )
         )
     except RuntimeError:
-        _poll_job_updates(job, emit_log, progress_callback)
+        _poll_job_updates(
+            job,
+            emit_log,
+            progress_callback,
+            cancel_callback=cancel_callback,
+        )
 
     return True
 
