@@ -49,8 +49,26 @@ def _guess_local_url(host: Optional[str], port: int) -> str:
     return f"http://{hostname}:{port}/"
 
 
-def _normalize_local_url(url: str, host: Optional[str], port: int) -> str:
+def _coerce_url(value: Optional[Any]) -> Optional[str]:
+    """Convert an arbitrary URL-like object to a trimmed string if possible."""
+
+    if not value:
+        return None
+
+    try:
+        text = str(value)
+    except Exception:  # pragma: no cover - defensive fallback
+        return None
+
+    stripped = text.strip()
+    return stripped or None
+
+
+def _normalize_local_url(url: Optional[str], host: Optional[str], port: int) -> str:
     """Rewrite *url* when a wildcard host should map to the loopback address."""
+
+    if not url:
+        return _guess_local_url(host, port)
 
     if host not in (None, "", "0.0.0.0"):
         return url
@@ -198,15 +216,15 @@ class _ServerTrayApplication:
 
         self._server_handle = server
         fallback_url = _guess_local_url(self._host, self._port)
-        local_url = getattr(server, "local_url", fallback_url)
+        local_url = _coerce_url(getattr(server, "local_url", fallback_url))
         self._local_url = _normalize_local_url(local_url, self._host, self._port)
-        self._share_url = getattr(server, "share_url", None)
+        self._share_url = _coerce_url(getattr(server, "share_url", None))
         self._ready_event.set()
         LOGGER.info("Server ready at %s", self._local_url)
 
         # Keep checking for a share URL while the server is running.
         while not self._stop_event.is_set():
-            share_url = getattr(server, "share_url", None)
+            share_url = _coerce_url(getattr(server, "share_url", None))
             if share_url:
                 self._share_url = share_url
                 LOGGER.info("Share URL available: %s", share_url)

@@ -76,7 +76,7 @@ class DummyTrayBackend:
 
 
 class DummyServer:
-    def __init__(self, local_url: str, share_url: Optional[str] = None) -> None:
+    def __init__(self, local_url: Any, share_url: Optional[Any] = None) -> None:
         self.local_url = local_url
         self.share_url = share_url
         self.close_calls = 0
@@ -95,6 +95,19 @@ class DummyDemo:
         return self._server
 
 
+class DummyURL:
+    """Lightweight wrapper that mimics objects returning URLs via ``__str__``."""
+
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return self._value
+
+    def __repr__(self) -> str:  # pragma: no cover - trivial debug helper
+        return f"DummyURL({self._value!r})"
+
+
 @pytest.fixture()
 def fast_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch ``server_tray.time.sleep`` to avoid slow polling in tests."""
@@ -108,7 +121,7 @@ def test_headless_mode_runs_and_opens_browser(
     open_calls: List[str] = []
     launch_calls: List[dict] = []
     backend = DummyTrayBackend()
-    server = DummyServer("http://0.0.0.0:1234/")
+    server = DummyServer(DummyURL("http://0.0.0.0:1234/"))
     demo = DummyDemo(server, launch_calls)
 
     app = server_tray._ServerTrayApplication(
@@ -148,6 +161,44 @@ def test_headless_mode_runs_and_opens_browser(
     runner.join(timeout=2.0)
     assert not runner.is_alive()
     assert server.close_calls >= 1
+
+
+def test_headless_mode_uses_stringified_share_url(
+    monkeypatch: pytest.MonkeyPatch, fast_sleep: None
+) -> None:
+    open_calls: List[str] = []
+    backend = DummyTrayBackend()
+    server = DummyServer(
+        DummyURL("http://0.0.0.0:4321/"), share_url=DummyURL("https://example.test/")
+    )
+    demo = DummyDemo(server, [])
+
+    app = server_tray._ServerTrayApplication(
+        host="0.0.0.0",
+        port=4321,
+        share=True,
+        open_browser=True,
+        tray_mode="headless",
+        tray_backend=backend,
+        build_interface=lambda: demo,
+        open_browser_callback=open_calls.append,
+    )
+
+    runner = threading.Thread(target=app.run, daemon=True)
+    runner.start()
+
+    assert app._ready_event.wait(timeout=1.0)
+
+    for _ in range(20):
+        if open_calls:
+            break
+        time_module.sleep(0.05)
+
+    assert open_calls == ["https://example.test/"]
+
+    app.stop()
+    runner.join(timeout=2.0)
+    assert not runner.is_alive()
 
 
 def test_pystray_detached_mode_stops_icon(
