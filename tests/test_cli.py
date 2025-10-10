@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -384,7 +385,9 @@ def test_main_launches_server_when_requested(monkeypatch: pytest.MonkeyPatch) ->
     assert server_calls == [["--share"]]
 
 
-def test_gather_input_files_returns_only_valid_entries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gather_input_files_returns_only_valid_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Only valid files should be returned when gathering inputs."""
 
     valid_file = tmp_path / "video_valid.mp4"
@@ -490,7 +493,9 @@ def test_process_via_server_handles_multiple_files_and_warnings(
         assert callable(call["progress_callback"])
 
 
-def test_print_total_time_formats_elapsed_time(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_print_total_time_formats_elapsed_time(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Elapsed time should be formatted into hours, minutes, and seconds."""
 
     monkeypatch.setattr(cli.time, "time", lambda: 3700.25)
@@ -499,3 +504,104 @@ def test_print_total_time_formats_elapsed_time(monkeypatch: pytest.MonkeyPatch, 
 
     captured = capsys.readouterr()
     assert "Time: 1h 0m 0.25s" in captured.out
+
+
+def test_process_via_server_handles_missing_remote_support() -> None:
+    """Remote processing should surface dependency errors and fall back locally."""
+
+    parsed_args = SimpleNamespace(
+        server_url="http://localhost:9005",
+        output_file=None,
+        silent_threshold=None,
+        silent_speed=None,
+        sounded_speed=None,
+        frame_spreadage=None,
+        sample_rate=None,
+        temp_folder=None,
+        small=False,
+        server_stream=False,
+    )
+
+    app = cli.CliApplication(
+        gather_files=lambda paths: list(paths),
+        send_video=None,
+        speed_up=lambda *_args, **_kwargs: None,
+        reporter_factory=lambda: None,
+        remote_error_message="Server mode requires the gradio_client dependency. (missing)",
+    )
+
+    success, errors, logs = app._process_via_server(
+        ["/videos/example.mp4"], parsed_args, 0.0
+    )
+
+    assert success is False
+    assert errors == [
+        "Server mode requires the gradio_client dependency. (missing)",
+        "Falling back to local processing pipeline.",
+    ]
+    assert logs == errors
+
+
+def test_find_server_tray_binary_prefers_executable_in_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The search helper should prioritise executables discovered via PATH."""
+
+    binary_path = tmp_path / "talks-reducer-server-tray"
+    binary_path.write_text("#!/bin/sh\n")
+    binary_path.chmod(0o755)
+
+    monkeypatch.setattr(cli.shutil, "which", lambda name: str(binary_path))
+    monkeypatch.setattr(cli.sys, "argv", ["cli.py"])
+
+    found = cli._find_server_tray_binary()
+
+    assert found == binary_path
+
+
+def test_find_server_tray_binary_uses_launcher_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When PATH lookup fails the helper should inspect the launcher directory."""
+
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+    launcher_path = tmp_path / "bin" / "launcher.py"
+    launcher_path.parent.mkdir()
+    launcher_path.write_text("print('hello')")
+    bundled = launcher_path.parent / "talks-reducer-server-tray"
+    bundled.write_text("#!/bin/sh\n")
+    bundled.chmod(0o755)
+
+    monkeypatch.setattr(cli.sys, "argv", [str(launcher_path)])
+
+    found = cli._find_server_tray_binary()
+
+    assert found == bundled
+
+
+def test_should_hide_subprocess_console_detects_detached_windows_console(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The console hiding helper should return True when no console window is attached."""
+
+    kernel32 = SimpleNamespace(GetConsoleWindow=lambda: 0)
+    fake_ctypes = SimpleNamespace(windll=SimpleNamespace(kernel32=kernel32))
+
+    monkeypatch.setattr(cli, "sys", SimpleNamespace(platform="win32", argv=sys.argv))
+    monkeypatch.setitem(sys.modules, "ctypes", fake_ctypes)
+
+    assert cli._should_hide_subprocess_console() is True
+
+
+def test_should_hide_subprocess_console_returns_false_for_attached_console(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When a console window is attached the helper should keep the default visibility."""
+
+    kernel32 = SimpleNamespace(GetConsoleWindow=lambda: 100)
+    fake_ctypes = SimpleNamespace(windll=SimpleNamespace(kernel32=kernel32))
+
+    monkeypatch.setattr(cli, "sys", SimpleNamespace(platform="win32", argv=sys.argv))
+    monkeypatch.setitem(sys.modules, "ctypes", fake_ctypes)
+
+    assert cli._should_hide_subprocess_console() is False
