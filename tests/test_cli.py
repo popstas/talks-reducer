@@ -382,3 +382,120 @@ def test_main_launches_server_when_requested(monkeypatch: pytest.MonkeyPatch) ->
     cli.main(["server", "--share"])
 
     assert server_calls == [["--share"]]
+
+
+def test_gather_input_files_returns_only_valid_entries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only valid files should be returned when gathering inputs."""
+
+    valid_file = tmp_path / "video_valid.mp4"
+    valid_file.write_text("data")
+    invalid_file = tmp_path / "video_invalid.mp4"
+    invalid_file.write_text("data")
+
+    nested_dir = tmp_path / "nested"
+    nested_dir.mkdir()
+    nested_valid = nested_dir / "clip_keep.mp4"
+    nested_valid.write_text("data")
+    (nested_dir / "clip_skip.txt").write_text("data")
+
+    monkeypatch.setattr(
+        cli.audio,
+        "is_valid_input_file",
+        lambda path: Path(path).name in {"video_valid.mp4", "clip_keep.mp4"},
+    )
+
+    gathered = cli.gather_input_files(
+        [str(valid_file), str(nested_dir), str(tmp_path / "nonexistent.mp4")]
+    )
+
+    assert str(valid_file.resolve()) in gathered
+    assert str(nested_valid) in gathered
+    assert all("invalid" not in path for path in gathered)
+
+
+def test_process_via_server_handles_multiple_files_and_warnings(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Server runs should warn about ignored options and stream progress."""
+
+    files = ["/videos/first.mp4", "/videos/second.mp4"]
+
+    parsed_args = SimpleNamespace(
+        input_file=list(files),
+        output_file="~/result.mp4",
+        temp_folder="/tmp/work",
+        silent_threshold=0.15,
+        silent_speed=4.0,
+        sounded_speed=1.2,
+        frame_spreadage=3,
+        sample_rate=44100,
+        small=False,
+        server_url="http://localhost:9005",
+        server_stream=True,
+    )
+
+    send_calls: list[dict[str, object]] = []
+
+    def fake_send_video(**kwargs: object):
+        send_calls.append(dict(kwargs))
+        log_callback = kwargs.get("log_callback")
+        if callable(log_callback):
+            log_callback("line 1")
+            log_callback("line 2")
+        progress_callback = kwargs.get("progress_callback")
+        if callable(progress_callback):
+            progress_callback("Upload", 1, 2, "files")
+            progress_callback("Upload", 1, 2, "files")  # duplicate should be ignored
+            progress_callback("Transcode", None, None, "frames")
+        return Path("/tmp/server-result.mp4"), "Summary text", "Server log tail"
+
+    monkeypatch.setattr(cli, "_print_total_time", lambda start_time: print("TOTAL"))
+
+    app = cli.CliApplication(
+        gather_files=lambda inputs: list(inputs),
+        send_video=fake_send_video,
+        speed_up=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()),
+        reporter_factory=lambda: None,
+    )
+
+    success, errors, logs = app._process_via_server(files, parsed_args, start_time=0.0)
+
+    captured = capsys.readouterr()
+
+    assert success is True
+    assert errors == []
+    assert logs == []
+    assert "Processing file 1/2 'first.mp4' via server" in captured.out
+    assert "Server log:" in captured.out
+    assert captured.out.count("Upload: 1/2 50.0% files") == len(files)
+    assert "Transcode: frames" in captured.out
+    assert "Summary text" in captured.out
+    assert "Server log tail" not in captured.out  # printed with header already
+    assert "TOTAL" in captured.out
+
+    assert "Warning: --output is ignored" in captured.err
+    assert "Warning: the following options are ignored" in captured.err
+
+    assert len(send_calls) == 2
+    for call, file in zip(send_calls, files):
+        assert call["input_path"] == Path(file)
+        assert call["output_path"] is None
+        assert call["server_url"] == "http://localhost:9005"
+        assert call["small"] is False
+        assert call["silent_threshold"] == 0.15
+        assert call["silent_speed"] == 4.0
+        assert call["sounded_speed"] == 1.2
+        assert call["stream_updates"] is True
+        assert callable(call["log_callback"])
+        assert callable(call["progress_callback"])
+
+
+def test_print_total_time_formats_elapsed_time(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Elapsed time should be formatted into hours, minutes, and seconds."""
+
+    monkeypatch.setattr(cli.time, "time", lambda: 3700.25)
+
+    cli._print_total_time(start_time=100.0)
+
+    captured = capsys.readouterr()
+    assert "Time: 1h 0m 0.25s" in captured.out
