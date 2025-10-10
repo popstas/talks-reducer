@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from talks_reducer import gui_remote
-from talks_reducer.gui_remote import (
+from talks_reducer.gui import remote as remote_module
+from talks_reducer.gui.remote import (
     check_remote_server,
     format_server_host,
     normalize_server_url,
@@ -43,7 +43,7 @@ def test_check_remote_server_success(monkeypatch: pytest.MonkeyPatch) -> None:
         calls.append((request.full_url, timeout))
         return DummyResponse(status=200)
 
-    monkeypatch.setattr(gui_remote.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(remote_module.urllib.request, "urlopen", fake_urlopen)
 
     messages: list[str] = []
     statuses: list[tuple[str, str]] = []
@@ -58,7 +58,7 @@ def test_check_remote_server_success(monkeypatch: pytest.MonkeyPatch) -> None:
         failure_status="Error",
         on_log=messages.append,
         on_status=record_status,
-        sleep=gui_remote.time.sleep,
+        sleep=remote_module.time.sleep,
     )
 
     assert success is True
@@ -77,7 +77,7 @@ def test_check_remote_server_stops_when_requested(
         called = True
         raise AssertionError("urlopen should not be called when stopped")
 
-    monkeypatch.setattr(gui_remote.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(remote_module.urllib.request, "urlopen", fake_urlopen)
 
     stopped = False
 
@@ -97,7 +97,7 @@ def test_check_remote_server_stops_when_requested(
         on_status=lambda _status, _msg: None,
         stop_check=stop_check,
         on_stop=on_stop,
-        sleep=gui_remote.time.sleep,
+        sleep=remote_module.time.sleep,
     )
 
     assert not success
@@ -115,14 +115,14 @@ def test_check_remote_server_failure_switches_and_alerts(
         attempts += 1
         raise urllib.error.URLError("boom")
 
-    monkeypatch.setattr(gui_remote.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(remote_module.urllib.request, "urlopen", fake_urlopen)
 
     delays: list[float] = []
 
     def fake_sleep(duration: float) -> None:
         delays.append(duration)
 
-    monkeypatch.setattr(gui_remote.time, "sleep", fake_sleep)
+    monkeypatch.setattr(remote_module.time, "sleep", fake_sleep)
 
     logs: list[str] = []
     statuses: list[tuple[str, str]] = []
@@ -152,7 +152,7 @@ def test_check_remote_server_failure_switches_and_alerts(
         delay=0.1,
         on_switch_to_local=on_switch,
         on_alert=on_alert,
-        sleep=gui_remote.time.sleep,
+        sleep=remote_module.time.sleep,
     )
 
     assert success is False

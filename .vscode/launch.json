@@ -13,7 +13,7 @@
             "name": "gui",
             "type": "debugpy",
             "request": "launch",
-            "module": "talks_reducer.gui",
+            "module": "talks_reducer.gui.__main__",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}"
         },
@@ -21,7 +21,7 @@
             "name": "gui --server",
             "type": "debugpy",
             "request": "launch",
-            "module": "talks_reducer.gui",
+            "module": "talks_reducer.gui.__main__",
             "args": [
                 "--server"
             ],
@@ -93,7 +93,7 @@
             "name": "gui docs/assets/demo.mp4 --small",
             "type": "debugpy",
             "request": "launch",
-            "module": "talks_reducer.gui",
+            "module": "talks_reducer.gui.__main__",
             "args": [
                 "docs/assets/demo.mp4"
             ],

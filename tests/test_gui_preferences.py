@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from talks_reducer.gui_preferences import (
+from talks_reducer.gui.preferences import (
     GUIPreferences,
     determine_config_path,
     load_settings,

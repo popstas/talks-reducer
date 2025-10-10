@@ -28,18 +28,22 @@ if TYPE_CHECKING:
     from tkinter import filedialog, messagebox, ttk
 
 try:
-    from .cli import gather_input_files
-    from .cli import main as cli_main
-    from .discovery import discover_servers
-    from .ffmpeg import FFmpegNotFoundError
-    from .gui_preferences import GUIPreferences, determine_config_path
-    from .gui_remote import (
-        check_remote_server,
+    from ..cli import gather_input_files
+    from ..cli import main as cli_main
+    from ..ffmpeg import FFmpegNotFoundError
+    from ..models import ProcessingOptions
+    from ..pipeline import ProcessingAborted, speed_up_video
+    from ..progress import ProgressHandle, SignalProgressReporter
+    from ..version_utils import resolve_version
+    from .preferences import GUIPreferences, determine_config_path
+    from .remote import (
+        check_remote_server_for_gui,
         format_server_host,
         normalize_server_url,
         ping_server,
+        process_files_via_server,
     )
-    from .gui_theme import (
+    from .theme import (
         DARK_THEME,
         LIGHT_THEME,
         STATUS_COLORS,
@@ -48,10 +52,6 @@ try:
         read_windows_theme_registry,
         run_defaults_command,
     )
-    from .models import ProcessingOptions, default_temp_folder
-    from .pipeline import ProcessingAborted, speed_up_video
-    from .progress import ProgressHandle, SignalProgressReporter
-    from .version_utils import resolve_version
 except ImportError:  # pragma: no cover - handled at runtime
     if __package__ not in (None, ""):
         raise
@@ -62,16 +62,16 @@ except ImportError:  # pragma: no cover - handled at runtime
 
     from talks_reducer.cli import gather_input_files
     from talks_reducer.cli import main as cli_main
-    from talks_reducer.discovery import discover_servers
     from talks_reducer.ffmpeg import FFmpegNotFoundError
-    from talks_reducer.gui_preferences import GUIPreferences, determine_config_path
-    from talks_reducer.gui_remote import (
-        check_remote_server,
+    from talks_reducer.gui.preferences import GUIPreferences, determine_config_path
+    from talks_reducer.gui.remote import (
+        check_remote_server_for_gui,
         format_server_host,
         normalize_server_url,
         ping_server,
+        process_files_via_server,
     )
-    from talks_reducer.gui_theme import (
+    from talks_reducer.gui.theme import (
         DARK_THEME,
         LIGHT_THEME,
         STATUS_COLORS,
@@ -80,7 +80,7 @@ except ImportError:  # pragma: no cover - handled at runtime
         read_windows_theme_registry,
         run_defaults_command,
     )
-    from talks_reducer.models import ProcessingOptions, default_temp_folder
+    from talks_reducer.models import ProcessingOptions
     from talks_reducer.pipeline import ProcessingAborted, speed_up_video
     from talks_reducer.progress import ProgressHandle, SignalProgressReporter
     from talks_reducer.version_utils import resolve_version
@@ -161,6 +161,10 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - runtime dependency
     DND_FILES = None  # type: ignore[assignment]
     TkinterDnD = None  # type: ignore[assignment]
+
+
+from . import discovery as discovery_helpers
+from . import layout as layout_helpers
 
 
 def _default_remote_destination(input_file: Path, *, small: bool) -> Path:
@@ -426,471 +430,144 @@ class TalksReducerGUI:
         if initial_inputs:
             self._populate_initial_inputs(initial_inputs, auto_run=auto_run)
 
-    # ------------------------------------------------------------------ UI --
-    def _apply_window_icon(self) -> None:
-        """Configure the application icon when the asset is available."""
-
-        base_path = Path(
-            getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)
-        )
-
-        icon_candidates: list[tuple[Path, str]] = []
-        if sys.platform.startswith("win"):
-            icon_candidates.append(
-                (
-                    base_path / "talks_reducer" / "resources" / "icons" / "icon.ico",
-                    "ico",
-                )
-            )
-        icon_candidates.append(
-            (
-                base_path / "talks_reducer" / "resources" / "icons" / "icon.png",
-                "png",
-            )
-        )
-
-        for icon_path, icon_type in icon_candidates:
-            if not icon_path.is_file():
-                continue
-
-            try:
-                if icon_type == "ico" and sys.platform.startswith("win"):
-                    # On Windows, iconbitmap works better without the 'default' parameter
-                    self.root.iconbitmap(str(icon_path))
-                else:
-                    self.root.iconphoto(False, self.tk.PhotoImage(file=str(icon_path)))
-                # If we got here without exception, icon was set successfully
-                return
-            except (self.tk.TclError, Exception) as e:
-                # Missing Tk image support or invalid icon format - try next candidate
-                continue
-
-    def _build_layout(self) -> None:
-        main = self.ttk.Frame(self.root, padding=self.PADDING)
-        main.grid(row=0, column=0, sticky="nsew")
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-
-        # Input selection frame
-        input_frame = self.ttk.Frame(main, padding=self.PADDING)
-        input_frame.grid(row=0, column=0, sticky="nsew")
-        main.rowconfigure(0, weight=1)
-        main.columnconfigure(0, weight=1)
-        input_frame.columnconfigure(0, weight=1)
-        input_frame.rowconfigure(0, weight=1)
-
-        self.drop_zone = self.tk.Label(
-            input_frame,
-            text="Drop video here",
-            relief=self.tk.FLAT,
-            borderwidth=0,
-            padx=self.PADDING,
-            pady=self.PADDING,
-            highlightthickness=0,
-        )
-        self.drop_zone.grid(row=0, column=0, sticky="nsew")
-        self._configure_drop_targets(self.drop_zone)
-        self.drop_zone.configure(cursor="hand2", takefocus=1)
-        self.drop_zone.bind("<Button-1>", self._on_drop_zone_click)
-        self.drop_zone.bind("<Return>", self._on_drop_zone_click)
-        self.drop_zone.bind("<space>", self._on_drop_zone_click)
-
-        # Options frame
-        self.options_frame = self.ttk.Frame(main, padding=self.PADDING)
-        self.options_frame.grid(row=2, column=0, pady=(0, 0), sticky="ew")
-        self.options_frame.columnconfigure(0, weight=1)
-
-        checkbox_frame = self.ttk.Frame(self.options_frame)
-        checkbox_frame.grid(row=0, column=0, columnspan=2, sticky="w")
-
-        self.ttk.Checkbutton(
-            checkbox_frame,
-            text="Small video",
-            variable=self.small_var,
-        ).grid(row=0, column=0, sticky="w")
-
-        self.ttk.Checkbutton(
-            checkbox_frame,
-            text="Open after convert",
-            variable=self.open_after_convert_var,
-        ).grid(row=0, column=1, sticky="w", padx=(12, 0))
-
-        self.simple_mode_check = self.ttk.Checkbutton(
-            checkbox_frame,
-            text="Simple mode",
-            variable=self.simple_mode_var,
-            command=self._toggle_simple_mode,
-        )
-        self.simple_mode_check.grid(
-            row=1, column=0, columnspan=3, sticky="w", pady=(8, 0)
-        )
-
-        self.advanced_visible = self.tk.BooleanVar(value=False)
-
-        basic_label_container = self.ttk.Frame(self.options_frame)
-        basic_label = self.ttk.Label(basic_label_container, text="Basic options")
-        basic_label.pack(side=self.tk.LEFT)
-
-        self.reset_basic_button = self.ttk.Button(
-            basic_label_container,
-            text="Reset to defaults",
-            command=self._reset_basic_defaults,
-            state=self.tk.DISABLED,
-            style="Link.TButton",
-        )
-
-        self.basic_options_frame = self.ttk.Labelframe(
-            self.options_frame, padding=0, labelwidget=basic_label_container
-        )
-        self.basic_options_frame.grid(
-            row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0)
-        )
-        self.basic_options_frame.columnconfigure(1, weight=1)
-
-        self._reset_button_visible = False
-
-        self.silent_speed_var = self.tk.DoubleVar(
-            value=min(max(self.preferences.get_float("silent_speed", 4.0), 1.0), 10.0)
-        )
-        self._add_slider(
-            self.basic_options_frame,
-            "Silent speed",
-            self.silent_speed_var,
-            row=0,
-            setting_key="silent_speed",
-            minimum=1.0,
-            maximum=10.0,
-            resolution=0.5,
-            display_format="{:.1f}×",
-            default_value=4.0,
-        )
-
-        self.sounded_speed_var = self.tk.DoubleVar(
-            value=min(max(self.preferences.get_float("sounded_speed", 1.0), 0.75), 2.0)
-        )
-        self._add_slider(
-            self.basic_options_frame,
-            "Sounded speed",
-            self.sounded_speed_var,
-            row=1,
-            setting_key="sounded_speed",
-            minimum=0.75,
-            maximum=2.0,
-            resolution=0.25,
-            display_format="{:.2f}×",
-            default_value=1.0,
-        )
-
-        self.silent_threshold_var = self.tk.DoubleVar(
-            value=min(
-                max(self.preferences.get_float("silent_threshold", 0.05), 0.0), 1.0
-            )
-        )
-        self._add_slider(
-            self.basic_options_frame,
-            "Silent threshold",
-            self.silent_threshold_var,
-            row=2,
-            setting_key="silent_threshold",
-            minimum=0.0,
-            maximum=1.0,
-            resolution=0.01,
-            display_format="{:.2f}",
-            default_value=0.05,
-        )
-
-        self.ttk.Label(self.basic_options_frame, text="Server URL").grid(
-            row=3, column=0, sticky="w", pady=4
-        )
-        stored_server_url = str(
-            self.preferences.get("server_url", "http://localhost:9005")
-        )
-        if not stored_server_url:
-            stored_server_url = "http://localhost:9005"
-            self.preferences.update("server_url", stored_server_url)
-        self.server_url_var.set(stored_server_url)
-        self.server_url_entry = self.ttk.Entry(
-            self.basic_options_frame, textvariable=self.server_url_var, width=30
-        )
-        self.server_url_entry.grid(row=3, column=1, sticky="w", pady=4)
-        self.server_discover_button = self.ttk.Button(
-            self.basic_options_frame, text="Discover", command=self._start_discovery
-        )
-        self.server_discover_button.grid(row=3, column=2, padx=(8, 0))
-
-        self.ttk.Label(self.basic_options_frame, text="Processing mode").grid(
-            row=4, column=0, sticky="w", pady=4
-        )
-        mode_choice = self.ttk.Frame(self.basic_options_frame)
-        mode_choice.grid(row=4, column=1, columnspan=2, sticky="w", pady=4)
-        self.ttk.Radiobutton(
-            mode_choice,
-            text="Local",
-            value="local",
-            variable=self.processing_mode_var,
-        ).pack(side=self.tk.LEFT, padx=(0, 8))
-        self.remote_mode_button = self.ttk.Radiobutton(
-            mode_choice,
-            text="Remote",
-            value="remote",
-            variable=self.processing_mode_var,
-        )
-        self.remote_mode_button.pack(side=self.tk.LEFT, padx=(0, 8))
-
-        self.ttk.Label(self.basic_options_frame, text="Theme").grid(
-            row=5, column=0, sticky="w", pady=(8, 0)
-        )
-        theme_choice = self.ttk.Frame(self.basic_options_frame)
-        theme_choice.grid(row=5, column=1, columnspan=2, sticky="w", pady=(8, 0))
-        for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
-            self.ttk.Radiobutton(
-                theme_choice,
-                text=label,
-                value=value,
-                variable=self.theme_var,
-                command=self._refresh_theme,
-            ).pack(side=self.tk.LEFT, padx=(0, 8))
-
-        self.advanced_button = self.ttk.Button(
-            self.options_frame,
-            text="Advanced",
-            command=self._toggle_advanced,
-        )
-        self.advanced_button.grid(
-            row=3, column=0, columnspan=2, sticky="w", pady=(12, 0)
-        )
-
-        self.advanced_frame = self.ttk.Frame(self.options_frame, padding=0)
-        self.advanced_frame.grid(row=4, column=0, columnspan=2, sticky="nsew")
-        self.advanced_frame.columnconfigure(1, weight=1)
-
-        self.output_var = self.tk.StringVar()
-        self._add_entry(
-            self.advanced_frame, "Output file", self.output_var, row=0, browse=True
-        )
-
-        self.temp_var = self.tk.StringVar(value=str(default_temp_folder()))
-        self._add_entry(
-            self.advanced_frame, "Temp folder", self.temp_var, row=1, browse=True
-        )
-
-        self.sample_rate_var = self.tk.StringVar(value="48000")
-        self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=2)
-
-        frame_margin_setting = self.preferences.get("frame_margin", 2)
-        try:
-            frame_margin_default = int(frame_margin_setting)
-        except (TypeError, ValueError):
-            frame_margin_default = 2
-            self.preferences.update("frame_margin", frame_margin_default)
-
-        self.frame_margin_var = self.tk.StringVar(value=str(frame_margin_default))
-        self._add_entry(
-            self.advanced_frame, "Frame margin", self.frame_margin_var, row=3
-        )
-
-        self._toggle_advanced(initial=True)
-        self._update_processing_mode_state()
-        self._update_basic_reset_state()
-
-        # Action buttons and log output
-        status_frame = self.ttk.Frame(main, padding=self.PADDING)
-        status_frame.grid(row=1, column=0, sticky="ew")
-        status_frame.columnconfigure(0, weight=0)
-        status_frame.columnconfigure(1, weight=1)
-        status_frame.columnconfigure(2, weight=0)
-        self.status_frame = status_frame
-
-        self.ttk.Label(status_frame, text="Status:").grid(row=0, column=0, sticky="w")
-        self.status_label = self.tk.Label(
-            status_frame, textvariable=self.status_var, anchor="e"
-        )
-        self.status_label.grid(row=0, column=1, sticky="e")
-
-        # Progress bar
-        self.progress_bar = self.ttk.Progressbar(
-            status_frame,
-            variable=self.progress_var,
-            maximum=100,
-            mode="determinate",
-            style="Idle.Horizontal.TProgressbar",
-        )
-        self.progress_bar.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 0))
-
-        self.stop_button = self.ttk.Button(
-            status_frame, text="Stop", command=self._stop_processing
-        )
-        self.stop_button.grid(
-            row=2, column=0, columnspan=3, sticky="ew", pady=self.PADDING
-        )
-        self.stop_button.grid_remove()  # Hidden by default
-
-        self.open_button = self.ttk.Button(
-            status_frame,
-            text="Open last",
-            command=self._open_last_output,
-            state=self.tk.DISABLED,
-        )
-        self.open_button.grid(
-            row=2, column=0, columnspan=3, sticky="ew", pady=self.PADDING
-        )
-        self.open_button.grid_remove()
-
-        # Button shown when no other action buttons are visible
-        self.drop_hint_button = self.ttk.Button(
-            status_frame,
-            text="Drop video to convert",
-            state=self.tk.DISABLED,
-        )
-        self.drop_hint_button.grid(
-            row=2, column=0, columnspan=3, sticky="ew", pady=self.PADDING
-        )
-        self.drop_hint_button.grid_remove()  # Hidden by default
-        self._configure_drop_targets(self.drop_hint_button)
-
-        self.log_frame = self.ttk.Frame(main, padding=self.PADDING)
-        self.log_frame.grid(row=3, column=0, pady=(16, 0), sticky="nsew")
-        main.rowconfigure(4, weight=1)
-        self.log_frame.columnconfigure(0, weight=1)
-        self.log_frame.rowconfigure(0, weight=1)
-
-        self.log_text = self.tk.Text(
-            self.log_frame, wrap="word", height=10, state=self.tk.DISABLED
-        )
-        self.log_text.grid(row=0, column=0, sticky="nsew")
-        log_scroll = self.ttk.Scrollbar(
-            self.log_frame, orient=self.tk.VERTICAL, command=self.log_text.yview
-        )
-        log_scroll.grid(row=0, column=1, sticky="ns")
-        self.log_text.configure(yscrollcommand=log_scroll.set)
-
-    def _add_entry(
-        self,
-        parent,  # type: tk.Misc
-        label: str,
-        variable,  # type: tk.StringVar
-        *,
-        row: int,
-        browse: bool = False,
-    ) -> None:
-        self.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=4)
-        entry = self.ttk.Entry(parent, textvariable=variable)
-        entry.grid(row=row, column=1, sticky="ew", pady=4)
-        if browse:
-            button = self.ttk.Button(
-                parent,
-                text="Browse",
-                command=lambda var=variable: self._browse_path(var, label),
-            )
-            button.grid(row=row, column=2, padx=(8, 0))
-
-    def _add_slider(
-        self,
-        parent,  # type: tk.Misc
-        label: str,
-        variable,  # type: tk.DoubleVar
-        *,
-        row: int,
-        setting_key: str,
-        minimum: float,
-        maximum: float,
-        resolution: float,
-        display_format: str,
-        default_value: float,
-    ) -> None:
-        self.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=4)
-
-        value_label = self.ttk.Label(parent)
-        value_label.grid(row=row, column=2, sticky="e", pady=4)
-
-        def update(value: str) -> None:
-            numeric = float(value)
-            clamped = max(minimum, min(maximum, numeric))
-            steps = round((clamped - minimum) / resolution)
-            quantized = minimum + steps * resolution
-            if abs(variable.get() - quantized) > 1e-9:
-                variable.set(quantized)
-            value_label.configure(text=display_format.format(quantized))
-            self.preferences.update(setting_key, float(f"{quantized:.6f}"))
-            self._update_basic_reset_state()
-
-        slider = self.tk.Scale(
-            parent,
-            variable=variable,
-            from_=minimum,
-            to=maximum,
-            orient=self.tk.HORIZONTAL,
-            resolution=resolution,
-            showvalue=False,
-            command=update,
-            length=240,
-            highlightthickness=0,
-        )
-        slider.grid(row=row, column=1, sticky="ew", pady=4, padx=(0, 8))
-
-        update(str(variable.get()))
-
-        self._slider_updaters[setting_key] = update
-        self._basic_defaults[setting_key] = default_value
-        self._basic_variables[setting_key] = variable
-        variable.trace_add("write", lambda *_: self._update_basic_reset_state())
-        self._sliders.append(slider)
-
-    def _update_basic_reset_state(self) -> None:
-        """Enable or disable the reset control based on slider values."""
-
-        if not hasattr(self, "reset_basic_button"):
+    def _start_run(self) -> None:
+        if self._processing_thread and self._processing_thread.is_alive():
+            self.messagebox.showinfo("Processing", "A job is already running.")
             return
 
-        should_enable = False
-        for key, default_value in self._basic_defaults.items():
-            variable = self._basic_variables.get(key)
-            if variable is None:
-                continue
-            try:
-                current_value = float(variable.get())
-            except (TypeError, ValueError):
-                should_enable = True
-                break
-            if abs(current_value - default_value) > 1e-9:
-                should_enable = True
-                break
+        if not self.input_files:
+            self.messagebox.showwarning(
+                "Missing input", "Please add at least one file or folder."
+            )
+            return
 
-        if should_enable:
-            if not getattr(self, "_reset_button_visible", False):
-                self.reset_basic_button.pack(side=self.tk.LEFT, padx=(8, 0))
-                self._reset_button_visible = True
-            self.reset_basic_button.configure(state=self.tk.NORMAL)
-        else:
-            if getattr(self, "_reset_button_visible", False):
-                self.reset_basic_button.pack_forget()
-                self._reset_button_visible = False
-            self.reset_basic_button.configure(state=self.tk.DISABLED)
+        try:
+            args = self._collect_arguments()
+        except ValueError as exc:
+            self.messagebox.showerror("Invalid value", str(exc))
+            return
+
+        self._append_log("Starting processing…")
+        self._stop_requested = False
+        self.stop_button.configure(text="Stop")
+        self._run_start_time = time.monotonic()
+        self._ping_worker_stop_requested = True
+        open_after_convert = bool(self.open_after_convert_var.get())
+        server_url = self.server_url_var.get().strip()
+        remote_mode = self.processing_mode_var.get() == "remote"
+        if remote_mode and not server_url:
+            self.messagebox.showerror(
+                "Missing server URL", "Remote mode requires a server URL."
+            )
+        remote_mode = remote_mode and bool(server_url)
+
+        # Store remote_mode for use after thread starts
+        self._current_remote_mode = remote_mode
+
+        def worker() -> None:
+            def set_process(proc: subprocess.Popen) -> None:
+                self._ffmpeg_process = proc
+
+            try:
+                files = gather_input_files(self.input_files)
+                if not files:
+                    self._schedule_on_ui_thread(
+                        lambda: self.messagebox.showwarning(
+                            "No files", "No supported media files were found."
+                        )
+                    )
+                    self._set_status("Idle")
+                    return
+
+                if self._current_remote_mode:
+                    success = self._process_files_via_server(
+                        files,
+                        args,
+                        server_url,
+                        open_after_convert=open_after_convert,
+                    )
+                    if success:
+                        self._schedule_on_ui_thread(self._hide_stop_button)
+                        return
+                    # If server processing failed, fall back to local processing
+                    # The _process_files_via_server function already switched to local mode
+                    # Update remote_mode variable to reflect the change
+                    self._current_remote_mode = False
+
+                reporter = _TkProgressReporter(
+                    self._append_log,
+                    process_callback=set_process,
+                    stop_callback=lambda: self._stop_requested,
+                )
+                for index, file in enumerate(files, start=1):
+                    self._append_log(f"Processing: {os.path.basename(file)}")
+                    options = self._create_processing_options(Path(file), args)
+                    result = speed_up_video(options, reporter=reporter)
+                    self._last_output = result.output_file
+                    self._last_time_ratio = result.time_ratio
+                    self._last_size_ratio = result.size_ratio
+
+                    # Create completion message with ratios if available
+                    completion_msg = f"Completed: {result.output_file}"
+                    if result.time_ratio is not None and result.size_ratio is not None:
+                        completion_msg += f" (Time: {result.time_ratio:.2%}, Size: {result.size_ratio:.2%})"
+
+                    self._append_log(completion_msg)
+                    if open_after_convert:
+                        self._schedule_on_ui_thread(
+                            lambda path=result.output_file: self._open_in_file_manager(
+                                path
+                            )
+                        )
+
+                self._append_log("All jobs finished successfully.")
+                self._schedule_on_ui_thread(
+                    lambda: self.open_button.configure(state=self.tk.NORMAL)
+                )
+                self._schedule_on_ui_thread(self._clear_input_files)
+            except FFmpegNotFoundError as exc:
+                self._schedule_on_ui_thread(
+                    lambda: self.messagebox.showerror("FFmpeg not found", str(exc))
+                )
+                self._set_status("Error")
+            except ProcessingAborted:
+                self._append_log("Processing aborted by user.")
+                self._set_status("Aborted")
+            except Exception as exc:  # pragma: no cover - GUI level safeguard
+                # If stop was requested, don't show error (FFmpeg termination is expected)
+                if self._stop_requested:
+                    self._append_log("Processing aborted by user.")
+                    self._set_status("Aborted")
+                else:
+                    error_msg = f"Processing failed: {exc}"
+                    self._append_log(error_msg)
+                    print(error_msg, file=sys.stderr)  # Also output to console
+                    self._schedule_on_ui_thread(
+                        lambda: self.messagebox.showerror("Error", error_msg)
+                    )
+                    self._set_status("Error")
+            finally:
+                self._run_start_time = None
+                self._schedule_on_ui_thread(self._hide_stop_button)
+
+        self._processing_thread = threading.Thread(target=worker, daemon=True)
+        self._processing_thread.start()
+
+        # Show Stop button when processing starts regardless of mode
+        self.stop_button.grid()
+
+    # ------------------------------------------------------------------ UI --
+    def _apply_window_icon(self) -> None:
+        layout_helpers.apply_window_icon(self)
+
+    def _build_layout(self) -> None:
+        layout_helpers.build_layout(self)
+
+    def _update_basic_reset_state(self) -> None:
+        layout_helpers.update_basic_reset_state(self)
 
     def _reset_basic_defaults(self) -> None:
-        """Restore the basic numeric controls to their default values."""
-
-        for key, default_value in self._basic_defaults.items():
-            variable = self._basic_variables.get(key)
-            if variable is None:
-                continue
-
-            try:
-                current_value = float(variable.get())
-            except (TypeError, ValueError):
-                current_value = default_value
-
-            if abs(current_value - default_value) <= 1e-9:
-                continue
-
-            variable.set(default_value)
-            updater = self._slider_updaters.get(key)
-            if updater is not None:
-                updater(str(default_value))
-            else:
-                self.preferences.update(key, float(f"{default_value:.6f}"))
-
-        self._update_basic_reset_state()
+        layout_helpers.reset_basic_defaults(self)
 
     def _update_processing_mode_state(self) -> None:
         has_url = bool(self.server_url_var.get().strip())
@@ -927,35 +604,8 @@ class TalksReducerGUI:
         max_attempts: int = 5,
         delay: float = 1.0,
     ) -> bool:
-        def log_callback(message: str) -> None:
-            self._schedule_on_ui_thread(lambda msg=message: self._append_log(msg))
-
-        def status_callback(status: str, message: str) -> None:
-            self._schedule_on_ui_thread(
-                lambda s=status, m=message: self._set_status(s, m)
-            )
-
-        if switch_to_local_on_failure:
-
-            def switch_callback() -> None:
-                self._schedule_on_ui_thread(
-                    lambda: self.processing_mode_var.set("local")
-                )
-
-        else:
-            switch_callback = None
-
-        if alert_on_failure:
-
-            def alert_callback(title: str, message: str) -> None:
-                self._schedule_on_ui_thread(
-                    lambda t=title, m=message: self.messagebox.showwarning(t, m)
-                )
-
-        else:
-            alert_callback = None
-
-        return check_remote_server(
+        return check_remote_server_for_gui(
+            self,
             server_url,
             success_status=success_status,
             waiting_status=waiting_status,
@@ -971,169 +621,35 @@ class TalksReducerGUI:
             warning_message=warning_message,
             max_attempts=max_attempts,
             delay=delay,
-            on_log=log_callback,
-            on_status=status_callback,
-            on_switch_to_local=switch_callback,
-            on_alert=alert_callback,
-            ping=self._ping_server,
-            sleep=time.sleep,
         )
 
     def _ping_server(self, server_url: str, *, timeout: float = 5.0) -> bool:
         return ping_server(server_url, timeout=timeout)
 
     def _start_discovery(self) -> None:
-        """Search the local network for running Talks Reducer servers."""
-
-        if self._discovery_thread and self._discovery_thread.is_alive():
-            return
-
-        self.server_discover_button.configure(
-            state=self.tk.DISABLED, text="Discovering…"
-        )
-        self._append_log("Discovering Talks Reducer servers on port 9005…")
-
-        def worker() -> None:
-            try:
-                urls = discover_servers(
-                    progress_callback=lambda current, total: self._schedule_on_ui_thread(
-                        lambda c=current, t=total: self._on_discovery_progress(c, t)
-                    )
-                )
-            except Exception as exc:  # pragma: no cover - network failure safeguard
-                self._schedule_on_ui_thread(lambda: self._on_discovery_failed(exc))
-                return
-            self._schedule_on_ui_thread(lambda: self._on_discovery_complete(urls))
-
-        self._discovery_thread = threading.Thread(target=worker, daemon=True)
-        self._discovery_thread.start()
+        discovery_helpers.start_discovery(self)
 
     def _on_discovery_failed(self, exc: Exception) -> None:
-        self.server_discover_button.configure(state=self.tk.NORMAL, text="Discover")
-        message = f"Discovery failed: {exc}"
-        self._append_log(message)
-        self.messagebox.showerror("Discovery failed", message)
+        discovery_helpers.on_discovery_failed(self, exc)
 
     def _on_discovery_progress(self, current: int, total: int) -> None:
-        if total > 0:
-            bounded = max(0, min(current, total))
-            label = f"{bounded} / {total}"
-        else:
-            label = "Discovering…"
-        self.server_discover_button.configure(text=label)
+        discovery_helpers.on_discovery_progress(self, current, total)
 
     def _on_discovery_complete(self, urls: List[str]) -> None:
-        self.server_discover_button.configure(state=self.tk.NORMAL, text="Discover")
-        if not urls:
-            self._append_log("No Talks Reducer servers were found.")
-            self.messagebox.showinfo(
-                "No servers found",
-                "No Talks Reducer servers responded on port 9005.",
-            )
-            return
-
-        self._append_log(
-            f"Discovered {len(urls)} server{'s' if len(urls) != 1 else ''}."
-        )
-
-        if len(urls) == 1:
-            self.server_url_var.set(urls[0])
-            return
-
-        self._show_discovery_results(urls)
+        discovery_helpers.on_discovery_complete(self, urls)
 
     def _show_discovery_results(self, urls: List[str]) -> None:
-        dialog = self.tk.Toplevel(self.root)
-        dialog.title("Select server")
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        self.ttk.Label(dialog, text="Select a Talks Reducer server:").grid(
-            row=0, column=0, columnspan=2, sticky="w", padx=self.PADDING, pady=(12, 4)
-        )
-
-        listbox = self.tk.Listbox(
-            dialog,
-            height=min(10, len(urls)),
-            selectmode=self.tk.SINGLE,
-        )
-        listbox.grid(
-            row=1,
-            column=0,
-            columnspan=2,
-            padx=self.PADDING,
-            sticky="nsew",
-        )
-        dialog.columnconfigure(0, weight=1)
-        dialog.columnconfigure(1, weight=1)
-        dialog.rowconfigure(1, weight=1)
-
-        for url in urls:
-            listbox.insert(self.tk.END, url)
-        listbox.select_set(0)
-
-        def choose(_: object | None = None) -> None:
-            selection = listbox.curselection()
-            if not selection:
-                return
-            index = selection[0]
-            self.server_url_var.set(urls[index])
-            dialog.grab_release()
-            dialog.destroy()
-
-        def cancel() -> None:
-            dialog.grab_release()
-            dialog.destroy()
-
-        listbox.bind("<Double-Button-1>", choose)
-        listbox.bind("<Return>", choose)
-
-        button_frame = self.ttk.Frame(dialog)
-        button_frame.grid(row=2, column=0, columnspan=2, pady=(8, 12))
-        self.ttk.Button(button_frame, text="Use server", command=choose).pack(
-            side=self.tk.LEFT, padx=(0, 8)
-        )
-        self.ttk.Button(button_frame, text="Cancel", command=cancel).pack(
-            side=self.tk.LEFT
-        )
-        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        discovery_helpers.show_discovery_results(self, urls)
 
     def _toggle_simple_mode(self) -> None:
         self.preferences.update("simple_mode", self.simple_mode_var.get())
         self._apply_simple_mode()
 
     def _apply_simple_mode(self, *, initial: bool = False) -> None:
-        simple = self.simple_mode_var.get()
-        if simple:
-            self.basic_options_frame.grid_remove()
-            self.log_frame.grid_remove()
-            self.advanced_button.grid_remove()
-            self.advanced_frame.grid_remove()
-            self.run_after_drop_var.set(True)
-            self._apply_window_size(simple=True)
-        else:
-            self.basic_options_frame.grid()
-            self.log_frame.grid()
-            self.advanced_button.grid()
-            if self.advanced_visible.get():
-                self.advanced_frame.grid()
-            self._apply_window_size(simple=False)
-
-        if initial and simple:
-            # Ensure the hidden widgets do not retain focus outlines on start.
-            self.drop_zone.focus_set()
+        layout_helpers.apply_simple_mode(self, initial=initial)
 
     def _apply_window_size(self, *, simple: bool) -> None:
-        width, height = self._simple_size if simple else self._full_size
-        self.root.update_idletasks()
-        self.root.minsize(width, height)
-        if simple:
-            self.root.geometry(f"{width}x{height}")
-        else:
-            current_width = self.root.winfo_width()
-            current_height = self.root.winfo_height()
-            if current_width < width or current_height < height:
-                self.root.geometry(f"{width}x{height}")
+        layout_helpers.apply_window_size(self, simple=simple)
 
     def _toggle_advanced(self, *, initial: bool = False) -> None:
         if not initial:
@@ -1311,132 +827,6 @@ class TalksReducerGUI:
         if result:
             variable.set(result)
 
-    def _start_run(self) -> None:
-        if self._processing_thread and self._processing_thread.is_alive():
-            self.messagebox.showinfo("Processing", "A job is already running.")
-            return
-
-        if not self.input_files:
-            self.messagebox.showwarning(
-                "Missing input", "Please add at least one file or folder."
-            )
-            return
-
-        try:
-            args = self._collect_arguments()
-        except ValueError as exc:
-            self.messagebox.showerror("Invalid value", str(exc))
-            return
-
-        self._append_log("Starting processing…")
-        self._stop_requested = False
-        self.stop_button.configure(text="Stop")
-        self._run_start_time = time.monotonic()
-        self._ping_worker_stop_requested = True
-        open_after_convert = bool(self.open_after_convert_var.get())
-        server_url = self.server_url_var.get().strip()
-        remote_mode = self.processing_mode_var.get() == "remote"
-        if remote_mode and not server_url:
-            self.messagebox.showerror(
-                "Missing server URL", "Remote mode requires a server URL."
-            )
-        remote_mode = remote_mode and bool(server_url)
-
-        # Store remote_mode for use after thread starts
-        self._current_remote_mode = remote_mode
-
-        def worker() -> None:
-            def set_process(proc: subprocess.Popen) -> None:
-                self._ffmpeg_process = proc
-
-            try:
-                files = gather_input_files(self.input_files)
-                if not files:
-                    self._schedule_on_ui_thread(
-                        lambda: self.messagebox.showwarning(
-                            "No files", "No supported media files were found."
-                        )
-                    )
-                    self._set_status("Idle")
-                    return
-
-                if self._current_remote_mode:
-                    success = self._process_files_via_server(
-                        files,
-                        args,
-                        server_url,
-                        open_after_convert=open_after_convert,
-                    )
-                    if success:
-                        self._schedule_on_ui_thread(self._hide_stop_button)
-                        return
-                    # If server processing failed, fall back to local processing
-                    # The _process_files_via_server function already switched to local mode
-                    # Update remote_mode variable to reflect the change
-                    self._current_remote_mode = False
-
-                reporter = _TkProgressReporter(
-                    self._append_log,
-                    process_callback=set_process,
-                    stop_callback=lambda: self._stop_requested,
-                )
-                for index, file in enumerate(files, start=1):
-                    self._append_log(f"Processing: {os.path.basename(file)}")
-                    options = self._create_processing_options(Path(file), args)
-                    result = speed_up_video(options, reporter=reporter)
-                    self._last_output = result.output_file
-                    self._last_time_ratio = result.time_ratio
-                    self._last_size_ratio = result.size_ratio
-
-                    # Create completion message with ratios if available
-                    completion_msg = f"Completed: {result.output_file}"
-                    if result.time_ratio is not None and result.size_ratio is not None:
-                        completion_msg += f" (Time: {result.time_ratio:.2%}, Size: {result.size_ratio:.2%})"
-
-                    self._append_log(completion_msg)
-                    if open_after_convert:
-                        self._schedule_on_ui_thread(
-                            lambda path=result.output_file: self._open_in_file_manager(
-                                path
-                            )
-                        )
-
-                self._append_log("All jobs finished successfully.")
-                self._schedule_on_ui_thread(
-                    lambda: self.open_button.configure(state=self.tk.NORMAL)
-                )
-                self._schedule_on_ui_thread(self._clear_input_files)
-            except FFmpegNotFoundError as exc:
-                self._schedule_on_ui_thread(
-                    lambda: self.messagebox.showerror("FFmpeg not found", str(exc))
-                )
-                self._set_status("Error")
-            except ProcessingAborted:
-                self._append_log("Processing aborted by user.")
-                self._set_status("Aborted")
-            except Exception as exc:  # pragma: no cover - GUI level safeguard
-                # If stop was requested, don't show error (FFmpeg termination is expected)
-                if self._stop_requested:
-                    self._append_log("Processing aborted by user.")
-                    self._set_status("Aborted")
-                else:
-                    error_msg = f"Processing failed: {exc}"
-                    self._append_log(error_msg)
-                    print(error_msg, file=sys.stderr)  # Also output to console
-                    self._schedule_on_ui_thread(
-                        lambda: self.messagebox.showerror("Error", error_msg)
-                    )
-                    self._set_status("Error")
-            finally:
-                self._run_start_time = None
-                self._schedule_on_ui_thread(self._hide_stop_button)
-
-        self._processing_thread = threading.Thread(target=worker, daemon=True)
-        self._processing_thread.start()
-
-        # Show Stop button when processing starts regardless of mode
-        self.stop_button.grid()
-
     def _stop_processing(self) -> None:
         """Stop the currently running processing by terminating FFmpeg."""
         import signal
@@ -1513,132 +903,15 @@ class TalksReducerGUI:
     ) -> bool:
         """Send *files* to the configured server for processing."""
 
-        def _ensure_not_stopped() -> None:
-            if self._stop_requested:
-                raise ProcessingAborted("Remote processing cancelled by user.")
-
-        try:
-            service_module = importlib.import_module("talks_reducer.service_client")
-        except ModuleNotFoundError as exc:
-            self._append_log(f"Server client unavailable: {exc}")
-            self._schedule_on_ui_thread(
-                lambda: self.messagebox.showerror(
-                    "Server unavailable",
-                    "Remote processing requires the gradio_client package.",
-                )
-            )
-            self._schedule_on_ui_thread(lambda: self._set_status("Error"))
-            return False
-
-        host_label = self._format_server_host(server_url)
-        self._schedule_on_ui_thread(
-            lambda: self._set_status("waiting", f"Waiting server {host_label}...")
-        )
-
-        available = self._check_remote_server(
+        return process_files_via_server(
+            self,
+            files,
+            args,
             server_url,
-            success_status="waiting",
-            waiting_status="Error",
-            failure_status="Error",
-            failure_message="Server {host} is unreachable after {max_attempts} attempts. Switching to local mode.",
-            stop_check=lambda: self._stop_requested,
-            on_stop=_ensure_not_stopped,
-            switch_to_local_on_failure=True,
-            alert_on_failure=True,
-            warning_message="Server {host} is not reachable. Switching to local processing mode.",
+            open_after_convert=open_after_convert,
+            default_remote_destination=_default_remote_destination,
+            parse_summary=_parse_ratios_from_summary,
         )
-
-        _ensure_not_stopped()
-
-        if not available:
-            return False
-
-        output_override = args.get("output_file") if len(files) == 1 else None
-        allowed_remote_keys = {
-            "output_file",
-            "small",
-            "silent_threshold",
-            "sounded_speed",
-            "silent_speed",
-        }
-        ignored = [key for key in args if key not in allowed_remote_keys]
-        if ignored:
-            ignored_options = ", ".join(sorted(ignored))
-            self._append_log(
-                f"Server mode ignores the following options: {ignored_options}"
-            )
-
-        small_mode = bool(args.get("small", False))
-
-        for index, file in enumerate(files, start=1):
-            _ensure_not_stopped()
-            basename = os.path.basename(file)
-            self._append_log(
-                f"Uploading {index}/{len(files)}: {basename} to {server_url}"
-            )
-            input_path = Path(file)
-
-            if output_override is not None:
-                output_path = Path(output_override)
-                if output_path.is_dir():
-                    output_path = (
-                        output_path
-                        / _default_remote_destination(input_path, small=small_mode).name
-                    )
-            else:
-                output_path = _default_remote_destination(input_path, small=small_mode)
-
-            try:
-                destination, summary, log_text = service_module.send_video(
-                    input_path=input_path,
-                    output_path=output_path,
-                    server_url=server_url,
-                    small=small_mode,
-                    silent_threshold=args.get("silent_threshold"),
-                    sounded_speed=args.get("sounded_speed"),
-                    silent_speed=args.get("silent_speed"),
-                    stream_updates=True,
-                    log_callback=self._append_log,
-                    should_cancel=lambda: self._stop_requested,
-                    # progress_callback=self._handle_service_progress,
-                )
-                _ensure_not_stopped()
-            except ProcessingAborted:
-                raise
-            except Exception as exc:  # pragma: no cover - network safeguard
-                error_detail = f"{exc.__class__.__name__}: {exc}"
-                error_msg = f"Processing failed: {error_detail}"
-                self._append_log(error_msg)
-                self._schedule_on_ui_thread(lambda: self._set_status("Error"))
-                self._schedule_on_ui_thread(
-                    lambda: self.messagebox.showerror(
-                        "Server error",
-                        f"Failed to process {basename}: {error_detail}",
-                    )
-                )
-                return False
-
-            self._last_output = Path(destination)
-            time_ratio, size_ratio = _parse_ratios_from_summary(summary)
-            self._last_time_ratio = time_ratio
-            self._last_size_ratio = size_ratio
-            for line in summary.splitlines():
-                self._append_log(line)
-            if log_text.strip():
-                self._append_log("Server log:")
-                for line in log_text.splitlines():
-                    self._append_log(line)
-            if open_after_convert:
-                self._schedule_on_ui_thread(
-                    lambda path=self._last_output: self._open_in_file_manager(path)
-                )
-
-        self._append_log("All jobs finished successfully.")
-        self._schedule_on_ui_thread(
-            lambda: self.open_button.configure(state=self.tk.NORMAL)
-        )
-        self._schedule_on_ui_thread(self._clear_input_files)
-        return True
 
     def _parse_float(self, value: str, label: str) -> float:
         try:
@@ -2167,7 +1440,14 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
     parsed_args, remaining = parser.parse_known_args(argv)
     if parsed_args.server:
         package_name = __package__ or "talks_reducer"
-        tray_module = importlib.import_module(f"{package_name}.server_tray")
+        module_name = f"{package_name}.server_tray"
+        try:
+            tray_module = importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            if exc.name != module_name:
+                raise
+            root_package = package_name.split(".")[0] or "talks_reducer"
+            tray_module = importlib.import_module(f"{root_package}.server_tray")
         tray_main = getattr(tray_module, "main")
         tray_main(remaining)
         return False
