@@ -12,7 +12,7 @@ import time
 import webbrowser
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Iterator, Optional, Sequence
+from typing import Any, Callable, Iterator, Optional, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 from PIL import Image
@@ -131,6 +131,15 @@ def _load_icon() -> Image.Image:
     return _generate_fallback_icon()
 
 
+class _HeadlessTrayBackend:
+    """Placeholder backend used when the tray icon is disabled."""
+
+    def __getattr__(self, name: str) -> Any:
+        raise RuntimeError(
+            "System tray backend is unavailable when running in headless mode."
+        )
+
+
 class _ServerTrayApplication:
     """Coordinate the Gradio server lifecycle and the system tray icon."""
 
@@ -142,12 +151,18 @@ class _ServerTrayApplication:
         share: bool,
         open_browser: bool,
         tray_mode: str,
+        tray_backend: Any,
+        build_interface: Callable[[], Any],
+        open_browser_callback: Callable[[str], Any],
     ) -> None:
         self._host = host
         self._port = port
         self._share = share
         self._open_browser_on_start = open_browser
         self._tray_mode = tray_mode
+        self._tray_backend = tray_backend
+        self._build_interface = build_interface
+        self._open_browser = open_browser_callback
 
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
@@ -156,7 +171,7 @@ class _ServerTrayApplication:
         self._server_handle: Optional[Any] = None
         self._local_url: Optional[str] = None
         self._share_url: Optional[str] = None
-        self._icon: Optional[pystray.Icon] = None
+        self._icon: Optional[Any] = None
         self._gui_process: Optional[subprocess.Popen[Any]] = None
         self._startup_error: Optional[BaseException] = None
 
@@ -171,7 +186,7 @@ class _ServerTrayApplication:
             self._port,
             self._share,
         )
-        demo = build_interface()
+        demo = self._build_interface()
         server = demo.launch(
             server_name=self._host,
             server_port=self._port,
@@ -206,12 +221,12 @@ class _ServerTrayApplication:
 
     def _handle_open_webui(
         self,
-        _icon: Optional[pystray.Icon] = None,
-        _item: Optional[pystray.MenuItem] = None,
+        _icon: Optional[Any] = None,
+        _item: Optional[Any] = None,
     ) -> None:
         url = self._resolve_url()
         if url:
-            webbrowser.open(url)
+            self._open_browser(url)
             LOGGER.info("Opened browser to %s", url)
         else:
             LOGGER.warning("Server URL not yet available; please try again.")
@@ -242,8 +257,8 @@ class _ServerTrayApplication:
 
     def _launch_gui(
         self,
-        _icon: Optional[pystray.Icon] = None,
-        _item: Optional[pystray.MenuItem] = None,
+        _icon: Optional[Any] = None,
+        _item: Optional[Any] = None,
     ) -> None:
         """Launch the Talks Reducer GUI in a background subprocess."""
 
@@ -274,16 +289,19 @@ class _ServerTrayApplication:
 
     def _handle_quit(
         self,
-        icon: Optional[pystray.Icon] = None,
-        _item: Optional[pystray.MenuItem] = None,
+        icon: Optional[Any] = None,
+        _item: Optional[Any] = None,
     ) -> None:
         self.stop()
         if icon is not None:
-            icon.stop()
+            stop_method = getattr(icon, "stop", None)
+            if callable(stop_method):
+                with suppress(Exception):
+                    stop_method()
 
     # Public API -------------------------------------------------------
 
-    def _await_server_start(self, icon: Optional[pystray.Icon]) -> None:
+    def _await_server_start(self, icon: Optional[Any]) -> None:
         """Wait for the server to signal readiness or trigger shutdown on failure."""
 
         if self._ready_event.wait(timeout=30):
@@ -301,8 +319,10 @@ class _ServerTrayApplication:
         LOGGER.error("%s", error)
 
         if icon is not None:
-            with suppress(Exception):
-                icon.notify("Talks Reducer server failed to start.")
+            notify = getattr(icon, "notify", None)
+            if callable(notify):
+                with suppress(Exception):
+                    notify("Talks Reducer server failed to start.")
 
         self.stop()
 
@@ -334,17 +354,17 @@ class _ServerTrayApplication:
             f" v{APP_VERSION}" if APP_VERSION and APP_VERSION != "unknown" else ""
         )
         version_label = f"Talks Reducer{version_suffix}"
-        menu = pystray.Menu(
-            pystray.MenuItem(version_label, None, enabled=False),
-            pystray.MenuItem(
+        menu = self._tray_backend.Menu(
+            self._tray_backend.MenuItem(version_label, None, enabled=False),
+            self._tray_backend.MenuItem(
                 "Open GUI",
                 self._launch_gui,
                 default=True,
             ),
-            pystray.MenuItem("Open WebUI", self._handle_open_webui),
-            pystray.MenuItem("Quit", self._handle_quit),
+            self._tray_backend.MenuItem("Open WebUI", self._handle_open_webui),
+            self._tray_backend.MenuItem("Quit", self._handle_quit),
         )
-        self._icon = pystray.Icon(
+        self._icon = self._tray_backend.Icon(
             "talks-reducer",
             icon_image,
             f"{version_label} Server",
@@ -383,9 +403,12 @@ class _ServerTrayApplication:
 
         if self._icon is not None:
             with suppress(Exception):
-                self._icon.visible = False
-            with suppress(Exception):
-                self._icon.stop()
+                if hasattr(self._icon, "visible"):
+                    self._icon.visible = False
+            stop_method = getattr(self._icon, "stop", None)
+            if callable(stop_method):
+                with suppress(Exception):
+                    stop_method()
 
         self._stop_gui()
 
@@ -417,6 +440,42 @@ class _ServerTrayApplication:
                     LOGGER.info("Error while terminating GUI process: %s", exc)
 
             self._gui_process = None
+
+
+def create_tray_app(
+    *,
+    host: Optional[str],
+    port: int,
+    share: bool,
+    open_browser: bool,
+    tray_mode: str,
+) -> _ServerTrayApplication:
+    """Build a :class:`_ServerTrayApplication` wired to production dependencies."""
+
+    if tray_mode != "headless" and (
+        pystray is None or PYSTRAY_IMPORT_ERROR is not None
+    ):
+        raise RuntimeError(
+            "System tray mode requires the 'pystray' dependency. Install it with "
+            "`pip install pystray` or `pip install talks-reducer[dev]` and try again."
+        ) from PYSTRAY_IMPORT_ERROR
+
+    tray_backend: Any
+    if pystray is None:
+        tray_backend = _HeadlessTrayBackend()
+    else:
+        tray_backend = pystray
+
+    return _ServerTrayApplication(
+        host=host,
+        port=port,
+        share=share,
+        open_browser=open_browser,
+        tray_mode=tray_mode,
+        tray_backend=tray_backend,
+        build_interface=build_interface,
+        open_browser_callback=webbrowser.open,
+    )
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
@@ -477,13 +536,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         datefmt="%H:%M:%S",
     )
 
-    if args.tray_mode != "headless" and PYSTRAY_IMPORT_ERROR is not None:
-        raise RuntimeError(
-            "System tray mode requires the 'pystray' dependency. Install it with "
-            "`pip install pystray` or `pip install talks-reducer[dev]` and try again."
-        ) from PYSTRAY_IMPORT_ERROR
-
-    app = _ServerTrayApplication(
+    app = create_tray_app(
         host=args.host,
         port=args.port,
         share=args.share,
@@ -499,7 +552,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         app.stop()
 
 
-__all__ = ["main"]
+__all__ = ["create_tray_app", "main"]
 
 
 if __name__ == "__main__":  # pragma: no cover - convenience entry point
