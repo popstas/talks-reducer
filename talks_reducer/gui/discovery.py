@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, List
 from ..discovery import discover_servers as core_discover_servers
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
-    from . import TalksReducerGUI
+    from .app import TalksReducerGUI
 
 
 def start_discovery(gui: "TalksReducerGUI") -> None:

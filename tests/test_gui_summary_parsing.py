@@ -1,6 +1,6 @@
 """Tests for parsing ratios from GUI remote summaries."""
 
-from talks_reducer.gui import _parse_ratios_from_summary
+from talks_reducer.gui.app import _parse_ratios_from_summary
 
 
 def test_parse_ratios_from_summary_with_percentages() -> None:

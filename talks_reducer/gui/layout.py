@@ -11,7 +11,7 @@ from ..models import default_temp_folder
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     import tkinter as tk
 
-    from . import TalksReducerGUI
+    from .app import TalksReducerGUI
 
 
 def build_layout(gui: "TalksReducerGUI") -> None:

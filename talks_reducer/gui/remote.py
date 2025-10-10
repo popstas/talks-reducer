@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 from ..pipeline import ProcessingAborted
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
-    from . import TalksReducerGUI
+    from .app import TalksReducerGUI
 
 
 def normalize_server_url(server_url: str) -> str:
