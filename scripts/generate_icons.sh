@@ -6,7 +6,7 @@
 #   chmod +x generate_icons.sh
 #   ./generate_icons.sh
 # Options:
-#   -s, --src    source PNG (default: talks_reducer/resources/icons/icon.png)
+#   -s, --src    source PNG (default: docs/assets/icon.png)
 #   -d, --dest   destination dir (default: talks_reducer/resources/icons)
 #   -f, --force  overwrite outputs if exist
 #   -h, --help   show help
@@ -28,7 +28,7 @@ usage() {
 }
 
 # Defaults relative to project root (script is executed from project root)
-SRC="talks_reducer/resources/icons/icon.png"
+SRC="docs/assets/icon.png"
 DEST="talks_reducer/resources/icons"
 FORCE=0
 

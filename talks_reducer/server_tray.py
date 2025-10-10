@@ -123,13 +123,9 @@ def _iter_icon_candidates() -> Iterator[Path]:
             if candidate_root not in expanded_roots:
                 expanded_roots.append(candidate_root)
 
-    icon_names = ("icon.ico", "icon.png") if sys.platform == "win32" else ("icon.png", "icon.ico")
+    icon_names = ("app.ico", "app.png") if sys.platform == "win32" else ("app.png", "app.ico")
     relative_paths = (
         Path("talks_reducer") / "resources" / "icons",
-        Path("talks_reducer") / "assets",
-        Path("docs") / "assets",
-        Path("assets"),
-        Path(""),
     )
 
     seen: set[Path] = set()
@@ -148,10 +144,10 @@ def _iter_icon_candidates() -> Iterator[Path]:
 def _load_icon() -> Image.Image:
     """Load the tray icon image, falling back to the embedded pen artwork."""
 
-    LOGGER.debug("Attempting to load tray icon image.")
+    LOGGER.info("Attempting to load tray icon image.")
 
     for candidate in _iter_icon_candidates():
-        LOGGER.debug("Checking icon candidate at %s", candidate)
+        LOGGER.info("Checking icon candidate at %s", candidate)
         if candidate.exists():
             try:
                 with Image.open(candidate) as image:
@@ -159,7 +155,7 @@ def _load_icon() -> Image.Image:
             except Exception as exc:  # pragma: no cover - diagnostic log
                 LOGGER.warning("Failed to load tray icon from %s: %s", candidate, exc)
             else:
-                LOGGER.debug("Loaded tray icon from %s", candidate)
+                LOGGER.info("Loaded tray icon from %s", candidate)
                 return loaded
 
     LOGGER.warning("Falling back to generated tray icon; packaged image not found")
@@ -248,10 +244,10 @@ def _load_embedded_icon() -> Image.Image:
 def _load_icon() -> Image.Image:
     """Load the tray icon image, falling back to the embedded pen artwork."""
 
-    LOGGER.debug("Attempting to load tray icon image.")
+    LOGGER.info("Attempting to load tray icon image.")
 
     for candidate in _iter_icon_candidates():
-        LOGGER.debug("Checking icon candidate at %s", candidate)
+        LOGGER.info("Checking icon candidate at %s", candidate)
         if candidate.exists():
             try:
                 with Image.open(candidate) as image:
@@ -259,13 +255,13 @@ def _load_icon() -> Image.Image:
             except Exception as exc:  # pragma: no cover - diagnostic log
                 LOGGER.warning("Failed to load tray icon from %s: %s", candidate, exc)
             else:
-                LOGGER.debug("Loaded tray icon from %s", candidate)
+                LOGGER.info("Loaded tray icon from %s", candidate)
                 return loaded
 
     with suppress(FileNotFoundError):
-        resource_icon = resources.files("talks_reducer") / "assets" / "icon.png"
+        resource_icon = resources.files("talks_reducer") / "assets" / "app.png"
         if resource_icon.is_file():
-            LOGGER.debug("Loading tray icon from package resources")
+            LOGGER.info("Loading tray icon from package resources")
             with resource_icon.open("rb") as handle:
                 try:
                     with Image.open(handle) as image:
@@ -363,7 +359,7 @@ class _ServerTrayApplication:
         url = self._resolve_url()
         if url:
             webbrowser.open(url)
-            LOGGER.debug("Opened browser to %s", url)
+            LOGGER.info("Opened browser to %s", url)
         else:
             LOGGER.warning("Server URL not yet available; please try again.")
 
@@ -384,7 +380,7 @@ class _ServerTrayApplication:
         try:
             process.wait()
         except Exception as exc:  # pragma: no cover - best-effort cleanup
-            LOGGER.debug("GUI process monitor exited with %s", exc)
+            LOGGER.info("GUI process monitor exited with %s", exc)
         finally:
             with self._gui_lock:
                 if self._gui_process is process:
@@ -567,7 +563,7 @@ class _ServerTrayApplication:
                     process.kill()
                     process.wait(timeout=5)
                 except Exception as exc:  # pragma: no cover - defensive cleanup
-                    LOGGER.debug("Error while terminating GUI process: %s", exc)
+                    LOGGER.info("Error while terminating GUI process: %s", exc)
 
             self._gui_process = None
 

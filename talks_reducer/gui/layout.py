@@ -454,19 +454,20 @@ def reset_basic_defaults(gui: "TalksReducerGUI") -> None:
 def apply_window_icon(gui: "TalksReducerGUI") -> None:
     """Configure the application icon when the asset is available."""
 
-    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent.parent))
 
     icon_candidates: list[tuple[Path, str]] = []
     if sys.platform.startswith("win"):
+        print("Checking icon candidate at %s (TODO: remove)" % (base_path / "talks_reducer" / "resources" / "icons" / "app.ico"))
         icon_candidates.append(
             (
-                base_path / "talks_reducer" / "resources" / "icons" / "icon.ico",
+                base_path / "talks_reducer" / "resources" / "icons" / "app.ico",
                 "ico",
             )
         )
     icon_candidates.append(
         (
-            base_path / "talks_reducer" / "resources" / "icons" / "icon.png",
+            base_path / "talks_reducer" / "resources" / "icons" / "app.png",
             "png",
         )
     )
