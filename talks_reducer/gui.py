@@ -35,6 +35,16 @@ try:
     from .cli import main as cli_main
     from .discovery import discover_servers
     from .ffmpeg import FFmpegNotFoundError
+    from .gui_preferences import GUIPreferences, determine_config_path
+    from .gui_theme import (
+        DARK_THEME,
+        LIGHT_THEME,
+        STATUS_COLORS,
+        apply_theme,
+        detect_system_theme,
+        read_windows_theme_registry,
+        run_defaults_command,
+    )
     from .models import ProcessingOptions, default_temp_folder
     from .pipeline import ProcessingAborted, speed_up_video
     from .progress import ProgressHandle, SignalProgressReporter
@@ -51,6 +61,16 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.cli import main as cli_main
     from talks_reducer.discovery import discover_servers
     from talks_reducer.ffmpeg import FFmpegNotFoundError
+    from talks_reducer.gui_preferences import GUIPreferences, determine_config_path
+    from talks_reducer.gui_theme import (
+        DARK_THEME,
+        LIGHT_THEME,
+        STATUS_COLORS,
+        apply_theme,
+        detect_system_theme,
+        read_windows_theme_registry,
+        run_defaults_command,
+    )
     from talks_reducer.models import ProcessingOptions, default_temp_folder
     from talks_reducer.pipeline import ProcessingAborted, speed_up_video
     from talks_reducer.progress import ProgressHandle, SignalProgressReporter
@@ -132,40 +152,6 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - runtime dependency
     DND_FILES = None  # type: ignore[assignment]
     TkinterDnD = None  # type: ignore[assignment]
-
-
-STATUS_COLORS = {
-    "idle": "#9ca3af",
-    "waiting": "#9ca3af",
-    "processing": "#af8e0e",
-    "success": "#178941",
-    "error": "#ad4f4f",
-    "aborted": "#6d727a",
-}
-
-LIGHT_THEME = {
-    "background": "#f5f5f5",
-    "foreground": "#1f2933",
-    "accent": "#2563eb",
-    "surface": "#ffffff",
-    "border": "#cbd5e1",
-    "hover": "#efefef",
-    "hover_text": "#000000",
-    "selection_background": "#2563eb",
-    "selection_foreground": "#ffffff",
-}
-
-DARK_THEME = {
-    "background": "#1e1e28",
-    "foreground": "#f3f4f6",
-    "accent": "#60a5fa",
-    "surface": "#2b2b3c",
-    "border": "#4b5563",
-    "hover": "#333333",
-    "hover_text": "#ffffff",
-    "selection_background": "#333333",
-    "selection_foreground": "#f3f4f6",
-}
 
 
 def _default_remote_destination(input_file: Path, *, small: bool) -> Path:
@@ -291,72 +277,14 @@ class TalksReducerGUI:
     MIN_AUDIO_INTERVAL_MS = 10
     DEFAULT_AUDIO_INTERVAL_MS = 200
 
-    def _determine_config_path(self) -> Path:
-        if sys.platform == "win32":
-            appdata = os.environ.get("APPDATA")
-            base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
-        elif sys.platform == "darwin":
-            base = Path.home() / "Library" / "Application Support"
-        else:
-            xdg_config = os.environ.get("XDG_CONFIG_HOME")
-            base = Path(xdg_config) if xdg_config else Path.home() / ".config"
-        return base / "talks-reducer" / "settings.json"
-
-    def _load_settings(self) -> dict[str, object]:
-        try:
-            with self._config_path.open("r", encoding="utf-8") as handle:
-                data = json.load(handle)
-            if isinstance(data, dict):
-                return data
-        except FileNotFoundError:
-            return {}
-        except (OSError, json.JSONDecodeError):
-            return {}
-        return {}
-
-    def _save_settings(self) -> None:
-        try:
-            self._config_path.parent.mkdir(parents=True, exist_ok=True)
-            with self._config_path.open("w", encoding="utf-8") as handle:
-                json.dump(self._settings, handle, indent=2, sort_keys=True)
-        except OSError:
-            pass
-
-    def _get_setting(self, key: str, default: object) -> object:
-        value = self._settings.get(key, default)
-        if key not in self._settings:
-            self._settings[key] = value
-        return value
-
-    def _get_float_setting(self, key: str, default: float) -> float:
-        """Return *key* as a float, coercing stored strings when necessary."""
-
-        raw_value = self._get_setting(key, default)
-        try:
-            number = float(raw_value)
-        except (TypeError, ValueError):
-            number = float(default)
-
-        if self._settings.get(key) != number:
-            self._settings[key] = number
-            self._save_settings()
-
-        return number
-
-    def _update_setting(self, key: str, value: object) -> None:
-        if self._settings.get(key) == value:
-            return
-        self._settings[key] = value
-        self._save_settings()
-
     def __init__(
         self,
         initial_inputs: Optional[Sequence[str]] = None,
         *,
         auto_run: bool = False,
     ) -> None:
-        self._config_path = self._determine_config_path()
-        self._settings = self._load_settings()
+        self._config_path = determine_config_path()
+        self.preferences = GUIPreferences(self._config_path)
 
         # Import tkinter here to avoid loading it at module import time
         import tkinter as tk
@@ -416,26 +344,26 @@ class TalksReducerGUI:
         self._dnd_available = TkinterDnD is not None and DND_FILES is not None
 
         self.simple_mode_var = tk.BooleanVar(
-            value=self._get_setting("simple_mode", True)
+            value=self.preferences.get("simple_mode", True)
         )
         self.run_after_drop_var = tk.BooleanVar(value=True)
-        self.small_var = tk.BooleanVar(value=self._get_setting("small_video", True))
+        self.small_var = tk.BooleanVar(value=self.preferences.get("small_video", True))
         self.open_after_convert_var = tk.BooleanVar(
-            value=self._get_setting("open_after_convert", True)
+            value=self.preferences.get("open_after_convert", True)
         )
-        stored_mode = str(self._get_setting("processing_mode", "local"))
+        stored_mode = str(self.preferences.get("processing_mode", "local"))
         if stored_mode not in {"local", "remote"}:
             stored_mode = "local"
         self.processing_mode_var = tk.StringVar(value=stored_mode)
         self.processing_mode_var.trace_add("write", self._on_processing_mode_change)
-        self.theme_var = tk.StringVar(value=self._get_setting("theme", "os"))
+        self.theme_var = tk.StringVar(value=self.preferences.get("theme", "os"))
         self.theme_var.trace_add("write", self._on_theme_change)
         self.small_var.trace_add("write", self._on_small_video_change)
         self.open_after_convert_var.trace_add(
             "write", self._on_open_after_convert_change
         )
         self.server_url_var = tk.StringVar(
-            value=str(self._get_setting("server_url", ""))
+            value=str(self.preferences.get("server_url", ""))
         )
         self.server_url_var.trace_add("write", self._on_server_url_change)
         self._discovery_thread: Optional[threading.Thread] = None
@@ -448,8 +376,8 @@ class TalksReducerGUI:
         self._build_layout()
         self._apply_simple_mode(initial=True)
         self._apply_status_style(self._status_state)
-        self._apply_theme()
-        self._save_settings()
+        self._refresh_theme()
+        self.preferences.save()
         self._hide_stop_button()
 
         # Ping server on startup if in remote mode
@@ -609,7 +537,7 @@ class TalksReducerGUI:
         self._reset_button_visible = False
 
         self.silent_speed_var = self.tk.DoubleVar(
-            value=min(max(self._get_float_setting("silent_speed", 4.0), 1.0), 10.0)
+            value=min(max(self.preferences.get_float("silent_speed", 4.0), 1.0), 10.0)
         )
         self._add_slider(
             self.basic_options_frame,
@@ -625,7 +553,7 @@ class TalksReducerGUI:
         )
 
         self.sounded_speed_var = self.tk.DoubleVar(
-            value=min(max(self._get_float_setting("sounded_speed", 1.0), 0.75), 2.0)
+            value=min(max(self.preferences.get_float("sounded_speed", 1.0), 0.75), 2.0)
         )
         self._add_slider(
             self.basic_options_frame,
@@ -641,7 +569,9 @@ class TalksReducerGUI:
         )
 
         self.silent_threshold_var = self.tk.DoubleVar(
-            value=min(max(self._get_float_setting("silent_threshold", 0.05), 0.0), 1.0)
+            value=min(
+                max(self.preferences.get_float("silent_threshold", 0.05), 0.0), 1.0
+            )
         )
         self._add_slider(
             self.basic_options_frame,
@@ -660,11 +590,11 @@ class TalksReducerGUI:
             row=3, column=0, sticky="w", pady=4
         )
         stored_server_url = str(
-            self._get_setting("server_url", "http://localhost:9005")
+            self.preferences.get("server_url", "http://localhost:9005")
         )
         if not stored_server_url:
             stored_server_url = "http://localhost:9005"
-            self._update_setting("server_url", stored_server_url)
+            self.preferences.update("server_url", stored_server_url)
         self.server_url_var.set(stored_server_url)
         self.server_url_entry = self.ttk.Entry(
             self.basic_options_frame, textvariable=self.server_url_var, width=30
@@ -705,7 +635,7 @@ class TalksReducerGUI:
                 text=label,
                 value=value,
                 variable=self.theme_var,
-                command=self._apply_theme,
+                command=self._refresh_theme,
             ).pack(side=self.tk.LEFT, padx=(0, 8))
 
         self.advanced_button = self.ttk.Button(
@@ -734,12 +664,12 @@ class TalksReducerGUI:
         self.sample_rate_var = self.tk.StringVar(value="48000")
         self._add_entry(self.advanced_frame, "Sample rate", self.sample_rate_var, row=2)
 
-        frame_margin_setting = self._get_setting("frame_margin", 2)
+        frame_margin_setting = self.preferences.get("frame_margin", 2)
         try:
             frame_margin_default = int(frame_margin_setting)
         except (TypeError, ValueError):
             frame_margin_default = 2
-            self._update_setting("frame_margin", frame_margin_default)
+            self.preferences.update("frame_margin", frame_margin_default)
 
         self.frame_margin_var = self.tk.StringVar(value=str(frame_margin_default))
         self._add_entry(
@@ -868,7 +798,7 @@ class TalksReducerGUI:
             if abs(variable.get() - quantized) > 1e-9:
                 variable.set(quantized)
             value_label.configure(text=display_format.format(quantized))
-            self._update_setting(setting_key, float(f"{quantized:.6f}"))
+            self.preferences.update(setting_key, float(f"{quantized:.6f}"))
             self._update_basic_reset_state()
 
         slider = self.tk.Scale(
@@ -945,7 +875,7 @@ class TalksReducerGUI:
             if updater is not None:
                 updater(str(default_value))
             else:
-                self._update_setting(key, float(f"{default_value:.6f}"))
+                self.preferences.update(key, float(f"{default_value:.6f}"))
 
         self._update_basic_reset_state()
 
@@ -1203,7 +1133,7 @@ class TalksReducerGUI:
         dialog.protocol("WM_DELETE_WINDOW", cancel)
 
     def _toggle_simple_mode(self) -> None:
-        self._update_setting("simple_mode", self.simple_mode_var.get())
+        self.preferences.update("simple_mode", self.simple_mode_var.get())
         self._apply_simple_mode()
 
     def _apply_simple_mode(self, *, initial: bool = False) -> None:
@@ -1251,14 +1181,14 @@ class TalksReducerGUI:
             self.advanced_button.configure(text="Advanced")
 
     def _on_theme_change(self, *_: object) -> None:
-        self._update_setting("theme", self.theme_var.get())
-        self._apply_theme()
+        self.preferences.update("theme", self.theme_var.get())
+        self._refresh_theme()
 
     def _on_small_video_change(self, *_: object) -> None:
-        self._update_setting("small_video", bool(self.small_var.get()))
+        self.preferences.update("small_video", bool(self.small_var.get()))
 
     def _on_open_after_convert_change(self, *_: object) -> None:
-        self._update_setting(
+        self.preferences.update(
             "open_after_convert", bool(self.open_after_convert_var.get())
         )
 
@@ -1267,7 +1197,7 @@ class TalksReducerGUI:
         if value not in {"local", "remote"}:
             self.processing_mode_var.set("local")
             return
-        self._update_setting("processing_mode", value)
+        self.preferences.update("processing_mode", value)
         self._update_processing_mode_state()
 
         if self.processing_mode_var.get() == "remote":
@@ -1291,206 +1221,37 @@ class TalksReducerGUI:
 
     def _on_server_url_change(self, *_: object) -> None:
         value = self.server_url_var.get().strip()
-        self._update_setting("server_url", value)
+        self.preferences.update("server_url", value)
         self._update_processing_mode_state()
 
-    def _apply_theme(self) -> None:
+    def _resolve_theme_mode(self) -> str:
         preference = self.theme_var.get().lower()
         if preference not in {"light", "dark"}:
-            mode = self._detect_system_theme()
-        else:
-            mode = preference
-
-        palette = LIGHT_THEME if mode == "light" else DARK_THEME
-
-        self.root.configure(bg=palette["background"])
-        self.style.theme_use("clam")
-        self.style.configure(
-            ".", background=palette["background"], foreground=palette["foreground"]
-        )
-        self.style.configure("TFrame", background=palette["background"])
-        self.style.configure(
-            "TLabelframe",
-            background=palette["background"],
-            foreground=palette["foreground"],
-            borderwidth=0,
-            relief="flat",
-        )
-        self.style.configure(
-            "TLabelframe.Label",
-            background=palette["background"],
-            foreground=palette["foreground"],
-        )
-        self.style.configure(
-            "TLabel", background=palette["background"], foreground=palette["foreground"]
-        )
-        self.style.configure(
-            "TCheckbutton",
-            background=palette["background"],
-            foreground=palette["foreground"],
-        )
-        self.style.map(
-            "TCheckbutton",
-            background=[("active", palette.get("hover", palette["background"]))],
-        )
-        self.style.configure(
-            "TRadiobutton",
-            background=palette["background"],
-            foreground=palette["foreground"],
-        )
-        self.style.map(
-            "TRadiobutton",
-            background=[("active", palette.get("hover", palette["background"]))],
-        )
-        self.style.configure(
-            "Link.TButton",
-            background=palette["background"],
-            foreground=palette["accent"],
-            borderwidth=0,
-            relief="flat",
-            highlightthickness=0,
-            padding=2,
-            font=("TkDefaultFont", 8, "underline"),
-        )
-        self.style.map(
-            "Link.TButton",
-            background=[
-                ("active", palette.get("hover", palette["background"])),
-                ("disabled", palette["background"]),
-            ],
-            foreground=[
-                ("active", palette.get("accent", palette["foreground"])),
-                ("disabled", palette["foreground"]),
-            ],
-        )
-        self.style.configure(
-            "TButton",
-            background=palette["surface"],
-            foreground=palette["foreground"],
-            padding=4,
-            font=("TkDefaultFont", 8),
-        )
-        self.style.map(
-            "TButton",
-            background=[
-                ("active", palette.get("hover", palette["accent"])),
-                ("disabled", palette["surface"]),
-            ],
-            foreground=[
-                ("active", palette.get("hover_text", "#000000")),
-                ("disabled", palette["foreground"]),
-            ],
-        )
-        self.style.configure(
-            "TEntry",
-            fieldbackground=palette["surface"],
-            foreground=palette["foreground"],
-        )
-        self.style.configure(
-            "TCombobox",
-            fieldbackground=palette["surface"],
-            foreground=palette["foreground"],
-        )
-
-        # Configure progress bar styles for different states
-        self.style.configure(
-            "Idle.Horizontal.TProgressbar",
-            background=STATUS_COLORS["idle"],
-            troughcolor=palette["surface"],
-            borderwidth=0,
-            thickness=20,
-        )
-        self.style.configure(
-            "Processing.Horizontal.TProgressbar",
-            background=STATUS_COLORS["processing"],
-            troughcolor=palette["surface"],
-            borderwidth=0,
-            thickness=20,
-        )
-        self.style.configure(
-            "Success.Horizontal.TProgressbar",
-            background=STATUS_COLORS["success"],
-            troughcolor=palette["surface"],
-            borderwidth=0,
-            thickness=20,
-        )
-        self.style.configure(
-            "Error.Horizontal.TProgressbar",
-            background=STATUS_COLORS["error"],
-            troughcolor=palette["surface"],
-            borderwidth=0,
-            thickness=20,
-        )
-        self.style.configure(
-            "Aborted.Horizontal.TProgressbar",
-            background=STATUS_COLORS["aborted"],
-            troughcolor=palette["surface"],
-            borderwidth=0,
-            thickness=20,
-        )
-
-        self.drop_zone.configure(
-            bg=palette["surface"],
-            fg=palette["foreground"],
-            highlightthickness=0,
-        )
-
-        slider_relief = self.tk.FLAT  # if mode == "dark" else self.tk.RAISED
-        active_background = (
-            palette.get("accent", palette["surface"])
-            if mode == "dark"
-            else palette.get("hover", palette["surface"])
-        )
-        for slider in getattr(self, "_sliders", []):
-            slider.configure(
-                background=palette["border"],  # slider inactive
-                troughcolor=palette["surface"],  # slider background
-                activebackground=palette["border"],  # slider active
-                sliderrelief=slider_relief,
-                bd=0,
+            return detect_system_theme(
+                os.environ,
+                sys.platform,
+                read_windows_theme_registry,
+                run_defaults_command,
             )
-        self.log_text.configure(
-            bg=palette["surface"],
-            fg=palette["foreground"],
-            insertbackground=palette["foreground"],
-            highlightbackground=palette["border"],
-            highlightcolor=palette["border"],
+        return preference
+
+    def _refresh_theme(self) -> None:
+        mode = self._resolve_theme_mode()
+        palette = LIGHT_THEME if mode == "light" else DARK_THEME
+        apply_theme(
+            self.style,
+            palette,
+            {
+                "root": self.root,
+                "drop_zone": getattr(self, "drop_zone", None),
+                "log_text": getattr(self, "log_text", None),
+                "status_label": getattr(self, "status_label", None),
+                "sliders": getattr(self, "_sliders", []),
+                "tk": self.tk,
+                "apply_status_style": self._apply_status_style,
+                "status_state": self._status_state,
+            },
         )
-        self.status_label.configure(bg=palette["background"])
-
-        self._apply_status_style(self._status_state)
-
-    def _detect_system_theme(self) -> str:
-        if sys.platform.startswith("win"):
-            try:
-                import winreg  # type: ignore
-
-                with winreg.OpenKey(
-                    winreg.HKEY_CURRENT_USER,
-                    r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
-                ) as key:
-                    value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-                return "light" if int(value) else "dark"
-            except OSError:
-                return "light"
-        if sys.platform == "darwin":
-            try:
-                result = subprocess.run(
-                    ["defaults", "read", "-g", "AppleInterfaceStyle"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                if result.returncode == 0 and result.stdout.strip().lower() == "dark":
-                    return "dark"
-            except Exception:
-                pass
-            return "light"
-
-        theme = os.environ.get("GTK_THEME", "").lower()
-        if "dark" in theme:
-            return "dark"
-        return "light"
 
     def _configure_drop_targets(self, widget) -> None:  # type: tk.Widget
         if not self._dnd_available:
@@ -2349,7 +2110,7 @@ class TalksReducerGUI:
             # Update color based on percentage gradient
             color = self._calculate_gradient_color(percentage, 0.5)
             palette = (
-                LIGHT_THEME if self._detect_system_theme() == "light" else DARK_THEME
+                LIGHT_THEME if self._resolve_theme_mode() == "light" else DARK_THEME
             )
             if self.theme_var.get().lower() in {"light", "dark"}:
                 palette = (
