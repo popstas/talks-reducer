@@ -10,10 +10,9 @@ import sys
 import time
 from importlib import import_module
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import audio
-
 from .ffmpeg import FFmpegNotFoundError
 from .models import ProcessingOptions, default_temp_folder
 from .pipeline import speed_up_video
@@ -141,116 +140,215 @@ def _print_total_time(start_time: float) -> None:
     print(f"\nTime: {int(hours)}h {int(minutes)}m {seconds:.2f}s")
 
 
-def _process_via_server(
-    files: Sequence[str], parsed_args: argparse.Namespace, *, start_time: float
-) -> Tuple[bool, Optional[str]]:
-    """Upload *files* to the configured server and download the results.
+class CliApplication:
+    """Coordinator for CLI processing with dependency injection support."""
 
-    Returns a tuple of (success, error_message). When *success* is ``False``,
-    ``error_message`` contains the reason and the caller should fall back to the
-    local processing pipeline.
-    """
+    def __init__(
+        self,
+        *,
+        gather_files: Callable[[List[str]], List[str]],
+        send_video: Optional[Callable[..., Tuple[Path, str, str]]],
+        speed_up: Callable[[ProcessingOptions, object], object],
+        reporter_factory: Callable[[], object],
+        remote_error_message: Optional[str] = None,
+    ) -> None:
+        self._gather_files = gather_files
+        self._send_video = send_video
+        self._speed_up = speed_up
+        self._reporter_factory = reporter_factory
+        self._remote_error_message = remote_error_message
 
-    try:
-        from . import service_client
-    except ImportError as exc:  # pragma: no cover - optional dependency guard
-        return False, ("Server mode requires the gradio_client dependency. " f"({exc})")
+    def run(self, parsed_args: argparse.Namespace) -> Tuple[int, List[str]]:
+        """Execute the CLI pipeline for *parsed_args*."""
 
-    server_url = parsed_args.server_url
-    if not server_url:
-        return False, "Server URL was not provided."
+        start_time = time.time()
+        files = self._gather_files(parsed_args.input_file)
 
-    output_override: Optional[Path] = None
-    if parsed_args.output_file and len(files) == 1:
-        output_override = Path(parsed_args.output_file).expanduser()
-    elif parsed_args.output_file and len(files) > 1:
-        print(
-            "Warning: --output is ignored when processing multiple files via the server.",
-            file=sys.stderr,
-        )
+        args: Dict[str, object] = {
+            key: value for key, value in vars(parsed_args).items() if value is not None
+        }
+        del args["input_file"]
 
-    remote_option_values: Dict[str, float] = {}
-    if parsed_args.silent_threshold is not None:
-        remote_option_values["silent_threshold"] = float(parsed_args.silent_threshold)
-    if parsed_args.silent_speed is not None:
-        remote_option_values["silent_speed"] = float(parsed_args.silent_speed)
-    if parsed_args.sounded_speed is not None:
-        remote_option_values["sounded_speed"] = float(parsed_args.sounded_speed)
+        if "host" in args:
+            del args["host"]
 
-    unsupported_options = []
-    for name in (
-        "frame_spreadage",
-        "sample_rate",
-        "temp_folder",
-    ):
-        if getattr(parsed_args, name) is not None:
-            unsupported_options.append(f"--{name.replace('_', '-')}")
+        if len(files) > 1 and "output_file" in args:
+            del args["output_file"]
 
-    if unsupported_options:
-        print(
-            "Warning: the following options are ignored when using --url: "
-            + ", ".join(sorted(unsupported_options)),
-            file=sys.stderr,
-        )
+        error_messages: List[str] = []
+        reporter_logs: List[str] = []
 
-    for index, file in enumerate(files, start=1):
-        basename = os.path.basename(file)
-        print(
-            f"Processing file {index}/{len(files)} '{basename}' via server {server_url}"
-        )
-        printed_log_header = False
-        progress_state: dict[str, tuple[Optional[int], Optional[int], str]] = {}
-        stream_updates = bool(getattr(parsed_args, "server_stream", False))
-
-        def _stream_server_log(line: str) -> None:
-            nonlocal printed_log_header
-            if not printed_log_header:
-                print("\nServer log:", flush=True)
-                printed_log_header = True
-            print(line, flush=True)
-
-        def _stream_progress(
-            desc: str, current: Optional[int], total: Optional[int], unit: str
-        ) -> None:
-            key = desc or "Processing"
-            state = (current, total, unit)
-            if progress_state.get(key) == state:
-                return
-            progress_state[key] = state
-
-            parts: list[str] = []
-            if current is not None and total and total > 0:
-                percent = (current / total) * 100
-                parts.append(f"{current}/{total}")
-                parts.append(f"{percent:.1f}%")
-            elif current is not None:
-                parts.append(str(current))
-            if unit:
-                parts.append(unit)
-            message = " ".join(parts).strip()
-            print(f"{key}: {message or 'update'}", flush=True)
-
-        try:
-            destination, summary, log_text = service_client.send_video(
-                input_path=Path(file),
-                output_path=output_override,
-                server_url=server_url,
-                small=bool(parsed_args.small),
-                **remote_option_values,
-                log_callback=_stream_server_log,
-                stream_updates=stream_updates,
-                progress_callback=_stream_progress if stream_updates else None,
+        if getattr(parsed_args, "server_url", None):
+            remote_success, remote_errors, fallback_logs = self._process_via_server(
+                files, parsed_args, start_time
             )
-        except Exception as exc:  # pragma: no cover - network failure safeguard
-            return False, f"Failed to process {basename} via server: {exc}"
+            error_messages.extend(remote_errors)
+            reporter_logs.extend(fallback_logs)
+            if remote_success:
+                return 0, error_messages
 
-        print(summary)
-        print(f"Saved processed video to {destination}")
-        if log_text.strip() and not printed_log_header:
-            print("\nServer log:\n" + log_text)
+        reporter = self._reporter_factory()
+        for message in reporter_logs:
+            reporter.log(message)
 
-    _print_total_time(start_time)
-    return True, None
+        for index, file in enumerate(files):
+            print(
+                f"Processing file {index + 1}/{len(files)} '{os.path.basename(file)}'"
+            )
+            local_options = dict(args)
+
+            option_kwargs: Dict[str, object] = {"input_file": Path(file)}
+
+            if "output_file" in local_options:
+                option_kwargs["output_file"] = Path(local_options["output_file"])
+            if "temp_folder" in local_options:
+                option_kwargs["temp_folder"] = Path(local_options["temp_folder"])
+            if "silent_threshold" in local_options:
+                option_kwargs["silent_threshold"] = float(
+                    local_options["silent_threshold"]
+                )
+            if "silent_speed" in local_options:
+                option_kwargs["silent_speed"] = float(local_options["silent_speed"])
+            if "sounded_speed" in local_options:
+                option_kwargs["sounded_speed"] = float(local_options["sounded_speed"])
+            if "frame_spreadage" in local_options:
+                option_kwargs["frame_spreadage"] = int(local_options["frame_spreadage"])
+            if "sample_rate" in local_options:
+                option_kwargs["sample_rate"] = int(local_options["sample_rate"])
+            if "small" in local_options:
+                option_kwargs["small"] = bool(local_options["small"])
+            options = ProcessingOptions(**option_kwargs)
+
+            try:
+                result = self._speed_up(options, reporter=reporter)
+            except FFmpegNotFoundError as exc:
+                message = str(exc)
+                return 1, [*error_messages, message]
+
+            reporter.log(f"Completed: {result.output_file}")
+            summary_parts: List[str] = []
+            time_ratio = getattr(result, "time_ratio", None)
+            size_ratio = getattr(result, "size_ratio", None)
+            if time_ratio is not None:
+                summary_parts.append(f"{time_ratio * 100:.0f}% time")
+            if size_ratio is not None:
+                summary_parts.append(f"{size_ratio * 100:.0f}% size")
+            if summary_parts:
+                reporter.log("Result: " + ", ".join(summary_parts))
+
+        _print_total_time(start_time)
+        return 0, error_messages
+
+    def _process_via_server(
+        self,
+        files: Sequence[str],
+        parsed_args: argparse.Namespace,
+        start_time: float,
+    ) -> Tuple[bool, List[str], List[str]]:
+        """Upload *files* to the configured server and download the results."""
+
+        if not self._send_video:
+            message = self._remote_error_message or "Server processing is unavailable."
+            fallback_notice = "Falling back to local processing pipeline."
+            return False, [message, fallback_notice], [message, fallback_notice]
+
+        server_url = parsed_args.server_url
+        if not server_url:
+            message = "Server URL was not provided."
+            fallback_notice = "Falling back to local processing pipeline."
+            return False, [message, fallback_notice], [message, fallback_notice]
+
+        output_override: Optional[Path] = None
+        if parsed_args.output_file and len(files) == 1:
+            output_override = Path(parsed_args.output_file).expanduser()
+        elif parsed_args.output_file and len(files) > 1:
+            print(
+                "Warning: --output is ignored when processing multiple files via the server.",
+                file=sys.stderr,
+            )
+
+        remote_option_values: Dict[str, float] = {}
+        if parsed_args.silent_threshold is not None:
+            remote_option_values["silent_threshold"] = float(
+                parsed_args.silent_threshold
+            )
+        if parsed_args.silent_speed is not None:
+            remote_option_values["silent_speed"] = float(parsed_args.silent_speed)
+        if parsed_args.sounded_speed is not None:
+            remote_option_values["sounded_speed"] = float(parsed_args.sounded_speed)
+
+        unsupported_options: List[str] = []
+        for name in ("frame_spreadage", "sample_rate", "temp_folder"):
+            if getattr(parsed_args, name) is not None:
+                unsupported_options.append(f"--{name.replace('_', '-')}")
+
+        if unsupported_options:
+            print(
+                "Warning: the following options are ignored when using --url: "
+                + ", ".join(sorted(unsupported_options)),
+                file=sys.stderr,
+            )
+
+        for index, file in enumerate(files, start=1):
+            basename = os.path.basename(file)
+            print(
+                f"Processing file {index}/{len(files)} '{basename}' via server {server_url}"
+            )
+            printed_log_header = False
+            progress_state: dict[str, tuple[Optional[int], Optional[int], str]] = {}
+            stream_updates = bool(getattr(parsed_args, "server_stream", False))
+
+            def _stream_server_log(line: str) -> None:
+                nonlocal printed_log_header
+                if not printed_log_header:
+                    print("\nServer log:", flush=True)
+                    printed_log_header = True
+                print(line, flush=True)
+
+            def _stream_progress(
+                desc: str, current: Optional[int], total: Optional[int], unit: str
+            ) -> None:
+                key = desc or "Processing"
+                state = (current, total, unit)
+                if progress_state.get(key) == state:
+                    return
+                progress_state[key] = state
+
+                parts: List[str] = []
+                if current is not None and total and total > 0:
+                    percent = (current / total) * 100
+                    parts.append(f"{current}/{total}")
+                    parts.append(f"{percent:.1f}%")
+                elif current is not None:
+                    parts.append(str(current))
+                if unit:
+                    parts.append(unit)
+                message = " ".join(parts).strip()
+                print(f"{key}: {message or 'update'}", flush=True)
+
+            try:
+                destination, summary, log_text = self._send_video(
+                    input_path=Path(file),
+                    output_path=output_override,
+                    server_url=server_url,
+                    small=bool(parsed_args.small),
+                    **remote_option_values,
+                    log_callback=_stream_server_log,
+                    stream_updates=stream_updates,
+                    progress_callback=_stream_progress if stream_updates else None,
+                )
+            except Exception as exc:  # pragma: no cover - network failure safeguard
+                message = f"Failed to process {basename} via server: {exc}"
+                fallback_notice = "Falling back to local processing pipeline."
+                return False, [message, fallback_notice], [message, fallback_notice]
+
+            print(summary)
+            print(f"Saved processed video to {destination}")
+            if log_text.strip() and not printed_log_header:
+                print("\nServer log:\n" + log_text)
+
+        _print_total_time(start_time)
+        return True, [], []
 
 
 def _launch_gui(argv: Sequence[str]) -> bool:
@@ -421,84 +519,30 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if host_value:
         parsed_args.server_url = f"http://{host_value}:9005"
 
-    start_time = time.time()
-
-    files = gather_input_files(parsed_args.input_file)
-
-    args: Dict[str, object] = {
-        k: v for k, v in vars(parsed_args).items() if v is not None
-    }
-    del args["input_file"]
-
-    if "host" in args:
-        del args["host"]
-
-    if len(files) > 1 and "output_file" in args:
-        del args["output_file"]
-
-    fallback_messages: List[str] = []
-    if parsed_args.server_url:
-        server_success, error_message = _process_via_server(
-            files, parsed_args, start_time=start_time
+    send_video = None
+    remote_error_message: Optional[str] = None
+    try:  # pragma: no cover - optional dependency guard
+        from . import service_client
+    except ImportError as exc:
+        remote_error_message = (
+            "Server mode requires the gradio_client dependency. " f"({exc})"
         )
-        if server_success:
-            return
+    else:
+        send_video = service_client.send_video
 
-        fallback_reason = error_message or "Server processing is unavailable."
-        print(fallback_reason, file=sys.stderr)
-        fallback_messages.append(fallback_reason)
+    application = CliApplication(
+        gather_files=gather_input_files,
+        send_video=send_video,
+        speed_up=speed_up_video,
+        reporter_factory=TqdmProgressReporter,
+        remote_error_message=remote_error_message,
+    )
 
-        fallback_notice = "Falling back to local processing pipeline."
-        print(fallback_notice, file=sys.stderr)
-        fallback_messages.append(fallback_notice)
-
-    reporter = TqdmProgressReporter()
-
-    for message in fallback_messages:
-        reporter.log(message)
-
-    for index, file in enumerate(files):
-        print(f"Processing file {index + 1}/{len(files)} '{os.path.basename(file)}'")
-        local_options = dict(args)
-
-        option_kwargs: Dict[str, object] = {"input_file": Path(file)}
-
-        if "output_file" in local_options:
-            option_kwargs["output_file"] = Path(local_options["output_file"])
-        if "temp_folder" in local_options:
-            option_kwargs["temp_folder"] = Path(local_options["temp_folder"])
-        if "silent_threshold" in local_options:
-            option_kwargs["silent_threshold"] = float(local_options["silent_threshold"])
-        if "silent_speed" in local_options:
-            option_kwargs["silent_speed"] = float(local_options["silent_speed"])
-        if "sounded_speed" in local_options:
-            option_kwargs["sounded_speed"] = float(local_options["sounded_speed"])
-        if "frame_spreadage" in local_options:
-            option_kwargs["frame_spreadage"] = int(local_options["frame_spreadage"])
-        if "sample_rate" in local_options:
-            option_kwargs["sample_rate"] = int(local_options["sample_rate"])
-        if "small" in local_options:
-            option_kwargs["small"] = bool(local_options["small"])
-        options = ProcessingOptions(**option_kwargs)
-
-        try:
-            result = speed_up_video(options, reporter=reporter)
-        except FFmpegNotFoundError as exc:
-            print(str(exc), file=sys.stderr)
-            sys.exit(1)
-
-        reporter.log(f"Completed: {result.output_file}")
-        summary_parts = []
-        time_ratio = getattr(result, "time_ratio", None)
-        size_ratio = getattr(result, "size_ratio", None)
-        if time_ratio is not None:
-            summary_parts.append(f"{time_ratio * 100:.0f}% time")
-        if size_ratio is not None:
-            summary_parts.append(f"{size_ratio * 100:.0f}% size")
-        if summary_parts:
-            reporter.log("Result: " + ", ".join(summary_parts))
-
-    _print_total_time(start_time)
+    exit_code, error_messages = application.run(parsed_args)
+    for message in error_messages:
+        print(message, file=sys.stderr)
+    if exit_code:
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":
