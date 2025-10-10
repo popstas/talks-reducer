@@ -131,67 +131,36 @@ fi
 # Build the GUI executable
 echo "⚙️  Running PyInstaller..."
 
-# Select icon assets per platform
-ICON_PATH="talks_reducer/resources/icons/app.ico"
-if [[ "$OS_NAME" == "macos" ]]; then
-    ICON_PATH="talks_reducer/resources/icons/app.icns"
+# The heavy dependency excludes now live in talks-reducer.spec so PyInstaller
+# avoids scanning ML stacks and setuptools vendored modules unless explicitly
+# requested via PYINSTALLER_EXTRA_EXCLUDES.
+if [[ -n "${PYINSTALLER_EXTRA_EXCLUDES:-}" ]]; then
+    echo "➖ Additional excludes from PYINSTALLER_EXTRA_EXCLUDES: $PYINSTALLER_EXTRA_EXCLUDES"
 fi
 
-# Exclude unnecessary heavy dependencies (but keep numpy/scipy as they're required)
-EXCLUDES="--exclude-module PySide6 \
---exclude-module PyQt5 \
---exclude-module PyQt6 \
---exclude-module pandas \
---exclude-module matplotlib \
---exclude-module numba \
---exclude-module cupy"
+PYINSTALLER_ARGS=(talks-reducer.spec --noconfirm --workpath build --distpath dist)
 
-# First, generate the spec file
-if [[ "$OS_NAME" == "windows" ]]; then
-    pyinstaller launcher.py --name talks-reducer --windowed \
-        --hidden-import=tkinterdnd2 \
-        --collect-submodules talks_reducer \
-        --collect-data gradio_client \
-        --icon "$ICON_PATH" \
-        --version-file=version.txt \
-        --add-data="talks_reducer/resources/icons/app-256.png;talks_reducer/resources/icons" \
-        --add-data="talks_reducer/resources/icons/app.ico;talks_reducer/resources/icons" \
-        $EXCLUDES \
-        --noconfirm \
-        --workpath build \
-        --distpath dist
-else
-    PYINSTALLER_ARGS=(launcher.py --name talks-reducer --windowed \
-        --hidden-import=tkinterdnd2 \
-        --collect-submodules talks_reducer \
-        --collect-data gradio_client \
-        --icon "$ICON_PATH" \
-        --add-data="talks_reducer/resources/icons/app-256.png:talks_reducer/resources/icons" \
-        --add-data="talks_reducer/resources/icons/app.ico:talks_reducer/resources/icons" \
-        $EXCLUDES \
-        --noconfirm)
+if [[ "$OS_NAME" == "macos" ]]; then
+    mkdir -p "dist/talks-reducer.app"
+    # Produce the most compatible binary we can. Prefer universal builds
+    # when the Python runtime and dependencies contain both arm64 and
+    # x86_64 slices, otherwise fall back to the active architecture to
+    # avoid PyInstaller attempting to thin non-fat binaries.
+    if command -v pyinstaller &> /dev/null && pyinstaller --help 2>/dev/null | grep -q -- "--target-arch"; then
+        TARGET_ARCH=""
+        HOST_ARCH=$(uname -m)
+        HOST_TARGET=""
+        case "$HOST_ARCH" in
+            arm64|aarch64)
+                HOST_TARGET="arm64"
+                ;;
+            x86_64|amd64)
+                HOST_TARGET="x86_64"
+                ;;
+        esac
 
-    if [[ "$OS_NAME" == "macos" ]]; then
-        mkdir -p "dist/talks-reducer.app"
-        # Produce the most compatible binary we can. Prefer universal builds
-        # when the Python runtime and dependencies contain both arm64 and
-        # x86_64 slices, otherwise fall back to the active architecture to
-        # avoid PyInstaller attempting to thin non-fat binaries.
-        if command -v pyinstaller &> /dev/null && pyinstaller --help 2>/dev/null | grep -q -- "--target-arch"; then
-            TARGET_ARCH=""
-            HOST_ARCH=$(uname -m)
-            HOST_TARGET=""
-            case "$HOST_ARCH" in
-                arm64|aarch64)
-                    HOST_TARGET="arm64"
-                    ;;
-                x86_64|amd64)
-                    HOST_TARGET="x86_64"
-                    ;;
-            esac
-
-            if command -v python3 &> /dev/null; then
-                PYTHON_SHARED_LIB=$(cat <<'PY' | python3 -
+        if command -v python3 &> /dev/null; then
+            PYTHON_SHARED_LIB=$(cat <<'PY' | python3 -
 import sysconfig
 libname = sysconfig.get_config_var('LDLIBRARY') or ''
 libdir = sysconfig.get_config_var('LIBDIR') or ''
@@ -202,35 +171,34 @@ if libname and libdir:
         print(path)
 PY
 )
-            fi
+        fi
 
-            if [[ -n "$PYTHON_SHARED_LIB" && -f "$PYTHON_SHARED_LIB" ]] && command -v lipo &> /dev/null; then
-                LIPO_INFO=$(lipo -info "$PYTHON_SHARED_LIB" 2>/dev/null || true)
-                if echo "$LIPO_INFO" | grep -q "Architectures in the fat file"; then
-                    TARGET_ARCH="universal2"
-                elif echo "$LIPO_INFO" | grep -q "Non-fat file"; then
-                    TARGET_ARCH="$HOST_TARGET"
-                fi
-            fi
-
-            if [[ -z "$TARGET_ARCH" ]]; then
+        if [[ -n "$PYTHON_SHARED_LIB" && -f "$PYTHON_SHARED_LIB" ]] && command -v lipo &> /dev/null; then
+            LIPO_INFO=$(lipo -info "$PYTHON_SHARED_LIB" 2>/dev/null || true)
+            if echo "$LIPO_INFO" | grep -q "Architectures in the fat file"; then
+                TARGET_ARCH="universal2"
+            elif echo "$LIPO_INFO" | grep -q "Non-fat file"; then
                 TARGET_ARCH="$HOST_TARGET"
             fi
-
-            if [[ -z "$TARGET_ARCH" ]]; then
-                TARGET_ARCH="universal2"
-            fi
-
-            echo "🎯 macOS build target architecture: $TARGET_ARCH"
-            PYINSTALLER_ARGS+=(--target-arch "$TARGET_ARCH")
-        else
-            echo "⚠️  This version of PyInstaller does not support --target-arch;"
-            echo "   falling back to the default architecture."
         fi
-    fi
 
-    pyinstaller "${PYINSTALLER_ARGS[@]}"
+        if [[ -z "$TARGET_ARCH" ]]; then
+            TARGET_ARCH="$HOST_TARGET"
+        fi
+
+        if [[ -z "$TARGET_ARCH" ]]; then
+            TARGET_ARCH="universal2"
+        fi
+
+        echo "🎯 macOS build target architecture: $TARGET_ARCH"
+        PYINSTALLER_ARGS+=(--target-arch "$TARGET_ARCH")
+    else
+        echo "⚠️  This version of PyInstaller does not support --target-arch;"
+        echo "   falling back to the default architecture."
+    fi
 fi
+
+pyinstaller "${PYINSTALLER_ARGS[@]}"
 
 # Find the output directory (PyInstaller may use dist/ or dist/)
 if [[ -d "dist/talks-reducer.app" ]]; then

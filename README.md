@@ -146,6 +146,28 @@ The helper wraps the Gradio API exposed by `server.py`, waits for processing to 
 path you provide. Pass `--small` to mirror the **Small video** checkbox or `--print-log` to stream the server log after the
 download finishes.
 
+## Faster PyInstaller builds
+
+PyInstaller spends most of its time walking imports. To keep GUI builds snappy:
+
+- Create a dedicated virtual environment for packaging the GUI and install only
+  the runtime dependencies you need (for example `pip install -r
+  requirements.txt -r scripts/requirements-pyinstaller.txt`). Avoid installing
+  heavy ML stacks such as Torch or TensorFlow in that environment so PyInstaller
+  never attempts to analyze them.
+- Use the committed `talks-reducer.spec` file via `./scripts/build-gui.sh`.
+  The spec excludes Torch, TensorFlow, TensorBoard, torchvision/torchaudio,
+  Pandas, Qt bindings, setuptools' vendored helpers, and other bulky modules
+  that previously slowed the analysis stage. Set
+  `PYINSTALLER_EXTRA_EXCLUDES=module1,module2` if you need to drop additional
+  imports for an experimental build.
+- Keep optional imports in the codebase lazy (wrapped in `try/except` or moved
+  inside functions) so the analyzer only sees the dependencies required for the
+  shipping GUI.
+
+The script keeps incremental build artifacts in `build/` between runs. Pass
+`--clean` to `scripts/build-gui.sh` when you want a full rebuild.
+
 ## Contributing
 See `CONTRIBUTION.md` for development setup details and guidance on sharing improvements.
 
