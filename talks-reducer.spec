@@ -8,7 +8,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
-PROJECT_DIR = pathlib.Path(__file__).resolve().parent
+PROJECT_DIR = pathlib.Path(__name__).resolve().parent
+if not PROJECT_DIR.exists() and "__file__" in globals():
+    PROJECT_DIR = pathlib.Path(__file__).resolve().parent
 
 # Data files bundled with the GUI
 base_datas = [
@@ -44,7 +46,6 @@ DEFAULT_EXCLUDES = [
     "setuptools",
     "pkg_resources",
     "wheel",
-    "importlib_metadata",
     "zipp",
     "platformdirs",
     "jaraco.functools",

@@ -131,12 +131,6 @@ fi
 # Build the GUI executable
 echo "⚙️  Running PyInstaller..."
 
-# Select icon assets per platform
-ICON_PATH="talks_reducer/resources/icons/app.ico"
-if [[ "$OS_NAME" == "macos" ]]; then
-    ICON_PATH="talks_reducer/resources/icons/app.icns"
-fi
-
 # The heavy dependency excludes now live in talks-reducer.spec so PyInstaller
 # avoids scanning ML stacks and setuptools vendored modules unless explicitly
 # requested via PYINSTALLER_EXTRA_EXCLUDES.
@@ -147,7 +141,6 @@ fi
 PYINSTALLER_ARGS=(talks-reducer.spec --noconfirm --workpath build --distpath dist)
 
 if [[ "$OS_NAME" == "macos" ]]; then
-    PYINSTALLER_ARGS+=(--icon "$ICON_PATH")
     mkdir -p "dist/talks-reducer.app"
     # Produce the most compatible binary we can. Prefer universal builds
     # when the Python runtime and dependencies contain both arm64 and
@@ -203,10 +196,6 @@ PY
         echo "⚠️  This version of PyInstaller does not support --target-arch;"
         echo "   falling back to the default architecture."
     fi
-fi
-
-if [[ "$OS_NAME" == "windows" ]]; then
-    PYINSTALLER_ARGS+=(--icon "$ICON_PATH")
 fi
 
 pyinstaller "${PYINSTALLER_ARGS[@]}"
