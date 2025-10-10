@@ -9,6 +9,7 @@ import socket
 import sys
 import tempfile
 from contextlib import AbstractContextManager, suppress
+from dataclasses import dataclass
 from pathlib import Path
 from queue import SimpleQueue
 from threading import Thread
@@ -244,6 +245,98 @@ def _format_summary(result: ProcessingResult) -> str:
     return "\n".join(lines)
 
 
+PipelineEvent = tuple[str, object]
+
+
+def _default_reporter_factory(
+    progress_callback: Optional[Callable[[int, int, str], None]],
+    log_callback: Callable[[str], None],
+) -> SignalProgressReporter:
+    """Construct a :class:`GradioProgressReporter` with the given callbacks."""
+
+    return GradioProgressReporter(
+        progress_callback=progress_callback,
+        log_callback=log_callback,
+    )
+
+
+def run_pipeline_job(
+    options: ProcessingOptions,
+    *,
+    speed_up: Callable[[ProcessingOptions, SignalProgressReporter], ProcessingResult],
+    reporter_factory: Callable[
+        [Optional[Callable[[int, int, str], None]], Callable[[str], None]],
+        SignalProgressReporter,
+    ],
+    events: SimpleQueue[PipelineEvent],
+    enable_progress: bool = True,
+    start_in_thread: bool = True,
+) -> Iterator[PipelineEvent]:
+    """Execute the processing pipeline and yield emitted events."""
+
+    def _emit(kind: str, payload: object) -> None:
+        events.put((kind, payload))
+
+    progress_callback: Optional[Callable[[int, int, str], None]] = None
+    if enable_progress:
+        progress_callback = lambda current, total, desc: _emit(
+            "progress", (current, total, desc)
+        )
+
+    reporter = reporter_factory(
+        progress_callback, lambda message: _emit("log", message)
+    )
+
+    def _worker() -> None:
+        try:
+            result = speed_up(options, reporter=reporter)
+        except FFmpegNotFoundError as exc:  # pragma: no cover - depends on runtime env
+            _emit("error", gr.Error(str(exc)))
+        except FileNotFoundError as exc:
+            _emit("error", gr.Error(str(exc)))
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            reporter.log(f"Error: {exc}")
+            _emit("error", gr.Error(f"Failed to process the video: {exc}"))
+        else:
+            reporter.log("Processing complete.")
+            _emit("result", result)
+        finally:
+            _emit("done", None)
+
+    thread: Optional[Thread] = None
+    if start_in_thread:
+        thread = Thread(target=_worker, daemon=True)
+        thread.start()
+    else:
+        _worker()
+
+    try:
+        while True:
+            kind, payload = events.get()
+            if kind == "done":
+                break
+            yield (kind, payload)
+    finally:
+        if thread is not None:
+            thread.join()
+
+
+@dataclass
+class ProcessVideoDependencies:
+    """Container for dependencies used by :func:`process_video`."""
+
+    speed_up: Callable[
+        [ProcessingOptions, SignalProgressReporter], ProcessingResult
+    ] = speed_up_video
+    reporter_factory: Callable[
+        [Optional[Callable[[int, int, str], None]], Callable[[str], None]],
+        SignalProgressReporter,
+    ] = _default_reporter_factory
+    queue_factory: Callable[[], SimpleQueue[PipelineEvent]] = SimpleQueue
+    run_pipeline_job_func: Callable[..., Iterator[PipelineEvent]] = run_pipeline_job
+    start_in_thread: bool = True
+
+
 def process_video(
     file_path: Optional[str],
     small_video: bool,
@@ -251,6 +344,8 @@ def process_video(
     sounded_speed: Optional[float] = None,
     silent_speed: Optional[float] = None,
     progress: Optional[gr.Progress] = gr.Progress(track_tqdm=False),
+    *,
+    dependencies: Optional[ProcessVideoDependencies] = None,
 ) -> Iterator[tuple[Optional[str], str, str, Optional[str]]]:
     """Run the Talks Reducer pipeline for a single uploaded file."""
 
@@ -265,23 +360,8 @@ def process_video(
     temp_folder = workspace / "temp"
     output_file = _build_output_path(input_path, workspace, small_video)
 
-    progress_callback: Optional[Callable[[int, int, str], None]] = None
-    if progress is not None:
-
-        def _callback(current: int, total: int, desc: str) -> None:
-            events.put(("progress", (current, total, desc)))
-
-        progress_callback = _callback
-
-    events: "SimpleQueue[tuple[str, object]]" = SimpleQueue()
-
-    def _log_callback(message: str) -> None:
-        events.put(("log", message))
-
-    reporter = GradioProgressReporter(
-        progress_callback=progress_callback,
-        log_callback=_log_callback,
-    )
+    deps = dependencies or ProcessVideoDependencies()
+    events = deps.queue_factory()
 
     option_kwargs: dict[str, float] = {}
     if silent_threshold is not None:
@@ -299,31 +379,20 @@ def process_video(
         **option_kwargs,
     )
 
-    def _worker() -> None:
-        try:
-            result = speed_up_video(options, reporter=reporter)
-        except FFmpegNotFoundError as exc:  # pragma: no cover - depends on runtime env
-            events.put(("error", gr.Error(str(exc))))
-        except FileNotFoundError as exc:
-            events.put(("error", gr.Error(str(exc))))
-        except Exception as exc:  # pragma: no cover - defensive fallback
-            reporter.log(f"Error: {exc}")
-            events.put(("error", gr.Error(f"Failed to process the video: {exc}")))
-        else:
-            reporter.log("Processing complete.")
-            events.put(("result", result))
-        finally:
-            events.put(("done", None))
-
-    worker = Thread(target=_worker, daemon=True)
-    worker.start()
+    event_stream = deps.run_pipeline_job_func(
+        options,
+        speed_up=deps.speed_up,
+        reporter_factory=deps.reporter_factory,
+        events=events,
+        enable_progress=progress is not None,
+        start_in_thread=deps.start_in_thread,
+    )
 
     collected_logs: list[str] = []
     final_result: Optional[ProcessingResult] = None
     error: Optional[gr.Error] = None
 
-    while True:
-        kind, payload = events.get()
+    for kind, payload in event_stream:
         if kind == "log":
             text = str(payload).strip()
             if text:
@@ -343,10 +412,6 @@ def process_video(
             final_result = payload  # type: ignore[assignment]
         elif kind == "error":
             error = payload  # type: ignore[assignment]
-        elif kind == "done":
-            break
-
-    worker.join()
 
     if error is not None:
         raise error

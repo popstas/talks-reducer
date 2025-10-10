@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from queue import SimpleQueue
 
 import pytest
 from PIL import Image
 
+import gradio as gr
+
 from talks_reducer import server, server_tray
-from talks_reducer.models import ProcessingResult
+from talks_reducer.models import ProcessingOptions, ProcessingResult
 
 
 class DummyProgress:
@@ -15,6 +18,117 @@ class DummyProgress:
 
     def __call__(self, current: int, *, total: int, desc: str) -> None:
         self.calls.append((current, total, desc))
+
+
+def _stub_reporter_factory(progress_callback, log_callback):
+    class _Reporter(server.SignalProgressReporter):
+        def __init__(self) -> None:
+            super().__init__()
+            self._progress_callback = progress_callback
+            self._log_callback = log_callback
+
+        def log(self, message: str) -> None:  # pragma: no cover - simple forwarding
+            if self._log_callback is not None:
+                self._log_callback(message)
+
+        def progress(self, current: int, total: int, desc: str) -> None:
+            if self._progress_callback is not None:
+                self._progress_callback(current, total, desc)
+
+    return _Reporter()
+
+
+def test_run_pipeline_job_emits_log_progress_and_result(tmp_path: Path) -> None:
+    input_file = tmp_path / "input.mp4"
+    output_file = tmp_path / "output.mp4"
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    input_file.write_bytes(b"")
+
+    options = ProcessingOptions(
+        input_file=input_file,
+        output_file=output_file,
+        temp_folder=temp_dir,
+        small=False,
+    )
+
+    result = ProcessingResult(
+        input_file=input_file,
+        output_file=output_file,
+        frame_rate=30.0,
+        original_duration=120.0,
+        output_duration=60.0,
+        chunk_count=3,
+        used_cuda=False,
+        max_audio_volume=0.5,
+        time_ratio=0.5,
+        size_ratio=0.4,
+    )
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        reporter.log("Starting job")
+        reporter.progress(5, 10, "Encoding")
+        return result
+
+    events = SimpleQueue()
+
+    event_stream = server.run_pipeline_job(
+        options,
+        speed_up=_speed_up,
+        reporter_factory=_stub_reporter_factory,
+        events=events,
+        enable_progress=True,
+        start_in_thread=False,
+    )
+
+    emitted = list(event_stream)
+
+    assert [kind for kind, _ in emitted] == [
+        "log",
+        "progress",
+        "log",
+        "result",
+    ]
+    assert emitted[0][1] == "Starting job"
+    assert emitted[1][1] == (5, 10, "Encoding")
+    assert emitted[-1][1] is result
+
+
+def test_run_pipeline_job_wraps_exceptions_with_gradio_error(tmp_path: Path) -> None:
+    input_file = tmp_path / "input.mp4"
+    output_file = tmp_path / "output.mp4"
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    input_file.write_bytes(b"")
+
+    options = ProcessingOptions(
+        input_file=input_file,
+        output_file=output_file,
+        temp_folder=temp_dir,
+        small=False,
+    )
+
+    def _speed_up(_options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        raise RuntimeError("pipeline exploded")
+
+    events = SimpleQueue()
+
+    event_stream = server.run_pipeline_job(
+        options,
+        speed_up=_speed_up,
+        reporter_factory=_stub_reporter_factory,
+        events=events,
+        enable_progress=True,
+        start_in_thread=False,
+    )
+
+    emitted = list(event_stream)
+
+    assert [kind for kind, _ in emitted] == ["log", "error"]
+    assert "pipeline exploded" in emitted[0][1]
+    error = emitted[1][1]
+    assert isinstance(error, gr.Error)
+    assert "Failed to process the video" in str(error)
 
 
 def test_build_output_path_mirrors_cli_naming(tmp_path: Path) -> None:
