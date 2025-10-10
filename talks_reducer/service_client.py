@@ -8,7 +8,7 @@ import shutil
 import time
 from contextlib import suppress
 from pathlib import Path
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Any, AsyncIterator, Callable, Optional, Sequence, Tuple
 
 from gradio_client import Client
 from gradio_client import file as gradio_file
@@ -18,6 +18,55 @@ try:
     from .pipeline import ProcessingAborted
 except ImportError:  # pragma: no cover - allow running as script
     from talks_reducer.pipeline import ProcessingAborted
+
+
+class StreamingJob:
+    """Adapter that provides a consistent interface for streaming jobs."""
+
+    def __init__(self, job: Any) -> None:
+        self._job = job
+
+    @property
+    def raw(self) -> Any:
+        """Return the wrapped job instance."""
+
+        return self._job
+
+    @property
+    def supports_streaming(self) -> bool:
+        """Return ``True`` when the remote job can stream async updates."""
+
+        communicator = getattr(self._job, "communicator", None)
+        return communicator is not None
+
+    async def async_iter_updates(self) -> AsyncIterator[Any]:
+        """Yield updates from the wrapped job asynchronously."""
+
+        async for update in self._job:  # type: ignore[async-for]
+            yield update
+
+    def status(self) -> Any:
+        """Return the latest status update from the job when available."""
+
+        status_method = getattr(self._job, "status", None)
+        if callable(status_method):
+            return status_method()
+        raise AttributeError("Wrapped job does not expose a status() method")
+
+    def outputs(self) -> Any:
+        """Return cached outputs from the job when available."""
+
+        outputs_method = getattr(self._job, "outputs", None)
+        if callable(outputs_method):
+            return outputs_method()
+        raise AttributeError("Wrapped job does not expose an outputs() method")
+
+    def cancel(self) -> None:
+        """Cancel the remote job when supported."""
+
+        cancel_method = getattr(self._job, "cancel", None)
+        if callable(cancel_method):
+            cancel_method()
 
 
 def send_video(
@@ -35,6 +84,10 @@ def send_video(
     progress_callback: Optional[
         Callable[[str, Optional[int], Optional[int], str], None]
     ] = None,
+    client_factory: Optional[Callable[[str], Client]] = None,
+    job_factory: Optional[
+        Callable[[Client, Tuple[Any, ...], dict[str, Any]], Any]
+    ] = None,
 ) -> Tuple[Path, str, str]:
     """Upload *input_path* to the Gradio server and download the processed video.
 
@@ -45,15 +98,23 @@ def send_video(
     if not input_path.exists():
         raise FileNotFoundError(f"Input file does not exist: {input_path}")
 
-    client = Client(server_url)
-    job = client.submit(
+    client_builder = client_factory or Client
+    client = client_builder(server_url)
+    submit_args: Tuple[Any, ...] = (
         gradio_file(str(input_path)),
         bool(small),
         silent_threshold,
         sounded_speed,
         silent_speed,
-        api_name="/process_video",
     )
+    submit_kwargs: dict[str, Any] = {"api_name": "/process_video"}
+
+    if job_factory is not None:
+        job = job_factory(client, submit_args, submit_kwargs)
+    else:
+        job = client.submit(*submit_args, **submit_kwargs)
+
+    streaming_job = StreamingJob(job)
 
     cancelled = False
 
@@ -62,7 +123,7 @@ def send_video(
         if should_cancel and should_cancel():
             if not cancelled:
                 with suppress(Exception):
-                    job.cancel()
+                    streaming_job.cancel()
                 cancelled = True
             raise ProcessingAborted("Remote processing cancelled by user.")
 
@@ -85,7 +146,7 @@ def send_video(
         if should_cancel is not None:
             stream_kwargs["cancel_callback"] = _cancel_if_requested
         consumed_stream = _stream_job_updates(
-            job,
+            streaming_job,
             _emit_new_lines,
             **stream_kwargs,
         )
@@ -190,7 +251,7 @@ def _emit_progress_update(
 
 
 async def _pump_job_updates(
-    job,
+    job: StreamingJob,
     emit_log: Callable[[str], None],
     progress_callback: Optional[
         Callable[[str, Optional[int], Optional[int], str], None]
@@ -199,7 +260,7 @@ async def _pump_job_updates(
 ) -> None:
     """Consume asynchronous updates from *job* and emit logs and progress."""
 
-    async for update in job:  # type: ignore[async-for]
+    async for update in job.async_iter_updates():
         if cancel_callback:
             cancel_callback()
         update_type = getattr(update, "type", "status")
@@ -242,15 +303,18 @@ def _poll_job_updates(
 ) -> None:
     """Poll *job* for outputs and status updates when async streaming is unavailable."""
 
+    streaming_job = job if isinstance(job, StreamingJob) else StreamingJob(job)
+    raw_job = streaming_job.raw
+
     while True:
         if cancel_callback:
             cancel_callback()
-        if job.done():
+        if hasattr(raw_job, "done") and raw_job.done():
             break
 
         status: Optional[StatusUpdate] = None
         with suppress(Exception):
-            status = job.status()  # type: ignore[assignment]
+            status = streaming_job.status()  # type: ignore[assignment]
 
         if status is not None:
             if progress_callback:
@@ -268,7 +332,7 @@ def _poll_job_updates(
 
         outputs = []
         with suppress(Exception):
-            outputs = job.outputs()
+            outputs = streaming_job.outputs()
         if outputs:
             latest = outputs[-1]
             if isinstance(latest, (list, tuple)) and len(latest) == 4:
@@ -280,7 +344,7 @@ def _poll_job_updates(
 
 
 def _stream_job_updates(
-    job,
+    job: StreamingJob,
     emit_log: Callable[[str], None],
     *,
     progress_callback: Optional[
@@ -294,8 +358,7 @@ def _stream_job_updates(
     generator-based fallback should be used.
     """
 
-    communicator = getattr(job, "communicator", None)
-    if communicator is None:
+    if not job.supports_streaming:
         return False
 
     try:

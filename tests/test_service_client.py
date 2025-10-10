@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from typing import Optional
 
@@ -27,6 +28,40 @@ class DummyJob:
         return self._outputs[-1]
 
 
+class StreamingDummyJob:
+    def __init__(self, updates, outputs, result):
+        self.communicator = object()
+        self._updates = list(updates)
+        self._outputs = list(outputs)
+        self._result = result
+        self.cancelled = False
+
+    def __aiter__(self):
+        async def generator():
+            for update in self._updates:
+                yield update
+
+        return generator()
+
+    def __iter__(self):
+        return iter(self._outputs)
+
+    def cancel(self):
+        self.cancelled = True
+
+    def result(self):
+        return self._result
+
+    def status(self):
+        return self._updates[-1] if self._updates else None
+
+    def outputs(self):
+        return self._outputs
+
+    def done(self):
+        return True
+
+
 class DummyClient:
     def __init__(self, server_url: str) -> None:
         self.server_url = server_url
@@ -36,6 +71,142 @@ class DummyClient:
     def submit(self, *args, **kwargs):
         self.submissions.append((args, kwargs))
         return DummyJob(self.job_outputs)
+
+
+def test_pump_job_updates_emits_logs_and_progress():
+    status_update = SimpleNamespace(
+        type="status",
+        log=("status log",),
+        progress_data=[
+            {"desc": "Encode", "length": 8, "index": 4, "progress": 4, "unit": "frames"}
+        ],
+        code=service_client.Status.PROCESSING,
+    )
+    output_update = SimpleNamespace(
+        type="output",
+        outputs=("path", "final log", "summary", "download"),
+        final=True,
+    )
+    job = StreamingDummyJob(
+        [status_update, output_update],
+        [("path", "final log", "summary", "download")],
+        ("path", "final log", "summary", "download"),
+    )
+
+    logs: list[str] = []
+    progress_events: list[tuple[str, Optional[int], Optional[int], str]] = []
+
+    asyncio.run(
+        service_client._pump_job_updates(
+            service_client.StreamingJob(job),
+            logs.append,
+            lambda desc, progress, total, unit: progress_events.append(
+                (desc, progress, total, unit)
+            ),
+        )
+    )
+
+    assert logs == ["status log", "final log"]
+    assert progress_events == [("Encode", 4, 8, "frames")]
+
+
+def test_send_video_stream_updates_cancel(monkeypatch, tmp_path):
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"input")
+    server_file = tmp_path / "server_output.mp4"
+    server_file.write_bytes(b"output")
+
+    final_result = (
+        str(server_file),
+        "log",
+        "summary",
+        str(server_file),
+    )
+    updates = [
+        SimpleNamespace(
+            type="status",
+            log=("status",),
+            progress_data=None,
+            code=service_client.Status.PROCESSING,
+        )
+    ]
+
+    job_holder: dict[str, StreamingDummyJob] = {}
+
+    def job_factory(client, args, kwargs):
+        job = StreamingDummyJob(updates, [final_result], final_result)
+        job_holder["job"] = job
+        return job
+
+    cancel_calls = {"count": 0}
+
+    def should_cancel() -> bool:
+        cancel_calls["count"] += 1
+        return True
+
+    monkeypatch.setattr(
+        service_client,
+        "gradio_file",
+        lambda path: SimpleNamespace(path=path),
+    )
+
+    with pytest.raises(service_client.ProcessingAborted):
+        service_client.send_video(
+            input_path=input_file,
+            output_path=None,
+            server_url="http://localhost:9005/",
+            stream_updates=True,
+            should_cancel=should_cancel,
+            client_factory=lambda url: DummyClient(url),
+            job_factory=job_factory,
+        )
+
+    assert cancel_calls["count"] >= 1
+    assert job_holder["job"].cancelled is True
+
+
+def test_stream_job_updates_fallback_to_poll_on_runtime_error(monkeypatch):
+    job = StreamingDummyJob([], [], (None, None, None, None))
+    streaming_job = service_client.StreamingJob(job)
+
+    logs: list[str] = []
+    progress_events: list[tuple[str, Optional[int], Optional[int], str]] = []
+
+    def fake_asyncio_run(coro, *args, **kwargs):
+        try:
+            coro.close()
+        finally:
+            raise RuntimeError("loop is closed")
+
+    monkeypatch.setattr(service_client.asyncio, "run", fake_asyncio_run)
+
+    captured: dict[str, object] = {}
+
+    def fake_poll(
+        job_arg,
+        emit_log,
+        progress_callback,
+        *,
+        cancel_callback=None,
+        interval: float = 0.25,
+    ) -> None:
+        captured["job"] = job_arg
+        emit_log("polled")
+        if progress_callback is not None:
+            progress_callback("Polled", 1, 2, "steps")
+
+    monkeypatch.setattr(service_client, "_poll_job_updates", fake_poll)
+
+    result = service_client._stream_job_updates(
+        streaming_job,
+        logs.append,
+        progress_callback=lambda *args: progress_events.append(args),
+    )
+
+    assert result is True
+    assert logs == ["polled"]
+    assert progress_events == [("Polled", 1, 2, "steps")]
+    assert captured["job"] is streaming_job
 
 
 def test_send_video_downloads_file(monkeypatch, tmp_path):
