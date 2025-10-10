@@ -735,7 +735,7 @@ class TalksReducerGUI:
             },
         )
 
-    def _configure_drop_targets(self, widget) -> None:  # type: tk.Widget
+    def _configure_drop_targets(self, widget) -> None:
         if not self._dnd_available:
             return
         widget.drop_target_register(DND_FILES)  # type: ignore[arg-type]
