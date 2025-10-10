@@ -23,6 +23,7 @@ from .ffmpeg import (
 )
 from .models import ProcessingOptions, ProcessingResult
 from .progress import NullProgressReporter, ProgressReporter
+from talks_reducer.version_utils import resolve_version
 
 
 def speed_up_video(
@@ -54,6 +55,10 @@ def speed_up_video(
     frame_rate = metadata["frame_rate"]
     original_duration = metadata["duration"]
     frame_count = metadata.get("frame_count", 0)
+
+    app_version = resolve_version()
+    if app_version and app_version != "unknown":
+        reporter.log(f"talks-reducer v{app_version}")
 
     reporter.log(
         (
