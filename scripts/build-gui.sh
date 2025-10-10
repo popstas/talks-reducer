@@ -150,8 +150,6 @@ if [[ "$OS_NAME" == "windows" ]]; then
         --version-file=version.txt \
         --add-data="talks_reducer/resources/icons/icon.png;talks_reducer/resources/icons" \
         --add-data="talks_reducer/resources/icons/icon.ico;talks_reducer/resources/icons" \
-        --add-data="docs/assets/icon.png;docs/assets" \
-        --add-data="docs/assets/icon.ico;docs/assets" \
         $EXCLUDES \
         --noconfirm \
         --workpath build \
@@ -164,8 +162,6 @@ else
         --icon=talks_reducer/resources/icons/icon.ico \
         --add-data="talks_reducer/resources/icons/icon.png:talks_reducer/resources/icons" \
         --add-data="talks_reducer/resources/icons/icon.ico:talks_reducer/resources/icons" \
-        --add-data="docs/assets/icon.png:docs/assets" \
-        --add-data="docs/assets/icon.ico:docs/assets" \
         $EXCLUDES \
         --noconfirm)
 
