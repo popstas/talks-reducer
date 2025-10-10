@@ -11,6 +11,124 @@ import pytest
 from talks_reducer import cli
 
 
+def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> None:
+    """The CLI application should configure the local pipeline correctly."""
+
+    parsed_args = SimpleNamespace(
+        input_file=["input.mp4"],
+        output_file="/tmp/output.mp4",
+        temp_folder="/tmp/work",
+        silent_threshold=0.2,
+        silent_speed=5.0,
+        sounded_speed=1.75,
+        frame_spreadage=4,
+        sample_rate=48000,
+        small=True,
+        server_url=None,
+        host=None,
+    )
+
+    gathered: list[list[str]] = []
+
+    def gather_files(paths: list[str]) -> list[str]:
+        gathered.append(list(paths))
+        return ["/videos/input.mp4"]
+
+    speed_calls: list[cli.ProcessingOptions] = []
+
+    def fake_speed_up(options: cli.ProcessingOptions, reporter: object):
+        speed_calls.append(options)
+        return SimpleNamespace(
+            output_file=Path("/videos/output.mp4"), time_ratio=0.5, size_ratio=0.25
+        )
+
+    logged_messages: list[str] = []
+
+    class DummyReporter:
+        def log(self, message: str) -> None:
+            logged_messages.append(message)
+
+    app = cli.CliApplication(
+        gather_files=gather_files,
+        send_video=None,
+        speed_up=fake_speed_up,
+        reporter_factory=DummyReporter,
+    )
+
+    exit_code, error_messages = app.run(parsed_args)
+
+    assert exit_code == 0
+    assert error_messages == []
+    assert gathered == [["input.mp4"]]
+    assert len(speed_calls) == 1
+    options = speed_calls[0]
+    assert options.input_file == Path("/videos/input.mp4")
+    assert options.output_file == Path("/tmp/output.mp4")
+    assert options.temp_folder == Path("/tmp/work")
+    assert options.silent_threshold == pytest.approx(0.2)
+    assert options.silent_speed == pytest.approx(5.0)
+    assert options.sounded_speed == pytest.approx(1.75)
+    assert options.frame_spreadage == 4
+    assert options.sample_rate == 48000
+    assert options.small is True
+    assert "Completed: /videos/output.mp4" in logged_messages
+    assert any(message.startswith("Result: ") for message in logged_messages)
+
+
+def test_cli_application_falls_back_to_local_after_remote_failure() -> None:
+    """Remote processing errors should switch back to the local pipeline."""
+
+    parsed_args = SimpleNamespace(
+        input_file=["input.mp4"],
+        output_file=None,
+        temp_folder=None,
+        silent_threshold=None,
+        silent_speed=None,
+        sounded_speed=None,
+        frame_spreadage=None,
+        sample_rate=None,
+        small=False,
+        server_url="http://localhost:9005",
+        server_stream=False,
+        host=None,
+    )
+
+    def gather_files(_paths: list[str]) -> list[str]:
+        return ["/videos/input.mp4"]
+
+    def failing_send_video(**_kwargs: object):
+        raise RuntimeError("boom")
+
+    local_runs: list[cli.ProcessingOptions] = []
+
+    def fake_speed_up(options: cli.ProcessingOptions, reporter: object):
+        local_runs.append(options)
+        return SimpleNamespace(output_file=Path("/videos/output.mp4"))
+
+    logged_messages: list[str] = []
+
+    class DummyReporter:
+        def log(self, message: str) -> None:
+            logged_messages.append(message)
+
+    app = cli.CliApplication(
+        gather_files=gather_files,
+        send_video=failing_send_video,
+        speed_up=fake_speed_up,
+        reporter_factory=DummyReporter,
+    )
+
+    exit_code, error_messages = app.run(parsed_args)
+
+    assert exit_code == 0
+    assert error_messages == [
+        "Failed to process input.mp4 via server: boom",
+        "Falling back to local processing pipeline.",
+    ]
+    assert logged_messages[:2] == error_messages
+    assert len(local_runs) == 1
+
+
 def test_main_launches_gui_when_no_args(monkeypatch: pytest.MonkeyPatch) -> None:
     """The GUI should be launched when no CLI arguments are provided."""
 
@@ -50,33 +168,24 @@ def test_main_runs_cli_with_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     parser_mock = mock.Mock()
     parser_mock.parse_args.return_value = parsed_args
 
-    outputs: list[cli.ProcessingOptions] = []
-
-    class DummyReporter:
-        def log(self, _message: str) -> None:  # pragma: no cover - simple stub
-            pass
-
-    def fake_speed_up_video(options: cli.ProcessingOptions, reporter: object):
-        outputs.append(options)
-        return SimpleNamespace(output_file=Path("/tmp/output.mp4"))
-
-    def fake_gather_input_files(_paths: list[str]) -> list[str]:
-        return ["/tmp/input.mp4"]
-
     def fail_launch(_argv: list[str]) -> bool:
         raise AssertionError("GUI should not be launched when arguments exist")
 
+    app_stub = mock.Mock()
+    app_stub.run.return_value = (0, [])
+
+    def build_app(**kwargs: object) -> mock.Mock:
+        app_stub.dependencies = kwargs
+        return app_stub
+
     monkeypatch.setattr(cli, "_build_parser", lambda: parser_mock)
-    monkeypatch.setattr(cli, "gather_input_files", fake_gather_input_files)
-    monkeypatch.setattr(cli, "speed_up_video", fake_speed_up_video)
-    monkeypatch.setattr(cli, "TqdmProgressReporter", lambda: DummyReporter())
+    monkeypatch.setattr(cli, "CliApplication", build_app)
     monkeypatch.setattr(cli, "_launch_gui", fail_launch)
 
     cli.main(["input.mp4"])
 
     parser_mock.parse_args.assert_called_once_with(["input.mp4"])
-    assert len(outputs) == 1
-    assert outputs[0].input_file == Path("/tmp/input.mp4")
+    app_stub.run.assert_called_once_with(parsed_args)
 
 
 def test_main_launches_server_tray_when_flag_set(
@@ -124,10 +233,8 @@ def test_main_exits_when_server_unavailable(monkeypatch: pytest.MonkeyPatch) -> 
         cli.main(["server"])
 
 
-def test_main_uses_remote_server_when_url_provided(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The CLI should delegate to the remote server client when --url is set."""
+def test_cli_application_uses_remote_server_when_url_provided() -> None:
+    """Remote processing should call the server client with the expected options."""
 
     parsed_args = SimpleNamespace(
         input_file=["input.mp4"],
@@ -140,35 +247,48 @@ def test_main_uses_remote_server_when_url_provided(
         sample_rate=None,
         small=True,
         server_url="http://localhost:9005/",
+        server_stream=False,
+        host=None,
     )
 
-    parser_mock = mock.Mock()
-    parser_mock.parse_args.return_value = parsed_args
+    send_calls: list[dict[str, object]] = []
 
-    def fake_gather_input_files(_paths: list[str]) -> list[str]:
-        return ["/tmp/input.mp4"]
-
-    calls: list[SimpleNamespace] = []
-
-    def fake_send_video(**kwargs):
-        calls.append(SimpleNamespace(**kwargs))
+    def fake_send_video(**kwargs: object):
+        send_calls.append(dict(kwargs))
         return Path("/tmp/result.mp4"), "Summary", "Log"
 
-    monkeypatch.setattr(cli, "_build_parser", lambda: parser_mock)
-    monkeypatch.setattr(cli, "gather_input_files", fake_gather_input_files)
-    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
-    import talks_reducer.service_client as service_client_module
+    def fail_speed_up(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("Local pipeline should not run when remote succeeds")
 
-    monkeypatch.setattr(service_client_module, "send_video", fake_send_video)
+    reporter_factory = mock.Mock(
+        side_effect=AssertionError(
+            "Reporter should not be constructed on remote success"
+        )
+    )
 
-    cli.main(["input.mp4", "--url", "http://localhost:9005/"])
+    app = cli.CliApplication(
+        gather_files=lambda paths: ["/tmp/input.mp4"],
+        send_video=fake_send_video,
+        speed_up=fail_speed_up,
+        reporter_factory=reporter_factory,
+    )
 
-    assert len(calls) == 1
-    assert calls[0].input_path == Path("/tmp/input.mp4")
-    assert calls[0].small is True
-    assert calls[0].silent_threshold == 0.25
-    assert calls[0].silent_speed == 5.0
-    assert calls[0].sounded_speed == 1.75
+    exit_code, error_messages = app.run(parsed_args)
+
+    assert exit_code == 0
+    assert error_messages == []
+    assert len(send_calls) == 1
+    call = send_calls[0]
+    assert call["input_path"] == Path("/tmp/input.mp4")
+    assert call["output_path"] is None
+    assert call["server_url"] == "http://localhost:9005/"
+    assert call["small"] is True
+    assert call["silent_threshold"] == 0.25
+    assert call["silent_speed"] == 5.0
+    assert call["sounded_speed"] == 1.75
+    assert call["log_callback"] is not None
+    assert call["stream_updates"] is False
+    assert call["progress_callback"] is None
 
 
 def test_launch_server_tray_prefers_external_binary(
