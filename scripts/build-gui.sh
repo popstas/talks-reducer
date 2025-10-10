@@ -131,6 +131,12 @@ fi
 # Build the GUI executable
 echo "⚙️  Running PyInstaller..."
 
+# Select icon assets per platform
+ICON_PATH="talks_reducer/resources/icons/app.ico"
+if [[ "$OS_NAME" == "macos" ]]; then
+    ICON_PATH="talks_reducer/resources/icons/app.icns"
+fi
+
 # Exclude unnecessary heavy dependencies (but keep numpy/scipy as they're required)
 EXCLUDES="--exclude-module PySide6 \
 --exclude-module PyQt5 \
@@ -146,10 +152,10 @@ if [[ "$OS_NAME" == "windows" ]]; then
         --hidden-import=tkinterdnd2 \
         --collect-submodules talks_reducer \
         --collect-data gradio_client \
-        --icon=talks_reducer/resources/icons/icon.ico \
+        --icon "$ICON_PATH" \
         --version-file=version.txt \
-        --add-data="talks_reducer/resources/icons/icon.png;talks_reducer/resources/icons" \
-        --add-data="talks_reducer/resources/icons/icon.ico;talks_reducer/resources/icons" \
+        --add-data="talks_reducer/resources/icons/app-256.png;talks_reducer/resources/icons" \
+        --add-data="talks_reducer/resources/icons/app.ico;talks_reducer/resources/icons" \
         $EXCLUDES \
         --noconfirm \
         --workpath build \
@@ -159,9 +165,9 @@ else
         --hidden-import=tkinterdnd2 \
         --collect-submodules talks_reducer \
         --collect-data gradio_client \
-        --icon=talks_reducer/resources/icons/icon.ico \
-        --add-data="talks_reducer/resources/icons/icon.png:talks_reducer/resources/icons" \
-        --add-data="talks_reducer/resources/icons/icon.ico:talks_reducer/resources/icons" \
+        --icon "$ICON_PATH" \
+        --add-data="talks_reducer/resources/icons/app-256.png:talks_reducer/resources/icons" \
+        --add-data="talks_reducer/resources/icons/app.ico:talks_reducer/resources/icons" \
         $EXCLUDES \
         --noconfirm)
 
