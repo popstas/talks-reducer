@@ -11,7 +11,7 @@ from contextlib import AbstractContextManager, suppress
 from pathlib import Path
 from queue import SimpleQueue
 from threading import Thread
-from typing import Callable, Iterator, Optional, Sequence
+from typing import Callable, Iterator, Optional, Sequence, cast
 
 import gradio as gr
 
@@ -270,7 +270,7 @@ def process_video(
     if progress is not None:
 
         def _callback(current: int, total: int, desc: str) -> None:
-            progress(current, total=total, desc=desc)
+            events.put(("progress", (current, total, desc)))
 
         progress_callback = _callback
 
@@ -335,6 +335,10 @@ def process_video(
                     gr.update(),
                     gr.update(),
                 )
+        elif kind == "progress":
+            if progress is not None:
+                current, total, desc = cast(tuple[int, int, str], payload)
+                progress(current, total=total, desc=desc)
         elif kind == "result":
             final_result = payload  # type: ignore[assignment]
         elif kind == "error":
