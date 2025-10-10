@@ -248,6 +248,9 @@ def _format_summary(result: ProcessingResult) -> str:
 def process_video(
     file_path: Optional[str],
     small_video: bool,
+    silent_threshold: Optional[float] = None,
+    sounded_speed: Optional[float] = None,
+    silent_speed: Optional[float] = None,
     progress: Optional[gr.Progress] = gr.Progress(track_tqdm=False),
 ) -> Iterator[tuple[Optional[str], str, str, Optional[str]]]:
     """Run the Talks Reducer pipeline for a single uploaded file."""
@@ -281,11 +284,20 @@ def process_video(
         log_callback=_log_callback,
     )
 
+    option_kwargs: dict[str, float] = {}
+    if silent_threshold is not None:
+        option_kwargs["silent_threshold"] = float(silent_threshold)
+    if sounded_speed is not None:
+        option_kwargs["sounded_speed"] = float(sounded_speed)
+    if silent_speed is not None:
+        option_kwargs["silent_speed"] = float(silent_speed)
+
     options = ProcessingOptions(
         input_file=input_path,
         output_file=output_file,
         temp_folder=temp_folder,
         small=small_video,
+        **option_kwargs,
     )
 
     def _worker() -> None:
@@ -379,6 +391,29 @@ def build_interface() -> gr.Blocks:
             )
             small_checkbox = gr.Checkbox(label="Small video", value=True)
 
+        with gr.Row():
+            silent_threshold_input = gr.Slider(
+                minimum=0.0,
+                maximum=1.0,
+                value=0.05,
+                step=0.01,
+                label="Silent threshold",
+            )
+            sounded_speed_input = gr.Slider(
+                minimum=0.5,
+                maximum=3.0,
+                value=1.0,
+                step=0.05,
+                label="Sounded speed",
+            )
+            silent_speed_input = gr.Slider(
+                minimum=1.0,
+                maximum=10.0,
+                value=4.0,
+                step=0.1,
+                label="Silent speed",
+            )
+
         video_output = gr.Video(label="Processed video")
         summary_output = gr.Markdown()
         download_output = gr.File(label="Download processed file", interactive=False)
@@ -386,7 +421,13 @@ def build_interface() -> gr.Blocks:
 
         file_input.upload(
             process_video,
-            inputs=[file_input, small_checkbox],
+            inputs=[
+                file_input,
+                small_checkbox,
+                silent_threshold_input,
+                sounded_speed_input,
+                silent_speed_input,
+            ],
             outputs=[video_output, log_output, summary_output, download_output],
             queue=True,
             api_name="process_video",

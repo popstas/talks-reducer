@@ -1706,7 +1706,14 @@ class TalksReducerGUI:
         self._notify(lambda: self._set_status("waiting", f"Server {host_label} ready"))
 
         output_override = args.get("output_file") if len(files) == 1 else None
-        ignored = [key for key in args if key not in {"output_file", "small"}]
+        allowed_remote_keys = {
+            "output_file",
+            "small",
+            "silent_threshold",
+            "sounded_speed",
+            "silent_speed",
+        }
+        ignored = [key for key in args if key not in allowed_remote_keys]
         if ignored:
             ignored_options = ", ".join(sorted(ignored))
             self._append_log(
@@ -1738,6 +1745,9 @@ class TalksReducerGUI:
                     output_path=output_path,
                     server_url=server_url,
                     small=small_mode,
+                    silent_threshold=args.get("silent_threshold"),
+                    sounded_speed=args.get("sounded_speed"),
+                    silent_speed=args.get("silent_speed"),
                     stream_updates=True,
                     log_callback=self._append_log,
                     # progress_callback=self._handle_service_progress,
