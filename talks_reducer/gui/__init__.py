@@ -37,10 +37,11 @@ try:
     from ..version_utils import resolve_version
     from .preferences import GUIPreferences, determine_config_path
     from .remote import (
-        check_remote_server,
+        check_remote_server_for_gui,
         format_server_host,
         normalize_server_url,
         ping_server,
+        process_files_via_server,
     )
     from .theme import (
         DARK_THEME,
@@ -64,10 +65,11 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.ffmpeg import FFmpegNotFoundError
     from talks_reducer.gui.preferences import GUIPreferences, determine_config_path
     from talks_reducer.gui.remote import (
-        check_remote_server,
+        check_remote_server_for_gui,
         format_server_host,
         normalize_server_url,
         ping_server,
+        process_files_via_server,
     )
     from talks_reducer.gui.theme import (
         DARK_THEME,
@@ -428,44 +430,135 @@ class TalksReducerGUI:
         if initial_inputs:
             self._populate_initial_inputs(initial_inputs, auto_run=auto_run)
 
-    # ------------------------------------------------------------------ UI --
-    def _apply_window_icon(self) -> None:
-        """Configure the application icon when the asset is available."""
+    def _start_run(self) -> None:
+        if self._processing_thread and self._processing_thread.is_alive():
+            self.messagebox.showinfo("Processing", "A job is already running.")
+            return
 
-        base_path = Path(
-            getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)
-        )
-
-        icon_candidates: list[tuple[Path, str]] = []
-        if sys.platform.startswith("win"):
-            icon_candidates.append(
-                (
-                    base_path / "talks_reducer" / "resources" / "icons" / "icon.ico",
-                    "ico",
-                )
+        if not self.input_files:
+            self.messagebox.showwarning(
+                "Missing input", "Please add at least one file or folder."
             )
-        icon_candidates.append(
-            (
-                base_path / "talks_reducer" / "resources" / "icons" / "icon.png",
-                "png",
-            )
-        )
+            return
 
-        for icon_path, icon_type in icon_candidates:
-            if not icon_path.is_file():
-                continue
+        try:
+            args = self._collect_arguments()
+        except ValueError as exc:
+            self.messagebox.showerror("Invalid value", str(exc))
+            return
+
+        self._append_log("Starting processing…")
+        self._stop_requested = False
+        self.stop_button.configure(text="Stop")
+        self._run_start_time = time.monotonic()
+        self._ping_worker_stop_requested = True
+        open_after_convert = bool(self.open_after_convert_var.get())
+        server_url = self.server_url_var.get().strip()
+        remote_mode = self.processing_mode_var.get() == "remote"
+        if remote_mode and not server_url:
+            self.messagebox.showerror(
+                "Missing server URL", "Remote mode requires a server URL."
+            )
+        remote_mode = remote_mode and bool(server_url)
+
+        # Store remote_mode for use after thread starts
+        self._current_remote_mode = remote_mode
+
+        def worker() -> None:
+            def set_process(proc: subprocess.Popen) -> None:
+                self._ffmpeg_process = proc
 
             try:
-                if icon_type == "ico" and sys.platform.startswith("win"):
-                    # On Windows, iconbitmap works better without the 'default' parameter
-                    self.root.iconbitmap(str(icon_path))
+                files = gather_input_files(self.input_files)
+                if not files:
+                    self._schedule_on_ui_thread(
+                        lambda: self.messagebox.showwarning(
+                            "No files", "No supported media files were found."
+                        )
+                    )
+                    self._set_status("Idle")
+                    return
+
+                if self._current_remote_mode:
+                    success = self._process_files_via_server(
+                        files,
+                        args,
+                        server_url,
+                        open_after_convert=open_after_convert,
+                    )
+                    if success:
+                        self._schedule_on_ui_thread(self._hide_stop_button)
+                        return
+                    # If server processing failed, fall back to local processing
+                    # The _process_files_via_server function already switched to local mode
+                    # Update remote_mode variable to reflect the change
+                    self._current_remote_mode = False
+
+                reporter = _TkProgressReporter(
+                    self._append_log,
+                    process_callback=set_process,
+                    stop_callback=lambda: self._stop_requested,
+                )
+                for index, file in enumerate(files, start=1):
+                    self._append_log(f"Processing: {os.path.basename(file)}")
+                    options = self._create_processing_options(Path(file), args)
+                    result = speed_up_video(options, reporter=reporter)
+                    self._last_output = result.output_file
+                    self._last_time_ratio = result.time_ratio
+                    self._last_size_ratio = result.size_ratio
+
+                    # Create completion message with ratios if available
+                    completion_msg = f"Completed: {result.output_file}"
+                    if result.time_ratio is not None and result.size_ratio is not None:
+                        completion_msg += f" (Time: {result.time_ratio:.2%}, Size: {result.size_ratio:.2%})"
+
+                    self._append_log(completion_msg)
+                    if open_after_convert:
+                        self._schedule_on_ui_thread(
+                            lambda path=result.output_file: self._open_in_file_manager(
+                                path
+                            )
+                        )
+
+                self._append_log("All jobs finished successfully.")
+                self._schedule_on_ui_thread(
+                    lambda: self.open_button.configure(state=self.tk.NORMAL)
+                )
+                self._schedule_on_ui_thread(self._clear_input_files)
+            except FFmpegNotFoundError as exc:
+                self._schedule_on_ui_thread(
+                    lambda: self.messagebox.showerror("FFmpeg not found", str(exc))
+                )
+                self._set_status("Error")
+            except ProcessingAborted:
+                self._append_log("Processing aborted by user.")
+                self._set_status("Aborted")
+            except Exception as exc:  # pragma: no cover - GUI level safeguard
+                # If stop was requested, don't show error (FFmpeg termination is expected)
+                if self._stop_requested:
+                    self._append_log("Processing aborted by user.")
+                    self._set_status("Aborted")
                 else:
-                    self.root.iconphoto(False, self.tk.PhotoImage(file=str(icon_path)))
-                # If we got here without exception, icon was set successfully
-                return
-            except (self.tk.TclError, Exception) as e:
-                # Missing Tk image support or invalid icon format - try next candidate
-                continue
+                    error_msg = f"Processing failed: {exc}"
+                    self._append_log(error_msg)
+                    print(error_msg, file=sys.stderr)  # Also output to console
+                    self._schedule_on_ui_thread(
+                        lambda: self.messagebox.showerror("Error", error_msg)
+                    )
+                    self._set_status("Error")
+            finally:
+                self._run_start_time = None
+                self._schedule_on_ui_thread(self._hide_stop_button)
+
+        self._processing_thread = threading.Thread(target=worker, daemon=True)
+        self._processing_thread.start()
+
+        # Show Stop button when processing starts regardless of mode
+        self.stop_button.grid()
+
+    # ------------------------------------------------------------------ UI --
+    def _apply_window_icon(self) -> None:
+        layout_helpers.apply_window_icon(self)
 
     def _build_layout(self) -> None:
         layout_helpers.build_layout(self)
@@ -511,35 +604,8 @@ class TalksReducerGUI:
         max_attempts: int = 5,
         delay: float = 1.0,
     ) -> bool:
-        def log_callback(message: str) -> None:
-            self._schedule_on_ui_thread(lambda msg=message: self._append_log(msg))
-
-        def status_callback(status: str, message: str) -> None:
-            self._schedule_on_ui_thread(
-                lambda s=status, m=message: self._set_status(s, m)
-            )
-
-        if switch_to_local_on_failure:
-
-            def switch_callback() -> None:
-                self._schedule_on_ui_thread(
-                    lambda: self.processing_mode_var.set("local")
-                )
-
-        else:
-            switch_callback = None
-
-        if alert_on_failure:
-
-            def alert_callback(title: str, message: str) -> None:
-                self._schedule_on_ui_thread(
-                    lambda t=title, m=message: self.messagebox.showwarning(t, m)
-                )
-
-        else:
-            alert_callback = None
-
-        return check_remote_server(
+        return check_remote_server_for_gui(
+            self,
             server_url,
             success_status=success_status,
             waiting_status=waiting_status,
@@ -555,12 +621,6 @@ class TalksReducerGUI:
             warning_message=warning_message,
             max_attempts=max_attempts,
             delay=delay,
-            on_log=log_callback,
-            on_status=status_callback,
-            on_switch_to_local=switch_callback,
-            on_alert=alert_callback,
-            ping=self._ping_server,
-            sleep=time.sleep,
         )
 
     def _ping_server(self, server_url: str, *, timeout: float = 5.0) -> bool:
@@ -586,37 +646,10 @@ class TalksReducerGUI:
         self._apply_simple_mode()
 
     def _apply_simple_mode(self, *, initial: bool = False) -> None:
-        simple = self.simple_mode_var.get()
-        if simple:
-            self.basic_options_frame.grid_remove()
-            self.log_frame.grid_remove()
-            self.advanced_button.grid_remove()
-            self.advanced_frame.grid_remove()
-            self.run_after_drop_var.set(True)
-            self._apply_window_size(simple=True)
-        else:
-            self.basic_options_frame.grid()
-            self.log_frame.grid()
-            self.advanced_button.grid()
-            if self.advanced_visible.get():
-                self.advanced_frame.grid()
-            self._apply_window_size(simple=False)
-
-        if initial and simple:
-            # Ensure the hidden widgets do not retain focus outlines on start.
-            self.drop_zone.focus_set()
+        layout_helpers.apply_simple_mode(self, initial=initial)
 
     def _apply_window_size(self, *, simple: bool) -> None:
-        width, height = self._simple_size if simple else self._full_size
-        self.root.update_idletasks()
-        self.root.minsize(width, height)
-        if simple:
-            self.root.geometry(f"{width}x{height}")
-        else:
-            current_width = self.root.winfo_width()
-            current_height = self.root.winfo_height()
-            if current_width < width or current_height < height:
-                self.root.geometry(f"{width}x{height}")
+        layout_helpers.apply_window_size(self, simple=simple)
 
     def _toggle_advanced(self, *, initial: bool = False) -> None:
         if not initial:
@@ -794,132 +827,6 @@ class TalksReducerGUI:
         if result:
             variable.set(result)
 
-    def _start_run(self) -> None:
-        if self._processing_thread and self._processing_thread.is_alive():
-            self.messagebox.showinfo("Processing", "A job is already running.")
-            return
-
-        if not self.input_files:
-            self.messagebox.showwarning(
-                "Missing input", "Please add at least one file or folder."
-            )
-            return
-
-        try:
-            args = self._collect_arguments()
-        except ValueError as exc:
-            self.messagebox.showerror("Invalid value", str(exc))
-            return
-
-        self._append_log("Starting processing…")
-        self._stop_requested = False
-        self.stop_button.configure(text="Stop")
-        self._run_start_time = time.monotonic()
-        self._ping_worker_stop_requested = True
-        open_after_convert = bool(self.open_after_convert_var.get())
-        server_url = self.server_url_var.get().strip()
-        remote_mode = self.processing_mode_var.get() == "remote"
-        if remote_mode and not server_url:
-            self.messagebox.showerror(
-                "Missing server URL", "Remote mode requires a server URL."
-            )
-        remote_mode = remote_mode and bool(server_url)
-
-        # Store remote_mode for use after thread starts
-        self._current_remote_mode = remote_mode
-
-        def worker() -> None:
-            def set_process(proc: subprocess.Popen) -> None:
-                self._ffmpeg_process = proc
-
-            try:
-                files = gather_input_files(self.input_files)
-                if not files:
-                    self._schedule_on_ui_thread(
-                        lambda: self.messagebox.showwarning(
-                            "No files", "No supported media files were found."
-                        )
-                    )
-                    self._set_status("Idle")
-                    return
-
-                if self._current_remote_mode:
-                    success = self._process_files_via_server(
-                        files,
-                        args,
-                        server_url,
-                        open_after_convert=open_after_convert,
-                    )
-                    if success:
-                        self._schedule_on_ui_thread(self._hide_stop_button)
-                        return
-                    # If server processing failed, fall back to local processing
-                    # The _process_files_via_server function already switched to local mode
-                    # Update remote_mode variable to reflect the change
-                    self._current_remote_mode = False
-
-                reporter = _TkProgressReporter(
-                    self._append_log,
-                    process_callback=set_process,
-                    stop_callback=lambda: self._stop_requested,
-                )
-                for index, file in enumerate(files, start=1):
-                    self._append_log(f"Processing: {os.path.basename(file)}")
-                    options = self._create_processing_options(Path(file), args)
-                    result = speed_up_video(options, reporter=reporter)
-                    self._last_output = result.output_file
-                    self._last_time_ratio = result.time_ratio
-                    self._last_size_ratio = result.size_ratio
-
-                    # Create completion message with ratios if available
-                    completion_msg = f"Completed: {result.output_file}"
-                    if result.time_ratio is not None and result.size_ratio is not None:
-                        completion_msg += f" (Time: {result.time_ratio:.2%}, Size: {result.size_ratio:.2%})"
-
-                    self._append_log(completion_msg)
-                    if open_after_convert:
-                        self._schedule_on_ui_thread(
-                            lambda path=result.output_file: self._open_in_file_manager(
-                                path
-                            )
-                        )
-
-                self._append_log("All jobs finished successfully.")
-                self._schedule_on_ui_thread(
-                    lambda: self.open_button.configure(state=self.tk.NORMAL)
-                )
-                self._schedule_on_ui_thread(self._clear_input_files)
-            except FFmpegNotFoundError as exc:
-                self._schedule_on_ui_thread(
-                    lambda: self.messagebox.showerror("FFmpeg not found", str(exc))
-                )
-                self._set_status("Error")
-            except ProcessingAborted:
-                self._append_log("Processing aborted by user.")
-                self._set_status("Aborted")
-            except Exception as exc:  # pragma: no cover - GUI level safeguard
-                # If stop was requested, don't show error (FFmpeg termination is expected)
-                if self._stop_requested:
-                    self._append_log("Processing aborted by user.")
-                    self._set_status("Aborted")
-                else:
-                    error_msg = f"Processing failed: {exc}"
-                    self._append_log(error_msg)
-                    print(error_msg, file=sys.stderr)  # Also output to console
-                    self._schedule_on_ui_thread(
-                        lambda: self.messagebox.showerror("Error", error_msg)
-                    )
-                    self._set_status("Error")
-            finally:
-                self._run_start_time = None
-                self._schedule_on_ui_thread(self._hide_stop_button)
-
-        self._processing_thread = threading.Thread(target=worker, daemon=True)
-        self._processing_thread.start()
-
-        # Show Stop button when processing starts regardless of mode
-        self.stop_button.grid()
-
     def _stop_processing(self) -> None:
         """Stop the currently running processing by terminating FFmpeg."""
         import signal
@@ -996,132 +903,15 @@ class TalksReducerGUI:
     ) -> bool:
         """Send *files* to the configured server for processing."""
 
-        def _ensure_not_stopped() -> None:
-            if self._stop_requested:
-                raise ProcessingAborted("Remote processing cancelled by user.")
-
-        try:
-            service_module = importlib.import_module("talks_reducer.service_client")
-        except ModuleNotFoundError as exc:
-            self._append_log(f"Server client unavailable: {exc}")
-            self._schedule_on_ui_thread(
-                lambda: self.messagebox.showerror(
-                    "Server unavailable",
-                    "Remote processing requires the gradio_client package.",
-                )
-            )
-            self._schedule_on_ui_thread(lambda: self._set_status("Error"))
-            return False
-
-        host_label = self._format_server_host(server_url)
-        self._schedule_on_ui_thread(
-            lambda: self._set_status("waiting", f"Waiting server {host_label}...")
-        )
-
-        available = self._check_remote_server(
+        return process_files_via_server(
+            self,
+            files,
+            args,
             server_url,
-            success_status="waiting",
-            waiting_status="Error",
-            failure_status="Error",
-            failure_message="Server {host} is unreachable after {max_attempts} attempts. Switching to local mode.",
-            stop_check=lambda: self._stop_requested,
-            on_stop=_ensure_not_stopped,
-            switch_to_local_on_failure=True,
-            alert_on_failure=True,
-            warning_message="Server {host} is not reachable. Switching to local processing mode.",
+            open_after_convert=open_after_convert,
+            default_remote_destination=_default_remote_destination,
+            parse_summary=_parse_ratios_from_summary,
         )
-
-        _ensure_not_stopped()
-
-        if not available:
-            return False
-
-        output_override = args.get("output_file") if len(files) == 1 else None
-        allowed_remote_keys = {
-            "output_file",
-            "small",
-            "silent_threshold",
-            "sounded_speed",
-            "silent_speed",
-        }
-        ignored = [key for key in args if key not in allowed_remote_keys]
-        if ignored:
-            ignored_options = ", ".join(sorted(ignored))
-            self._append_log(
-                f"Server mode ignores the following options: {ignored_options}"
-            )
-
-        small_mode = bool(args.get("small", False))
-
-        for index, file in enumerate(files, start=1):
-            _ensure_not_stopped()
-            basename = os.path.basename(file)
-            self._append_log(
-                f"Uploading {index}/{len(files)}: {basename} to {server_url}"
-            )
-            input_path = Path(file)
-
-            if output_override is not None:
-                output_path = Path(output_override)
-                if output_path.is_dir():
-                    output_path = (
-                        output_path
-                        / _default_remote_destination(input_path, small=small_mode).name
-                    )
-            else:
-                output_path = _default_remote_destination(input_path, small=small_mode)
-
-            try:
-                destination, summary, log_text = service_module.send_video(
-                    input_path=input_path,
-                    output_path=output_path,
-                    server_url=server_url,
-                    small=small_mode,
-                    silent_threshold=args.get("silent_threshold"),
-                    sounded_speed=args.get("sounded_speed"),
-                    silent_speed=args.get("silent_speed"),
-                    stream_updates=True,
-                    log_callback=self._append_log,
-                    should_cancel=lambda: self._stop_requested,
-                    # progress_callback=self._handle_service_progress,
-                )
-                _ensure_not_stopped()
-            except ProcessingAborted:
-                raise
-            except Exception as exc:  # pragma: no cover - network safeguard
-                error_detail = f"{exc.__class__.__name__}: {exc}"
-                error_msg = f"Processing failed: {error_detail}"
-                self._append_log(error_msg)
-                self._schedule_on_ui_thread(lambda: self._set_status("Error"))
-                self._schedule_on_ui_thread(
-                    lambda: self.messagebox.showerror(
-                        "Server error",
-                        f"Failed to process {basename}: {error_detail}",
-                    )
-                )
-                return False
-
-            self._last_output = Path(destination)
-            time_ratio, size_ratio = _parse_ratios_from_summary(summary)
-            self._last_time_ratio = time_ratio
-            self._last_size_ratio = size_ratio
-            for line in summary.splitlines():
-                self._append_log(line)
-            if log_text.strip():
-                self._append_log("Server log:")
-                for line in log_text.splitlines():
-                    self._append_log(line)
-            if open_after_convert:
-                self._schedule_on_ui_thread(
-                    lambda path=self._last_output: self._open_in_file_manager(path)
-                )
-
-        self._append_log("All jobs finished successfully.")
-        self._schedule_on_ui_thread(
-            lambda: self.open_button.configure(state=self.tk.NORMAL)
-        )
-        self._schedule_on_ui_thread(self._clear_input_files)
-        return True
 
     def _parse_float(self, value: str, label: str) -> float:
         try:
@@ -1650,7 +1440,14 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
     parsed_args, remaining = parser.parse_known_args(argv)
     if parsed_args.server:
         package_name = __package__ or "talks_reducer"
-        tray_module = importlib.import_module(f"{package_name}.server_tray")
+        module_name = f"{package_name}.server_tray"
+        try:
+            tray_module = importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            if exc.name != module_name:
+                raise
+            root_package = package_name.split(".")[0] or "talks_reducer"
+            tray_module = importlib.import_module(f"{root_package}.server_tray")
         tray_main = getattr(tray_module, "main")
         tray_main(remaining)
         return False

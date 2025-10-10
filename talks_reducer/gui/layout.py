@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from ..models import default_temp_folder
@@ -447,3 +449,78 @@ def reset_basic_defaults(gui: "TalksReducerGUI") -> None:
             gui.preferences.update(key, float(f"{default_value:.6f}"))
 
     update_basic_reset_state(gui)
+
+
+def apply_window_icon(gui: "TalksReducerGUI") -> None:
+    """Configure the application icon when the asset is available."""
+
+    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+
+    icon_candidates: list[tuple[Path, str]] = []
+    if sys.platform.startswith("win"):
+        icon_candidates.append(
+            (
+                base_path / "talks_reducer" / "resources" / "icons" / "icon.ico",
+                "ico",
+            )
+        )
+    icon_candidates.append(
+        (
+            base_path / "talks_reducer" / "resources" / "icons" / "icon.png",
+            "png",
+        )
+    )
+
+    for icon_path, icon_type in icon_candidates:
+        if not icon_path.is_file():
+            continue
+
+        try:
+            if icon_type == "ico" and sys.platform.startswith("win"):
+                # On Windows, iconbitmap works better without the 'default' parameter
+                gui.root.iconbitmap(str(icon_path))
+            else:
+                gui.root.iconphoto(False, gui.tk.PhotoImage(file=str(icon_path)))
+            return
+        except (gui.tk.TclError, Exception):
+            # Missing Tk image support or invalid icon format - try next candidate
+            continue
+
+
+def apply_window_size(gui: "TalksReducerGUI", *, simple: bool) -> None:
+    """Apply the appropriate window geometry for the current mode."""
+
+    width, height = gui._simple_size if simple else gui._full_size
+    gui.root.update_idletasks()
+    gui.root.minsize(width, height)
+    if simple:
+        gui.root.geometry(f"{width}x{height}")
+    else:
+        current_width = gui.root.winfo_width()
+        current_height = gui.root.winfo_height()
+        if current_width < width or current_height < height:
+            gui.root.geometry(f"{width}x{height}")
+
+
+def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
+    """Toggle between simple and full layouts."""
+
+    simple = gui.simple_mode_var.get()
+    if simple:
+        gui.basic_options_frame.grid_remove()
+        gui.log_frame.grid_remove()
+        gui.advanced_button.grid_remove()
+        gui.advanced_frame.grid_remove()
+        gui.run_after_drop_var.set(True)
+        apply_window_size(gui, simple=True)
+    else:
+        gui.basic_options_frame.grid()
+        gui.log_frame.grid()
+        gui.advanced_button.grid()
+        if gui.advanced_visible.get():
+            gui.advanced_frame.grid()
+        apply_window_size(gui, simple=False)
+
+    if initial and simple:
+        # Ensure the hidden widgets do not retain focus outlines on start.
+        gui.drop_zone.focus_set()
