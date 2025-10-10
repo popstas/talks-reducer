@@ -64,6 +64,94 @@ def test_parse_source_duration_seconds_handles_invalid_value():
     assert duration is None
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Final encode target frames: 4800",
+        "Final encode target frames (fallback): 98765",
+    ],
+)
+def test_parse_encode_total_frames_extracts_values(message):
+    found, frames = app._parse_encode_total_frames(message)
+
+    assert found is True
+    assert frames == int(message.rsplit(":", 1)[-1].strip())
+
+
+def test_parse_encode_total_frames_handles_invalid_number():
+    message = "Final encode target frames: not-a-number"
+
+    found, frames = app._parse_encode_total_frames(message)
+
+    assert found is False
+    assert frames is None
+
+
+def test_parse_encode_total_frames_missing_returns_false():
+    found, frames = app._parse_encode_total_frames("No frame info here")
+
+    assert found is False
+    assert frames is None
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("frame=   42", 42),
+        ("frame=1000 fps=30", 1000),
+    ],
+)
+def test_parse_current_frame_extracts_integer(message, expected):
+    found, frame = app._parse_current_frame(message)
+
+    assert found is True
+    assert frame == expected
+
+
+def test_parse_current_frame_handles_invalid_number():
+    found, frame = app._parse_current_frame("frame=notanint")
+
+    assert found is False
+    assert frame is None
+
+
+def test_parse_current_frame_missing_returns_false():
+    found, frame = app._parse_current_frame("no frame information")
+
+    assert found is False
+    assert frame is None
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("Final encode target duration: 12.5s", 12.5),
+        ("Final encode target duration (fallback): 30s", 30.0),
+    ],
+)
+def test_parse_encode_target_duration_extracts_seconds(message, expected):
+    found, duration = app._parse_encode_target_duration(message)
+
+    assert found is True
+    assert duration == expected
+
+
+def test_parse_encode_target_duration_handles_invalid_value():
+    found, duration = app._parse_encode_target_duration(
+        "Final encode target duration: 5.5.5s"
+    )
+
+    assert found is True
+    assert duration is None
+
+
+def test_parse_encode_target_duration_missing_returns_false():
+    found, duration = app._parse_encode_target_duration("no duration info")
+
+    assert found is False
+    assert duration is None
+
+
 def test_parse_video_duration_seconds_extracts_total_seconds():
     message = "Duration: 00:05:10.50"
 
