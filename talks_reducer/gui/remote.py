@@ -219,6 +219,12 @@ def check_remote_server_for_gui(
     )
 
 
+def _load_service_client() -> object:
+    """Return the Talks Reducer service client module."""
+
+    return importlib.import_module("talks_reducer.service_client")
+
+
 def process_files_via_server(
     gui: "TalksReducerGUI",
     files: List[str],
@@ -228,6 +234,8 @@ def process_files_via_server(
     open_after_convert: bool,
     default_remote_destination: Callable[[Path, bool], Path],
     parse_summary: Callable[[str], tuple[Optional[float], Optional[float]]],
+    load_service_client: Callable[[], object] = _load_service_client,
+    check_server: Callable[..., bool] = check_remote_server_for_gui,
 ) -> bool:
     """Send *files* to the configured server for processing."""
 
@@ -236,7 +244,7 @@ def process_files_via_server(
             raise ProcessingAborted("Remote processing cancelled by user.")
 
     try:
-        service_module = importlib.import_module("talks_reducer.service_client")
+        service_module = load_service_client()
     except ModuleNotFoundError as exc:
         gui._append_log(f"Server client unavailable: {exc}")
         gui._schedule_on_ui_thread(
@@ -253,7 +261,7 @@ def process_files_via_server(
         lambda: gui._set_status("waiting", f"Waiting server {host_label}...")
     )
 
-    available = check_remote_server_for_gui(
+    available = check_server(
         gui,
         server_url,
         success_status="waiting",
