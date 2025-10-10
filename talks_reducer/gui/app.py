@@ -133,6 +133,124 @@ def _parse_ratios_from_summary(summary: str) -> Tuple[Optional[float], Optional[
     return time_ratio, size_ratio
 
 
+def _parse_source_duration_seconds(message: str) -> tuple[bool, Optional[float]]:
+    """Return whether *message* includes source duration metadata."""
+
+    metadata_match = re.search(
+        r"source metadata: duration:\s*([\d.]+)s",
+        message,
+        re.IGNORECASE,
+    )
+    if not metadata_match:
+        return False, None
+
+    try:
+        return True, float(metadata_match.group(1))
+    except ValueError:
+        return True, None
+
+
+def _parse_encode_total_frames(message: str) -> tuple[bool, Optional[int]]:
+    """Extract final encode frame totals from *message* when present."""
+
+    frame_total_match = re.search(
+        r"Final encode target frames(?: \(fallback\))?:\s*(\d+)", message
+    )
+    if not frame_total_match:
+        return False, None
+
+    try:
+        return True, int(frame_total_match.group(1))
+    except ValueError:
+        return True, None
+
+
+def _is_encode_total_frames_unknown(normalized_message: str) -> bool:
+    """Return ``True`` if *normalized_message* marks encode frame totals unknown."""
+
+    return (
+        "final encode target frames" in normalized_message
+        and "unknown" in normalized_message
+    )
+
+
+def _parse_current_frame(message: str) -> tuple[bool, Optional[int]]:
+    """Extract the current encode frame from *message* when available."""
+
+    frame_match = re.search(r"frame=\s*(\d+)", message)
+    if not frame_match:
+        return False, None
+
+    try:
+        return True, int(frame_match.group(1))
+    except ValueError:
+        return True, None
+
+
+def _parse_encode_target_duration(message: str) -> tuple[bool, Optional[float]]:
+    """Extract encode target duration from *message* if reported."""
+
+    encode_duration_match = re.search(
+        r"Final encode target duration(?: \(fallback\))?:\s*([\d.]+)s",
+        message,
+    )
+    if not encode_duration_match:
+        return False, None
+
+    try:
+        return True, float(encode_duration_match.group(1))
+    except ValueError:
+        return True, None
+
+
+def _is_encode_target_duration_unknown(normalized_message: str) -> bool:
+    """Return ``True`` if encode target duration is reported as unknown."""
+
+    return (
+        "final encode target duration" in normalized_message
+        and "unknown" in normalized_message
+    )
+
+
+def _parse_video_duration_seconds(message: str) -> tuple[bool, Optional[float]]:
+    """Parse the input video duration from *message* when FFmpeg prints it."""
+
+    duration_match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)", message)
+    if not duration_match:
+        return False, None
+
+    try:
+        hours = int(duration_match.group(1))
+        minutes = int(duration_match.group(2))
+        seconds = float(duration_match.group(3))
+    except ValueError:
+        return True, None
+
+    total_seconds = hours * 3600 + minutes * 60 + seconds
+    return True, total_seconds
+
+
+def _parse_ffmpeg_progress(message: str) -> tuple[bool, Optional[tuple[int, str]]]:
+    """Parse FFmpeg progress information from *message* if available."""
+
+    time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.\d+", message)
+    speed_match = re.search(r"speed=\s*([\d.]+)x", message)
+
+    if not (time_match and speed_match):
+        return False, None
+
+    try:
+        hours = int(time_match.group(1))
+        minutes = int(time_match.group(2))
+        seconds = int(time_match.group(3))
+    except ValueError:
+        return True, None
+
+    current_seconds = hours * 3600 + minutes * 60 + seconds
+    speed_str = speed_match.group(1)
+    return True, (current_seconds, speed_str)
+
+
 class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
 
@@ -815,17 +933,90 @@ class TalksReducerGUI:
 
     def _update_status_from_message(self, message: str) -> None:
         normalized = message.strip().lower()
-        metadata_match = re.search(
-            r"source metadata: duration:\s*([\d.]+)s",
-            message,
-            re.IGNORECASE,
-        )
-        if metadata_match:
-            try:
-                self._source_duration_seconds = float(metadata_match.group(1))
-            except ValueError:
-                self._source_duration_seconds = None
-        if "all jobs finished successfully" in normalized:
+
+        metadata_found, source_duration = _parse_source_duration_seconds(message)
+        if metadata_found:
+            self._source_duration_seconds = source_duration
+
+        if self._handle_status_transitions(normalized):
+            return
+
+        frame_total_found, frame_total = _parse_encode_total_frames(message)
+        if frame_total_found:
+            self._encode_total_frames = frame_total
+            return
+
+        if _is_encode_total_frames_unknown(normalized):
+            self._encode_total_frames = None
+            return
+
+        frame_found, current_frame = _parse_current_frame(message)
+        if frame_found:
+            if current_frame is None:
+                return
+
+            if self._encode_current_frame == current_frame:
+                return
+
+            self._encode_current_frame = current_frame
+            if self._encode_total_frames and self._encode_total_frames > 0:
+                self._complete_audio_phase()
+                frame_ratio = min(current_frame / self._encode_total_frames, 1.0)
+                percentage = min(100, 5 + int(frame_ratio * 95))
+                self._set_progress(percentage)
+            else:
+                self._complete_audio_phase()
+                self._set_status("processing", f"{current_frame} frames encoded")
+
+        duration_found, encode_duration = _parse_encode_target_duration(message)
+        if duration_found:
+            self._encode_target_duration_seconds = encode_duration
+
+        if _is_encode_target_duration_unknown(normalized):
+            self._encode_target_duration_seconds = None
+
+        video_duration_found, video_duration = _parse_video_duration_seconds(message)
+        if video_duration_found and video_duration is not None:
+            self._video_duration_seconds = video_duration
+
+        progress_found, progress_info = _parse_ffmpeg_progress(message)
+        if progress_found and progress_info is not None:
+            current_seconds, speed_str = progress_info
+            time_str = self._format_progress_time(current_seconds)
+
+            self._last_progress_seconds = current_seconds
+
+            total_seconds = (
+                self._encode_target_duration_seconds or self._video_duration_seconds
+            )
+            if total_seconds:
+                total_str = self._format_progress_time(total_seconds)
+                time_display = f"{time_str} / {total_str}"
+            else:
+                time_display = time_str
+
+            status_msg = f"{time_display}, {speed_str}x"
+
+            if (
+                (
+                    not self._encode_total_frames
+                    or self._encode_total_frames <= 0
+                    or self._encode_current_frame is None
+                )
+                and total_seconds
+                and total_seconds > 0
+            ):
+                self._complete_audio_phase()
+                time_ratio = min(current_seconds / total_seconds, 1.0)
+                percentage = min(100, 5 + int(time_ratio * 95))
+                self._set_progress(percentage)
+
+            self._set_status("processing", status_msg)
+
+    def _handle_status_transitions(self, normalized_message: str) -> bool:
+        """Handle high-level status transitions for *normalized_message*."""
+
+        if "all jobs finished successfully" in normalized_message:
             status_components: List[str] = []
             if self._run_start_time is not None:
                 finish_time = time.monotonic()
@@ -861,40 +1052,48 @@ class TalksReducerGUI:
 
             self._reset_audio_progress_state(clear_source=True)
             self._set_status("success", status_msg)
-            self._set_progress(100)  # 100% on success
+            self._set_progress(100)
             self._run_start_time = None
-            self._video_duration_seconds = None  # Reset for next video
+            self._video_duration_seconds = None
             self._encode_target_duration_seconds = None
             self._encode_total_frames = None
             self._encode_current_frame = None
             self._last_progress_seconds = None
-        elif normalized.startswith("extracting audio"):
+            return True
+
+        if normalized_message.startswith("extracting audio"):
             self._reset_audio_progress_state(clear_source=False)
             self._set_status("processing", "Extracting audio...")
-            self._set_progress(0)  # 0% on start
-            self._video_duration_seconds = None  # Reset for new processing
+            self._set_progress(0)
+            self._video_duration_seconds = None
             self._encode_target_duration_seconds = None
             self._encode_total_frames = None
             self._encode_current_frame = None
             self._last_progress_seconds = None
             self._start_audio_progress()
-        elif normalized.startswith("uploading"):
+            return False
+
+        if normalized_message.startswith("uploading"):
             self._set_status("processing", "Uploading...")
-        elif normalized.startswith("starting processing"):
+            return False
+
+        if normalized_message.startswith("starting processing"):
             self._reset_audio_progress_state(clear_source=True)
             self._set_status("processing", "Processing")
-            self._set_progress(0)  # 0% on start
-            self._video_duration_seconds = None  # Reset for new processing
+            self._set_progress(0)
+            self._video_duration_seconds = None
             self._encode_target_duration_seconds = None
             self._encode_total_frames = None
             self._encode_current_frame = None
             self._last_progress_seconds = None
-        elif normalized.startswith("processing"):
-            is_new_job = bool(re.match(r"processing \d+/\d+:", normalized))
+            return False
+
+        if normalized_message.startswith("processing"):
+            is_new_job = bool(re.match(r"processing \d+/\d+:", normalized_message))
             should_reset = self._status_state.lower() != "processing" or is_new_job
             if should_reset:
-                self._set_progress(0)  # 0% on start
-                self._video_duration_seconds = None  # Reset for new processing
+                self._set_progress(0)
+                self._video_duration_seconds = None
                 self._encode_target_duration_seconds = None
                 self._encode_total_frames = None
                 self._encode_current_frame = None
@@ -902,103 +1101,9 @@ class TalksReducerGUI:
             if is_new_job:
                 self._reset_audio_progress_state(clear_source=True)
             self._set_status("processing", "Processing")
+            return False
 
-        frame_total_match = re.search(
-            r"Final encode target frames(?: \(fallback\))?:\s*(\d+)", message
-        )
-        if frame_total_match:
-            self._encode_total_frames = int(frame_total_match.group(1))
-            return
-
-        if "final encode target frames" in normalized and "unknown" in normalized:
-            self._encode_total_frames = None
-            return
-
-        frame_match = re.search(r"frame=\s*(\d+)", message)
-        if frame_match:
-            try:
-                current_frame = int(frame_match.group(1))
-            except ValueError:
-                current_frame = None
-
-            if current_frame is not None:
-                if self._encode_current_frame == current_frame:
-                    return
-
-                self._encode_current_frame = current_frame
-                if self._encode_total_frames and self._encode_total_frames > 0:
-                    self._complete_audio_phase()
-                    frame_ratio = min(current_frame / self._encode_total_frames, 1.0)
-                    percentage = min(100, 5 + int(frame_ratio * 95))
-                    self._set_progress(percentage)
-                else:
-                    self._complete_audio_phase()
-                    self._set_status("processing", f"{current_frame} frames encoded")
-
-        # Parse encode target duration reported by the pipeline
-        encode_duration_match = re.search(
-            r"Final encode target duration(?: \(fallback\))?:\s*([\d.]+)s",
-            message,
-        )
-        if encode_duration_match:
-            try:
-                self._encode_target_duration_seconds = float(
-                    encode_duration_match.group(1)
-                )
-            except ValueError:
-                self._encode_target_duration_seconds = None
-
-        if "final encode target duration" in normalized and "unknown" in normalized:
-            self._encode_target_duration_seconds = None
-
-        # Parse video duration from FFmpeg output
-        duration_match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)", message)
-        if duration_match:
-            hours = int(duration_match.group(1))
-            minutes = int(duration_match.group(2))
-            seconds = float(duration_match.group(3))
-            self._video_duration_seconds = hours * 3600 + minutes * 60 + seconds
-
-        # Parse FFmpeg progress information (time and speed)
-        time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.\d+", message)
-        speed_match = re.search(r"speed=\s*([\d.]+)x", message)
-
-        if time_match and speed_match:
-            hours = int(time_match.group(1))
-            minutes = int(time_match.group(2))
-            seconds = int(time_match.group(3))
-            current_seconds = hours * 3600 + minutes * 60 + seconds
-            time_str = self._format_progress_time(current_seconds)
-            speed_str = speed_match.group(1)
-
-            self._last_progress_seconds = current_seconds
-
-            total_seconds = (
-                self._encode_target_duration_seconds or self._video_duration_seconds
-            )
-            if total_seconds:
-                total_str = self._format_progress_time(total_seconds)
-                time_display = f"{time_str} / {total_str}"
-            else:
-                time_display = time_str
-
-            status_msg = f"{time_display}, {speed_str}x"
-
-            if (
-                (
-                    not self._encode_total_frames
-                    or self._encode_total_frames <= 0
-                    or self._encode_current_frame is None
-                )
-                and total_seconds
-                and total_seconds > 0
-            ):
-                self._complete_audio_phase()
-                time_ratio = min(current_seconds / total_seconds, 1.0)
-                percentage = min(100, 5 + int(time_ratio * 95))
-                self._set_progress(percentage)
-
-            self._set_status("processing", status_msg)
+        return False
 
     def _compute_audio_progress_interval(self) -> int:
         duration = self._source_duration_seconds or self._video_duration_seconds
