@@ -383,21 +383,23 @@ def build_interface() -> gr.Blocks:
             """.strip()
         )
 
-        with gr.Row():
+        with gr.Column():
             file_input = gr.File(
                 label="Video file",
                 file_types=["video"],
                 type="filepath",
             )
-            small_checkbox = gr.Checkbox(label="Small video", value=True)
 
         with gr.Row():
-            silent_threshold_input = gr.Slider(
-                minimum=0.0,
-                maximum=1.0,
-                value=0.05,
-                step=0.01,
-                label="Silent threshold",
+            small_checkbox = gr.Checkbox(label="Small video", value=True)
+
+        with gr.Column():
+            silent_speed_input = gr.Slider(
+                minimum=1.0,
+                maximum=10.0,
+                value=4.0,
+                step=0.1,
+                label="Silent speed",
             )
             sounded_speed_input = gr.Slider(
                 minimum=0.5,
@@ -406,12 +408,12 @@ def build_interface() -> gr.Blocks:
                 step=0.05,
                 label="Sounded speed",
             )
-            silent_speed_input = gr.Slider(
-                minimum=1.0,
-                maximum=10.0,
-                value=4.0,
-                step=0.1,
-                label="Silent speed",
+            silent_threshold_input = gr.Slider(
+                minimum=0.0,
+                maximum=1.0,
+                value=0.05,
+                step=0.01,
+                label="Silent threshold",
             )
 
         video_output = gr.Video(label="Processed video")
