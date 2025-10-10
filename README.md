@@ -1,4 +1,4 @@
-# Talks Reducer 
+# Talks Reducer [![Coverage Status](https://coveralls.io/repos/github/popstas/talks-reducer/badge.svg?branch=master)](https://coveralls.io/github/popstas/talks-reducer?branch=master)
 
 Talks Reducer shortens long-form presentations by removing silent gaps and optionally re-encoding them to smaller files. The
 project was renamed from **jumpcutter** to emphasize its focus on conference talks and screencasts.
