@@ -1551,7 +1551,7 @@ class TalksReducerGUI:
                 )
                 for index, file in enumerate(files, start=1):
                     self._append_log(
-                        f"Processing {index}/{len(files)}: {os.path.basename(file)}"
+                        f"Processing: {os.path.basename(file)}"
                     )
                     options = self._build_options(Path(file), args)
                     result = speed_up_video(options, reporter=reporter)
@@ -1833,7 +1833,7 @@ class TalksReducerGUI:
     def _update_status_from_message(self, message: str) -> None:
         normalized = message.strip().lower()
         metadata_match = re.search(
-            r"source metadata [—-] duration:\s*([\d.]+)s",
+            r"source metadata: duration:\s*([\d.]+)s",
             message,
             re.IGNORECASE,
         )

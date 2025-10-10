@@ -25,103 +25,6 @@ from .models import ProcessingOptions, ProcessingResult
 from .progress import NullProgressReporter, ProgressReporter
 
 
-def _input_to_output_filename(filename: Path, small: bool = False) -> Path:
-    dot_index = filename.name.rfind(".")
-    suffix_parts = []
-
-    if small:
-        suffix_parts.append("_small")
-
-    if not suffix_parts:
-        suffix_parts.append("")  # Default case
-
-    suffix = "_speedup" + "".join(suffix_parts)
-    new_name = (
-        filename.name[:dot_index] + suffix + filename.name[dot_index:]
-        if dot_index != -1
-        else filename.name + suffix
-    )
-    return filename.with_name(new_name)
-
-
-def _create_path(path: Path) -> None:
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:  # pragma: no cover - defensive logging
-        raise AssertionError(
-            "Creation of the directory failed. (The TEMP folder may already exist. Delete or rename it, and try again.)"
-        ) from exc
-
-
-def _delete_path(path: Path) -> None:
-    import time
-    from shutil import rmtree
-
-    try:
-        rmtree(path, ignore_errors=False)
-        for i in range(5):
-            if not path.exists():
-                return
-            time.sleep(0.01 * i)
-    except OSError as exc:  # pragma: no cover - defensive logging
-        print(f"Deletion of the directory {path} failed")
-        print(exc)
-
-
-def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, float]:
-    from .ffmpeg import get_ffprobe_path
-
-    ffprobe_path = get_ffprobe_path()
-    command = [
-        ffprobe_path,
-        "-i",
-        os.fspath(input_file),
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-select_streams",
-        "v",
-        "-show_entries",
-        "format=duration:stream=avg_frame_rate,nb_frames",
-    ]
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-        universal_newlines=True,
-    )
-    stdout, _ = process.communicate()
-
-    match_frame_rate = re.search(r"frame_rate=(\d*)/(\d*)", str(stdout))
-    if match_frame_rate is not None:
-        frame_rate = float(match_frame_rate.group(1)) / float(match_frame_rate.group(2))
-
-    match_duration = re.search(r"duration=([\d.]*)", str(stdout))
-    original_duration = float(match_duration.group(1)) if match_duration else 0.0
-
-    match_frames = re.search(r"nb_frames=(\d+)", str(stdout))
-    frame_count = int(match_frames.group(1)) if match_frames else 0
-
-    return {
-        "frame_rate": frame_rate,
-        "duration": original_duration,
-        "frame_count": frame_count,
-    }
-
-
-def _ensure_two_dimensional(audio_data: np.ndarray) -> np.ndarray:
-    if audio_data.ndim == 1:
-        return audio_data[:, np.newaxis]
-    return audio_data
-
-
-def _prepare_output_audio(output_audio_data: np.ndarray) -> np.ndarray:
-    if output_audio_data.ndim == 2 and output_audio_data.shape[1] == 1:
-        return output_audio_data[:, 0]
-    return output_audio_data
-
-
 def speed_up_video(
     options: ProcessingOptions, reporter: ProgressReporter | None = None
 ) -> ProcessingResult:
@@ -154,8 +57,8 @@ def speed_up_video(
 
     reporter.log(
         (
-            "Source metadata — duration: {duration:.2f}s, frame rate: {fps:.3f} fps,"
-            " reported frames: {frames}"
+            "Source metadata: duration: {duration:.2f}s, frame rate: {fps:.3f} fps,"
+            " frames: {frames}"
         ).format(
             duration=original_duration,
             fps=frame_rate,
@@ -211,8 +114,7 @@ def speed_up_video(
     audio_sample_count = audio_data.shape[0]
     max_audio_volume = audio_utils.get_max_volume(audio_data)
 
-    reporter.log("\nInformation:")
-    reporter.log(f"- Max Audio Volume: {max_audio_volume}")
+    reporter.log(f"Max Audio Volume: {max_audio_volume}")
 
     samples_per_frame = wav_sample_rate / frame_rate
     audio_frame_count = int(math.ceil(audio_sample_count / samples_per_frame))
@@ -227,7 +129,7 @@ def speed_up_video(
 
     chunks, _ = chunk_utils.build_chunks(has_loud_audio, options.frame_spreadage)
 
-    reporter.log(f"Generated {len(chunks)} chunks")
+    reporter.log(f"Processing {len(chunks)} chunks...")
 
     new_speeds = [options.silent_speed, options.sounded_speed]
     output_audio_data, updated_chunks = audio_utils.process_audio_chunks(
@@ -364,3 +266,99 @@ def speed_up_video(
         time_ratio=time_ratio,
         size_ratio=size_ratio,
     )
+
+def _input_to_output_filename(filename: Path, small: bool = False) -> Path:
+    dot_index = filename.name.rfind(".")
+    suffix_parts = []
+
+    if small:
+        suffix_parts.append("_small")
+
+    if not suffix_parts:
+        suffix_parts.append("")  # Default case
+
+    suffix = "_speedup" + "".join(suffix_parts)
+    new_name = (
+        filename.name[:dot_index] + suffix + filename.name[dot_index:]
+        if dot_index != -1
+        else filename.name + suffix
+    )
+    return filename.with_name(new_name)
+
+
+def _create_path(path: Path) -> None:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:  # pragma: no cover - defensive logging
+        raise AssertionError(
+            "Creation of the directory failed. (The TEMP folder may already exist. Delete or rename it, and try again.)"
+        ) from exc
+
+
+def _delete_path(path: Path) -> None:
+    import time
+    from shutil import rmtree
+
+    try:
+        rmtree(path, ignore_errors=False)
+        for i in range(5):
+            if not path.exists():
+                return
+            time.sleep(0.01 * i)
+    except OSError as exc:  # pragma: no cover - defensive logging
+        print(f"Deletion of the directory {path} failed")
+        print(exc)
+
+
+def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, float]:
+    from .ffmpeg import get_ffprobe_path
+
+    ffprobe_path = get_ffprobe_path()
+    command = [
+        ffprobe_path,
+        "-i",
+        os.fspath(input_file),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-select_streams",
+        "v",
+        "-show_entries",
+        "format=duration:stream=avg_frame_rate,nb_frames",
+    ]
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=1,
+        universal_newlines=True,
+    )
+    stdout, _ = process.communicate()
+
+    match_frame_rate = re.search(r"frame_rate=(\d*)/(\d*)", str(stdout))
+    if match_frame_rate is not None:
+        frame_rate = float(match_frame_rate.group(1)) / float(match_frame_rate.group(2))
+
+    match_duration = re.search(r"duration=([\d.]*)", str(stdout))
+    original_duration = float(match_duration.group(1)) if match_duration else 0.0
+
+    match_frames = re.search(r"nb_frames=(\d+)", str(stdout))
+    frame_count = int(match_frames.group(1)) if match_frames else 0
+
+    return {
+        "frame_rate": frame_rate,
+        "duration": original_duration,
+        "frame_count": frame_count,
+    }
+
+
+def _ensure_two_dimensional(audio_data: np.ndarray) -> np.ndarray:
+    if audio_data.ndim == 1:
+        return audio_data[:, np.newaxis]
+    return audio_data
+
+
+def _prepare_output_audio(output_audio_data: np.ndarray) -> np.ndarray:
+    if output_audio_data.ndim == 2 and output_audio_data.shape[1] == 1:
+        return output_audio_data[:, 0]
+    return output_audio_data
