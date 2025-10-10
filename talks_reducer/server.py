@@ -6,6 +6,7 @@ import argparse
 import atexit
 import shutil
 import socket
+import sys
 import tempfile
 from contextlib import AbstractContextManager, suppress
 from pathlib import Path
@@ -16,6 +17,7 @@ from typing import Callable, Iterator, Optional, Sequence, cast
 import gradio as gr
 
 from talks_reducer.ffmpeg import FFmpegNotFoundError
+from talks_reducer.icons import find_icon_path
 from talks_reducer.models import ProcessingOptions, ProcessingResult
 from talks_reducer.pipeline import speed_up_video
 from talks_reducer.progress import ProgressHandle, SignalProgressReporter
@@ -144,13 +146,10 @@ class GradioProgressReporter(SignalProgressReporter):
         self._progress_callback(bounded_current, total_value, display_desc)
 
 
-_FAVICON_CANDIDATES = (
-    Path(__file__).resolve().parent / "resources" / "icons" / "app.ico",
-    Path(__file__).resolve().parent.parent / "docs" / "assets" / "app.ico",
+_FAVICON_FILENAMES = (
+    ("app.ico", "app.png") if sys.platform.startswith("win") else ("app.png", "app.ico")
 )
-_FAVICON_PATH: Optional[Path] = next(
-    (path for path in _FAVICON_CANDIDATES if path.exists()), None
-)
+_FAVICON_PATH = find_icon_path(filenames=_FAVICON_FILENAMES)
 _FAVICON_PATH_STR = str(_FAVICON_PATH) if _FAVICON_PATH else None
 _WORKSPACES: list[Path] = []
 

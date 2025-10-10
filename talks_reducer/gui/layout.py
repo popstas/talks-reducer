@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
+from ..icons import find_icon_path
 from ..models import default_temp_folder
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
@@ -454,38 +454,24 @@ def reset_basic_defaults(gui: "TalksReducerGUI") -> None:
 def apply_window_icon(gui: "TalksReducerGUI") -> None:
     """Configure the application icon when the asset is available."""
 
-    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent.parent))
-
-    icon_candidates: list[tuple[Path, str]] = []
-    if sys.platform.startswith("win"):
-        print("Checking icon candidate at %s (TODO: remove)" % (base_path / "talks_reducer" / "resources" / "icons" / "app.ico"))
-        icon_candidates.append(
-            (
-                base_path / "talks_reducer" / "resources" / "icons" / "app.ico",
-                "ico",
-            )
-        )
-    icon_candidates.append(
-        (
-            base_path / "talks_reducer" / "resources" / "icons" / "app.png",
-            "png",
-        )
+    icon_filenames = (
+        ("app.ico", "app.png")
+        if sys.platform.startswith("win")
+        else ("app.png", "app.ico")
     )
+    icon_path = find_icon_path(filenames=icon_filenames)
+    if icon_path is None:
+        return
 
-    for icon_path, icon_type in icon_candidates:
-        if not icon_path.is_file():
-            continue
-
-        try:
-            if icon_type == "ico" and sys.platform.startswith("win"):
-                # On Windows, iconbitmap works better withgout the 'default' parameter
-                gui.root.iconbitmap(str(icon_path))
-            else:
-                gui.root.iconphoto(False, gui.tk.PhotoImage(file=str(icon_path)))
-            return
-        except (gui.tk.TclError, Exception):
-            # Missing Tk image support or invalid icon format - try next candidate
-            continue
+    try:
+        if icon_path.suffix.lower() == ".ico" and sys.platform.startswith("win"):
+            # On Windows, iconbitmap works better without the 'default' parameter.
+            gui.root.iconbitmap(str(icon_path))
+        else:
+            gui.root.iconphoto(False, gui.tk.PhotoImage(file=str(icon_path)))
+    except (gui.tk.TclError, Exception):
+        # Missing Tk image support or invalid icon format - fail silently.
+        return
 
 
 def apply_window_size(gui: "TalksReducerGUI", *, simple: bool) -> None:
