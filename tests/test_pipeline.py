@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from talks_reducer import ffmpeg as ffmpeg_module
@@ -66,3 +68,87 @@ def test_extract_video_metadata_uses_ffprobe(monkeypatch) -> None:
     assert metadata["frame_rate"] == pytest.approx(25.0)
     assert metadata["duration"] == pytest.approx(5.0)
     assert metadata["frame_count"] == 125
+
+
+def test_stop_requested_handles_callable_and_bool() -> None:
+    """The stop helper should respect both callable and boolean flags."""
+
+    assert pipeline._stop_requested(None) is False
+
+    class ReporterWithMethod:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def stop_requested(self) -> bool:
+            self.calls += 1
+            return True
+
+    reporter_callable = ReporterWithMethod()
+    assert pipeline._stop_requested(reporter_callable) is True
+    assert reporter_callable.calls == 1
+
+    reporter_true = SimpleNamespace(stop_requested=True)
+    reporter_false = SimpleNamespace(stop_requested=False)
+
+    assert pipeline._stop_requested(reporter_true) is True
+    assert pipeline._stop_requested(reporter_false) is False
+
+
+def test_raise_if_stopped_cleans_temp_and_raises(tmp_path) -> None:
+    """Stopping should delete intermediates and raise ``ProcessingAborted``."""
+
+    temp_path = tmp_path / "intermediates"
+    temp_path.mkdir()
+
+    deleted: list[Path] = []
+
+    def record_delete(path: Path) -> None:
+        deleted.append(path)
+
+    class Reporter:
+        def stop_requested(self) -> bool:
+            return True
+
+    dependencies = SimpleNamespace(delete_path=record_delete)
+
+    with pytest.raises(pipeline.ProcessingAborted):
+        pipeline._raise_if_stopped(
+            Reporter(), temp_path=temp_path, dependencies=dependencies
+        )
+
+    assert deleted == [temp_path]
+
+
+def test_ensure_two_dimensional_expands_mono_audio() -> None:
+    """One-dimensional audio arrays should gain an explicit channel axis."""
+
+    mono_audio = np.array([0.1, -0.2, 0.3], dtype=np.float32)
+
+    result = pipeline._ensure_two_dimensional(mono_audio)
+
+    assert result.shape == (3, 1)
+    np.testing.assert_allclose(result[:, 0], mono_audio)
+
+
+def test_prepare_output_audio_squeezes_single_channel() -> None:
+    """Two-dimensional mono audio should be flattened for writing."""
+
+    mono_audio = np.array([[0.5], [-0.5], [1.0]], dtype=np.float32)
+
+    result = pipeline._prepare_output_audio(mono_audio)
+
+    assert result.ndim == 1
+    np.testing.assert_allclose(result, mono_audio[:, 0])
+
+
+def test_create_path_builds_nested_directories(tmp_path) -> None:
+    """The helper should create the requested directory tree if missing."""
+
+    target = tmp_path / "nested" / "dir"
+
+    assert not target.exists()
+
+    pipeline._create_path(target)
+
+    assert target.exists()
+    assert target.is_dir()
