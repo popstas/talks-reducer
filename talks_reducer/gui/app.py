@@ -1187,27 +1187,33 @@ class TalksReducerGUI:
 
         self._schedule_on_ui_thread(_complete)
 
-    def _apply_status_style(self, status: str) -> None:
+    def _get_status_style(self, status: str) -> str | None:
+        """Return the foreground color for *status* if a match is known."""
+
         color = STATUS_COLORS.get(status.lower())
         if color:
+            return color
+
+        status_lower = status.lower()
+        if "extracting audio" in status_lower:
+            return STATUS_COLORS["processing"]
+
+        if re.search(
+            r"\d+:\d{2}(?::\d{2})?(?: / \d+:\d{2}(?::\d{2})?)?.*\d+\.?\d*x",
+            status,
+        ):
+            return STATUS_COLORS["processing"]
+
+        if "time:" in status_lower and "size:" in status_lower:
+            # This is our new success format with ratios
+            return STATUS_COLORS["success"]
+
+        return None
+
+    def _apply_status_style(self, status: str) -> None:
+        color = self._get_status_style(status)
+        if color:
             self.status_label.configure(fg=color)
-        else:
-            # For extracting audio or FFmpeg progress messages, use processing color
-            # Also handle the new "Time: X%, Size: Y%" format as success
-            status_lower = status.lower()
-            if (
-                "extracting audio" in status_lower
-                or re.search(
-                    r"\d+:\d{2}(?::\d{2})?(?: / \d+:\d{2}(?::\d{2})?)?.*\d+\.?\d*x",
-                    status,
-                )
-                or ("time:" in status_lower and "size:" in status_lower)
-            ):
-                if "time:" in status_lower and "size:" in status_lower:
-                    # This is our new success format with ratios
-                    self.status_label.configure(fg=STATUS_COLORS["success"])
-                else:
-                    self.status_label.configure(fg=STATUS_COLORS["processing"])
 
     def _set_status(self, status: str, status_msg: str = "") -> None:
         def apply() -> None:

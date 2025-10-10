@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import math
+
+import pytest
+
 from talks_reducer.gui import app
+from talks_reducer.gui.theme import STATUS_COLORS
 
 
 def test_default_remote_destination_with_suffix(tmp_path):
@@ -87,3 +92,91 @@ def test_is_encode_target_duration_unknown_detects_indicator():
     normalized = "status: final encode target duration unknown"
 
     assert app._is_encode_target_duration_unknown(normalized) is True
+
+
+@pytest.mark.parametrize(
+    ("percentage", "expected"),
+    [
+        (-10, "#f87171"),
+        (0, "#f87171"),
+        (50, "#facc15"),
+        (100, "#22c55e"),
+        (150, "#22c55e"),
+    ],
+)
+def test_calculate_gradient_color_clamps_percentage(percentage, expected):
+    gui = object.__new__(app.TalksReducerGUI)
+
+    assert app.TalksReducerGUI._calculate_gradient_color(gui, percentage) == expected
+
+
+def test_calculate_gradient_color_applies_darken_factor():
+    gui = object.__new__(app.TalksReducerGUI)
+
+    color = app.TalksReducerGUI._calculate_gradient_color(gui, 25, darken=0.5)
+
+    # 25% sits midway in the red-to-yellow gradient and should be half the brightness.
+    assert color == "#7c4f21"
+
+
+@pytest.mark.parametrize(
+    ("total_seconds", "expected"),
+    [
+        (59.4, "0:59"),
+        (61, "1:01"),
+        (3661.2, "1:01:01"),
+        (-5, "0:00"),
+    ],
+)
+def test_format_progress_time_formats_values(total_seconds, expected):
+    gui = object.__new__(app.TalksReducerGUI)
+
+    assert app.TalksReducerGUI._format_progress_time(gui, total_seconds) == expected
+
+
+def test_format_progress_time_handles_invalid_input():
+    gui = object.__new__(app.TalksReducerGUI)
+
+    assert app.TalksReducerGUI._format_progress_time(gui, math.nan) == "0:00"
+
+
+class _DummyLabel:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, str]] = []
+
+    def configure(self, **kwargs: str) -> None:
+        self.calls.append(kwargs)
+
+
+def _make_gui_with_dummy_label() -> app.TalksReducerGUI:
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.status_label = _DummyLabel()
+    return gui
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("success", STATUS_COLORS["success"]),
+        ("ERROR", STATUS_COLORS["error"]),
+        ("Extracting audio", STATUS_COLORS["processing"]),
+        (
+            "Time: 50%, Size: 25%",
+            STATUS_COLORS["success"],
+        ),
+    ],
+)
+def test_apply_status_style_sets_expected_color(status, expected):
+    gui = _make_gui_with_dummy_label()
+
+    app.TalksReducerGUI._apply_status_style(gui, status)
+
+    assert gui.status_label.calls[-1]["fg"] == expected
+
+
+def test_apply_status_style_ignores_unknown_status():
+    gui = _make_gui_with_dummy_label()
+
+    app.TalksReducerGUI._apply_status_style(gui, "something else entirely")
+
+    assert gui.status_label.calls == []
