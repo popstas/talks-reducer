@@ -169,11 +169,16 @@ def _process_via_server(
             file=sys.stderr,
         )
 
+    remote_option_values: Dict[str, float] = {}
+    if parsed_args.silent_threshold is not None:
+        remote_option_values["silent_threshold"] = float(parsed_args.silent_threshold)
+    if parsed_args.silent_speed is not None:
+        remote_option_values["silent_speed"] = float(parsed_args.silent_speed)
+    if parsed_args.sounded_speed is not None:
+        remote_option_values["sounded_speed"] = float(parsed_args.sounded_speed)
+
     unsupported_options = []
     for name in (
-        "silent_threshold",
-        "silent_speed",
-        "sounded_speed",
         "frame_spreadage",
         "sample_rate",
         "temp_folder",
@@ -231,6 +236,7 @@ def _process_via_server(
                 output_path=output_override,
                 server_url=server_url,
                 small=bool(parsed_args.small),
+                **remote_option_values,
                 log_callback=_stream_server_log,
                 stream_updates=stream_updates,
                 progress_callback=_stream_progress if stream_updates else None,

@@ -21,6 +21,9 @@ def send_video(
     server_url: str,
     small: bool = False,
     *,
+    silent_threshold: Optional[float] = None,
+    sounded_speed: Optional[float] = None,
+    silent_speed: Optional[float] = None,
     log_callback: Optional[Callable[[str], None]] = None,
     stream_updates: bool = False,
     progress_callback: Optional[
@@ -36,6 +39,9 @@ def send_video(
     job = client.submit(
         gradio_file(str(input_path)),
         bool(small),
+        silent_threshold,
+        sounded_speed,
+        silent_speed,
         api_name="/process_video",
     )
 

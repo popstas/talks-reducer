@@ -133,9 +133,9 @@ def test_main_uses_remote_server_when_url_provided(
         input_file=["input.mp4"],
         output_file=None,
         temp_folder=None,
-        silent_threshold=None,
-        silent_speed=None,
-        sounded_speed=None,
+        silent_threshold=0.25,
+        silent_speed=5.0,
+        sounded_speed=1.75,
         frame_spreadage=None,
         sample_rate=None,
         small=True,
@@ -166,6 +166,9 @@ def test_main_uses_remote_server_when_url_provided(
     assert len(calls) == 1
     assert calls[0].input_path == Path("/tmp/input.mp4")
     assert calls[0].small is True
+    assert calls[0].silent_threshold == 0.25
+    assert calls[0].silent_speed == 5.0
+    assert calls[0].sounded_speed == 1.75
 
 
 def test_launch_server_tray_prefers_external_binary(

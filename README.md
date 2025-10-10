@@ -52,6 +52,10 @@ talks-reducer --url http://localhost:9005 demo.mp4
 talks-reducer --host 192.168.1.42 demo.mp4
 ```
 
+Remote jobs respect the same timing controls as the local CLI. Provide
+`--silent-threshold`, `--sounded-speed`, or `--silent-speed` to tweak how the
+server trims and accelerates segments without falling back to local mode.
+
 Want to see progress as the remote server works? Add `--server-stream` so the
 CLI prints live progress bars and log lines while you wait for the download.
 
@@ -69,6 +73,10 @@ Prefer a lightweight browser interface? Launch the Gradio-powered simple mode wi
 ```sh
 talks-reducer server
 ```
+
+The browser UI mirrors the CLI timing controls with sliders for the silent
+threshold and playback speeds, so you can tune exports without leaving the
+remote workflow.
 
 Want the server to live in your system tray instead of a terminal window? Use:
 
