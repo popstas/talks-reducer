@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import types
 
 import numpy as np
@@ -185,3 +186,55 @@ def test_is_valid_input_file_requires_audio_stream(monkeypatch):
     monkeypatch.setattr(audio.subprocess, "run", fake_run)
 
     assert audio.is_valid_input_file("silent.mp4") is False
+
+
+def test_is_valid_input_file_handles_timeout(monkeypatch):
+    """Timeouts when invoking ffprobe should lead to a ``False`` result."""
+
+    monkeypatch.setattr(audio, "get_ffprobe_path", lambda: "ffprobe")
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=["ffprobe"], timeout=5)
+
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+
+    assert audio.is_valid_input_file("delayed.mp4") is False
+
+
+def test_is_valid_input_file_sets_creationflags_on_windows(monkeypatch):
+    """Windows invocations should request hidden subprocess windows."""
+
+    monkeypatch.setattr(audio, "get_ffprobe_path", lambda: "ffprobe")
+    monkeypatch.setattr(audio.sys, "platform", "win32")
+
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_run(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return _make_completed_process(
+            stdout="[STREAM]\ncodec_type=audio\n[/STREAM]\n", returncode=0
+        )
+
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+
+    assert audio.is_valid_input_file("windows-input.mp4") is True
+    assert captured_kwargs.get("creationflags") == 0x08000000
+
+
+def test_process_audio_chunks_returns_empty_output_for_empty_inputs():
+    """Empty inputs should produce an empty, correctly shaped audio array."""
+
+    audio_data = np.zeros((0,), dtype=np.float32)
+
+    processed, updated_chunks = audio.process_audio_chunks(
+        audio_data,
+        [],
+        samples_per_frame=1.0,
+        speeds=[],
+        audio_fade_envelope_size=4,
+        max_audio_volume=1.0,
+    )
+
+    assert processed.shape == (0, 1)
+    assert processed.size == 0
+    assert updated_chunks == []

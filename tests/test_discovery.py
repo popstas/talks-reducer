@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import http.server
+import socket
 import threading
 from contextlib import contextmanager
 
@@ -136,3 +137,113 @@ def test_build_default_host_candidates_filters_excluded_hosts() -> None:
     )
 
     assert candidates == ["192.0.2.1"]
+
+
+def test_create_udp_socket_delegates_to_socket_module(monkeypatch) -> None:
+    """The helper should forward parameters to :func:`socket.socket`."""
+
+    captured_args: tuple[int, int] | None = None
+
+    class DummySocket:
+        pass
+
+    def fake_socket(family: int, type_: int) -> DummySocket:
+        nonlocal captured_args
+        captured_args = (family, type_)
+        return DummySocket()
+
+    monkeypatch.setattr(discovery.socket, "socket", fake_socket)
+
+    result = discovery._create_udp_socket(1, 2)
+
+    assert isinstance(result, DummySocket)
+    assert captured_args == (1, 2)
+
+
+def test_iter_getaddrinfo_addresses_handles_hostname_errors() -> None:
+    """Hostname resolution errors should terminate the iterator silently."""
+
+    def failing_resolver() -> str:
+        raise OSError("hostname unavailable")
+
+    addresses = list(
+        discovery._iter_getaddrinfo_addresses(hostname_resolver=failing_resolver)
+    )
+
+    assert addresses == []
+
+
+def test_iter_getaddrinfo_addresses_filters_invalid_entries() -> None:
+    """The iterator should ignore malformed or empty address tuples."""
+
+    def fake_resolver() -> str:
+        return "example-host"
+
+    def fake_getaddrinfo(hostname: str, *_args, **_kwargs):
+        return [
+            tuple(),
+            (None, None, None, None, ("192.0.2.50", 0)),
+            (None, None, None, None, ("", 0)),
+        ]
+
+    addresses = list(
+        discovery._iter_getaddrinfo_addresses(
+            hostname_resolver=fake_resolver, getaddrinfo=fake_getaddrinfo
+        )
+    )
+
+    assert addresses == ["192.0.2.50"]
+
+
+def test_iter_getaddrinfo_addresses_handles_socket_errors() -> None:
+    """Socket-level errors while querying should result in no addresses."""
+
+    def fake_getaddrinfo(hostname: str, *_args, **_kwargs):
+        raise socket.gaierror("lookup failed")
+
+    addresses = list(
+        discovery._iter_getaddrinfo_addresses(
+            hostname_resolver=lambda: "example", getaddrinfo=fake_getaddrinfo
+        )
+    )
+
+    assert addresses == []
+
+
+def test_iter_probe_addresses_recovers_from_socket_errors() -> None:
+    """Probe failures should not interrupt iteration over remaining hosts."""
+
+    behaviours = iter(
+        [
+            ("error", ""),
+            ("ok", ""),
+            ("ok", "192.0.2.77"),
+        ]
+    )
+
+    class DummySocket:
+        def __init__(self, mode: str, address: str):
+            self.mode = mode
+            self.address = address
+
+        def connect(self, _target):
+            if self.mode == "error":
+                raise OSError("network unreachable")
+
+        def getsockname(self):
+            return (self.address, 1234)
+
+        def close(self):
+            return None
+
+    def fake_socket_factory(_family: int, _type: int) -> DummySocket:
+        mode, address = next(behaviours)
+        return DummySocket(mode, address)
+
+    addresses = list(
+        discovery._iter_probe_addresses(
+            probes=("first", "second", "third"), socket_factory=fake_socket_factory
+        )
+    )
+
+    assert addresses == ["192.0.2.77"]
