@@ -1540,6 +1540,7 @@ class TalksReducerGUI:
 
         self._append_log("Starting processing…")
         self._stop_requested = False
+        self.stop_button.configure(text="Stop")
         self._run_start_time = time.monotonic()
         self._ping_worker_stop_requested = True
         open_after_convert = bool(self.open_after_convert_var.get())
@@ -1647,6 +1648,8 @@ class TalksReducerGUI:
         import signal
 
         self._stop_requested = True
+        # Update button text to indicate stopping state
+        self.stop_button.configure(text="Stopping...")
         if self._current_remote_mode:
             self._append_log("Cancelling remote job...")
         elif self._ffmpeg_process and self._ffmpeg_process.poll() is None:

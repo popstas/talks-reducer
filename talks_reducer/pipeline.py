@@ -82,8 +82,6 @@ def speed_up_video(
         _delete_path(temp_path)
     _create_path(temp_path)
 
-    _raise_if_stopped(reporter, temp_path=temp_path)
-
     metadata = _extract_video_metadata(input_path, options.frame_rate)
     frame_rate = metadata["frame_rate"]
     original_duration = metadata["duration"]
@@ -123,6 +121,7 @@ def speed_up_video(
         ffmpeg_path=ffmpeg_path,
     )
 
+    _raise_if_stopped(reporter, temp_path=temp_path)
     reporter.log("Extracting audio...")
     process_callback = getattr(reporter, "process_callback", None)
     estimated_total_frames = frame_count
@@ -133,8 +132,6 @@ def speed_up_video(
         reporter.log(f"Extract audio target frames: {estimated_total_frames}")
     else:
         reporter.log("Extract audio target frames: unknown")
-
-    _raise_if_stopped(reporter, temp_path=temp_path)
 
     run_timed_ffmpeg_command(
         extract_command,
@@ -180,8 +177,6 @@ def speed_up_video(
         options.audio_fade_envelope_size,
         max_audio_volume,
     )
-
-    _raise_if_stopped(reporter, temp_path=temp_path)
 
     audio_new_path = temp_path / "audioNew.wav"
     # Use the sample rate that was actually used for processing
