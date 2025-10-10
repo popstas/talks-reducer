@@ -139,6 +139,13 @@ if [[ -n "${PYINSTALLER_EXTRA_EXCLUDES:-}" ]]; then
 fi
 
 PYINSTALLER_ARGS=(talks-reducer.spec --noconfirm --workpath build --distpath dist)
+USES_SPEC_FILE=false
+for arg in "${PYINSTALLER_ARGS[@]}"; do
+    if [[ "$arg" == *.spec ]]; then
+        USES_SPEC_FILE=true
+        break
+    fi
+done
 
 if [[ "$OS_NAME" == "macos" ]]; then
     mkdir -p "dist/talks-reducer.app"
@@ -191,7 +198,12 @@ PY
         fi
 
         echo "🎯 macOS build target architecture: $TARGET_ARCH"
-        PYINSTALLER_ARGS+=(--target-arch "$TARGET_ARCH")
+        if [[ "$USES_SPEC_FILE" == true ]]; then
+            echo "ℹ️  talks-reducer.spec already defines the bundle layout; skipping --target-arch"
+            echo "    because PyInstaller rejects this option when a spec file is supplied."
+        else
+            PYINSTALLER_ARGS+=(--target-arch "$TARGET_ARCH")
+        fi
     else
         echo "⚠️  This version of PyInstaller does not support --target-arch;"
         echo "   falling back to the default architecture."
