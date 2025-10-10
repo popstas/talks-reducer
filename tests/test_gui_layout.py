@@ -26,6 +26,139 @@ class DummyVar:
         self.traces.append((mode, callback))
 
 
+class VarStub:
+    def __init__(self, *, value):
+        self._value = value
+        self.trace_calls: list[tuple[str, object]] = []
+
+    def get(self):
+        return self._value
+
+    def set(self, value):
+        self._value = value
+
+    def trace_add(self, mode: str, callback):
+        self.trace_calls.append((mode, callback))
+
+
+class StringVarStub(VarStub):
+    def __init__(self, value: str = ""):
+        super().__init__(value=str(value))
+
+    def set(self, value):
+        super().set(str(value))
+
+
+class DoubleVarStub(VarStub):
+    def __init__(self, value: float = 0.0):
+        super().__init__(value=float(value))
+
+    def set(self, value):
+        super().set(float(value))
+
+
+class BooleanVarStub(VarStub):
+    def __init__(self, value: bool = False):
+        super().__init__(value=bool(value))
+
+    def set(self, value):
+        super().set(bool(value))
+
+
+class WidgetStub:
+    def __init__(self, widget_type: str, *, args: tuple, kwargs: dict):
+        self.widget_type = widget_type
+        self.args = args
+        self.kwargs = kwargs
+        self.grid_calls: list[tuple[tuple, dict]] = []
+        self.grid_remove_calls: list[None] = []
+        self.pack_calls: list[tuple[tuple, dict]] = []
+        self.pack_forget_calls: list[None] = []
+        self.configure_calls: list[tuple[tuple, dict]] = []
+        self.bind_calls: list[tuple[str, object]] = []
+        self.columnconfigure_calls: list[tuple[int, dict]] = []
+        self.rowconfigure_calls: list[tuple[int, dict]] = []
+        self.yview_calls: list[tuple[tuple, dict]] = []
+        self.set_calls: list[tuple[tuple, dict]] = []
+        self.focused = False
+
+    def grid(self, *args, **kwargs):
+        self.grid_calls.append((args, kwargs))
+        return self
+
+    def grid_remove(self):
+        self.grid_remove_calls.append(None)
+
+    def pack(self, *args, **kwargs):
+        self.pack_calls.append((args, kwargs))
+        return self
+
+    def pack_forget(self):
+        self.pack_forget_calls.append(None)
+
+    def configure(self, *args, **kwargs):
+        self.configure_calls.append((args, kwargs))
+
+    def bind(self, sequence, callback):
+        self.bind_calls.append((sequence, callback))
+
+    def columnconfigure(self, index: int, **kwargs):
+        self.columnconfigure_calls.append((index, kwargs))
+
+    def rowconfigure(self, index: int, **kwargs):
+        self.rowconfigure_calls.append((index, kwargs))
+
+    def focus_set(self):
+        self.focused = True
+
+    def yview(self, *args, **kwargs):
+        self.yview_calls.append((args, kwargs))
+
+    def set(self, *args, **kwargs):
+        self.set_calls.append((args, kwargs))
+
+
+class WidgetFactory:
+    def __init__(self, widget_type: str):
+        self.widget_type = widget_type
+        self.created: list[WidgetStub] = []
+
+    def __call__(self, *args, **kwargs):
+        widget = WidgetStub(self.widget_type, args=args, kwargs=kwargs)
+        self.created.append(widget)
+        return widget
+
+
+class RootStub:
+    def __init__(self):
+        self.columnconfigure_calls: list[tuple[int, dict]] = []
+        self.rowconfigure_calls: list[tuple[int, dict]] = []
+        self.update_idletasks_calls = 0
+        self.minsize_calls: list[tuple[int, int]] = []
+        self.geometry_calls: list[str] = []
+
+    def columnconfigure(self, index: int, **kwargs):
+        self.columnconfigure_calls.append((index, kwargs))
+
+    def rowconfigure(self, index: int, **kwargs):
+        self.rowconfigure_calls.append((index, kwargs))
+
+    def update_idletasks(self):
+        self.update_idletasks_calls += 1
+
+    def minsize(self, width: int, height: int):
+        self.minsize_calls.append((width, height))
+
+    def geometry(self, spec: str):
+        self.geometry_calls.append(spec)
+
+    def winfo_width(self) -> int:
+        return 0
+
+    def winfo_height(self) -> int:
+        return 0
+
+
 def make_widget_mock() -> Mock:
     widget = Mock()
     widget.grid = Mock()
@@ -34,6 +167,115 @@ def make_widget_mock() -> Mock:
     widget.pack_forget = Mock()
     widget.configure = Mock()
     return widget
+
+
+def test_build_layout_initializes_widgets(monkeypatch):
+    add_slider_mock = Mock()
+    add_entry_mock = Mock()
+    update_reset_mock = Mock()
+    monkeypatch.setattr(layout, "add_slider", add_slider_mock)
+    monkeypatch.setattr(layout, "add_entry", add_entry_mock)
+    monkeypatch.setattr(layout, "update_basic_reset_state", update_reset_mock)
+
+    temp_path = Path("/tmp/mock-temp")
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: temp_path)
+
+    ttk = SimpleNamespace(
+        Frame=WidgetFactory("Frame"),
+        Checkbutton=WidgetFactory("Checkbutton"),
+        Label=WidgetFactory("Label"),
+        Button=WidgetFactory("Button"),
+        Labelframe=WidgetFactory("Labelframe"),
+        Entry=WidgetFactory("Entry"),
+        Radiobutton=WidgetFactory("Radiobutton"),
+        Progressbar=WidgetFactory("Progressbar"),
+        Scrollbar=WidgetFactory("Scrollbar"),
+    )
+    tk = SimpleNamespace(
+        Label=WidgetFactory("Label"),
+        Text=WidgetFactory("Text"),
+        StringVar=StringVarStub,
+        DoubleVar=DoubleVarStub,
+        BooleanVar=BooleanVarStub,
+        Scale=WidgetFactory("Scale"),
+        FLAT="flat",
+        LEFT="left",
+        NORMAL="normal",
+        DISABLED="disabled",
+        HORIZONTAL="horizontal",
+        VERTICAL="vertical",
+    )
+
+    preferences = SimpleNamespace(
+        get_float=lambda key, default: default,
+        get=lambda key, default: default,
+        update=Mock(),
+    )
+
+    configure_drop_targets = Mock()
+    on_drop_zone_click = Mock()
+    toggle_simple_mode = Mock()
+    reset_basic_defaults = Mock()
+    start_discovery = Mock()
+    refresh_theme = Mock()
+    toggle_advanced = Mock()
+    update_processing_mode_state = Mock()
+    stop_processing = Mock()
+    open_last_output = Mock()
+
+    gui = SimpleNamespace(
+        root=RootStub(),
+        ttk=ttk,
+        tk=tk,
+        PADDING=8,
+        _configure_drop_targets=configure_drop_targets,
+        _on_drop_zone_click=on_drop_zone_click,
+        _toggle_simple_mode=toggle_simple_mode,
+        _reset_basic_defaults=reset_basic_defaults,
+        _start_discovery=start_discovery,
+        _refresh_theme=refresh_theme,
+        _toggle_advanced=toggle_advanced,
+        _update_processing_mode_state=update_processing_mode_state,
+        _stop_processing=stop_processing,
+        _open_last_output=open_last_output,
+        small_var=BooleanVarStub(value=True),
+        open_after_convert_var=BooleanVarStub(value=False),
+        simple_mode_var=BooleanVarStub(value=False),
+        preferences=preferences,
+        processing_mode_var=StringVarStub(value="local"),
+        server_url_var=StringVarStub(value=""),
+        theme_var=StringVarStub(value="os"),
+        status_var=StringVarStub(value="Idle"),
+        progress_var=DoubleVarStub(value=0.0),
+    )
+
+    layout.build_layout(gui)
+
+    assert isinstance(gui.drop_zone, WidgetStub)
+    assert any(
+        kwargs == {"cursor": "hand2", "takefocus": 1}
+        for _, kwargs in gui.drop_zone.configure_calls
+    )
+    assert {event for event, _ in gui.drop_zone.bind_calls} == {
+        "<Button-1>",
+        "<Return>",
+        "<space>",
+    }
+    assert all(callback is on_drop_zone_click for _, callback in gui.drop_zone.bind_calls)
+    configure_drop_targets.assert_any_call(gui.drop_zone)
+
+    assert isinstance(gui.advanced_button, WidgetStub)
+    assert gui.advanced_button.kwargs["command"] is toggle_advanced
+    toggle_advanced.assert_any_call(initial=True)
+    assert gui.advanced_visible.get() is False
+
+    assert isinstance(gui.temp_var, StringVarStub)
+    assert gui.temp_var.get() == str(temp_path)
+    update_processing_mode_state.assert_called_once_with()
+    update_reset_mock.assert_called_once_with(gui)
+
+    configure_drop_targets.assert_any_call(gui.drop_hint_button)
+    assert gui.drop_hint_button.grid_remove_calls
 
 
 def test_add_entry_with_browse(monkeypatch):
