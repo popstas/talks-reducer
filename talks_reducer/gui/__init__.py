@@ -325,7 +325,7 @@ class TalksReducerGUI:
 
         self._full_size = (1000, 800)
         self._simple_size = (300, 270)
-        self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
+        # self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
         self.style = self.ttk.Style(self.root)
 
         self._processing_thread: Optional[threading.Thread] = None

@@ -477,7 +477,7 @@ def apply_window_icon(gui: "TalksReducerGUI") -> None:
 
         try:
             if icon_type == "ico" and sys.platform.startswith("win"):
-                # On Windows, iconbitmap works better without the 'default' parameter
+                # On Windows, iconbitmap works better withgout the 'default' parameter
                 gui.root.iconbitmap(str(icon_path))
             else:
                 gui.root.iconphoto(False, gui.tk.PhotoImage(file=str(icon_path)))
