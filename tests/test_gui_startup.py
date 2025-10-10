@@ -68,3 +68,78 @@ def test_main_handles_missing_tkinter(
 
     assert result is False
     assert "GUI not available" in captured.out
+
+
+def test_check_tkinter_available_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        startup.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(stdout='{"status": "ok"}\n', stderr=""),
+    )
+
+    available, message = startup._check_tkinter_available()
+
+    assert available is True
+    assert message == ""
+
+
+def test_check_tkinter_available_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        startup.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout='{"status": "import_error", "error": "ModuleNotFoundError: tk"}\n',
+            stderr="",
+        ),
+    )
+
+    available, message = startup._check_tkinter_available()
+
+    assert available is False
+    assert "tkinter is not installed" in message
+
+
+def test_check_tkinter_available_init_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        startup.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout='{"status": "init_error", "error": "RuntimeError: display"}\n',
+            stderr="",
+        ),
+    )
+
+    available, message = startup._check_tkinter_available()
+
+    assert available is False
+    assert "could not open a window" in message
+
+
+def test_check_tkinter_available_handles_invalid_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        startup.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(stdout="not json\n", stderr=""),
+    )
+
+    available, message = startup._check_tkinter_available()
+
+    assert available is False
+    assert message == "not json"
+
+
+def test_check_tkinter_available_handles_missing_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        startup.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(stdout="\n", stderr="\n"),
+    )
+
+    available, message = startup._check_tkinter_available()
+
+    assert available is False
+    assert message == "Window creation failed"

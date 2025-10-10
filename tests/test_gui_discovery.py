@@ -45,8 +45,11 @@ class StubGUI:
         self.server_url_var = StubVar()
         self.logs: list[str] = []
         self.tk = SimpleNamespace(DISABLED="disabled", NORMAL="normal")
+        self.ttk = SimpleNamespace()
         self.messagebox = StubMessageBox()
         self._scheduled_callbacks: list[Callable[[], None]] = []
+        self.root = object()
+        self.PADDING = 10
 
     def _append_log(self, message: str) -> None:
         self.logs.append(message)
@@ -68,6 +71,134 @@ class DummyThread:
 
     def is_alive(self) -> bool:
         return self.started
+
+
+class DummyToplevel:
+    last_instance: "DummyToplevel | None" = None
+
+    def __init__(self, root: object) -> None:
+        self.root = root
+        self.title_text: str | None = None
+        self.transient_target: object | None = None
+        self.grabbed = False
+        self.released = False
+        self.destroyed = False
+        self.columnconfigure_calls: list[tuple[int, int]] = []
+        self.rowconfigure_calls: list[tuple[int, int]] = []
+        self.protocols: dict[str, Callable[[], None]] = {}
+        DummyToplevel.last_instance = self
+
+    def title(self, text: str) -> None:
+        self.title_text = text
+
+    def transient(self, root: object) -> None:
+        self.transient_target = root
+
+    def grab_set(self) -> None:
+        self.grabbed = True
+
+    def grab_release(self) -> None:
+        self.released = True
+
+    def destroy(self) -> None:
+        self.destroyed = True
+
+    def columnconfigure(self, column: int, weight: int) -> None:
+        self.columnconfigure_calls.append((column, weight))
+
+    def rowconfigure(self, row: int, weight: int) -> None:
+        self.rowconfigure_calls.append((row, weight))
+
+    def protocol(self, name: str, callback: Callable[[], None]) -> None:
+        self.protocols[name] = callback
+
+
+class DummyListbox:
+    last_instance: "DummyListbox | None" = None
+
+    def __init__(self, dialog: DummyToplevel, *, height: int, selectmode: str) -> None:
+        self.dialog = dialog
+        self.height = height
+        self.selectmode = selectmode
+        self.grid_calls: list[dict[str, object]] = []
+        self.items: list[str] = []
+        self._selection: tuple[int, ...] = tuple()
+        self.bindings: dict[str, Callable[[object | None], None]] = {}
+        DummyListbox.last_instance = self
+
+    def grid(self, **kwargs: object) -> None:
+        self.grid_calls.append(kwargs)
+
+    def insert(self, _end: object, url: str) -> None:
+        self.items.append(url)
+
+    def select_set(self, index: int) -> None:
+        self._selection = (index,)
+
+    def curselection(self) -> tuple[int, ...]:
+        return self._selection
+
+    def bind(self, event: str, callback: Callable[[object | None], None]) -> None:
+        self.bindings[event] = callback
+
+    def trigger(self, event: str, *, index: int | None = None) -> None:
+        if index is not None:
+            self._selection = (index,)
+        callback = self.bindings[event]
+        callback(None)
+
+
+class DummyLabel:
+    def __init__(self, master: object, text: str) -> None:
+        self.master = master
+        self.text = text
+        self.grid_calls: list[dict[str, object]] = []
+
+    def grid(self, **kwargs: object) -> None:
+        self.grid_calls.append(kwargs)
+
+
+class DummyFrame:
+    def __init__(self, master: object) -> None:
+        self.master = master
+        self.grid_calls: list[dict[str, object]] = []
+
+    def grid(self, **kwargs: object) -> None:
+        self.grid_calls.append(kwargs)
+
+
+class DummyButton:
+    def __init__(
+        self, master: object, *, text: str, command: Callable[[], None]
+    ) -> None:
+        self.master = master
+        self.text = text
+        self.command = command
+        self.pack_calls: list[dict[str, object]] = []
+
+    def pack(self, **kwargs: object) -> None:
+        self.pack_calls.append(kwargs)
+
+    def invoke(self) -> None:
+        self.command()
+
+
+class DummyTkModule(SimpleNamespace):
+    def __init__(self) -> None:
+        super().__init__(
+            Toplevel=DummyToplevel,
+            Listbox=DummyListbox,
+            SINGLE="single",
+            END="end",
+            LEFT="left",
+        )
+
+
+def make_gui_with_widgets() -> StubGUI:
+    gui = StubGUI()
+    gui.tk = DummyTkModule()
+    gui.ttk = SimpleNamespace(Label=DummyLabel, Frame=DummyFrame, Button=DummyButton)
+    return gui
 
 
 @pytest.fixture()
@@ -174,3 +305,28 @@ def test_on_discovery_complete_sets_single_url(stub_gui: StubGUI) -> None:
     ]
     assert stub_gui.server_url_var.value == "http://server"
     assert stub_gui.logs == ["Discovered 1 server."]
+
+
+def test_show_discovery_results_populates_dialog_and_selects_url() -> None:
+    gui = make_gui_with_widgets()
+    urls = ["http://server-one", "http://server-two"]
+
+    discovery_module.show_discovery_results(gui, urls)
+
+    dialog = DummyToplevel.last_instance
+    assert dialog is not None
+    assert dialog.title_text == "Select server"
+    assert dialog.transient_target is gui.root
+    assert dialog.grabbed is True
+
+    listbox = DummyListbox.last_instance
+    assert listbox is not None
+    assert listbox.items == urls
+    assert listbox.curselection() == (0,)
+
+    listbox.trigger("<Return>", index=1)
+
+    assert gui.server_url_var.value == "http://server-two"
+    assert dialog.released is True
+    assert dialog.destroyed is True
+    assert dialog.protocols["WM_DELETE_WINDOW"] is not None
