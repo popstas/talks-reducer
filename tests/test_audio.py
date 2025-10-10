@@ -201,6 +201,19 @@ def test_is_valid_input_file_handles_timeout(monkeypatch):
     assert audio.is_valid_input_file("delayed.mp4") is False
 
 
+def test_is_valid_input_file_handles_nonzero_exit(monkeypatch):
+    """A non-zero ffprobe exit status should result in ``False``."""
+
+    monkeypatch.setattr(audio, "get_ffprobe_path", lambda: "ffprobe")
+
+    def fake_run(*args, **kwargs):
+        return _make_completed_process(stdout="", stderr="boom", returncode=1)
+
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+
+    assert audio.is_valid_input_file("corrupt.mp4") is False
+
+
 def test_is_valid_input_file_sets_creationflags_on_windows(monkeypatch):
     """Windows invocations should request hidden subprocess windows."""
 
