@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from talks_reducer.gui_theme import (
+from talks_reducer.gui.theme import (
     LIGHT_THEME,
     STATUS_COLORS,
     apply_theme,

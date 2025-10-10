@@ -31,14 +31,18 @@ try:
     from ..cli import gather_input_files
     from ..cli import main as cli_main
     from ..ffmpeg import FFmpegNotFoundError
-    from ..gui_preferences import GUIPreferences, determine_config_path
-    from ..gui_remote import (
+    from ..models import ProcessingOptions
+    from ..pipeline import ProcessingAborted, speed_up_video
+    from ..progress import ProgressHandle, SignalProgressReporter
+    from ..version_utils import resolve_version
+    from .preferences import GUIPreferences, determine_config_path
+    from .remote import (
         check_remote_server,
         format_server_host,
         normalize_server_url,
         ping_server,
     )
-    from ..gui_theme import (
+    from .theme import (
         DARK_THEME,
         LIGHT_THEME,
         STATUS_COLORS,
@@ -47,10 +51,6 @@ try:
         read_windows_theme_registry,
         run_defaults_command,
     )
-    from ..models import ProcessingOptions
-    from ..pipeline import ProcessingAborted, speed_up_video
-    from ..progress import ProgressHandle, SignalProgressReporter
-    from ..version_utils import resolve_version
 except ImportError:  # pragma: no cover - handled at runtime
     if __package__ not in (None, ""):
         raise
@@ -62,14 +62,14 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.cli import gather_input_files
     from talks_reducer.cli import main as cli_main
     from talks_reducer.ffmpeg import FFmpegNotFoundError
-    from talks_reducer.gui_preferences import GUIPreferences, determine_config_path
-    from talks_reducer.gui_remote import (
+    from talks_reducer.gui.preferences import GUIPreferences, determine_config_path
+    from talks_reducer.gui.remote import (
         check_remote_server,
         format_server_host,
         normalize_server_url,
         ping_server,
     )
-    from talks_reducer.gui_theme import (
+    from talks_reducer.gui.theme import (
         DARK_THEME,
         LIGHT_THEME,
         STATUS_COLORS,
