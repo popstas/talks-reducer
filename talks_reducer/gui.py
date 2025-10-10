@@ -36,7 +36,7 @@ try:
     from .discovery import discover_servers
     from .ffmpeg import FFmpegNotFoundError
     from .models import ProcessingOptions, default_temp_folder
-    from .pipeline import speed_up_video
+    from .pipeline import ProcessingAborted, speed_up_video
     from .progress import ProgressHandle, SignalProgressReporter
     from .version_utils import resolve_version
 except ImportError:  # pragma: no cover - handled at runtime
@@ -52,7 +52,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.discovery import discover_servers
     from talks_reducer.ffmpeg import FFmpegNotFoundError
     from talks_reducer.models import ProcessingOptions, default_temp_folder
-    from talks_reducer.pipeline import speed_up_video
+    from talks_reducer.pipeline import ProcessingAborted, speed_up_video
     from talks_reducer.progress import ProgressHandle, SignalProgressReporter
     from talks_reducer.version_utils import resolve_version
 
@@ -257,9 +257,12 @@ class _TkProgressReporter(SignalProgressReporter):
         self,
         log_callback: Callable[[str], None],
         process_callback: Optional[Callable] = None,
+        *,
+        stop_callback: Optional[Callable[[], bool]] = None,
     ) -> None:
         self._log_callback = log_callback
         self.process_callback = process_callback
+        self._stop_callback = stop_callback
 
     def log(self, message: str) -> None:
         self._log_callback(message)
@@ -270,6 +273,13 @@ class _TkProgressReporter(SignalProgressReporter):
     ) -> _GuiProgressHandle:
         del total, unit
         return _GuiProgressHandle(self._log_callback, desc)
+
+    def stop_requested(self) -> bool:
+        """Return ``True`` when the GUI has asked to cancel processing."""
+
+        if self._stop_callback is None:
+            return False
+        return bool(self._stop_callback())
 
 
 class TalksReducerGUI:
@@ -469,7 +479,8 @@ class TalksReducerGUI:
                                 return
 
                             self._set_status(
-                                "Error", f"Waiting server {host_label} (attempt {attempts}/5)"
+                                "Error",
+                                f"Waiting server {host_label} (attempt {attempts}/5)",
                             )
                             self._notify(
                                 lambda: self._append_log(
@@ -1526,6 +1537,7 @@ class TalksReducerGUI:
 
         self._append_log("Starting processing…")
         self._stop_requested = False
+        self.stop_button.configure(text="Stop")
         self._run_start_time = time.monotonic()
         self._ping_worker_stop_requested = True
         open_after_convert = bool(self.open_after_convert_var.get())
@@ -1561,7 +1573,7 @@ class TalksReducerGUI:
                         args,
                         server_url,
                         open_after_convert=open_after_convert,
-                    )               
+                    )
                     if success:
                         self._notify(self._hide_stop_button)
                         return
@@ -1571,12 +1583,12 @@ class TalksReducerGUI:
                     self._current_remote_mode = False
 
                 reporter = _TkProgressReporter(
-                    self._append_log, process_callback=set_process
+                    self._append_log,
+                    process_callback=set_process,
+                    stop_callback=lambda: self._stop_requested,
                 )
                 for index, file in enumerate(files, start=1):
-                    self._append_log(
-                        f"Processing: {os.path.basename(file)}"
-                    )
+                    self._append_log(f"Processing: {os.path.basename(file)}")
                     options = self._build_options(Path(file), args)
                     result = speed_up_video(options, reporter=reporter)
                     self._last_output = result.output_file
@@ -1604,6 +1616,9 @@ class TalksReducerGUI:
                     lambda: self.messagebox.showerror("FFmpeg not found", str(exc))
                 )
                 self._set_status("Error")
+            except ProcessingAborted:
+                self._append_log("Processing aborted by user.")
+                self._set_status("Aborted")
             except Exception as exc:  # pragma: no cover - GUI level safeguard
                 # If stop was requested, don't show error (FFmpeg termination is expected)
                 if self._stop_requested:
@@ -1622,18 +1637,19 @@ class TalksReducerGUI:
         self._processing_thread = threading.Thread(target=worker, daemon=True)
         self._processing_thread.start()
 
-        # Show Stop button when processing starts
-        if self._current_remote_mode:
-            self.stop_button.grid_remove()
-        else:
-            self.stop_button.grid()
+        # Show Stop button when processing starts regardless of mode
+        self.stop_button.grid()
 
     def _stop_processing(self) -> None:
         """Stop the currently running processing by terminating FFmpeg."""
         import signal
 
         self._stop_requested = True
-        if self._ffmpeg_process and self._ffmpeg_process.poll() is None:
+        # Update button text to indicate stopping state
+        self.stop_button.configure(text="Stopping...")
+        if self._current_remote_mode:
+            self._append_log("Cancelling remote job...")
+        elif self._ffmpeg_process and self._ffmpeg_process.poll() is None:
             self._append_log("Stopping FFmpeg process...")
             try:
                 # Send SIGTERM to FFmpeg process
@@ -1700,6 +1716,10 @@ class TalksReducerGUI:
     ) -> bool:
         """Send *files* to the configured server for processing."""
 
+        def _ensure_not_stopped() -> None:
+            if self._stop_requested:
+                raise ProcessingAborted("Remote processing cancelled by user.")
+
         try:
             service_module = importlib.import_module("talks_reducer.service_client")
         except ModuleNotFoundError as exc:
@@ -1724,22 +1744,35 @@ class TalksReducerGUI:
 
         while not self._ping_server(server_url) and ping_attempts < max_ping_attempts:
             ping_attempts += 1
-            self._append_log(f"Waiting server {host_label} (attempt {ping_attempts}/{max_ping_attempts})")
-            self._notify(
-                lambda: self._set_status("Error", f"Waiting server {host_label} (attempt {ping_attempts}/{max_ping_attempts})")
+            self._append_log(
+                f"Waiting server {host_label} (attempt {ping_attempts}/{max_ping_attempts})"
             )
+            self._notify(
+                lambda: self._set_status(
+                    "Error",
+                    f"Waiting server {host_label} (attempt {ping_attempts}/{max_ping_attempts})",
+                )
+            )
+            _ensure_not_stopped()
             time.sleep(1)
+
+        _ensure_not_stopped()
 
         if ping_attempts >= max_ping_attempts:
             # Server is not reachable after max attempts, fall back to local mode
-            self._append_log(f"Server {host_label} is not reachable after {max_ping_attempts} attempts. Switching to local mode.")
+            self._append_log(
+                f"Server {host_label} is not reachable after {max_ping_attempts} attempts. Switching to local mode."
+            )
             self._notify(
-                lambda: self._set_status("Error", f"Server {host_label} unreachable after {max_ping_attempts} attempts. Switching to local mode.")
+                lambda: self._set_status(
+                    "Error",
+                    f"Server {host_label} unreachable after {max_ping_attempts} attempts. Switching to local mode.",
+                )
             )
             self._notify(
                 lambda: self.messagebox.showwarning(
                     "Server unavailable",
-                    f"Server {host_label} is not reachable. Switching to local processing mode."
+                    f"Server {host_label} is not reachable. Switching to local processing mode.",
                 )
             )
             # Switch to local mode and return False to indicate fallback
@@ -1766,6 +1799,7 @@ class TalksReducerGUI:
         small_mode = bool(args.get("small", False))
 
         for index, file in enumerate(files, start=1):
+            _ensure_not_stopped()
             basename = os.path.basename(file)
             self._append_log(
                 f"Uploading {index}/{len(files)}: {basename} to {server_url}"
@@ -1793,8 +1827,12 @@ class TalksReducerGUI:
                     silent_speed=args.get("silent_speed"),
                     stream_updates=True,
                     log_callback=self._append_log,
+                    should_cancel=lambda: self._stop_requested,
                     # progress_callback=self._handle_service_progress,
                 )
+                _ensure_not_stopped()
+            except ProcessingAborted:
+                raise
             except Exception as exc:  # pragma: no cover - network safeguard
                 error_detail = f"{exc.__class__.__name__}: {exc}"
                 error_msg = f"Processing failed: {error_detail}"
