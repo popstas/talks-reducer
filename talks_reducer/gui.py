@@ -1358,7 +1358,7 @@ class TalksReducerGUI:
             highlightthickness=0,
         )
 
-        slider_relief = self.tk.FLAT if mode == "dark" else self.tk.RAISED
+        slider_relief = self.tk.FLAT # if mode == "dark" else self.tk.RAISED
         active_background = (
             palette.get("accent", palette["surface"])
             if mode == "dark"
@@ -1366,12 +1366,9 @@ class TalksReducerGUI:
         )
         for slider in getattr(self, "_sliders", []):
             slider.configure(
-                # background=palette["background"],
-                # foreground=palette["foreground"],
-                troughcolor=palette["surface"],
-                # activebackground=active_background,
-                # highlightbackground=palette["background"],
-                highlightcolor=palette["background"],
+                background=palette["border"], # slider inactive
+                troughcolor=palette["surface"], # slider background
+                activebackground=palette["border"], # slider active
                 sliderrelief=slider_relief,
                 bd=0,
             )
