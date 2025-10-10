@@ -1211,7 +1211,6 @@ class TalksReducerGUI:
         if simple:
             self.basic_options_frame.grid_remove()
             self.log_frame.grid_remove()
-            self.stop_button.grid_remove()
             self.advanced_button.grid_remove()
             self.advanced_frame.grid_remove()
             self.run_after_drop_var.set(True)
@@ -1974,7 +1973,7 @@ class TalksReducerGUI:
                 finish_time = time.monotonic()
                 runtime_seconds = max(0.0, finish_time - self._run_start_time)
                 duration_str = self._format_progress_time(runtime_seconds)
-                status_components.append(f"Finished for {duration_str}")
+                status_components.append(f"{duration_str}")
             else:
                 finished_seconds = next(
                     (
@@ -1991,7 +1990,7 @@ class TalksReducerGUI:
 
                 if finished_seconds is not None:
                     duration_str = self._format_progress_time(finished_seconds)
-                    status_components.append(f"Finished for {duration_str}")
+                    status_components.append(f"{duration_str}")
                 else:
                     status_components.append("Finished")
 
