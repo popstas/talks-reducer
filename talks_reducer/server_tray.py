@@ -309,6 +309,7 @@ class _ServerTrayApplication:
         self._share_url: Optional[str] = None
         self._icon: Optional[pystray.Icon] = None
         self._gui_process: Optional[subprocess.Popen[Any]] = None
+        self._startup_error: Optional[BaseException] = None
 
     # Server lifecycle -------------------------------------------------
 
@@ -435,26 +436,45 @@ class _ServerTrayApplication:
 
     # Public API -------------------------------------------------------
 
+    def _await_server_start(self, icon: Optional[pystray.Icon]) -> None:
+        """Wait for the server to signal readiness or trigger shutdown on failure."""
+
+        if self._ready_event.wait(timeout=30):
+            if self._open_browser_on_start and not self._stop_event.is_set():
+                self._handle_open_webui()
+            return
+
+        if self._stop_event.is_set():
+            return
+
+        error = RuntimeError(
+            "Timed out while waiting for the Talks Reducer server to start."
+        )
+        self._startup_error = error
+        LOGGER.error("%s", error)
+
+        if icon is not None:
+            with suppress(Exception):
+                icon.notify("Talks Reducer server failed to start.")
+
+        self.stop()
+
     def run(self) -> None:
         """Start the server and block until the tray icon exits."""
 
-        server_thread = threading.Thread(
+        self._startup_error = None
+
+        threading.Thread(
             target=self._launch_server, name="talks-reducer-server", daemon=True
-        )
-        server_thread.start()
-
-        if not self._ready_event.wait(timeout=30):
-            raise RuntimeError(
-                "Timed out while waiting for the Talks Reducer server to start."
-            )
-
-        if self._open_browser_on_start:
-            self._handle_open_webui()
+        ).start()
 
         if self._tray_mode == "headless":
             LOGGER.warning(
                 "Tray icon disabled (tray_mode=headless); press Ctrl+C to stop the server."
             )
+            self._await_server_start(None)
+            if self._startup_error is not None:
+                raise self._startup_error
             try:
                 while not self._stop_event.wait(0.5):
                     pass
@@ -484,6 +504,14 @@ class _ServerTrayApplication:
             menu=menu,
         )
 
+        watcher = threading.Thread(
+            target=self._await_server_start,
+            args=(self._icon,),
+            name="talks-reducer-server-watcher",
+            daemon=True,
+        )
+        watcher.start()
+
         if self._tray_mode == "pystray-detached":
             LOGGER.info("Running tray icon in detached mode")
             self._icon.run_detached()
@@ -492,10 +520,14 @@ class _ServerTrayApplication:
                     pass
             finally:
                 self.stop()
+            if self._startup_error is not None:
+                raise self._startup_error
             return
 
         LOGGER.info("Running tray icon in blocking mode")
         self._icon.run()
+        if self._startup_error is not None:
+            raise self._startup_error
 
     def stop(self) -> None:
         """Stop the tray icon and shut down the Gradio server."""
