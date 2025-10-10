@@ -29,7 +29,7 @@ def default_temp_folder() -> Path:
         else:
             base = Path(tempfile.gettempdir()) / "talks-reducer"
 
-    return base / "temp"
+    return base / "talks-reducer-temp"
 
 
 @dataclass(frozen=True)
