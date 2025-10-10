@@ -11,9 +11,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -36,6 +33,12 @@ try:
     from .discovery import discover_servers
     from .ffmpeg import FFmpegNotFoundError
     from .gui_preferences import GUIPreferences, determine_config_path
+    from .gui_remote import (
+        check_remote_server,
+        format_server_host,
+        normalize_server_url,
+        ping_server,
+    )
     from .gui_theme import (
         DARK_THEME,
         LIGHT_THEME,
@@ -62,6 +65,12 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.discovery import discover_servers
     from talks_reducer.ffmpeg import FFmpegNotFoundError
     from talks_reducer.gui_preferences import GUIPreferences, determine_config_path
+    from talks_reducer.gui_remote import (
+        check_remote_server,
+        format_server_host,
+        normalize_server_url,
+        ping_server,
+    )
     from talks_reducer.gui_theme import (
         DARK_THEME,
         LIGHT_THEME,
@@ -400,8 +409,12 @@ class TalksReducerGUI:
                 except Exception as exc:  # pragma: no cover - defensive safeguard
                     host_label = self._format_server_host(server_url)
                     message = f"Error pinging server {host_label}: {exc}"
-                    self._notify(lambda msg=message: self._append_log(msg))
-                    self._notify(lambda msg=message: self._set_status("Idle", msg))
+                    self._schedule_on_ui_thread(
+                        lambda msg=message: self._append_log(msg)
+                    )
+                    self._schedule_on_ui_thread(
+                        lambda msg=message: self._set_status("Idle", msg)
+                    )
 
             threading.Thread(target=ping_worker, daemon=True).start()
 
@@ -890,29 +903,10 @@ class TalksReducerGUI:
             self.remote_mode_button.configure(state=state)
 
     def _normalize_server_url(self, server_url: str) -> str:
-        parsed = urllib.parse.urlsplit(server_url)
-        if not parsed.scheme:
-            parsed = urllib.parse.urlsplit(f"http://{server_url}")
-
-        netloc = parsed.netloc or parsed.path
-        if not netloc:
-            return server_url
-
-        path = parsed.path if parsed.netloc else ""
-        normalized_path = path or "/"
-        return urllib.parse.urlunsplit((parsed.scheme, netloc, normalized_path, "", ""))
+        return normalize_server_url(server_url)
 
     def _format_server_host(self, server_url: str) -> str:
-        parsed = urllib.parse.urlsplit(server_url)
-        if not parsed.scheme:
-            parsed = urllib.parse.urlsplit(f"http://{server_url}")
-
-        host = parsed.netloc or parsed.path or server_url
-        if parsed.netloc and parsed.path and parsed.path not in {"", "/"}:
-            host = f"{parsed.netloc}{parsed.path}"
-
-        host = host.rstrip("/").split(":")[0]
-        return host or server_url
+        return format_server_host(server_url)
 
     def _check_remote_server(
         self,
@@ -933,88 +927,60 @@ class TalksReducerGUI:
         max_attempts: int = 5,
         delay: float = 1.0,
     ) -> bool:
-        """Ping *server_url* until it responds or attempts are exhausted."""
+        def log_callback(message: str) -> None:
+            self._schedule_on_ui_thread(lambda msg=message: self._append_log(msg))
 
-        host_label = self._format_server_host(server_url)
-        format_kwargs = {"host": host_label, "max_attempts": max_attempts}
-
-        success_text = (
-            success_message.format(**format_kwargs)
-            if success_message
-            else f"Server {host_label} is ready"
-        )
-        failure_text = (
-            failure_message.format(**format_kwargs)
-            if failure_message
-            else f"Server {host_label} is unreachable"
-        )
-
-        for attempt in range(1, max_attempts + 1):
-            if stop_check and stop_check():
-                if on_stop:
-                    on_stop()
-                return False
-
-            if self._ping_server(server_url):
-                self._notify(lambda msg=success_text: self._append_log(msg))
-                self._notify(
-                    lambda msg=success_text: self._set_status(success_status, msg)
-                )
-                return True
-
-            if attempt < max_attempts:
-                wait_text = waiting_message_template.format(
-                    attempt=attempt, max_attempts=max_attempts, host=host_label
-                )
-                self._notify(lambda msg=wait_text: self._append_log(msg))
-                self._notify(
-                    lambda msg=wait_text: self._set_status(waiting_status, msg)
-                )
-                if stop_check and stop_check():
-                    if on_stop:
-                        on_stop()
-                    return False
-                if delay:
-                    time.sleep(delay)
-
-        self._notify(lambda msg=failure_text: self._append_log(msg))
-        self._notify(lambda msg=failure_text: self._set_status(failure_status, msg))
+        def status_callback(status: str, message: str) -> None:
+            self._schedule_on_ui_thread(
+                lambda s=status, m=message: self._set_status(s, m)
+            )
 
         if switch_to_local_on_failure:
-            self._notify(lambda: self.processing_mode_var.set("local"))
+
+            def switch_callback() -> None:
+                self._schedule_on_ui_thread(
+                    lambda: self.processing_mode_var.set("local")
+                )
+
+        else:
+            switch_callback = None
 
         if alert_on_failure:
 
-            def warn() -> None:
-                message = (
-                    warning_message.format(**format_kwargs)
-                    if warning_message
-                    else failure_text
+            def alert_callback(title: str, message: str) -> None:
+                self._schedule_on_ui_thread(
+                    lambda t=title, m=message: self.messagebox.showwarning(t, m)
                 )
-                self.messagebox.showwarning(warning_title, message)
 
-            self._notify(warn)
+        else:
+            alert_callback = None
 
-        return False
-
-    def _ping_server(self, server_url: str, *, timeout: float = 5.0) -> bool:
-        normalized = self._normalize_server_url(server_url)
-        request = urllib.request.Request(
-            normalized,
-            headers={"User-Agent": "talks-reducer-gui"},
-            method="GET",
+        return check_remote_server(
+            server_url,
+            success_status=success_status,
+            waiting_status=waiting_status,
+            failure_status=failure_status,
+            success_message=success_message,
+            waiting_message_template=waiting_message_template,
+            failure_message=failure_message,
+            stop_check=stop_check,
+            on_stop=on_stop,
+            switch_to_local_on_failure=switch_to_local_on_failure,
+            alert_on_failure=alert_on_failure,
+            warning_title=warning_title,
+            warning_message=warning_message,
+            max_attempts=max_attempts,
+            delay=delay,
+            on_log=log_callback,
+            on_status=status_callback,
+            on_switch_to_local=switch_callback,
+            on_alert=alert_callback,
+            ping=self._ping_server,
+            sleep=time.sleep,
         )
 
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                status = getattr(response, "status", None)
-                if status is None:
-                    status = response.getcode()
-                if status is None:
-                    return False
-                return 200 <= int(status) < 500
-        except (urllib.error.URLError, ValueError):
-            return False
+    def _ping_server(self, server_url: str, *, timeout: float = 5.0) -> bool:
+        return ping_server(server_url, timeout=timeout)
 
     def _start_discovery(self) -> None:
         """Search the local network for running Talks Reducer servers."""
@@ -1030,14 +996,14 @@ class TalksReducerGUI:
         def worker() -> None:
             try:
                 urls = discover_servers(
-                    progress_callback=lambda current, total: self._notify(
+                    progress_callback=lambda current, total: self._schedule_on_ui_thread(
                         lambda c=current, t=total: self._on_discovery_progress(c, t)
                     )
                 )
             except Exception as exc:  # pragma: no cover - network failure safeguard
-                self._notify(lambda: self._on_discovery_failed(exc))
+                self._schedule_on_ui_thread(lambda: self._on_discovery_failed(exc))
                 return
-            self._notify(lambda: self._on_discovery_complete(urls))
+            self._schedule_on_ui_thread(lambda: self._on_discovery_complete(urls))
 
         self._discovery_thread = threading.Thread(target=worker, daemon=True)
         self._discovery_thread.start()
@@ -1386,7 +1352,7 @@ class TalksReducerGUI:
             try:
                 files = gather_input_files(self.input_files)
                 if not files:
-                    self._notify(
+                    self._schedule_on_ui_thread(
                         lambda: self.messagebox.showwarning(
                             "No files", "No supported media files were found."
                         )
@@ -1402,7 +1368,7 @@ class TalksReducerGUI:
                         open_after_convert=open_after_convert,
                     )
                     if success:
-                        self._notify(self._hide_stop_button)
+                        self._schedule_on_ui_thread(self._hide_stop_button)
                         return
                     # If server processing failed, fall back to local processing
                     # The _process_files_via_server function already switched to local mode
@@ -1416,7 +1382,7 @@ class TalksReducerGUI:
                 )
                 for index, file in enumerate(files, start=1):
                     self._append_log(f"Processing: {os.path.basename(file)}")
-                    options = self._build_options(Path(file), args)
+                    options = self._create_processing_options(Path(file), args)
                     result = speed_up_video(options, reporter=reporter)
                     self._last_output = result.output_file
                     self._last_time_ratio = result.time_ratio
@@ -1429,17 +1395,19 @@ class TalksReducerGUI:
 
                     self._append_log(completion_msg)
                     if open_after_convert:
-                        self._notify(
+                        self._schedule_on_ui_thread(
                             lambda path=result.output_file: self._open_in_file_manager(
                                 path
                             )
                         )
 
                 self._append_log("All jobs finished successfully.")
-                self._notify(lambda: self.open_button.configure(state=self.tk.NORMAL))
-                self._notify(self._clear_input_files)
+                self._schedule_on_ui_thread(
+                    lambda: self.open_button.configure(state=self.tk.NORMAL)
+                )
+                self._schedule_on_ui_thread(self._clear_input_files)
             except FFmpegNotFoundError as exc:
-                self._notify(
+                self._schedule_on_ui_thread(
                     lambda: self.messagebox.showerror("FFmpeg not found", str(exc))
                 )
                 self._set_status("Error")
@@ -1455,11 +1423,13 @@ class TalksReducerGUI:
                     error_msg = f"Processing failed: {exc}"
                     self._append_log(error_msg)
                     print(error_msg, file=sys.stderr)  # Also output to console
-                    self._notify(lambda: self.messagebox.showerror("Error", error_msg))
+                    self._schedule_on_ui_thread(
+                        lambda: self.messagebox.showerror("Error", error_msg)
+                    )
                     self._set_status("Error")
             finally:
                 self._run_start_time = None
-                self._notify(self._hide_stop_button)
+                self._schedule_on_ui_thread(self._hide_stop_button)
 
         self._processing_thread = threading.Thread(target=worker, daemon=True)
         self._processing_thread.start()
@@ -1551,17 +1521,17 @@ class TalksReducerGUI:
             service_module = importlib.import_module("talks_reducer.service_client")
         except ModuleNotFoundError as exc:
             self._append_log(f"Server client unavailable: {exc}")
-            self._notify(
+            self._schedule_on_ui_thread(
                 lambda: self.messagebox.showerror(
                     "Server unavailable",
                     "Remote processing requires the gradio_client package.",
                 )
             )
-            self._notify(lambda: self._set_status("Error"))
+            self._schedule_on_ui_thread(lambda: self._set_status("Error"))
             return False
 
         host_label = self._format_server_host(server_url)
-        self._notify(
+        self._schedule_on_ui_thread(
             lambda: self._set_status("waiting", f"Waiting server {host_label}...")
         )
 
@@ -1639,8 +1609,8 @@ class TalksReducerGUI:
                 error_detail = f"{exc.__class__.__name__}: {exc}"
                 error_msg = f"Processing failed: {error_detail}"
                 self._append_log(error_msg)
-                self._notify(lambda: self._set_status("Error"))
-                self._notify(
+                self._schedule_on_ui_thread(lambda: self._set_status("Error"))
+                self._schedule_on_ui_thread(
                     lambda: self.messagebox.showerror(
                         "Server error",
                         f"Failed to process {basename}: {error_detail}",
@@ -1659,13 +1629,15 @@ class TalksReducerGUI:
                 for line in log_text.splitlines():
                     self._append_log(line)
             if open_after_convert:
-                self._notify(
+                self._schedule_on_ui_thread(
                     lambda path=self._last_output: self._open_in_file_manager(path)
                 )
 
         self._append_log("All jobs finished successfully.")
-        self._notify(lambda: self.open_button.configure(state=self.tk.NORMAL))
-        self._notify(self._clear_input_files)
+        self._schedule_on_ui_thread(
+            lambda: self.open_button.configure(state=self.tk.NORMAL)
+        )
+        self._schedule_on_ui_thread(self._clear_input_files)
         return True
 
     def _parse_float(self, value: str, label: str) -> float:
@@ -1674,7 +1646,7 @@ class TalksReducerGUI:
         except ValueError as exc:  # pragma: no cover - input validation
             raise ValueError(f"{label} must be a number.") from exc
 
-    def _build_options(
+    def _create_processing_options(
         self, input_file: Path, args: dict[str, object]
     ) -> ProcessingOptions:
         options = dict(args)
@@ -1924,7 +1896,7 @@ class TalksReducerGUI:
                 interval_ms, self._advance_audio_progress
             )
 
-        self._notify(_start)
+        self._schedule_on_ui_thread(_start)
 
     def _advance_audio_progress(self) -> None:
         self._audio_progress_job = None
@@ -1961,7 +1933,7 @@ class TalksReducerGUI:
                 self._audio_progress_job = None
             self._audio_progress_interval_ms = None
 
-        self._notify(_cancel)
+        self._schedule_on_ui_thread(_cancel)
 
     def _reset_audio_progress_state(self, *, clear_source: bool) -> None:
         if clear_source:
@@ -1983,7 +1955,7 @@ class TalksReducerGUI:
                 if current_value < self.AUDIO_PROGRESS_STEPS:
                     self._set_progress(self.AUDIO_PROGRESS_STEPS)
 
-        self._notify(_complete)
+        self._schedule_on_ui_thread(_complete)
 
     def _apply_status_style(self, status: str) -> None:
         color = STATUS_COLORS.get(status.lower())
@@ -2161,7 +2133,7 @@ class TalksReducerGUI:
 
         self.root.after(0, updater)
 
-    def _notify(self, callback: Callable[[], None]) -> None:
+    def _schedule_on_ui_thread(self, callback: Callable[[], None]) -> None:
         self.root.after(0, callback)
 
     def run(self) -> None:
