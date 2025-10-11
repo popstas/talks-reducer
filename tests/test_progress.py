@@ -78,6 +78,7 @@ def test_tqdm_progress_handle_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None
 
         handle.advance(4)
         assert recorded["bar"].n == 4
+        assert handle.current == 4
 
     assert recorded["bar"].n == 10
     assert recorded["bar"].update_calls == [4, 6]

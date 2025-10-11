@@ -12,6 +12,69 @@ import pytest
 from talks_reducer import cli
 
 
+def test_build_parser_includes_version_and_defaults(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """The CLI parser should expose version info and default temp folder."""
+
+    monkeypatch.setattr(cli, "resolve_version", lambda: "9.9.9")
+    default_temp = tmp_path / "work"
+    monkeypatch.setattr(cli, "default_temp_folder", lambda: default_temp)
+
+    parser = cli._build_parser()
+
+    args = parser.parse_args(["input.mp4"])
+    assert args.input_file == ["input.mp4"]
+    assert args.temp_folder == str(default_temp)
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--version"])
+
+    out = capsys.readouterr().out
+    assert "talks-reducer 9.9.9" in out
+
+
+def test_gather_input_files_collects_valid_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Gathering should include individual files and directory members."""
+
+    file_path = tmp_path / "video1.mp4"
+    file_path.write_text("data")
+
+    directory = tmp_path / "inputs"
+    directory.mkdir()
+    valid_child = directory / "clip.mp4"
+    valid_child.write_text("data")
+    (directory / "notes.txt").write_text("ignore")
+
+    monkeypatch.setattr(
+        cli.audio,
+        "is_valid_input_file",
+        lambda candidate: str(candidate).endswith(("video1.mp4", "clip.mp4")),
+    )
+
+    results = cli.gather_input_files([str(file_path), str(directory)])
+
+    assert str(file_path.resolve()) in results
+    assert str(valid_child) in results
+    assert len(results) == 2
+
+
+def test_print_total_time_formats_elapsed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The elapsed time helper should print hours, minutes, and seconds."""
+
+    start_time = 10.0
+    monkeypatch.setattr(cli.time, "time", lambda: start_time + 3661.5)
+
+    cli._print_total_time(start_time)
+
+    output = capsys.readouterr().out
+    assert "Time: 1h 1m 1.50s" in output
+
+
 def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> None:
     """The CLI application should configure the local pipeline correctly."""
 
@@ -336,6 +399,16 @@ def test_launch_server_tray_binary_hides_console_without_parent(
 
     assert cli._launch_server_tray_binary([]) is True
     assert calls and calls[0].get("creationflags") == DummySubprocess.CREATE_NO_WINDOW
+
+
+def test_should_hide_subprocess_console_defaults_to_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-Windows platforms should never request a hidden console."""
+
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+
+    assert cli._should_hide_subprocess_console() is False
 
 
 def test_launch_server_tray_binary_handles_failures(
