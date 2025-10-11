@@ -8,6 +8,7 @@ import gradio as gr
 import pytest
 from PIL import Image
 
+from talks_reducer import icons as icons_module
 from talks_reducer import server, server_tray
 from talks_reducer.models import ProcessingOptions, ProcessingResult
 
@@ -380,6 +381,12 @@ def test_iter_icon_candidates_covers_packaged_roots(
     project_docs_icon.parent.mkdir(parents=True)
     project_docs_icon.write_bytes(b"\x89PNG\r\n\x1a\n")
 
+    project_package_icon = (
+        module_dir.parent / "talks_reducer" / "resources" / "icons" / "icon.png"
+    )
+    project_package_icon.parent.mkdir(parents=True)
+    project_package_icon.write_bytes(b"PNG")
+
     frozen_root = tmp_path / "frozen"
     frozen_icon = frozen_root / "docs" / "assets" / "icon.png"
     frozen_icon.parent.mkdir(parents=True)
@@ -390,9 +397,19 @@ def test_iter_icon_candidates_covers_packaged_roots(
     dist_icon.parent.mkdir(parents=True)
     dist_icon.write_bytes(b"PNG")
 
+    dist_package_icon = dist_root / "talks_reducer" / "resources" / "icons" / "icon.png"
+    dist_package_icon.parent.mkdir(parents=True)
+    dist_package_icon.write_bytes(b"PNG")
+
     internal_icon = dist_root / "_internal" / "docs" / "assets" / "icon.png"
     internal_icon.parent.mkdir(parents=True)
     internal_icon.write_bytes(b"PNG")
+
+    internal_package_icon = (
+        dist_root / "_internal" / "talks_reducer" / "resources" / "icons" / "icon.png"
+    )
+    internal_package_icon.parent.mkdir(parents=True)
+    internal_package_icon.write_bytes(b"PNG")
 
     monkeypatch.setattr(server_tray, "__file__", str(module_file))
     monkeypatch.setattr(server_tray.sys, "_MEIPASS", str(frozen_root), raising=False)
@@ -413,8 +430,84 @@ def test_iter_icon_candidates_covers_packaged_roots(
 
     assert project_docs_icon.resolve() in candidates
     assert frozen_icon.resolve() in candidates
+    assert project_package_icon.resolve() in candidates
     assert dist_icon.resolve() in candidates
+    assert dist_package_icon.resolve() in candidates
     assert internal_icon.resolve() in candidates
+    assert internal_package_icon.resolve() in candidates
+
+
+def test_iter_icon_candidates_includes_package_resources(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Package installations should discover bundled resources/icons assets."""
+
+    package_root = tmp_path / "site-packages" / "talks_reducer"
+    module_file = package_root / "server_tray.py"
+    icon_path = package_root / "resources" / "icons" / "icon.png"
+
+    module_file.parent.mkdir(parents=True)
+    module_file.write_text("# dummy module")
+    icon_path.parent.mkdir(parents=True)
+    icon_path.write_bytes(b"PNG")
+
+    monkeypatch.setattr(server_tray, "__file__", str(module_file))
+    monkeypatch.setattr(server_tray.sys, "_MEIPASS", None, raising=False)
+    monkeypatch.setattr(
+        server_tray.sys,
+        "executable",
+        str(package_root / "talks-reducer.exe"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        server_tray.sys,
+        "argv",
+        [str(package_root / "talks-reducer.exe")],
+        raising=False,
+    )
+
+    candidates = list(server_tray._iter_icon_candidates())
+
+    assert icon_path.resolve() in candidates
+
+
+def test_iter_icon_candidates_include_working_directory_bundle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Bundled executables should locate icons beside the working directory."""
+
+    module_dir = tmp_path / "pkg" / "talks_reducer"
+    module_dir.mkdir(parents=True)
+    module_file = module_dir / "server_tray.py"
+    module_file.write_text("# dummy module")
+
+    working_dir = tmp_path / "dist" / "talks-reducer"
+    bundle_icon = (
+        working_dir / "_internal" / "talks_reducer" / "resources" / "icons" / "icon.png"
+    )
+    bundle_icon.parent.mkdir(parents=True)
+    bundle_icon.write_bytes(b"PNG")
+
+    monkeypatch.setattr(server_tray, "__file__", str(module_file))
+    monkeypatch.setattr(icons_module, "__file__", str(module_file))
+    monkeypatch.setattr(server_tray.sys, "_MEIPASS", None, raising=False)
+    monkeypatch.setattr(
+        server_tray.sys, "executable", str(working_dir / "talks-reducer.exe")
+    )
+    monkeypatch.setattr(
+        server_tray.sys, "argv", [str(working_dir / "talks-reducer.exe")], raising=False
+    )
+
+    monkeypatch.setattr(
+        server_tray.Path, "cwd", staticmethod(lambda: working_dir), raising=False
+    )
+    monkeypatch.setattr(
+        icons_module.Path, "cwd", staticmethod(lambda: working_dir), raising=False
+    )
+
+    candidates = list(server_tray._iter_icon_candidates())
+
+    assert bundle_icon.resolve() in candidates
 
 
 def test_load_icon_uses_first_existing_candidate(

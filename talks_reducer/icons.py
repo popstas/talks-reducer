@@ -11,12 +11,16 @@ from typing import Iterator, Optional, Sequence
 LOGGER = logging.getLogger(__name__)
 
 _ICON_RELATIVE_PATHS: Sequence[Path] = (
+    Path("resources") / "icons",
     Path("talks_reducer") / "resources" / "icons",
+    Path("talks_reducer") / "assets",
+    Path("assets"),
     Path("docs") / "assets",
 )
 _ICON_PATH_SUFFIXES: Sequence[Path] = (
     Path(""),
     Path("_internal"),
+    Path("_internal") / "talks_reducer",
     Path("Contents") / "Resources",
     Path("Resources"),
 )
@@ -31,36 +35,45 @@ def _iter_base_roots(module_file: Optional[Path | str] = None) -> Iterator[Path]
 
     seen: set[Path] = set()
 
-    def _yield(path: Optional[Path]) -> Iterator[Path]:
+    def _yield(label: str, path: Optional[Path | str]) -> Iterator[Path]:
         if path is None:
+            LOGGER.debug("Skipping %s icon root: value is not set", label)
             return iter(())
-        resolved = path.resolve()
+        try:
+            resolved = Path(path).resolve()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            LOGGER.debug("Failed to resolve %s icon root %r: %s", label, path, exc)
+            return iter(())
         if resolved in seen:
+            LOGGER.debug("Skipping duplicate %s icon root: %s", label, resolved)
             return iter(())
         seen.add(resolved)
+        LOGGER.debug("Added %s icon root: %s", label, resolved)
         return iter((resolved,))
 
-    for root in (
-        package_root,
-        project_root,
-    ):
-        yield from _yield(root)
+    yield from _yield("module", package_root)
+    yield from _yield("project", project_root)
 
-    frozen_root: Optional[Path] = None
+    try:
+        cwd = Path.cwd()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        LOGGER.debug("Failed to resolve working directory for icons: %s", exc)
+    else:
+        yield from _yield("working directory", cwd)
+
     frozen_value = getattr(sys, "_MEIPASS", None)
     if frozen_value:
-        with suppress(Exception):
-            frozen_root = Path(str(frozen_value))
-    if frozen_root is not None:
-        yield from _yield(frozen_root)
+        yield from _yield("frozen bundle", frozen_value)
 
     with suppress(Exception):
-        executable_root = Path(sys.executable).resolve().parent
-        yield from _yield(executable_root)
+        executable_path = Path(sys.executable).resolve()
+        LOGGER.debug("Executable path for icon search: %s", executable_path)
+        yield from _yield("executable directory", executable_path.parent)
 
     with suppress(Exception):
-        launcher_root = Path(sys.argv[0]).resolve().parent
-        yield from _yield(launcher_root)
+        launcher_path = Path(sys.argv[0]).resolve()
+        LOGGER.debug("Launcher path for icon search: %s", launcher_path)
+        yield from _yield("launcher directory", launcher_path.parent)
 
 
 def iter_icon_candidates(

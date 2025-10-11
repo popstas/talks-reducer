@@ -99,7 +99,10 @@ if sys.platform.startswith("win"):
 else:
     _TRAY_ICON_FILENAMES = ("icon.png", "icon.ico", "app.png", "app.ico", "app-256.png")
 _ICON_RELATIVE_PATHS = (
+    Path("resources") / "icons",
     Path("talks_reducer") / "resources" / "icons",
+    Path("talks_reducer") / "assets",
+    Path("assets"),
     Path("docs") / "assets",
 )
 
