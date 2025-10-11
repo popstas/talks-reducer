@@ -401,6 +401,16 @@ def test_launch_server_tray_binary_hides_console_without_parent(
     assert calls and calls[0].get("creationflags") == DummySubprocess.CREATE_NO_WINDOW
 
 
+def test_should_hide_subprocess_console_defaults_to_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-Windows platforms should never request a hidden console."""
+
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+
+    assert cli._should_hide_subprocess_console() is False
+
+
 def test_launch_server_tray_binary_handles_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

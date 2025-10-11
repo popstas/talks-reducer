@@ -247,3 +247,70 @@ def test_iter_probe_addresses_recovers_from_socket_errors() -> None:
     )
 
     assert addresses == ["192.0.2.77"]
+
+
+def test_should_include_host_handles_empty_values() -> None:
+    """Hosts without a value or in the exclusion set should be ignored."""
+
+    assert discovery._should_include_host("") is False
+    assert discovery._should_include_host(None) is False
+    assert discovery._should_include_host("localhost") is False
+    assert discovery._should_include_host("192.0.2.55") is True
+
+
+def test_iter_local_ipv4_addresses_uses_default_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default address sources should be consulted when none are provided."""
+
+    monkeypatch.setattr(
+        discovery,
+        "_iter_getaddrinfo_addresses",
+        lambda: iter(["", "192.0.2.15"]),
+    )
+    monkeypatch.setattr(
+        discovery,
+        "_iter_probe_addresses",
+        lambda: iter(["192.0.2.15", "198.51.100.7"]),
+    )
+
+    addresses = list(discovery._iter_local_ipv4_addresses())
+
+    assert addresses == ["192.0.2.15", "198.51.100.7"]
+
+
+def test_probe_host_handles_close_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Errors raised while closing the connection should be suppressed."""
+
+    events: dict[str, bool] = {"closed": False, "read": False}
+
+    class DummyResponse:
+        status = 503
+
+        def read(self) -> None:
+            events["read"] = True
+
+    class DummyConnection:
+        def __init__(self, host: str, port: int, timeout: float) -> None:
+            self.host = host
+            self.port = port
+            self.timeout = timeout
+
+        def request(self, method: str, path: str, headers: dict[str, str]) -> None:
+            assert method == "GET"
+            assert path == "/"
+            assert "User-Agent" in headers
+
+        def getresponse(self) -> DummyResponse:
+            return DummyResponse()
+
+        def close(self) -> None:
+            events["closed"] = True
+            raise RuntimeError("close failed")
+
+    monkeypatch.setattr(discovery, "HTTPConnection", DummyConnection)
+
+    result = discovery._probe_host("example.com", 8080, timeout=0.1)
+
+    assert result is None
+    assert events == {"closed": True, "read": True}
