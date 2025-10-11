@@ -11,6 +11,7 @@ from typing import Iterator, Optional, Sequence
 LOGGER = logging.getLogger(__name__)
 
 _ICON_RELATIVE_PATHS: Sequence[Path] = (
+    Path("resources") / "icons",
     Path("talks_reducer") / "resources" / "icons",
     Path("docs") / "assets",
 )
@@ -43,6 +44,7 @@ def _iter_base_roots(module_file: Optional[Path | str] = None) -> Iterator[Path]
     for root in (
         package_root,
         project_root,
+        Path.cwd(),
     ):
         yield from _yield(root)
 

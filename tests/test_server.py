@@ -417,6 +417,40 @@ def test_iter_icon_candidates_covers_packaged_roots(
     assert internal_icon.resolve() in candidates
 
 
+def test_iter_icon_candidates_includes_package_resources(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Package installations should discover bundled resources/icons assets."""
+
+    package_root = tmp_path / "site-packages" / "talks_reducer"
+    module_file = package_root / "server_tray.py"
+    icon_path = package_root / "resources" / "icons" / "icon.png"
+
+    module_file.parent.mkdir(parents=True)
+    module_file.write_text("# dummy module")
+    icon_path.parent.mkdir(parents=True)
+    icon_path.write_bytes(b"PNG")
+
+    monkeypatch.setattr(server_tray, "__file__", str(module_file))
+    monkeypatch.setattr(server_tray.sys, "_MEIPASS", None, raising=False)
+    monkeypatch.setattr(
+        server_tray.sys,
+        "executable",
+        str(package_root / "talks-reducer.exe"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        server_tray.sys,
+        "argv",
+        [str(package_root / "talks-reducer.exe")],
+        raising=False,
+    )
+
+    candidates = list(server_tray._iter_icon_candidates())
+
+    assert icon_path.resolve() in candidates
+
+
 def test_load_icon_uses_first_existing_candidate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
