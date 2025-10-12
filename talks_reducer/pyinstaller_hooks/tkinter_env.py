@@ -10,7 +10,7 @@ from pathlib import Path
 def _select_latest(directory: Path, prefix: str) -> Path | None:
     """Pick the newest matching child directory within *directory*."""
 
-    if not directory.exists():
+    if not directory.exists() or not directory.is_dir():
         return None
 
     candidates = [child for child in directory.iterdir() if child.is_dir() and child.name.lower().startswith(prefix)]
