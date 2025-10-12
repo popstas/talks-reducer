@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,32 @@ from typing import Optional, Sequence, Tuple
 
 from ..cli import main as cli_main
 from .app import TalksReducerGUI
+
+_runtime_logged = False
+
+
+def _log_python_runtime() -> None:
+    """Emit the active Python runtime details once for troubleshooting."""
+
+    global _runtime_logged
+    if _runtime_logged:
+        return
+
+    _runtime_logged = True
+
+    try:
+        implementation = platform.python_implementation()
+    except Exception:  # pragma: no cover - extremely defensive fallback
+        implementation = "Python"
+
+    try:
+        version = platform.python_version()
+    except Exception:  # pragma: no cover - platform module unavailable
+        version = sys.version.split()[0]
+
+    sys.stdout.write(
+        f"[Talks Reducer] Runtime: {implementation} {version} (executable: {sys.executable})\n"
+    )
 
 
 def _check_tkinter_available() -> Tuple[bool, str]:
@@ -87,6 +114,8 @@ if __name__ == "__main__":
 
 def main(argv: Optional[Sequence[str]] = None) -> bool:
     """Launch the GUI when run without arguments, otherwise defer to the CLI."""
+
+    _log_python_runtime()
 
     if argv is None:
         argv = sys.argv[1:]
