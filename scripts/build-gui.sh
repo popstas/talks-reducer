@@ -148,7 +148,6 @@ for arg in "${PYINSTALLER_ARGS[@]}"; do
 done
 
 if [[ "$OS_NAME" == "macos" ]]; then
-    mkdir -p "dist/talks-reducer.app"
     # Produce the most compatible binary we can. Prefer universal builds
     # when the Python runtime and dependencies contain both arm64 and
     # x86_64 slices, otherwise fall back to the active architecture to
@@ -213,11 +212,38 @@ fi
 pyinstaller "${PYINSTALLER_ARGS[@]}"
 
 # Find the output directory (PyInstaller may use dist/ or dist/)
-if [[ -d "dist/talks-reducer.app" ]]; then
-    OUTPUT_DIR="dist/talks-reducer.app"
-elif [[ -d "dist/talks-reducer" ]]; then
-    OUTPUT_DIR="dist/talks-reducer"
-else
+OUTPUT_DIR=""
+if [[ -d "dist" ]]; then
+    if [[ "$OS_NAME" == "macos" && -d "dist/talks-reducer.app/Contents" ]]; then
+        OUTPUT_DIR="dist/talks-reducer.app"
+    elif [[ -d "dist/talks-reducer" ]]; then
+        OUTPUT_DIR="dist/talks-reducer"
+    else
+        OUTPUT_DIR=$(cat <<'PY' | "$PYTHON_BIN" - 2>/dev/null || true
+import pathlib
+
+dist = pathlib.Path("dist")
+candidates = []
+if dist.exists():
+    for child in dist.iterdir():
+        if child.is_dir():
+            try:
+                mtime = child.stat().st_mtime
+            except OSError:
+                continue
+            candidates.append((mtime, child))
+
+if candidates:
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    print(candidates[0][1].as_posix())
+PY
+        )
+        OUTPUT_DIR=${OUTPUT_DIR//$'\r'/}
+        OUTPUT_DIR=${OUTPUT_DIR//$'\n'/}
+    fi
+fi
+
+if [[ "$OS_NAME" == "macos" && "$OUTPUT_DIR" == *.app && ! -d "$OUTPUT_DIR/Contents" ]]; then
     OUTPUT_DIR=""
 fi
 
