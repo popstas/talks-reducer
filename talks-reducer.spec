@@ -1,11 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import importlib.util
 import os
 import pathlib
 import platform
 import subprocess
 import sys
 import sysconfig
+
+try:
+    from PyInstaller.building.osx import BUNDLE
+except Exception:  # pragma: no cover - macOS-only helper may not import elsewhere
+    BUNDLE = None
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -77,6 +83,24 @@ else:
 
 if candidate.exists():
     icon_file = str(candidate)
+
+
+def resolve_app_version() -> str:
+    """Return the Talks Reducer version for bundle metadata."""
+
+    about_path = PROJECT_DIR / "talks_reducer" / "__about__.py"
+    try:
+        spec = importlib.util.spec_from_file_location("talks_reducer.__about__", about_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            version = getattr(module, "__version__", "")
+            if version:
+                return str(version)
+    except Exception:
+        pass
+
+    return "0.0.0"
 
 
 def detect_macos_target_arch() -> str:
@@ -164,13 +188,38 @@ exe = EXE(
     icon=icon_file,
     version=version_file,
 )
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name="talks-reducer",
-)
+if sys.platform == "darwin" and BUNDLE is not None:
+    app_version = resolve_app_version()
+    bundle_identifier = "com.popstas.talks-reducer"
+    info_plist = {
+        "CFBundleName": "Talks Reducer",
+        "CFBundleDisplayName": "Talks Reducer",
+        "CFBundleIdentifier": bundle_identifier,
+        "CFBundleVersion": app_version,
+        "CFBundleShortVersionString": app_version,
+        "CFBundlePackageType": "APPL",
+        "NSHighResolutionCapable": True,
+    }
+
+    app = BUNDLE(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        name="talks-reducer.app",
+        icon=icon_file,
+        bundle_identifier=bundle_identifier,
+        info_plist=info_plist,
+        version=app_version,
+    )
+else:
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name="talks-reducer",
+    )

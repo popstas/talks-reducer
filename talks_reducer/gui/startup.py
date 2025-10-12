@@ -123,6 +123,9 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
         )
     argv = remaining
 
+    if sys.platform == "darwin":
+        argv = [arg for arg in argv if not arg.startswith("-psn_")]
+
     if argv:
         launch_gui = False
         if sys.platform == "win32" and not any(arg.startswith("-") for arg in argv):
