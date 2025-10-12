@@ -7,6 +7,7 @@ import platform
 import subprocess
 import sys
 import sysconfig
+import ctypes.util
 
 try:
     from PyInstaller.building.osx import BUNDLE
@@ -29,6 +30,72 @@ base_datas = [
 ]
 
 datas = [(str(src), dest) for src, dest in base_datas if src.exists()]
+
+
+def _collect_tcl_tk_data() -> list[tuple[str, str]]:
+    """Locate Tcl/Tk resource directories that PyInstaller may miss on macOS."""
+
+    resources: list[tuple[str, str]] = []
+
+    try:
+        import tkinter  # type: ignore
+    except Exception:
+        return resources
+
+    tk_root = pathlib.Path(tkinter.__file__).resolve().parent
+    search_roots: set[pathlib.Path] = set()
+
+    # Include sibling directories such as tcl8.6, tk8.6, etc.
+    for pattern in ("tcl*", "tk*"):
+        for candidate in tk_root.glob(pattern):
+            if candidate.is_dir():
+                search_roots.add(candidate)
+
+    # Some Python builds stash the resources in a Resources/lib folder.
+    potential_parent = tk_root.parent
+    if potential_parent.exists():
+        for subdir in ("tcl", "tk"):
+            container = potential_parent / subdir
+            if not container.exists():
+                continue
+            for candidate in container.glob(f"{subdir}*"):
+                if candidate.is_dir():
+                    search_roots.add(candidate)
+
+    # Honour environment overrides if present during the build.
+    for env_var in ("TCL_LIBRARY", "TK_LIBRARY"):
+        value = os.environ.get(env_var)
+        if value:
+            path = pathlib.Path(value)
+            if path.exists():
+                search_roots.add(path)
+                if path.parent.exists():
+                    search_roots.add(path.parent)
+
+    collected: set[str] = set()
+    for directory in search_roots:
+        if not directory.is_dir():
+            continue
+
+        name = directory.name
+        if name in collected:
+            continue
+
+        if name.lower().startswith("tcl"):
+            destination = f"tcl/{name}"
+        elif name.lower().startswith("tk"):
+            destination = f"tk/{name}"
+        else:
+            destination = f"tk/{name}"
+
+        resources.append((str(directory), destination))
+        collected.add(name)
+
+    return resources
+
+
+if sys.platform == "darwin":
+    datas.extend(_collect_tcl_tk_data())
 
 try:
     datas.extend(collect_data_files("gradio_client"))
@@ -147,6 +214,49 @@ if sys.platform == "darwin":
     target_arch = detect_macos_target_arch()
     print(f"🎯 macOS build target architecture: {target_arch}")
 
+binaries: list[tuple[str, str]] = []
+if sys.platform == "darwin":
+    lib_candidates = set()
+    for base_prefix in {pathlib.Path(sys.base_prefix), pathlib.Path(sys.prefix)}:
+        lib_dir = base_prefix / "lib"
+        if lib_dir.exists():
+            lib_candidates.add(lib_dir)
+
+    framework_prefix = sysconfig.get_config_var("PYTHONFRAMEWORKPREFIX")
+    py_short_version = sysconfig.get_config_var("py_version_short")
+    if framework_prefix and py_short_version:
+        framework_dir = pathlib.Path(framework_prefix)
+        lib_dir = framework_dir / "Versions" / py_short_version / "lib"
+        if lib_dir.exists():
+            lib_candidates.add(lib_dir)
+
+    dylib_names = ["libtcl8.7.dylib", "libtcl8.6.dylib", "libtk8.7.dylib", "libtk8.6.dylib"]
+
+    seen_binaries = set()
+    for lib_dir in lib_candidates:
+        for name in dylib_names:
+            candidate = lib_dir / name
+            if candidate.exists():
+                key = str(candidate.resolve())
+                if key not in seen_binaries:
+                    binaries.append((str(candidate), name))
+                    seen_binaries.add(key)
+
+    # Fallback to ctypes util discovery in case the dylibs live elsewhere.
+    for lookup in ("tcl8.7", "tcl8.6", "tk8.7", "tk8.6"):
+        try:
+            path = ctypes.util.find_library(lookup)
+        except Exception:
+            path = None
+        if not path:
+            continue
+        candidate = pathlib.Path(path)
+        if candidate.exists():
+            key = str(candidate.resolve())
+            if key not in seen_binaries:
+                binaries.append((str(candidate), candidate.name))
+                seen_binaries.add(key)
+
 version_file = None
 if sys.platform.startswith("win"):
     candidate_version = PROJECT_DIR / "version.txt"
@@ -156,12 +266,14 @@ if sys.platform.startswith("win"):
 a = Analysis(
     ["launcher.py"],
     pathex=pathex,
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[
+        str(PROJECT_DIR / "talks_reducer" / "pyinstaller_hooks" / "tkinter_env.py"),
+    ] if sys.platform == "darwin" else [],
     excludes=excludes,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -200,6 +312,9 @@ if sys.platform == "darwin" and BUNDLE is not None:
         "CFBundlePackageType": "APPL",
         "NSHighResolutionCapable": True,
     }
+
+    if icon_file:
+        info_plist["CFBundleIconFile"] = pathlib.Path(icon_file).stem
 
     app = BUNDLE(
         exe,
