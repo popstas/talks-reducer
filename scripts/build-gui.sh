@@ -213,10 +213,10 @@ pyinstaller "${PYINSTALLER_ARGS[@]}"
 
 # Find the output directory (PyInstaller may use dist/ or dist/)
 OUTPUT_DIR=""
-if [[ -d "dist" ]]; then
-    if [[ "$OS_NAME" == "macos" && -d "dist/talks-reducer.app/Contents" ]]; then
-        OUTPUT_DIR="dist/talks-reducer.app"
-    elif [[ -d "dist/talks-reducer" ]]; then
+if [[ "$OS_NAME" == "macos" ]]; then
+    OUTPUT_DIR="dist/talks-reducer.app"
+elif [[ -d "dist" ]]; then
+    if [[ -d "dist/talks-reducer" ]]; then
         OUTPUT_DIR="dist/talks-reducer"
     else
         OUTPUT_DIR=$(cat <<'PY' | "$PYTHON_BIN" - 2>/dev/null || true
@@ -241,10 +241,6 @@ PY
         OUTPUT_DIR=${OUTPUT_DIR//$'\r'/}
         OUTPUT_DIR=${OUTPUT_DIR//$'\n'/}
     fi
-fi
-
-if [[ "$OS_NAME" == "macos" && "$OUTPUT_DIR" == *.app && ! -d "$OUTPUT_DIR/Contents" ]]; then
-    OUTPUT_DIR=""
 fi
 
 # Remove CUDA DLLs (not needed, saves ~500MB)
