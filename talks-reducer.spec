@@ -2,7 +2,10 @@
 
 import os
 import pathlib
+import platform
+import subprocess
 import sys
+import sysconfig
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -75,6 +78,51 @@ else:
 if candidate.exists():
     icon_file = str(candidate)
 
+
+def detect_macos_target_arch() -> str:
+    """Derive the most compatible macOS target architecture for PyInstaller."""
+
+    host_arch = platform.machine().lower()
+    host_target = None
+    if host_arch in {"arm64", "aarch64"}:
+        host_target = "arm64"
+    elif host_arch in {"x86_64", "amd64"}:
+        host_target = "x86_64"
+
+    python_shared_lib = None
+    lib_name = sysconfig.get_config_var("LDLIBRARY") or ""
+    lib_dir = sysconfig.get_config_var("LIBDIR") or ""
+    if lib_name and lib_dir:
+        candidate_path = pathlib.Path(lib_dir) / lib_name
+        if candidate_path.exists():
+            python_shared_lib = candidate_path
+
+    if python_shared_lib is not None:
+        try:
+            lipo_info = subprocess.check_output(
+                ["lipo", "-info", str(python_shared_lib)],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            lipo_info = ""
+
+        if "Architectures in the fat file" in lipo_info:
+            return "universal2"
+        if "Non-fat file" in lipo_info and host_target:
+            return host_target
+
+    if host_target:
+        return host_target
+
+    return "universal2"
+
+
+target_arch = None
+if sys.platform == "darwin":
+    target_arch = detect_macos_target_arch()
+    print(f"🎯 macOS build target architecture: {target_arch}")
+
 version_file = None
 if sys.platform.startswith("win"):
     candidate_version = PROJECT_DIR / "version.txt"
@@ -110,7 +158,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=None,
+    target_arch=target_arch,
     codesign_identity=None,
     entitlements_file=None,
     icon=icon_file,
