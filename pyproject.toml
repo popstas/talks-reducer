@@ -53,3 +53,13 @@ profile = "black"
 line_length = 88
 known_first_party = ["talks_reducer"]
 
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"talks_reducer.resources" = [
+    "icons/*.png",
+    "icons/*.ico",
+    "icons/*.icns",
+]
+
