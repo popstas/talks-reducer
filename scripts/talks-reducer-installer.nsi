@@ -6,7 +6,10 @@ Unicode true
 
 !define APP_NAME "Talks Reducer"
 !ifndef APP_VERSION
-!define APP_VERSION "0.8.2"
+!searchparsefile "..\talks_reducer\__about__.py" "__version__ = \"" APP_VERSION "\""
+!endif
+!ifndef APP_VERSION
+!error "APP_VERSION not set. Pass /DAPP_VERSION=... or update talks_reducer/__about__.py"
 !endif
 !ifndef APP_PUBLISHER
 !define APP_PUBLISHER "Talks Reducer"
