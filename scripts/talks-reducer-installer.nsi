@@ -18,11 +18,6 @@ Unicode true
 !define APP_ICON "..\talks_reducer\resources\icons\app.ico"
 !endif
 
-!ifexist "${SOURCE_DIR}\talks-reducer.exe"
-!else
-!warning "Expected PyInstaller bundle in ${SOURCE_DIR}"
-!endif
-
 Name "${APP_NAME}"
 OutFile "talks-reducer-${APP_VERSION}-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\talks-reducer"
@@ -46,6 +41,13 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_UNPAGE_INSTFILES
 
 !insertmacro MUI_LANGUAGE "English"
+
+Function .onInit
+  IfFileExists "${SOURCE_DIR}\talks-reducer.exe" initContinue
+  MessageBox MB_ICONSTOP "Expected PyInstaller bundle in ${SOURCE_DIR}.\r\nRun scripts/build-gui.sh before packaging."
+  Abort
+initContinue:
+FunctionEnd
 
 
 Section "Application files" SEC_APP
