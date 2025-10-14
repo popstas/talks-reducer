@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-<#!
+<#
 .SYNOPSIS
 Build the Talks Reducer Windows installer using Inno Setup.
 
@@ -7,7 +7,7 @@ Build the Talks Reducer Windows installer using Inno Setup.
 Ensures the PyInstaller bundle exists, determines the application version,
 and invokes the Inno Setup compiler with the expected arguments. The resulting
 installer is moved into the ``dist`` directory.
-!>
+#>
 
 [CmdletBinding()]
 param(
