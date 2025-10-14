@@ -9,6 +9,16 @@
 #endif
 #ifndef SOURCE_DIR
   #define SOURCE_DIR "..\\dist\\talks-reducer"
+
+  #ifnexist "{#SOURCE_DIR}\\talks-reducer.exe"
+    #undef SOURCE_DIR
+    #define SOURCE_DIR "..\\dist\\talks-reducer-windows"
+  #endif
+
+  #ifnexist "{#SOURCE_DIR}\\talks-reducer.exe"
+    #undef SOURCE_DIR
+    #define SOURCE_DIR "..\\dist\\talks-reducer-windows\\talks-reducer"
+  #endif
 #endif
 #ifndef APP_ICON
   #define APP_ICON "..\\talks_reducer\\resources\\icons\\app.ico"
