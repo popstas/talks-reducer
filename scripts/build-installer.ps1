@@ -46,15 +46,44 @@ if (-not $AppVersion) {
     throw 'Unable to determine package version. Set APP_VERSION explicitly.'
 }
 
-$sourceDir = Join-Path $repositoryRoot 'dist/talks-reducer'
-if (-not (Test-Path -Path $sourceDir -PathType Container)) {
-    throw "PyInstaller output not found at $sourceDir. Run scripts/build-gui.sh first."
+$distRoot = [System.IO.Path]::Combine($repositoryRoot, 'dist')
+$candidateDirs = @(
+    [System.IO.Path]::Combine($distRoot, 'talks-reducer'),
+    [System.IO.Path]::Combine($distRoot, 'talks-reducer-windows')
+)
+
+$sourceDir = $null
+$executablePath = $null
+
+foreach ($candidate in $candidateDirs) {
+    if (-not (Test-Path -LiteralPath $candidate -PathType Container)) {
+        continue
+    }
+
+    $potentialExe = [System.IO.Path]::Combine($candidate, 'talks-reducer.exe')
+    if (Test-Path -LiteralPath $potentialExe -PathType Leaf) {
+        $sourceDir = $candidate
+        $executablePath = $potentialExe
+        break
+    }
+
+    $nestedCandidate = [System.IO.Path]::Combine($candidate, 'talks-reducer')
+    if (Test-Path -LiteralPath $nestedCandidate -PathType Container) {
+        $potentialExe = [System.IO.Path]::Combine($nestedCandidate, 'talks-reducer.exe')
+        if (Test-Path -LiteralPath $potentialExe -PathType Leaf) {
+            $sourceDir = $nestedCandidate
+            $executablePath = $potentialExe
+            break
+        }
+    }
 }
 
-$executablePath = Join-Path $sourceDir 'talks-reducer.exe'
-if (-not (Test-Path -Path $executablePath -PathType Leaf)) {
-    throw "Expected PyInstaller executable at $executablePath. Run scripts/build-gui.sh first."
+if (-not $sourceDir -or -not $executablePath) {
+    $searched = $candidateDirs -join ', '
+    throw "PyInstaller output not found. Checked: $searched. Run scripts/build-gui.sh first."
 }
+
+Write-Host "ℹ️  Using PyInstaller executable at $executablePath"
 
 $isccPath = $null
 if ($env:ISCC_BIN) {
