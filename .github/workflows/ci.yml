@@ -47,7 +47,7 @@ jobs:
           - macos-latest
     runs-on: ${{ matrix.os }}
     needs: test
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/codex/add-windows-setup-installer-for-talks-reducer'
 
     steps:
       - name: Check out repository
@@ -69,9 +69,9 @@ jobs:
         run: bash scripts/build-gui.sh --clean --zip
         shell: bash
 
-      - name: Install NSIS
+      - name: Install Inno Setup
         if: matrix.os == 'windows-latest'
-        run: choco install nsis -y
+        run: choco install innosetup -y
         shell: powershell
 
       - name: Build Windows installer
