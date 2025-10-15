@@ -8,26 +8,31 @@
   #define APP_PUBLISHER "Talks Reducer"
 #endif
 #ifndef SOURCE_DIR
-  #define SOURCE_DIR_BASE "..\\dist\\"
-  #define SOURCE_PRIMARY SOURCE_DIR_BASE + "talks-reducer\\"
-  #pragma message "Checking installer source: {#SOURCE_PRIMARY}"
+  #define SOURCE_PRIMARY "..\dist\talks-reducer\"
+  #pragma message "Checking installer source: " + SOURCE_PRIMARY
 
-  #ifexist "{#SOURCE_PRIMARY}talks-reducer.exe"
+  #ifexist SOURCE_PRIMARY + "talks-reducer.exe"
     #define SOURCE_DIR SOURCE_PRIMARY
   #else
-    #define SOURCE_SECOND SOURCE_DIR_BASE + "talks-reducer-windows\\"
-    #pragma message "Checking installer source: {#SOURCE_SECOND}"
-    #ifexist "{#SOURCE_SECOND}talks-reducer.exe"
+    #define SOURCE_SECOND "..\dist\talks-reducer-windows\"
+    #pragma message "Checking installer source: " + SOURCE_SECOND
+    #ifexist SOURCE_SECOND + "talks-reducer.exe"
       #define SOURCE_DIR SOURCE_SECOND
     #else
-      #define SOURCE_THIRD SOURCE_DIR_BASE + "talks-reducer-windows\\talks-reducer\\"
-      #pragma message "Checking installer source: {#SOURCE_THIRD}"
-      #define SOURCE_DIR SOURCE_THIRD
+      #define SOURCE_THIRD "..\dist\talks-reducer-windows\talks-reducer\"
+      #pragma message "Checking installer source: " + SOURCE_THIRD
+      #ifexist SOURCE_THIRD + "talks-reducer.exe"
+        #define SOURCE_DIR SOURCE_THIRD
+      #endif
     #endif
   #endif
 #endif
 
-#pragma message "Resolved SOURCE_DIR: {#SOURCE_DIR}"
+#ifndef SOURCE_DIR
+  #error "Expected PyInstaller bundle under dist. Run scripts/build-gui.sh before packaging."
+#endif
+
+#pragma message "Resolved SOURCE_DIR: " + SOURCE_DIR
 #ifndef APP_ICON
   #define APP_ICON "..\\talks_reducer\\resources\\icons\\app.ico"
 #endif
@@ -35,7 +40,7 @@
   #define OUTPUT_DIR ".."
 #endif
 
-#ifnexist "{#SOURCE_DIR}talks-reducer.exe"
+#ifnexist SOURCE_DIR + "talks-reducer.exe"
   #error "Expected PyInstaller bundle in {#SOURCE_DIR}. Run scripts/build-gui.sh before packaging."
 #endif
 
