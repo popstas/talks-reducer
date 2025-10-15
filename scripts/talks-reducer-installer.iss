@@ -8,8 +8,8 @@
   #define APP_PUBLISHER "Talks Reducer"
 #endif
 #ifndef SOURCE_DIR
-  #define ROOT_DIR GetFileParent(AddBackslash(SourcePath))
-  #define SOURCE_DIR_BASE AddBackslash(AddBackslash(ROOT_DIR) + 'dist')
+  #define ROOT_DIR AddBackslash(AddBackslash(SourcePath) + '..')
+  #define SOURCE_DIR_BASE AddBackslash(ROOT_DIR + 'dist')
   #define SOURCE_DIR AddBackslash(SOURCE_DIR_BASE + 'talks-reducer')
 
   #ifnexist "{#SOURCE_DIR}talks-reducer.exe"
