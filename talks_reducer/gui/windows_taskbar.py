@@ -5,7 +5,7 @@ from __future__ import annotations
 import ctypes
 import sys
 from ctypes import wintypes
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence, Tuple
 from uuid import UUID
 
 
@@ -30,6 +30,14 @@ class _GUID(ctypes.Structure):
             self.Data4[index] = component
 
 
+class _ITaskbarList(ctypes.Structure):
+    """Minimal representation of the ``ITaskbarList`` COM interface."""
+
+    _fields_: Sequence[tuple[str, object]] = (
+        ("lpVtbl", ctypes.POINTER(ctypes.c_void_p)),
+    )
+
+
 class _ITaskbarList3(ctypes.Structure):
     """Minimal representation of the ``ITaskbarList3`` COM interface."""
 
@@ -38,9 +46,11 @@ class _ITaskbarList3(ctypes.Structure):
     )
 
 
+_PITaskbarList = ctypes.POINTER(_ITaskbarList)
 _PITaskbarList3 = ctypes.POINTER(_ITaskbarList3)
 
 _CLSID_TASKBAR_LIST = _GUID("56FDF344-FD6D-11d0-958A-006097C9A090")
+_IID_ITASKBAR_LIST = _GUID("56FDF342-FD6D-11d0-958A-006097C9A090")
 _IID_ITASKBAR_LIST3 = _GUID("EA1AFB91-9E28-4B86-90E9-9E9F7A5ACB12")
 
 _CLSCTX_INPROC_SERVER = 0x1
@@ -162,17 +172,27 @@ class TaskbarProgressController:
             ctypes.byref(_CLSID_TASKBAR_LIST),
             None,
             _CLSCTX_INPROC_SERVER,
-            ctypes.byref(_IID_ITASKBAR_LIST3),
+            ctypes.byref(_IID_ITASKBAR_LIST),
             ctypes.byref(instance),
         )
         if result != _S_OK or not instance.value:
             return
 
-        pointer = ctypes.cast(instance.value, _PITaskbarList3)
-        if self._call_method(pointer, 3, (), ()) != _S_OK:
+        pointer = ctypes.cast(instance.value, _PITaskbarList)
+        if self._call_method(pointer, _PITaskbarList, 3, (), ()) != _S_OK:
+            self._release(pointer, _PITaskbarList)
             return
 
-        self._taskbar = pointer
+        query_result, taskbar = self._query_interface(
+            pointer, _PITaskbarList, _IID_ITASKBAR_LIST3, _PITaskbarList3
+        )
+        if query_result != _S_OK or taskbar is None:
+            self._release(pointer, _PITaskbarList)
+            return
+
+        self._release(pointer, _PITaskbarList)
+
+        self._taskbar = taskbar
         self._available = True
 
     def _set_state(self, flag: int) -> None:
@@ -183,6 +203,7 @@ class TaskbarProgressController:
 
         result = self._call_method(
             self._taskbar,
+            _PITaskbarList3,
             10,
             (wintypes.HWND, ctypes.c_uint),
             (self._hwnd, ctypes.c_uint(flag)),
@@ -198,6 +219,7 @@ class TaskbarProgressController:
 
         self._call_method(
             self._taskbar,
+            _PITaskbarList3,
             9,
             (wintypes.HWND, ctypes.c_ulonglong, ctypes.c_ulonglong),
             (
@@ -209,7 +231,8 @@ class TaskbarProgressController:
 
     def _call_method(
         self,
-        pointer: Optional[_PITaskbarList3],
+        pointer: Optional[ctypes.c_void_p],
+        pointer_type: Any,
         index: int,
         arg_types: Sequence[object],
         args: Sequence[object],
@@ -233,13 +256,46 @@ class TaskbarProgressController:
         if address is None:
             return _S_FALSE
 
-        prototype = ctypes.WINFUNCTYPE(
-            ctypes.HRESULT,
-            _PITaskbarList3,
-            *arg_types,
-        )
+        prototype = ctypes.WINFUNCTYPE(ctypes.HRESULT, pointer_type, *arg_types)
         method = prototype(address)
         return method(pointer, *args)
+
+    def _query_interface(
+        self,
+        pointer: Optional[ctypes.c_void_p],
+        pointer_type: Any,
+        interface_id: _GUID,
+        result_type: Any,
+    ) -> Tuple[int, Optional[Any]]:
+        """Request a different COM interface from the current pointer."""
+
+        if pointer is None:
+            return _S_FALSE, None
+
+        out_object = ctypes.c_void_p()
+        result = self._call_method(
+            pointer,
+            pointer_type,
+            0,
+            (ctypes.POINTER(_GUID), ctypes.POINTER(ctypes.c_void_p)),
+            (ctypes.byref(interface_id), ctypes.byref(out_object)),
+        )
+        if result != _S_OK or not out_object.value:
+            return result, None
+
+        return result, ctypes.cast(out_object.value, result_type)
+
+    def _release(
+        self,
+        pointer: Optional[ctypes.c_void_p],
+        pointer_type: Any,
+    ) -> None:
+        """Decrease the reference count of a COM interface pointer."""
+
+        if pointer is None:
+            return
+
+        self._call_method(pointer, pointer_type, 2, (), ())
 
 
 __all__ = ["TaskbarProgressController"]
