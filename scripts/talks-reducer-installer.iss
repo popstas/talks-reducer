@@ -90,14 +90,3 @@ Root: HKCU; Subkey: "Software\Classes\Directory\shell\OpenWithTalksReducer\comma
 [Run]
 Filename: "{app}\talks-reducer.exe"; Description: "Launch Talks Reducer"; Flags: nowait postinstall skipifsilent
 
-[Code]
-function InitializeSetup(): Boolean;
-begin
-  if not FileExists(ExpandConstant('{#SOURCE_DIR}talks-reducer.exe')) then
-  begin
-    MsgBox('Expected PyInstaller bundle in {#SOURCE_DIR}.' #13#10 'Run scripts/build-gui.sh before packaging.', mbError, MB_OK);
-    Result := False;
-    exit;
-  end;
-  Result := True;
-end;
