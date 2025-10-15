@@ -56,25 +56,33 @@ $sourceDir = $null
 $executablePath = $null
 
 foreach ($candidate in $candidateDirs) {
+    Write-Host "🔍 Checking bundle directory $candidate"
     if (-not (Test-Path -LiteralPath $candidate -PathType Container)) {
+        Write-Host "   ↳ Directory missing"
         continue
     }
 
     $potentialExe = [System.IO.Path]::Combine($candidate, 'talks-reducer.exe')
     if (Test-Path -LiteralPath $potentialExe -PathType Leaf) {
+        Write-Host "   ↳ Found executable at $potentialExe"
         $sourceDir = $candidate
         $executablePath = $potentialExe
         break
     }
 
     $nestedCandidate = [System.IO.Path]::Combine($candidate, 'talks-reducer')
+    Write-Host "   ↳ Checking nested bundle $nestedCandidate"
     if (Test-Path -LiteralPath $nestedCandidate -PathType Container) {
         $potentialExe = [System.IO.Path]::Combine($nestedCandidate, 'talks-reducer.exe')
         if (Test-Path -LiteralPath $potentialExe -PathType Leaf) {
+            Write-Host "      ↳ Found executable at $potentialExe"
             $sourceDir = $nestedCandidate
             $executablePath = $potentialExe
             break
         }
+        Write-Host "      ↳ Executable not found in nested bundle"
+    } else {
+        Write-Host "   ↳ Nested bundle missing"
     }
 }
 
@@ -84,6 +92,7 @@ if (-not $sourceDir -or -not $executablePath) {
 }
 
 Write-Host "ℹ️  Using PyInstaller executable at $executablePath"
+Write-Host "ℹ️  Source directory resolved to $sourceDir"
 
 $isccPath = $null
 if ($env:ISCC_BIN) {
@@ -120,6 +129,7 @@ $outputName = "talks-reducer-$AppVersion-setup.exe"
 $isccExitCode = $null
 Push-Location -LiteralPath $scriptDirectory
 try {
+    Write-Host "ℹ️  Invoking Inno Setup compiler at $isccPath from $scriptDirectory"
     & $isccPath "/DAPP_VERSION=$AppVersion" 'talks-reducer-installer.iss'
     $isccExitCode = $LASTEXITCODE
 }

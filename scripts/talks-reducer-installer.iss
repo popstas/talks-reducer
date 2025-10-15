@@ -9,18 +9,25 @@
 #endif
 #ifndef SOURCE_DIR
   #define SOURCE_DIR_BASE "..\\dist\\"
-  #define SOURCE_DIR SOURCE_DIR_BASE + "talks-reducer\\"
+  #define SOURCE_PRIMARY SOURCE_DIR_BASE + "talks-reducer\\"
+  #pragma message "Checking installer source: {#SOURCE_PRIMARY}"
 
-  #ifnexist "{#SOURCE_DIR}talks-reducer.exe"
-    #undef SOURCE_DIR
-    #define SOURCE_DIR SOURCE_DIR_BASE + "talks-reducer-windows\\"
-  #endif
-
-  #ifnexist "{#SOURCE_DIR}talks-reducer.exe"
-    #undef SOURCE_DIR
-    #define SOURCE_DIR SOURCE_DIR_BASE + "talks-reducer-windows\\talks-reducer\\"
+  #ifexist "{#SOURCE_PRIMARY}talks-reducer.exe"
+    #define SOURCE_DIR SOURCE_PRIMARY
+  #else
+    #define SOURCE_SECOND SOURCE_DIR_BASE + "talks-reducer-windows\\"
+    #pragma message "Checking installer source: {#SOURCE_SECOND}"
+    #ifexist "{#SOURCE_SECOND}talks-reducer.exe"
+      #define SOURCE_DIR SOURCE_SECOND
+    #else
+      #define SOURCE_THIRD SOURCE_DIR_BASE + "talks-reducer-windows\\talks-reducer\\"
+      #pragma message "Checking installer source: {#SOURCE_THIRD}"
+      #define SOURCE_DIR SOURCE_THIRD
+    #endif
   #endif
 #endif
+
+#pragma message "Resolved SOURCE_DIR: {#SOURCE_DIR}"
 #ifndef APP_ICON
   #define APP_ICON "..\\talks_reducer\\resources\\icons\\app.ico"
 #endif
