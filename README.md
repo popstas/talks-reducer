@@ -112,7 +112,9 @@ progress indicator, and automatic previews of the processed output. The page hea
 Talks Reducer version so you can confirm which build the server is running. Once the job completes you can inspect the resulting
 compression ratio and download the rendered video directly from the page.
 
-The desktop GUI mirrors this behaviour. Open **Advanced** settings to provide a
+The desktop GUI mirrors this behaviour. On Windows the taskbar button now shows
+live progress while videos convert, so you can monitor exports even when the
+window is minimized. Open **Advanced** settings to provide a
 server URL and click **Discover** to scan your local network for Talks Reducer
 instances listening on port `9005`. The button now updates with the discovery
 progress, showing the scanned/total host count as `scanned / total`. A new

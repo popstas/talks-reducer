@@ -35,6 +35,7 @@ try:
     from . import layout as layout_helpers
     from .preferences import GUIPreferences, determine_config_path
     from .progress import _TkProgressReporter
+    from .windows_taskbar import TaskbarProgressController
     from .remote import (
         check_remote_server_for_gui,
         format_server_host,
@@ -65,6 +66,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.gui import layout as layout_helpers
     from talks_reducer.gui.preferences import GUIPreferences, determine_config_path
     from talks_reducer.gui.progress import _TkProgressReporter
+    from talks_reducer.gui.windows_taskbar import TaskbarProgressController
     from talks_reducer.gui.remote import (
         check_remote_server_for_gui,
         format_server_host,
@@ -297,6 +299,9 @@ class TalksReducerGUI:
         self._simple_size = (300, 270)
         # self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
         self.style = self.ttk.Style(self.root)
+
+        self.root.update_idletasks()
+        self._initialize_taskbar_progress()
 
         self._processing_thread: Optional[threading.Thread] = None
         self._last_output: Optional[Path] = None
@@ -1225,6 +1230,9 @@ class TalksReducerGUI:
                 status
             )  # Colors depend on status, not display text
             self._set_progress_bar_style(status)
+
+            if hasattr(self, "_taskbar_progress"):
+                self._taskbar_progress.update_status(status, display_text)
             lowered = status.lower()
             is_processing = lowered == "processing" or "extracting audio" in lowered
 
@@ -1310,6 +1318,20 @@ class TalksReducerGUI:
 
         return f"#{r:02x}{g:02x}{b:02x}"
 
+    def _determine_window_handle(self) -> int:
+        """Return the native window handle for the root window when available."""
+
+        try:
+            return int(self.root.winfo_id())
+        except (ValueError, self.tk.TclError):
+            return 0
+
+    def _initialize_taskbar_progress(self) -> None:
+        """Set up the Windows taskbar progress controller when supported."""
+
+        hwnd = self._determine_window_handle()
+        self._taskbar_progress = TaskbarProgressController(hwnd)
+
     def _set_progress(self, percentage: int) -> None:
         """Update the progress bar value and color (thread-safe)."""
 
@@ -1335,6 +1357,9 @@ class TalksReducerGUI:
                 thickness=20,
             )
             self.progress_bar.configure(style="Dynamic.Horizontal.TProgressbar")
+
+            if hasattr(self, "_taskbar_progress"):
+                self._taskbar_progress.update_progress(percentage)
 
             # Show stop button when progress < 100
             if percentage < 100:
