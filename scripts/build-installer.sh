@@ -14,28 +14,7 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
 fi
 
 read_version() {
-  "$PYTHON_BIN" - <<'PY'
-import importlib.util
-import pathlib
-
-about_path = pathlib.Path("talks_reducer/__about__.py")
-if about_path.exists():
-    spec = importlib.util.spec_from_file_location("talks_reducer.__about__", about_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    version = getattr(module, "__version__", "")
-    if version:
-        print(version)
-        raise SystemExit
-
-pyproject = pathlib.Path("pyproject.toml")
-if pyproject.exists():
-    for line in pyproject.read_text().splitlines():
-        if line.strip().startswith("version") and "=" in line:
-            print(line.split("=", 1)[1].strip().strip('"'))
-            raise SystemExit
-print("")
-PY
+  "$PYTHON_BIN" scripts/get-version.py
 }
 
 APP_VERSION=${APP_VERSION:-$(read_version)}
