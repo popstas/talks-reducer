@@ -117,8 +117,17 @@ if (-not (Test-Path -Path $installerScript -PathType Leaf)) {
 
 $outputName = "talks-reducer-$AppVersion-setup.exe"
 
-& $isccPath "/DAPP_VERSION=$AppVersion" $installerScript
-if ($LASTEXITCODE -ne 0) {
+$isccExitCode = $null
+Push-Location -LiteralPath $scriptDirectory
+try {
+    & $isccPath "/DAPP_VERSION=$AppVersion" 'talks-reducer-installer.iss'
+    $isccExitCode = $LASTEXITCODE
+}
+finally {
+    Pop-Location
+}
+
+if ($isccExitCode -ne 0) {
     throw 'Inno Setup failed to build the installer.'
 }
 
