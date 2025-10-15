@@ -63,7 +63,6 @@ PrivilegesRequiredOverridesAllowed=dialog
 Compression=lzma
 SolidCompression=yes
 UninstallDisplayIcon={app}\talks-reducer.exe
-DefaultTasks=addcontext
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
