@@ -168,13 +168,34 @@ class TaskbarProgressController:
         ]
 
         instance = ctypes.c_void_p()
-        result = ole32.CoCreateInstance(
-            ctypes.byref(_CLSID_TASKBAR_LIST),
-            None,
-            _CLSCTX_INPROC_SERVER,
-            ctypes.byref(_IID_ITASKBAR_LIST),
-            ctypes.byref(instance),
-        )
+        # Newer versions of Windows allow requesting ``ITaskbarList3`` directly.
+        direct = ctypes.c_void_p()
+        try:
+            direct_result = ole32.CoCreateInstance(
+                ctypes.byref(_CLSID_TASKBAR_LIST),
+                None,
+                _CLSCTX_INPROC_SERVER,
+                ctypes.byref(_IID_ITASKBAR_LIST3),
+                ctypes.byref(direct),
+            )
+        except OSError:
+            direct_result = _S_FALSE
+
+        if direct_result == _S_OK and direct.value:
+            self._taskbar = ctypes.cast(direct.value, _PITaskbarList3)
+            self._available = True
+            return
+
+        try:
+            result = ole32.CoCreateInstance(
+                ctypes.byref(_CLSID_TASKBAR_LIST),
+                None,
+                _CLSCTX_INPROC_SERVER,
+                ctypes.byref(_IID_ITASKBAR_LIST),
+                ctypes.byref(instance),
+            )
+        except OSError:
+            return
         if result != _S_OK or not instance.value:
             return
 
@@ -258,7 +279,10 @@ class TaskbarProgressController:
 
         prototype = ctypes.WINFUNCTYPE(ctypes.HRESULT, pointer_type, *arg_types)
         method = prototype(address)
-        return method(pointer, *args)
+        try:
+            return method(pointer, *args)
+        except OSError as exc:  # pragma: no cover - requires Windows failure modes
+            return getattr(exc, "winerror", _S_FALSE)
 
     def _query_interface(
         self,
