@@ -8,16 +8,17 @@
   #define APP_PUBLISHER "Talks Reducer"
 #endif
 #ifndef SOURCE_DIR
-  #define SOURCE_DIR "..\\dist\\talks-reducer"
+  #define SOURCE_DIR_BASE ExpandConstant('{#SourcePath}\..\dist')
+  #define SOURCE_DIR AddBackslash('{#SOURCE_DIR_BASE}\talks-reducer')
 
-  #ifnexist "{#SOURCE_DIR}\\talks-reducer.exe"
+  #ifnexist "{#SOURCE_DIR}talks-reducer.exe"
     #undef SOURCE_DIR
-    #define SOURCE_DIR "..\\dist\\talks-reducer-windows"
+    #define SOURCE_DIR AddBackslash('{#SOURCE_DIR_BASE}\talks-reducer-windows')
   #endif
 
-  #ifnexist "{#SOURCE_DIR}\\talks-reducer.exe"
+  #ifnexist "{#SOURCE_DIR}talks-reducer.exe"
     #undef SOURCE_DIR
-    #define SOURCE_DIR "..\\dist\\talks-reducer-windows\\talks-reducer"
+    #define SOURCE_DIR AddBackslash('{#SOURCE_DIR_BASE}\talks-reducer-windows\talks-reducer')
   #endif
 #endif
 #ifndef APP_ICON
@@ -27,7 +28,7 @@
   #define OUTPUT_DIR ".."
 #endif
 
-#ifnexist "{#SOURCE_DIR}\\talks-reducer.exe"
+#ifnexist "{#SOURCE_DIR}talks-reducer.exe"
   #error "Expected PyInstaller bundle in {#SOURCE_DIR}. Run scripts/build-gui.sh before packaging."
 #endif
 
@@ -60,7 +61,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "A
 Name: "addcontext"; Description: "Register \"Open with Talks Reducer\" in Explorer"; GroupDescription: "Shell integration:"
 
 [Files]
-Source: "{#SOURCE_DIR}\\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SOURCE_DIR}*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
 Name: "{group}\Talks Reducer"; Filename: "{app}\talks-reducer.exe"; WorkingDir: "{app}"; IconFilename: "{app}\talks-reducer.exe"
@@ -81,7 +82,7 @@ Filename: "{app}\talks-reducer.exe"; Description: "Launch Talks Reducer"; Flags:
 [Code]
 function InitializeSetup(): Boolean;
 begin
-  if not FileExists(ExpandConstant('{#SOURCE_DIR}\talks-reducer.exe')) then
+  if not FileExists(ExpandConstant('{#SOURCE_DIR}talks-reducer.exe')) then
   begin
     MsgBox('Expected PyInstaller bundle in {#SOURCE_DIR}.' #13#10 'Run scripts/build-gui.sh before packaging.', mbError, MB_OK);
     Result := False;
