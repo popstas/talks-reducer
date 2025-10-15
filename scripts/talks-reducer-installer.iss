@@ -8,18 +8,17 @@
   #define APP_PUBLISHER "Talks Reducer"
 #endif
 #ifndef SOURCE_DIR
-  #define ROOT_DIR AddBackslash(AddBackslash(SourcePath) + '..')
-  #define SOURCE_DIR_BASE AddBackslash(ROOT_DIR + 'dist')
-  #define SOURCE_DIR AddBackslash(SOURCE_DIR_BASE + 'talks-reducer')
+  #define SOURCE_DIR_BASE "..\\dist\\"
+  #define SOURCE_DIR SOURCE_DIR_BASE + "talks-reducer\\"
 
   #ifnexist "{#SOURCE_DIR}talks-reducer.exe"
     #undef SOURCE_DIR
-    #define SOURCE_DIR AddBackslash(SOURCE_DIR_BASE + 'talks-reducer-windows')
+    #define SOURCE_DIR SOURCE_DIR_BASE + "talks-reducer-windows\\"
   #endif
 
   #ifnexist "{#SOURCE_DIR}talks-reducer.exe"
     #undef SOURCE_DIR
-    #define SOURCE_DIR AddBackslash(SOURCE_DIR_BASE + 'talks-reducer-windows\\talks-reducer')
+    #define SOURCE_DIR SOURCE_DIR_BASE + "talks-reducer-windows\\talks-reducer\\"
   #endif
 #endif
 #ifndef APP_ICON
