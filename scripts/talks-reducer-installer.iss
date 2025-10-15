@@ -69,7 +69,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
-Name: "addcontext"; Description: "Register \"Open with Talks Reducer\" in Explorer"; GroupDescription: "Shell integration:"
+Name: "addcontext"; Description: "Register ""Open with Talks Reducer"" in Explorer"; GroupDescription: "Shell integration:"
 
 [Files]
 Source: "{#SOURCE_DIR}*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -81,11 +81,11 @@ Name: "{userdesktop}\Talks Reducer"; Filename: "{app}\talks-reducer.exe"; Tasks:
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\*\shell\OpenWithTalksReducer"; ValueType: string; ValueName: ""; ValueData: "Open with Talks Reducer"; Tasks: addcontext; Flags: uninsdeletekeyifempty
-Root: HKCU; Subkey: "Software\Classes\*\shell\OpenWithTalksReducer"; ValueType: string; ValueName: "Icon"; ValueData: "\"{app}\\talks-reducer.exe\",0"; Tasks: addcontext
-Root: HKCU; Subkey: "Software\Classes\*\shell\OpenWithTalksReducer\command"; ValueType: string; ValueName: ""; ValueData: "\"{app}\\talks-reducer.exe\" \"%1\""; Tasks: addcontext; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\*\shell\OpenWithTalksReducer"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\\talks-reducer.exe"",0"; Tasks: addcontext
+Root: HKCU; Subkey: "Software\Classes\*\shell\OpenWithTalksReducer\command"; ValueType: string; ValueName: ""; ValueData: """{app}\\talks-reducer.exe"" ""%1"""; Tasks: addcontext; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\Directory\shell\OpenWithTalksReducer"; ValueType: string; ValueName: ""; ValueData: "Open with Talks Reducer"; Tasks: addcontext; Flags: uninsdeletekeyifempty
-Root: HKCU; Subkey: "Software\Classes\Directory\shell\OpenWithTalksReducer"; ValueType: string; ValueName: "Icon"; ValueData: "\"{app}\\talks-reducer.exe\",0"; Tasks: addcontext
-Root: HKCU; Subkey: "Software\Classes\Directory\shell\OpenWithTalksReducer\command"; ValueType: string; ValueName: ""; ValueData: "\"{app}\\talks-reducer.exe\" \"%1\""; Tasks: addcontext; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\OpenWithTalksReducer"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\\talks-reducer.exe"",0"; Tasks: addcontext
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\OpenWithTalksReducer\command"; ValueType: string; ValueName: ""; ValueData: """{app}\\talks-reducer.exe"" ""%1"""; Tasks: addcontext; Flags: uninsdeletekey
 
 [Run]
 Filename: "{app}\talks-reducer.exe"; Description: "Launch Talks Reducer"; Flags: nowait postinstall skipifsilent
