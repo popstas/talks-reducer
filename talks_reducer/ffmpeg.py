@@ -330,8 +330,14 @@ def build_video_commands(
     ffmpeg_path: Optional[str] = None,
     cuda_available: bool,
     small: bool,
+    frame_rate: Optional[float] = None,
 ) -> Tuple[str, Optional[str], bool]:
-    """Create the FFmpeg command strings used to render the final video output."""
+    """Create the FFmpeg command strings used to render the final video output.
+
+    Args:
+        frame_rate: Optional source frame rate used to size GOP/keyframe spacing for
+            the small preset when generating hardware/software encoder commands.
+    """
 
     ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
     global_parts: List[str] = [f'"{ffmpeg_path}"', "-y"]
@@ -355,6 +361,16 @@ def build_video_commands(
     use_cuda_encoder = False
 
     if small:
+        keyframe_interval_seconds = 2.0
+        formatted_interval = f"{keyframe_interval_seconds:.6g}"
+        gop_size = 48
+        if frame_rate and frame_rate > 0:
+            gop_size = max(1, int(round(frame_rate * keyframe_interval_seconds)))
+        small_keyframe_args = [
+            f"-g {gop_size}",
+            f"-keyint_min {gop_size}",
+            f"-force_key_frames expr:gte(t,n_forced*{formatted_interval})",
+        ]
         if cuda_available:
             use_cuda_encoder = True
             video_encoder_args = [
@@ -363,14 +379,15 @@ def build_video_commands(
                 "-cq 28",
                 "-tune",
                 "ll",
-            ]
+                "-forced-idr 1",
+            ] + small_keyframe_args
             fallback_encoder_args = [
                 "-c:v libx264",
                 "-preset veryfast",
                 "-crf 24",
                 "-tune",
                 "zerolatency",
-            ]
+            ] + small_keyframe_args
         else:
             video_encoder_args = [
                 "-c:v libx264",
@@ -378,7 +395,7 @@ def build_video_commands(
                 "-crf 24",
                 "-tune",
                 "zerolatency",
-            ]
+            ] + small_keyframe_args
     else:
         global_parts.append("-filter_complex_threads 1")
         if cuda_available:

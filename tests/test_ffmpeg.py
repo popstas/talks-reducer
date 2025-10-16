@@ -269,10 +269,18 @@ def test_build_video_commands_small_cuda(monkeypatch):
         "output.mp4",
         cuda_available=True,
         small=True,
+        frame_rate=30.0,
     )
 
     assert "-c:v h264_nvenc" in command
+    assert "-forced-idr 1" in command
+    assert "-g 60" in command
+    assert "-keyint_min 60" in command
+    assert "-force_key_frames expr:gte(t,n_forced*2)" in command
     assert fallback is not None and "-c:v libx264" in fallback
+    assert "-force_key_frames expr:gte(t,n_forced*2)" in fallback
+    assert "-forced-idr 1" not in fallback
+    assert "-g 60" in fallback
     assert use_cuda
 
 
@@ -286,9 +294,14 @@ def test_build_video_commands_small_cpu(monkeypatch):
         "output.mp4",
         cuda_available=False,
         small=True,
+        frame_rate=30.0,
     )
 
     assert "-c:v libx264" in command
+    assert "-g 60" in command
+    assert "-keyint_min 60" in command
+    assert "-force_key_frames expr:gte(t,n_forced*2)" in command
+    assert "-forced-idr 1" not in command
     assert fallback is None
     assert not use_cuda
 
@@ -303,6 +316,7 @@ def test_build_video_commands_large_cuda(monkeypatch):
         "output.mp4",
         cuda_available=True,
         small=False,
+        frame_rate=30.0,
     )
 
     assert "-hwaccel cuda" in command
@@ -321,6 +335,7 @@ def test_build_video_commands_large_cpu(monkeypatch):
         "output.mp4",
         cuda_available=False,
         small=False,
+        frame_rate=30.0,
     )
 
     assert "-c:v libx264" in command
