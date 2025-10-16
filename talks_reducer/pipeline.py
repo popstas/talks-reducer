@@ -246,6 +246,7 @@ def speed_up_video(
             ffmpeg_path=ffmpeg_path,
             cuda_available=cuda_available,
             small=options.small,
+            frame_rate=frame_rate,
         )
     )
 
