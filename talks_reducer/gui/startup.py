@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
 from ..cli import main as cli_main
+from . import hi_dpi  # noqa: F401 - imported for side effects
 from .app import TalksReducerGUI
 
 _runtime_logged = False
