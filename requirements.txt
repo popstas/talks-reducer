@@ -5,5 +5,5 @@ tqdm>=4.65.0
 tkinterdnd2>=0.3.0
 Pillow>=9.0.0
 pystray>=0.19.5
-imageio-ffmpeg>=0.4.8
+static-ffmpeg>=2.13
 gradio>=4.0.0
