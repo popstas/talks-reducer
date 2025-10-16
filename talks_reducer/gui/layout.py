@@ -300,7 +300,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     gui.log_frame = gui.ttk.Frame(main, padding=gui.PADDING)
     gui.log_frame.grid(row=3, column=0, pady=(16, 0), sticky="nsew")
-    main.rowconfigure(4, weight=1)
+    main.rowconfigure(3, weight=1)
     gui.log_frame.columnconfigure(0, weight=1)
     gui.log_frame.rowconfigure(0, weight=1)
 
