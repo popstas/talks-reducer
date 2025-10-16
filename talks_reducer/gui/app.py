@@ -20,6 +20,7 @@ from typing import (
     Tuple,
 )
 
+from . import hi_dpi  # should be imported before tkinter
 if TYPE_CHECKING:
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
