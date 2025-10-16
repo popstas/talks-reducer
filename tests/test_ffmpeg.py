@@ -12,6 +12,16 @@ import pytest
 from talks_reducer import ffmpeg
 
 
+@pytest.fixture(autouse=True)
+def stub_static_ffmpeg(monkeypatch):
+    """Prevent tests from invoking real static-ffmpeg downloads."""
+
+    stub = SimpleNamespace(add_paths=lambda: False)
+    monkeypatch.setitem(sys.modules, "static_ffmpeg", stub)
+    yield
+    sys.modules.pop("static_ffmpeg", None)
+
+
 class DummyProgressReporter(ffmpeg.ProgressReporter):
     """Progress reporter used to capture progress updates in tests."""
 
@@ -102,9 +112,7 @@ def test_find_ffmpeg_returns_none_when_missing(monkeypatch):
         raise RuntimeError
 
     monkeypatch.setitem(
-        sys.modules,
-        "imageio_ffmpeg",
-        SimpleNamespace(get_ffmpeg_exe=raise_error),
+        sys.modules, "static_ffmpeg", SimpleNamespace(add_paths=raise_error)
     )
 
     assert ffmpeg.find_ffmpeg() is None

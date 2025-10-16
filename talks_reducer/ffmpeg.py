@@ -35,17 +35,18 @@ def find_ffmpeg() -> Optional[str]:
             else env_override
         )
 
-    # Try bundled ffmpeg from imageio-ffmpeg first
+    # Try bundled ffmpeg from static-ffmpeg first
     try:
-        import imageio_ffmpeg
+        import static_ffmpeg
 
-        bundled_path = imageio_ffmpeg.get_ffmpeg_exe()
-        if bundled_path and os.path.isfile(bundled_path):
+        static_ffmpeg.add_paths()
+        bundled_path = shutil_which("ffmpeg")
+        if bundled_path:
             return bundled_path
     except ImportError:
         pass
     except Exception:
-        # If imageio_ffmpeg is installed but fails, continue to other methods
+        # If static_ffmpeg is installed but fails, continue to other methods
         pass
 
     common_paths = [
@@ -77,6 +78,20 @@ def find_ffprobe() -> Optional[str]:
             if os.path.isfile(env_override)
             else env_override
         )
+
+    # Try bundled ffprobe from static-ffmpeg first
+    try:
+        import static_ffmpeg
+
+        static_ffmpeg.add_paths()
+        bundled_ffprobe = shutil_which("ffprobe")
+        if bundled_ffprobe:
+            return bundled_ffprobe
+    except ImportError:
+        pass
+    except Exception:
+        # If static_ffmpeg is installed but fails, continue to other methods
+        pass
 
     # Try to find ffprobe in the same directory as FFmpeg
     ffmpeg_path = find_ffmpeg()
@@ -114,7 +129,7 @@ def _resolve_ffmpeg_path() -> str:
     ffmpeg_path = find_ffmpeg()
     if not ffmpeg_path:
         raise FFmpegNotFoundError(
-            "FFmpeg not found. Please install imageio-ffmpeg (pip install imageio-ffmpeg) "
+            "FFmpeg not found. Please install static-ffmpeg (pip install static-ffmpeg) "
             "or install FFmpeg manually and add it to PATH, or set TALKS_REDUCER_FFMPEG environment variable."
         )
 
