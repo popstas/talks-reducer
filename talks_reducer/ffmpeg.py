@@ -172,7 +172,7 @@ def get_ffprobe_path() -> str:
 
 
 def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
-    """Return whether CUDA hardware encoders are available in the FFmpeg build."""
+    """Return whether CUDA hardware encoders are usable in the FFmpeg build."""
 
     # Hide console window on Windows
     creationflags = 0
@@ -180,28 +180,39 @@ def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
         # CREATE_NO_WINDOW = 0x08000000
         creationflags = 0x08000000
 
-    try:
-        ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
-        result = subprocess.run(
-            [ffmpeg_path, "-encoders"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            creationflags=creationflags,
-        )
-    except (
-        subprocess.TimeoutExpired,
-        subprocess.CalledProcessError,
-        FileNotFoundError,
-    ):
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+
+    def _probe_ffmpeg(args: List[str]) -> Optional[str]:
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                creationflags=creationflags,
+            )
+        except (
+            subprocess.TimeoutExpired,
+            subprocess.CalledProcessError,
+            FileNotFoundError,
+        ):
+            return None
+
+        if result.returncode != 0:
+            return None
+
+        return result.stdout.lower()
+
+    hwaccels_output = _probe_ffmpeg([ffmpeg_path, "-hide_banner", "-hwaccels"])
+    if not hwaccels_output or "cuda" not in hwaccels_output:
         return False
 
-    if result.returncode != 0:
+    encoder_output = _probe_ffmpeg([ffmpeg_path, "-hide_banner", "-encoders"])
+    if not encoder_output:
         return False
 
-    encoder_list = result.stdout.lower()
     return any(
-        encoder in encoder_list for encoder in ["h264_nvenc", "hevc_nvenc", "nvenc"]
+        encoder in encoder_output for encoder in ["h264_nvenc", "hevc_nvenc", "nvenc"]
     )
 
 
@@ -355,14 +366,14 @@ def build_video_commands(
     """
 
     ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
-    global_parts: List[str] = [f'"{ffmpeg_path}"', "-y"]
+    base_parts: List[str] = [f'"{ffmpeg_path}"', "-y"]
     hwaccel_args: List[str] = []
+    processing_args: List[str] = []
 
     if cuda_available and not small:
         hwaccel_args = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
-        global_parts.extend(hwaccel_args)
-    elif small and cuda_available:
-        pass
+
+    global_parts = base_parts + hwaccel_args
 
     input_parts = [f'-i "{input_file}"', f'-i "{audio_file}"']
 
@@ -412,10 +423,15 @@ def build_video_commands(
                 "zerolatency",
             ] + small_keyframe_args
     else:
-        global_parts.append("-filter_complex_threads 1")
+        processing_args.append("-filter_complex_threads 1")
         if cuda_available:
             video_encoder_args = ["-c:v h264_nvenc"]
             use_cuda_encoder = True
+            fallback_encoder_args = [
+                "-c:v libx264",
+                "-preset veryfast",
+                "-crf 23",
+            ]
         else:
             # Cannot use copy codec when applying filters (speed modifications)
             # Use a fast software encoder instead
@@ -428,14 +444,20 @@ def build_video_commands(
     ]
 
     full_command_parts = (
-        global_parts + input_parts + output_parts + video_encoder_args + audio_parts
+        global_parts
+        + processing_args
+        + input_parts
+        + output_parts
+        + video_encoder_args
+        + audio_parts
     )
     command_str = " ".join(full_command_parts)
 
     fallback_command_str: Optional[str] = None
     if fallback_encoder_args:
         fallback_parts = (
-            global_parts
+            base_parts
+            + processing_args
             + input_parts
             + output_parts
             + fallback_encoder_args

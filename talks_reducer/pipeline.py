@@ -170,14 +170,40 @@ def speed_up_video(
     else:
         reporter.log("Extract audio target frames: unknown")
 
-    dependencies.run_timed_ffmpeg_command(
-        extract_command,
-        reporter=reporter,
-        total=estimated_total_frames if estimated_total_frames > 0 else None,
-        unit="frames",
-        desc="Extracting audio:",
-        process_callback=process_callback,
-    )
+    try:
+        dependencies.run_timed_ffmpeg_command(
+            extract_command,
+            reporter=reporter,
+            total=estimated_total_frames if estimated_total_frames > 0 else None,
+            unit="frames",
+            desc="Extracting audio:",
+            process_callback=process_callback,
+        )
+    except subprocess.CalledProcessError:
+        if hwaccel:
+            reporter.log(
+                "CUDA decoding failed during audio extraction, retrying on CPU..."
+            )
+            cuda_available = False
+            hwaccel = []
+            extract_command = dependencies.build_extract_audio_command(
+                os.fspath(input_path),
+                os.fspath(audio_wav),
+                extraction_sample_rate,
+                audio_bitrate,
+                hwaccel,
+                ffmpeg_path=ffmpeg_path,
+            )
+            dependencies.run_timed_ffmpeg_command(
+                extract_command,
+                reporter=reporter,
+                total=estimated_total_frames if estimated_total_frames > 0 else None,
+                unit="frames",
+                desc="Extracting audio (fallback):",
+                process_callback=process_callback,
+            )
+        else:
+            raise
 
     wav_sample_rate, audio_data = wavfile.read(os.fspath(audio_wav))
     audio_data = _ensure_two_dimensional(audio_data)
@@ -301,6 +327,7 @@ def speed_up_video(
             _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
 
             reporter.log("CUDA encoding failed, retrying with CPU encoder...")
+            use_cuda_encoder = False
             if final_total_frames > 0:
                 reporter.log(
                     f"Final encode target frames (fallback): {final_total_frames}"

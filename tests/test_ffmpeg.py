@@ -198,24 +198,45 @@ def test_get_ffprobe_path_caches(monkeypatch):
 
 def test_check_cuda_available_detects_nvenc(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(
-        ffmpeg.subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(
-            stdout="encoder h264_nvenc", returncode=0
-        ),
-    )
+
+    def fake_run(args, **kwargs):
+        if "-hwaccels" in args:
+            return SimpleNamespace(stdout="cuda\n", returncode=0)
+        if "-encoders" in args:
+            return SimpleNamespace(stdout="encoder h264_nvenc", returncode=0)
+        raise AssertionError(f"Unexpected args: {args}")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
 
     assert ffmpeg.check_cuda_available()
 
 
 def test_check_cuda_available_handles_missing_nvenc(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(
-        ffmpeg.subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(stdout="encoder libx264", returncode=0),
-    )
+
+    def fake_run(args, **kwargs):
+        if "-hwaccels" in args:
+            return SimpleNamespace(stdout="cuda\n", returncode=0)
+        if "-encoders" in args:
+            return SimpleNamespace(stdout="encoder libx264", returncode=0)
+        raise AssertionError(f"Unexpected args: {args}")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+
+    assert not ffmpeg.check_cuda_available()
+
+
+def test_check_cuda_available_requires_cuda_hwaccel(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    def fake_run(args, **kwargs):
+        if "-hwaccels" in args:
+            return SimpleNamespace(stdout="qsv\nonevapi", returncode=0)
+        if "-encoders" in args:
+            return SimpleNamespace(stdout="encoder h264_nvenc", returncode=0)
+        raise AssertionError(f"Unexpected args: {args}")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
 
     assert not ffmpeg.check_cuda_available()
 
@@ -223,11 +244,10 @@ def test_check_cuda_available_handles_missing_nvenc(monkeypatch):
 def test_check_cuda_available_handles_errors(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
 
-    monkeypatch.setattr(
-        ffmpeg.subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(stdout="", returncode=1),
-    )
+    def failing_run(args, **kwargs):
+        return SimpleNamespace(stdout="", returncode=1)
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", failing_run)
     assert not ffmpeg.check_cuda_available()
 
     def raise_timeout(*args, **kwargs):
@@ -236,13 +256,13 @@ def test_check_cuda_available_handles_errors(monkeypatch):
     monkeypatch.setattr(ffmpeg.subprocess, "run", raise_timeout)
     assert not ffmpeg.check_cuda_available()
 
-    def raise_called_process_error(*args, **kwargs):
+    def raise_called_process_error(args, **kwargs):
         raise ffmpeg.subprocess.CalledProcessError(returncode=1, cmd=args)
 
     monkeypatch.setattr(ffmpeg.subprocess, "run", raise_called_process_error)
     assert not ffmpeg.check_cuda_available()
 
-    def raise_file_not_found(*args, **kwargs):
+    def raise_file_not_found(args, **kwargs):
         raise FileNotFoundError
 
     monkeypatch.setattr(ffmpeg.subprocess, "run", raise_file_not_found)
@@ -289,6 +309,7 @@ def test_build_video_commands_small_cuda(monkeypatch):
     assert "-force_key_frames expr:gte(t,n_forced*2)" in fallback
     assert "-forced-idr 1" not in fallback
     assert "-g 60" in fallback
+    assert "-hwaccel cuda" not in fallback
     assert use_cuda
 
 
@@ -329,7 +350,10 @@ def test_build_video_commands_large_cuda(monkeypatch):
 
     assert "-hwaccel cuda" in command
     assert "-filter_complex_threads 1" in command
-    assert fallback is None
+    assert fallback is not None
+    assert "-c:v libx264" in fallback
+    assert "-filter_complex_threads 1" in fallback
+    assert "-hwaccel cuda" not in fallback
     assert use_cuda
 
 
@@ -347,6 +371,7 @@ def test_build_video_commands_large_cpu(monkeypatch):
     )
 
     assert "-c:v libx264" in command
+    assert "-filter_complex_threads 1" in command
     assert fallback is None
     assert not use_cuda
 
