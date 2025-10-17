@@ -172,7 +172,7 @@ def get_ffprobe_path() -> str:
 
 
 def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
-    """Return whether CUDA hardware encoders are available in the FFmpeg build."""
+    """Return whether CUDA hardware encoders are usable in the FFmpeg build."""
 
     # Hide console window on Windows
     creationflags = 0
@@ -180,28 +180,39 @@ def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
         # CREATE_NO_WINDOW = 0x08000000
         creationflags = 0x08000000
 
-    try:
-        ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
-        result = subprocess.run(
-            [ffmpeg_path, "-encoders"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            creationflags=creationflags,
-        )
-    except (
-        subprocess.TimeoutExpired,
-        subprocess.CalledProcessError,
-        FileNotFoundError,
-    ):
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+
+    def _probe_ffmpeg(args: List[str]) -> Optional[str]:
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                creationflags=creationflags,
+            )
+        except (
+            subprocess.TimeoutExpired,
+            subprocess.CalledProcessError,
+            FileNotFoundError,
+        ):
+            return None
+
+        if result.returncode != 0:
+            return None
+
+        return result.stdout.lower()
+
+    hwaccels_output = _probe_ffmpeg([ffmpeg_path, "-hide_banner", "-hwaccels"])
+    if not hwaccels_output or "cuda" not in hwaccels_output:
         return False
 
-    if result.returncode != 0:
+    encoder_output = _probe_ffmpeg([ffmpeg_path, "-hide_banner", "-encoders"])
+    if not encoder_output:
         return False
 
-    encoder_list = result.stdout.lower()
     return any(
-        encoder in encoder_list for encoder in ["h264_nvenc", "hevc_nvenc", "nvenc"]
+        encoder in encoder_output for encoder in ["h264_nvenc", "hevc_nvenc", "nvenc"]
     )
 
 
