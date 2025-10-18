@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -9,7 +10,9 @@ import sys
 from shutil import which as _shutil_which
 from typing import List, Optional, Tuple
 
-from .progress import ProgressReporter, TqdmProgressReporter
+from .progress import ProgressReporter, TaskbarProgressReporter, TqdmProgressReporter
+
+logger = logging.getLogger(__name__)
 
 
 class FFmpegNotFoundError(RuntimeError):
@@ -263,7 +266,28 @@ def run_timed_ffmpeg_command(
     if process_callback:
         process_callback(process)
 
-    progress_reporter = reporter or TqdmProgressReporter()
+    base_reporter = reporter or TqdmProgressReporter()
+    progress_reporter: ProgressReporter = base_reporter
+
+    if sys.platform == "win32":
+        try:
+            from .windows_taskbar import TaskbarProgress, TaskbarUnavailableError
+
+            taskbar = TaskbarProgress()
+            progress_reporter = TaskbarProgressReporter(base_reporter, taskbar)
+        except (ImportError, TaskbarUnavailableError, OSError) as exc:
+            logger.debug(
+                "Windows taskbar progress unavailable, falling back to standard reporter: %s",
+                exc,
+                exc_info=True,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug(
+                "Unexpected failure initialising Windows taskbar progress, disabling integration: %s",
+                exc,
+                exc_info=True,
+            )
+
     task_manager = progress_reporter.task(desc=desc, total=total, unit=unit)
     with task_manager as progress:
         while True:
