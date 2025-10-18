@@ -54,6 +54,7 @@ if sys.platform != "win32":  # pragma: no cover - platform-specific shim
 
 else:  # pragma: no cover - requires Windows runtime
     import ctypes
+    import logging
     from ctypes import wintypes
 
     HRESULT = getattr(wintypes, "HRESULT", getattr(ctypes, "HRESULT", ctypes.c_long))
@@ -61,6 +62,8 @@ else:  # pragma: no cover - requires Windows runtime
     COINIT_APARTMENTTHREADED = 0x2
     CLSCTX_INPROC_SERVER = 0x1
     RPC_E_CHANGED_MODE = 0x80010106
+
+    logger = logging.getLogger(__name__)
 
     class GUID(ctypes.Structure):
         """ctypes representation of a Windows GUID."""
@@ -98,15 +101,25 @@ else:  # pragma: no cover - requires Windows runtime
         kernel32.GetConsoleWindow.restype = wintypes.HWND
         hwnd = kernel32.GetConsoleWindow()
         if hwnd:
+            logger.debug("Resolved console window handle for taskbar updates: %s", hwnd)
             return hwnd
 
         user32.GetActiveWindow.restype = wintypes.HWND
         hwnd = user32.GetActiveWindow()
         if hwnd:
+            logger.debug("Resolved active window handle for taskbar updates: %s", hwnd)
             return hwnd
 
         user32.GetForegroundWindow.restype = wintypes.HWND
         hwnd = user32.GetForegroundWindow()
+        if hwnd:
+            logger.debug(
+                "Resolved foreground window handle for taskbar updates: %s", hwnd
+            )
+        else:
+            logger.debug(
+                "Unable to resolve any default window handle for taskbar updates"
+            )
         return hwnd or None
 
     def _failed(hr: int) -> bool:
@@ -129,6 +142,8 @@ else:  # pragma: no cover - requires Windows runtime
                     "Unable to locate a window handle for taskbar progress updates."
                 )
 
+            logger.debug("Initialising TaskbarProgress for HWND %s", self._hwnd)
+
             self._ole32 = ctypes.OleDLL("ole32")
             self._ole32.CoInitializeEx.restype = HRESULT
             self._ole32.CoInitializeEx.argtypes = (ctypes.c_void_p, wintypes.DWORD)
@@ -148,6 +163,16 @@ else:  # pragma: no cover - requires Windows runtime
                 raise TaskbarUnavailableError(
                     f"CoInitializeEx failed with HRESULT 0x{hr & 0xFFFFFFFF:08X}."
                 )
+            if hr == RPC_E_CHANGED_MODE:
+                logger.debug(
+                    "COM already initialised in a different mode; continuing with existing apartment"
+                )
+            else:
+                logger.debug(
+                    "CoInitializeEx succeeded with HRESULT 0x%08X (should_uninit=%s)",
+                    hr & 0xFFFFFFFF,
+                    self._should_uninit,
+                )
 
             taskbar_ptr = ctypes.c_void_p()
             hr = self._ole32.CoCreateInstance(
@@ -163,6 +188,9 @@ else:  # pragma: no cover - requires Windows runtime
                 raise TaskbarUnavailableError(
                     f"CoCreateInstance for ITaskbarList3 failed (HRESULT 0x{hr & 0xFFFFFFFF:08X})."
                 )
+            logger.debug(
+                "CoCreateInstance for ITaskbarList3 succeeded: ptr=%s", taskbar_ptr
+            )
 
             self._iface = taskbar_ptr
             self._vtable = ctypes.cast(
@@ -177,6 +205,7 @@ else:  # pragma: no cover - requires Windows runtime
                 raise TaskbarUnavailableError(
                     f"ITaskbarList3.HrInit failed with HRESULT 0x{hr & 0xFFFFFFFF:08X}."
                 )
+            logger.debug("ITaskbarList3.HrInit succeeded")
 
             self._set_progress_value = self._get_method(
                 9,
@@ -213,6 +242,12 @@ else:  # pragma: no cover - requires Windows runtime
                 raise TaskbarUnavailableError(
                     f"ITaskbarList3.SetProgressValue failed with HRESULT 0x{hr & 0xFFFFFFFF:08X}."
                 )
+            logger.debug(
+                "Updated taskbar progress: hwnd=%s completed=%s total=%s",
+                self._hwnd,
+                completed,
+                total,
+            )
 
         def set_progress_state(self, state: TaskbarProgressState) -> None:
             """Update the taskbar progress state."""
@@ -222,6 +257,9 @@ else:  # pragma: no cover - requires Windows runtime
                 raise TaskbarUnavailableError(
                     f"ITaskbarList3.SetProgressState failed with HRESULT 0x{hr & 0xFFFFFFFF:08X}."
                 )
+            logger.debug(
+                "Updated taskbar progress state: hwnd=%s state=%s", self._hwnd, state
+            )
 
         def clear(self) -> None:
             """Remove progress indicators from the taskbar button."""
@@ -229,7 +267,9 @@ else:  # pragma: no cover - requires Windows runtime
             try:
                 self.set_progress_state(TaskbarProgressState.NOPROGRESS)
             except TaskbarUnavailableError:
-                pass
+                logger.debug(
+                    "Unable to clear taskbar progress state during cleanup; ignoring"
+                )
 
         def close(self) -> None:
             """Release COM resources held by the helper."""
@@ -242,9 +282,11 @@ else:  # pragma: no cover - requires Windows runtime
                 if getattr(self, "_iface", None) and getattr(self, "_release", None):
                     self._release(self._iface)
                     self._iface = None
+                    logger.debug("Released taskbar COM interface")
             finally:
                 if self._should_uninit:
                     self._ole32.CoUninitialize()
+                    logger.debug("CoUninitialize called during TaskbarProgress cleanup")
 
         def __del__(self) -> None:
             self.close()

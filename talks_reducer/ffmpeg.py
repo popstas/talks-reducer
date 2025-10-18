@@ -275,6 +275,9 @@ def run_timed_ffmpeg_command(
         if callable(hwnd_attr):
             try:
                 taskbar_hwnd = hwnd_attr()
+                logger.debug(
+                    "Reporter callable returned taskbar HWND: %s", taskbar_hwnd
+                )
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.debug(
                     "Failed to resolve reporter taskbar window handle: %s",
@@ -283,12 +286,20 @@ def run_timed_ffmpeg_command(
                 )
         elif isinstance(hwnd_attr, int):
             taskbar_hwnd = hwnd_attr
+            logger.debug("Reporter provided taskbar HWND attribute: %s", taskbar_hwnd)
+        else:
+            logger.debug("Reporter did not expose a taskbar HWND (attr=%r)", hwnd_attr)
 
         try:
             from .windows_taskbar import TaskbarProgress, TaskbarUnavailableError
 
+            logger.debug(
+                "Attempting to initialise Windows taskbar progress (hwnd=%s)",
+                taskbar_hwnd,
+            )
             taskbar = TaskbarProgress(hwnd=taskbar_hwnd)
             progress_reporter = TaskbarProgressReporter(base_reporter, taskbar)
+            logger.debug("Windows taskbar progress initialised successfully")
         except (ImportError, TaskbarUnavailableError, OSError) as exc:
             logger.debug(
                 "Windows taskbar progress unavailable, falling back to standard reporter: %s",

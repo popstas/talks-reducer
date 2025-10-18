@@ -221,6 +221,11 @@ class TaskbarProgressReporter(ProgressReporter):
         self._total: Optional[int] = None
         self._current: int = 0
         self._finalized = False
+        logger.debug(
+            "TaskbarProgressReporter initialised with delegate=%s taskbar=%s",
+            type(delegate).__name__,
+            taskbar,
+        )
 
     def log(self, message: str) -> None:
         self._delegate.log(message)
@@ -228,6 +233,9 @@ class TaskbarProgressReporter(ProgressReporter):
     def task(
         self, *, desc: str = "", total: Optional[int] = None, unit: str = ""
     ) -> AbstractContextManager[ProgressHandle]:
+        logger.debug(
+            "Creating taskbar-mirrored task desc=%r total=%s unit=%r", desc, total, unit
+        )
         context = self._delegate.task(desc=desc, total=total, unit=unit)
         self._finalized = False
         return _TaskbarTaskContext(self, context, total)
@@ -237,11 +245,25 @@ class TaskbarProgressReporter(ProgressReporter):
         self._total = total
         self._current = current
         if not self._enabled:
+            logger.debug(
+                "Skipping taskbar start because reporter is disabled (total=%s current=%s)",
+                total,
+                current,
+            )
             return
         try:
             if not total or total <= 0:
+                logger.debug(
+                    "Setting taskbar progress state to indeterminate (current=%s)",
+                    current,
+                )
                 self._taskbar.set_progress_state(TaskbarProgressState.INDETERMINATE)
             else:
+                logger.debug(
+                    "Initialising taskbar progress (current=%s total=%s)",
+                    current,
+                    total,
+                )
                 self._taskbar.set_progress_state(TaskbarProgressState.NORMAL)
                 self._taskbar.set_progress_value(current, total)
         except Exception as exc:  # pragma: no cover - Windows-specific logging
@@ -252,8 +274,19 @@ class TaskbarProgressReporter(ProgressReporter):
             return
         self._total = max(self._total or 0, total)
         if not self._enabled or not self._total:
+            logger.debug(
+                "Skipping taskbar total update (enabled=%s total=%s current=%s)",
+                self._enabled,
+                self._total,
+                current,
+            )
             return
         try:
+            logger.debug(
+                "Updating taskbar total/current (total=%s current=%s)",
+                self._total,
+                current,
+            )
             self._taskbar.set_progress_state(TaskbarProgressState.NORMAL)
             self._taskbar.set_progress_value(current, self._total)
         except Exception as exc:  # pragma: no cover - Windows-specific logging
@@ -262,8 +295,19 @@ class TaskbarProgressReporter(ProgressReporter):
     def _on_advance(self, current: int) -> None:
         self._current = current
         if not self._enabled or not self._total:
+            logger.debug(
+                "Skipping taskbar advance (enabled=%s total=%s current=%s)",
+                self._enabled,
+                self._total,
+                current,
+            )
             return
         try:
+            logger.debug(
+                "Advancing taskbar progress (current=%s total=%s)",
+                current,
+                self._total,
+            )
             self._taskbar.set_progress_value(current, self._total)
         except Exception as exc:  # pragma: no cover - Windows-specific logging
             self._disable(exc)
@@ -271,26 +315,39 @@ class TaskbarProgressReporter(ProgressReporter):
     def _on_finish(self, current: int) -> None:
         self._current = current
         if not self._enabled:
+            logger.debug(
+                "Skipping taskbar finish because reporter is disabled (current=%s)",
+                current,
+            )
             return
         try:
             if self._total and self._total > 0:
+                logger.debug(
+                    "Finishing taskbar progress (current=%s total=%s)",
+                    current,
+                    self._total,
+                )
                 self._taskbar.set_progress_value(self._total, self._total)
             self._taskbar.clear()
+            logger.debug("Cleared taskbar progress after finish")
         except Exception as exc:  # pragma: no cover - Windows-specific logging
             self._disable(exc)
 
     def _finalize(self) -> None:
         if self._finalized:
+            logger.debug("Taskbar reporter already finalised; skipping cleanup")
             return
         self._finalized = True
         try:
             if self._enabled:
                 self._taskbar.clear()
+                logger.debug("Cleared taskbar progress during finalise")
         except Exception:  # pragma: no cover - best-effort cleanup
             pass
         finally:
             try:
                 self._taskbar.close()
+                logger.debug("Closed taskbar progress helper")
             except Exception:  # pragma: no cover - best-effort cleanup
                 pass
 
