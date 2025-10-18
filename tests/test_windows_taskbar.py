@@ -50,7 +50,7 @@ class FakeTaskbarList:
 
 @pytest.mark.parametrize("use_query_interface", [True, False])
 def test_taskbar_progress_uses_pywin32(monkeypatch, use_query_interface):
-    init_calls: list[str] = []
+    init_calls: list[tuple[str, int | None]] = []
     recorded: list[tuple[str, str]] = []
     fake_interface = FakeTaskbarList3()
 
@@ -64,6 +64,10 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, use_query_interface):
         if iid.endswith("2B2A}") and use_query_interface:
             # Simulate E_NOINTERFACE so the fallback path runs.
             raise FakeComError(0x80004002)
+        if iid.endswith("3A1A}"):
+            if use_query_interface:
+                raise FakeComError(0x80004002)
+            return fake_interface
         if iid.endswith("A090}") and use_query_interface:
             nonlocal base_iface
             base_iface = FakeTaskbarList(fake_interface)
@@ -72,12 +76,15 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, use_query_interface):
 
     fake_pythoncom = SimpleNamespace(
         CLSCTX_INPROC_SERVER=1,
-        CoInitialize=lambda: init_calls.append("init"),
-        CoUninitialize=lambda: init_calls.append("uninit"),
+        CLSCTX_ALL=7,
+        COINIT_APARTMENTTHREADED=2,
+        CoInitialize=lambda: init_calls.append(("init", None)),
+        CoInitializeEx=lambda flag: init_calls.append(("init_ex", flag)),
+        CoUninitialize=lambda: init_calls.append(("uninit", None)),
         MakeIID=lambda value: value,
         CoCreateInstance=co_create_instance,
     )
-    fake_pywintypes = SimpleNamespace(com_error=FakeComError)
+    fake_pywintypes = SimpleNamespace(com_error=FakeComError, IID=lambda value: value)
 
     module_path = Path(talks_reducer.__file__).with_name("windows_taskbar.py")
 
@@ -98,11 +105,12 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, use_query_interface):
     taskbar.clear()
     taskbar.close()
 
-    assert init_calls == ["init", "uninit"]
+    assert init_calls == [("init_ex", 2), ("uninit", None)]
     assert recorded[0][1].endswith("2B2A}")
     if use_query_interface:
-        # Expect fallback path to create ITaskbarList before querying for v3.
-        assert recorded[1][1].endswith("A090}")
+        # Expect fallback path to probe v4, then create ITaskbarList before querying for v3.
+        assert recorded[1][1].endswith("3A1A}")
+        assert recorded[2][1].endswith("A090}")
         assert base_iface is not None and base_iface.hr_init_calls == 1
     assert fake_interface.init_calls == 1
     assert fake_interface.value_calls[-1] == (0x1234, 5, 10)

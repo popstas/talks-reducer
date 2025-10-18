@@ -67,6 +67,7 @@ else:  # pragma: no cover - requires Windows runtime
     CLSID_TASKBARLIST = "{56FDF344-FD6D-11d0-958A-006097C9A090}"
     IID_ITASKBARLIST = "{56FDF342-FD6D-11d0-958A-006097C9A090}"
     IID_ITASKBARLIST3 = "{EA1AFB91-9E28-4B86-90E9-9E9F8A5A2B2A}"
+    IID_ITASKBARLIST4 = "{C43DC798-95D1-4BEA-9030-BB99E2983A1A}"
     E_NOINTERFACE = 0x80004002
     RPC_E_CHANGED_MODE = 0x80010106
 
@@ -123,20 +124,7 @@ else:  # pragma: no cover - requires Windows runtime
 
             logger.debug("Initialising TaskbarProgress for HWND %s", self._hwnd)
 
-            try:
-                pythoncom.CoInitialize()
-                self._should_uninit = True
-                logger.debug("CoInitialize succeeded (should_uninit=%s)", True)
-            except pywintypes.com_error as exc:
-                if exc.hresult == RPC_E_CHANGED_MODE:
-                    logger.debug(
-                        "COM already initialised in a different mode; continuing with existing apartment"
-                    )
-                else:
-                    raise TaskbarUnavailableError(
-                        "CoInitialize failed with HRESULT "
-                        f"0x{exc.hresult & 0xFFFFFFFF:08X}."
-                    ) from exc
+            self._should_uninit = self._initialise_com_apartment()
 
             self._iface = self._create_taskbar_interface()
 
@@ -150,35 +138,84 @@ else:  # pragma: no cover - requires Windows runtime
                     f"0x{exc.hresult & 0xFFFFFFFF:08X}."
                 ) from exc
 
+        def _initialise_com_apartment(self) -> bool:
+            """Initialise COM for the current thread if needed."""
+
+            try:
+                initialise = pythoncom.CoInitializeEx
+                apartment = getattr(
+                    pythoncom,
+                    "COINIT_APARTMENTTHREADED",
+                    getattr(pythoncom, "COINIT_APARTMENT", 0),
+                )
+                logger.debug(
+                    "Attempting CoInitializeEx with apartment flag 0x%X", apartment
+                )
+                initialise(apartment)
+                logger.debug("CoInitializeEx succeeded (should_uninit=True)")
+                return True
+            except AttributeError:
+                logger.debug(
+                    "pywin32 lacks CoInitializeEx; falling back to CoInitialize"
+                )
+                pythoncom.CoInitialize()
+                logger.debug("CoInitialize succeeded (should_uninit=True)")
+                return True
+            except pywintypes.com_error as exc:
+                if exc.hresult == RPC_E_CHANGED_MODE:
+                    logger.debug(
+                        "COM already initialised in a different mode; continuing without uninitialise"
+                    )
+                    return False
+                raise TaskbarUnavailableError(
+                    "CoInitializeEx failed with HRESULT "
+                    f"0x{exc.hresult & 0xFFFFFFFF:08X}."
+                ) from exc
+
         def _make_iid(self, value: str):
-            return pythoncom.MakeIID(value)
+            try:
+                return pywintypes.IID(value)
+            except AttributeError:  # pragma: no cover - very old pywin32
+                return pythoncom.MakeIID(value)
 
         def _create_taskbar_interface(self):
             """Create an ``ITaskbarList3`` COM interface via pywin32."""
 
-            try:
-                iface = pythoncom.CoCreateInstance(
-                    self._make_iid(CLSID_TASKBARLIST),
-                    None,
-                    pythoncom.CLSCTX_INPROC_SERVER,
-                    self._make_iid(IID_ITASKBARLIST3),
-                )
-                logger.debug("CoCreateInstance for ITaskbarList3 succeeded via pywin32")
-                return iface
-            except pywintypes.com_error as exc:
-                if exc.hresult != E_NOINTERFACE:
-                    self._handle_creation_failure(
-                        exc, "CoCreateInstance for ITaskbarList3"
+            context = getattr(
+                pythoncom, "CLSCTX_ALL", getattr(pythoncom, "CLSCTX_INPROC_SERVER", 1)
+            )
+
+            last_error: pywintypes.com_error | None = None
+
+            for label, iid in (
+                ("ITaskbarList3", IID_ITASKBARLIST3),
+                ("ITaskbarList4", IID_ITASKBARLIST4),
+            ):
+                try:
+                    iface = pythoncom.CoCreateInstance(
+                        self._make_iid(CLSID_TASKBARLIST),
+                        None,
+                        context,
+                        self._make_iid(iid),
                     )
-                logger.debug(
-                    "Direct ITaskbarList3 activation failed with E_NOINTERFACE; attempting QueryInterface fallback"
-                )
+                    logger.debug("CoCreateInstance for %s succeeded via pywin32", label)
+                    return iface
+                except pywintypes.com_error as exc:
+                    last_error = exc
+                    if exc.hresult != E_NOINTERFACE:
+                        self._handle_creation_failure(
+                            exc, f"CoCreateInstance for {label}"
+                        )
+                    logger.debug(
+                        "Direct %s activation failed with E_NOINTERFACE; attempting fallback",
+                        label,
+                    )
 
             try:
                 base = pythoncom.CoCreateInstance(
                     self._make_iid(CLSID_TASKBARLIST),
                     None,
-                    pythoncom.CLSCTX_INPROC_SERVER,
+                    context,
                     self._make_iid(IID_ITASKBARLIST),
                 )
             except pywintypes.com_error as exc:
@@ -186,18 +223,36 @@ else:  # pragma: no cover - requires Windows runtime
 
             try:
                 base.HrInit()
-                logger.debug("ITaskbarList.HrInit succeeded for QueryInterface fallback")
+                logger.debug(
+                    "ITaskbarList.HrInit succeeded for QueryInterface fallback"
+                )
             except pywintypes.com_error as exc:
                 self._handle_creation_failure(exc, "ITaskbarList.HrInit")
 
-            try:
-                iface = base.QueryInterface(self._make_iid(IID_ITASKBARLIST3))
-                logger.debug("Obtained ITaskbarList3 via QueryInterface fallback")
-                return iface
-            except pywintypes.com_error as exc:
-                self._handle_creation_failure(exc, "QueryInterface for ITaskbarList3")
-            finally:
-                base = None  # release reference eagerly
+            for label, iid in (
+                ("ITaskbarList3", IID_ITASKBARLIST3),
+                ("ITaskbarList4", IID_ITASKBARLIST4),
+            ):
+                try:
+                    iface = base.QueryInterface(self._make_iid(iid))
+                    logger.debug("Obtained %s via QueryInterface fallback", label)
+                    base = None
+                    return iface
+                except pywintypes.com_error as exc:
+                    last_error = exc
+                    if exc.hresult != E_NOINTERFACE:
+                        self._handle_creation_failure(
+                            exc, f"QueryInterface for {label}"
+                        )
+                    logger.debug(
+                        "QueryInterface for %s returned E_NOINTERFACE; trying next candidate",
+                        label,
+                    )
+            else:
+                if last_error is not None:
+                    self._handle_creation_failure(
+                        last_error, "QueryInterface for taskbar interface"
+                    )
 
         def _handle_creation_failure(self, exc, context: str) -> None:
             if self._should_uninit:
