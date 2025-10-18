@@ -309,6 +309,7 @@ def test_build_video_commands_small_cuda(monkeypatch):
     assert "-force_key_frames expr:gte(t,n_forced*2)" in fallback
     assert "-forced-idr 1" not in fallback
     assert "-g 60" in fallback
+    assert "-hwaccel cuda" not in fallback
     assert use_cuda
 
 
@@ -349,7 +350,10 @@ def test_build_video_commands_large_cuda(monkeypatch):
 
     assert "-hwaccel cuda" in command
     assert "-filter_complex_threads 1" in command
-    assert fallback is None
+    assert fallback is not None
+    assert "-c:v libx264" in fallback
+    assert "-filter_complex_threads 1" in fallback
+    assert "-hwaccel cuda" not in fallback
     assert use_cuda
 
 
@@ -367,6 +371,7 @@ def test_build_video_commands_large_cpu(monkeypatch):
     )
 
     assert "-c:v libx264" in command
+    assert "-filter_complex_threads 1" in command
     assert fallback is None
     assert not use_cuda
 

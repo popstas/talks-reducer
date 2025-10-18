@@ -366,14 +366,14 @@ def build_video_commands(
     """
 
     ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
-    global_parts: List[str] = [f'"{ffmpeg_path}"', "-y"]
+    base_parts: List[str] = [f'"{ffmpeg_path}"', "-y"]
     hwaccel_args: List[str] = []
+    processing_args: List[str] = []
 
     if cuda_available and not small:
         hwaccel_args = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
-        global_parts.extend(hwaccel_args)
-    elif small and cuda_available:
-        pass
+
+    global_parts = base_parts + hwaccel_args
 
     input_parts = [f'-i "{input_file}"', f'-i "{audio_file}"']
 
@@ -423,10 +423,15 @@ def build_video_commands(
                 "zerolatency",
             ] + small_keyframe_args
     else:
-        global_parts.append("-filter_complex_threads 1")
+        processing_args.append("-filter_complex_threads 1")
         if cuda_available:
             video_encoder_args = ["-c:v h264_nvenc"]
             use_cuda_encoder = True
+            fallback_encoder_args = [
+                "-c:v libx264",
+                "-preset veryfast",
+                "-crf 23",
+            ]
         else:
             # Cannot use copy codec when applying filters (speed modifications)
             # Use a fast software encoder instead
@@ -439,14 +444,20 @@ def build_video_commands(
     ]
 
     full_command_parts = (
-        global_parts + input_parts + output_parts + video_encoder_args + audio_parts
+        global_parts
+        + processing_args
+        + input_parts
+        + output_parts
+        + video_encoder_args
+        + audio_parts
     )
     command_str = " ".join(full_command_parts)
 
     fallback_command_str: Optional[str] = None
     if fallback_encoder_args:
         fallback_parts = (
-            global_parts
+            base_parts
+            + processing_args
             + input_parts
             + output_parts
             + fallback_encoder_args
