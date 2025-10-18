@@ -67,7 +67,9 @@ can glance at progress without keeping the terminal focused. The integration
 uses the bundled `talks_reducer.windows_taskbar` helper, which relies on the
 standard library `ctypes` module that ships with Python on Windows. If the COM
 interface is unavailable the reporter falls back to the regular progress bar and
-logs a verbose message explaining that taskbar updates were skipped.
+logs a verbose message explaining that taskbar updates were skipped. Set
+`LOG_LEVEL=DEBUG` before launching the CLI or GUI to surface the detailed
+diagnostic logs emitted by the taskbar integration.
 
 ### Speech detection
 

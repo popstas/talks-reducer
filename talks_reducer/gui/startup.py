@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
 from ..cli import main as cli_main
+from ..logging_config import configure_logging_from_env
 from .app import TalksReducerGUI
 
 _runtime_logged = False
@@ -115,6 +116,7 @@ if __name__ == "__main__":
 def main(argv: Optional[Sequence[str]] = None) -> bool:
     """Launch the GUI when run without arguments, otherwise defer to the CLI."""
 
+    configure_logging_from_env()
     _log_python_runtime()
 
     if argv is None:

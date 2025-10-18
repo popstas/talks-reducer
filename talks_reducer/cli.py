@@ -14,6 +14,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import audio
 from .ffmpeg import FFmpegNotFoundError
+from .logging_config import configure_logging_from_env
 from .models import ProcessingOptions, default_temp_folder
 from .pipeline import speed_up_video
 from .progress import TqdmProgressReporter
@@ -484,6 +485,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     Launch the GUI when run without arguments, otherwise defer to the CLI.
     """
+
+    configure_logging_from_env()
 
     if argv is None:
         argv_list = sys.argv[1:]
