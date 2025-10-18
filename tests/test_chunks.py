@@ -116,8 +116,5 @@ def test_get_tree_expression_balances_multiple_chunks() -> None:
     expression = get_tree_expression(chunks)
 
     assert expression == "if(lt(N,3),N*1.0+0.0,if(lt(N,5),N*0.5+1.5,N*1.0-1.0))/TB/FR"
-    speeds = [
-        (chunk[3] - chunk[2]) / (chunk[1] - chunk[0])
-        for chunk in chunks
-    ]
+    speeds = [(chunk[3] - chunk[2]) / (chunk[1] - chunk[0]) for chunk in chunks]
     assert speeds == pytest.approx([1.0, 0.5, 1.0])

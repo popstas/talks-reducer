@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from importlib.metadata import PackageNotFoundError, version as metadata_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as metadata_version
 
 try:  # pragma: no cover - defensive fallback when metadata module missing
     from .__about__ import __version__ as _about_version

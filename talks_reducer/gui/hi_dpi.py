@@ -13,10 +13,12 @@
     hi_dpi.get_tk_scaling(root) -> float
 """
 from __future__ import annotations
+
 import sys
 from typing import Optional
 
 __all__ = ["enable_high_dpi", "get_window_dpi", "get_tk_scaling"]
+
 
 def enable_high_dpi() -> str:
     """Включает DPI-осознанность процесса. Возвращает строку с режимом."""
@@ -33,7 +35,9 @@ def enable_high_dpi() -> str:
     # Попытка 1: Per-Monitor-V2 (Windows 10+)
     try:
         user32.SetProcessDpiAwarenessContext.restype = wintypes.BOOL
-        ok = user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))  # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+        ok = user32.SetProcessDpiAwarenessContext(
+            ctypes.c_void_p(-4)
+        )  # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
         if ok:
             return "PerMonitorV2"
     except Exception:
@@ -56,17 +60,20 @@ def enable_high_dpi() -> str:
     except Exception:
         return "Unaware(failed)"
 
+
 def get_window_dpi(widget) -> Optional[int]:
     """Возвращает фактический DPI окна (Win10+), иначе None."""
     if sys.platform != "win32":
         return None
     try:
         import ctypes
+
         getdpi = ctypes.windll.user32.GetDpiForWindow
         getdpi.restype = ctypes.c_uint
         return int(getdpi(widget.winfo_id()))
     except Exception:
         return None
+
 
 def get_tk_scaling(root) -> float:
     """Возвращает tk scaling (px per typographic point). На 125% ≈ 1.6667."""
@@ -74,6 +81,7 @@ def get_tk_scaling(root) -> float:
         return float(root.tk.call("tk", "scaling"))
     except Exception:
         return 1.0
+
 
 # Выполняем сразу при импорте
 _enable_mode = enable_high_dpi()

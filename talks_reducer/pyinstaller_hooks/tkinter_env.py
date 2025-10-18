@@ -13,7 +13,11 @@ def _select_latest(directory: Path, prefix: str) -> Path | None:
     if not directory.exists() or not directory.is_dir():
         return None
 
-    candidates = [child for child in directory.iterdir() if child.is_dir() and child.name.lower().startswith(prefix)]
+    candidates = [
+        child
+        for child in directory.iterdir()
+        if child.is_dir() and child.name.lower().startswith(prefix)
+    ]
     if not candidates:
         return None
 
