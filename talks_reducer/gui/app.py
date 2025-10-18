@@ -21,6 +21,7 @@ from typing import (
 )
 
 from . import hi_dpi  # should be imported before tkinter
+
 if TYPE_CHECKING:
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
@@ -435,6 +436,8 @@ class TalksReducerGUI:
         # Store remote_mode for use after thread starts
         self._current_remote_mode = remote_mode
 
+        taskbar_hwnd = self._get_taskbar_window_handle()
+
         def worker() -> None:
             def set_process(proc: subprocess.Popen) -> None:
                 self._ffmpeg_process = proc
@@ -469,6 +472,7 @@ class TalksReducerGUI:
                     self._append_log,
                     process_callback=set_process,
                     stop_callback=lambda: self._stop_requested,
+                    taskbar_hwnd=taskbar_hwnd,
                 )
                 for index, file in enumerate(files, start=1):
                     self._append_log(f"Processing: {os.path.basename(file)}")
@@ -528,6 +532,19 @@ class TalksReducerGUI:
         self.stop_button.grid()
 
     # ------------------------------------------------------------------ UI --
+    def _get_taskbar_window_handle(self) -> Optional[int]:
+        """Return the HWND of the root window when running on Windows."""
+
+        if sys.platform != "win32":
+            return None
+
+        try:
+            handle = int(self.root.winfo_id())
+        except Exception:
+            return None
+
+        return handle or None
+
     def _apply_window_icon(self) -> None:
         layout_helpers.apply_window_icon(self)
 
