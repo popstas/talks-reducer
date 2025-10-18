@@ -39,6 +39,10 @@ class FakeTaskbarList3:
 class FakeTaskbarList:
     def __init__(self, target: FakeTaskbarList3) -> None:
         self._target = target
+        self.hr_init_calls = 0
+
+    def HrInit(self) -> None:
+        self.hr_init_calls += 1
 
     def QueryInterface(self, iid: str) -> FakeTaskbarList3:
         return self._target
@@ -50,6 +54,8 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, use_query_interface):
     recorded: list[tuple[str, str]] = []
     fake_interface = FakeTaskbarList3()
 
+    base_iface: FakeTaskbarList | None = None
+
     def co_create_instance(clsid: str, _outer, _ctx: int, iid: str):
         recorded.append((clsid, iid))
         if not use_query_interface and iid.endswith("2B2A}"):
@@ -59,7 +65,9 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, use_query_interface):
             # Simulate E_NOINTERFACE so the fallback path runs.
             raise FakeComError(0x80004002)
         if iid.endswith("A090}") and use_query_interface:
-            return FakeTaskbarList(fake_interface)
+            nonlocal base_iface
+            base_iface = FakeTaskbarList(fake_interface)
+            return base_iface
         raise AssertionError(f"Unexpected CoCreateInstance iid {iid}")
 
     fake_pythoncom = SimpleNamespace(
@@ -95,6 +103,7 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, use_query_interface):
     if use_query_interface:
         # Expect fallback path to create ITaskbarList before querying for v3.
         assert recorded[1][1].endswith("A090}")
+        assert base_iface is not None and base_iface.hr_init_calls == 1
     assert fake_interface.init_calls == 1
     assert fake_interface.value_calls[-1] == (0x1234, 5, 10)
     assert fake_interface.state_calls[0] == (0x1234, module.TaskbarProgressState.NORMAL)

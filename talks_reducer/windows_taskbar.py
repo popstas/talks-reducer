@@ -185,6 +185,12 @@ else:  # pragma: no cover - requires Windows runtime
                 self._handle_creation_failure(exc, "CoCreateInstance for ITaskbarList")
 
             try:
+                base.HrInit()
+                logger.debug("ITaskbarList.HrInit succeeded for QueryInterface fallback")
+            except pywintypes.com_error as exc:
+                self._handle_creation_failure(exc, "ITaskbarList.HrInit")
+
+            try:
                 iface = base.QueryInterface(self._make_iid(IID_ITASKBARLIST3))
                 logger.debug("Obtained ITaskbarList3 via QueryInterface fallback")
                 return iface
