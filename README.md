@@ -109,7 +109,7 @@ item (or relaunch the GUI separately) whenever you want to reopen it. The tray
 no longer opens a browser automatically—pass `--open-browser` if you prefer the
 web page to launch as soon as the server is ready.
 
-This opens a local web page featuring a drag-and-drop upload zone, a **Small video** checkbox that mirrors the CLI preset, a live
+This opens a local web page featuring a drag-and-drop upload zone, **Small video** and **Target 480p** checkboxes that mirror the CLI presets, a live
 progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current
 Talks Reducer version so you can confirm which build the server is running. Once the job completes you can inspect the resulting
 compression ratio and download the rendered video directly from the page.
@@ -128,7 +128,7 @@ the GUI downloads the finished files automatically.
 
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
 2. Drag a video onto the **Video file** drop zone or click to browse and select one from disk.
-3. **Small video** starts enabled to apply the 720p/128 kbps preset. Clear the box before the upload finishes if you want to keep the original resolution and bitrate.
+3. **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear both boxes before the upload finishes to keep the original resolution and bitrate.
 4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives.
 5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally.
 
@@ -145,7 +145,7 @@ python -m talks_reducer.service_client --server http://127.0.0.1:9005/ --input d
 ```
 
 The helper wraps the Gradio API exposed by `server.py`, waits for processing to complete, then copies the rendered file to the
-path you provide. Pass `--small` to mirror the **Small video** checkbox or `--print-log` to stream the server log after the
+path you provide. Pass `--small` (and optionally `--480`) to mirror the **Small video**/**Target 480p** checkboxes or `--print-log` to stream the server log after the
 download finishes.
 
 ## Windows installer packaging

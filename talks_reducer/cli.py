@@ -283,7 +283,7 @@ class CliApplication:
                 file=sys.stderr,
             )
 
-        remote_option_values: Dict[str, float] = {}
+        remote_option_values: Dict[str, object] = {}
         if parsed_args.silent_threshold is not None:
             remote_option_values["silent_threshold"] = float(
                 parsed_args.silent_threshold
@@ -305,11 +305,11 @@ class CliApplication:
                 file=sys.stderr,
             )
 
-        if getattr(parsed_args, "small_480", False):
-            print(
-                "Warning: --480 is ignored when using --url.",
-                file=sys.stderr,
-            )
+        small_480_mode = bool(getattr(parsed_args, "small_480", False)) and bool(
+            getattr(parsed_args, "small", False)
+        )
+        if small_480_mode:
+            remote_option_values["small_480"] = True
 
         for index, file in enumerate(files, start=1):
             basename = os.path.basename(file)
@@ -354,6 +354,7 @@ class CliApplication:
                     output_path=output_override,
                     server_url=server_url,
                     small=bool(parsed_args.small),
+                    small_480=small_480_mode,
                     **remote_option_values,
                     log_callback=_stream_server_log,
                     stream_updates=stream_updates,

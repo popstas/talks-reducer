@@ -238,7 +238,9 @@ def test_send_video_downloads_file(monkeypatch, tmp_path):
     assert log_text == "log"
     assert client_instance.submissions, "submit was not called"
     submission_args, submission_kwargs = client_instance.submissions[0]
-    assert submission_args[2:5] == (None, None, None)
+    assert submission_args[1] is True
+    assert submission_args[2] is False
+    assert submission_args[3:6] == (None, None, None)
     assert submission_kwargs.get("api_name") == "/process_video"
 
 
@@ -350,7 +352,8 @@ def test_send_video_forwards_custom_options(monkeypatch, tmp_path):
     assert summary == "summary"
     assert log_text == "log"
     submission_args, _ = client_instance.submissions[0]
-    assert submission_args[2:5] == (0.12, 1.5, 6.0)
+    assert submission_args[2] is False
+    assert submission_args[3:6] == (0.12, 1.5, 6.0)
 
 
 def test_send_video_defaults_to_current_directory(monkeypatch, tmp_path, cwd_tmp_path):
@@ -386,6 +389,7 @@ def test_main_prints_summary(monkeypatch, tmp_path, capsys):
 
     def fake_send_video(*, log_callback=None, **kwargs):
         assert kwargs["small"] is False
+        assert kwargs["small_480"] is False
         assert kwargs["stream_updates"] is False
         if log_callback is not None:
             log_callback("log")
@@ -416,6 +420,7 @@ def test_main_stream_option(monkeypatch, tmp_path, capsys):
 
     def fake_send_video(*, progress_callback=None, **kwargs):
         assert kwargs["stream_updates"] is True
+        assert kwargs["small_480"] is False
         assert callable(progress_callback)
         if progress_callback is not None:
             progress_callback("Processing", 2, 4, "frames")
@@ -436,6 +441,60 @@ def test_main_stream_option(monkeypatch, tmp_path, capsys):
 
     captured = capsys.readouterr()
     assert "Processing: 2/4 50.0% frames" in captured.out
+
+
+def test_main_small_480_option(monkeypatch, tmp_path, capsys):
+    input_file = tmp_path / "input.mp4"
+    destination_file = tmp_path / "output.mp4"
+
+    def fake_send_video(**kwargs):
+        assert kwargs["small"] is True
+        assert kwargs["small_480"] is True
+        return destination_file, "summary", "log"
+
+    monkeypatch.setattr(service_client, "send_video", fake_send_video)
+
+    service_client.main(
+        [
+            str(input_file),
+            "--server",
+            "http://localhost:9005/",
+            "--output",
+            str(destination_file),
+            "--small",
+            "--480",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert "summary" in captured.out
+    assert str(destination_file) in captured.out
+
+
+def test_main_warns_when_480_without_small(monkeypatch, tmp_path, capsys):
+    input_file = tmp_path / "input.mp4"
+    destination_file = tmp_path / "output.mp4"
+
+    def fake_send_video(**kwargs):
+        assert kwargs["small"] is False
+        assert kwargs["small_480"] is False
+        return destination_file, "summary", "log"
+
+    monkeypatch.setattr(service_client, "send_video", fake_send_video)
+
+    service_client.main(
+        [
+            str(input_file),
+            "--server",
+            "http://localhost:9005/",
+            "--output",
+            str(destination_file),
+            "--480",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert "Warning: --480 has no effect" in captured.err
 
 
 @pytest.fixture

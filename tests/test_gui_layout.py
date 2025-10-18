@@ -239,6 +239,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         _stop_processing=stop_processing,
         _open_last_output=open_last_output,
         small_var=BooleanVarStub(value=True),
+        small_480_var=BooleanVarStub(value=False),
         open_after_convert_var=BooleanVarStub(value=False),
         simple_mode_var=BooleanVarStub(value=False),
         preferences=preferences,
@@ -261,7 +262,9 @@ def test_build_layout_initializes_widgets(monkeypatch):
         "<Return>",
         "<space>",
     }
-    assert all(callback is on_drop_zone_click for _, callback in gui.drop_zone.bind_calls)
+    assert all(
+        callback is on_drop_zone_click for _, callback in gui.drop_zone.bind_calls
+    )
     configure_drop_targets.assert_any_call(gui.drop_zone)
 
     assert isinstance(gui.advanced_button, WidgetStub)

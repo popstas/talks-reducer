@@ -21,6 +21,7 @@ from typing import (
 )
 
 from . import hi_dpi  # should be imported before tkinter
+
 if TYPE_CHECKING:
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
@@ -332,6 +333,9 @@ class TalksReducerGUI:
         )
         self.run_after_drop_var = tk.BooleanVar(value=True)
         self.small_var = tk.BooleanVar(value=self.preferences.get("small_video", True))
+        self.small_480_var = tk.BooleanVar(
+            value=self.preferences.get("small_video_480", False)
+        )
         self.open_after_convert_var = tk.BooleanVar(
             value=self.preferences.get("open_after_convert", True)
         )
@@ -343,6 +347,7 @@ class TalksReducerGUI:
         self.theme_var = tk.StringVar(value=self.preferences.get("theme", "os"))
         self.theme_var.trace_add("write", self._on_theme_change)
         self.small_var.trace_add("write", self._on_small_video_change)
+        self.small_480_var.trace_add("write", self._on_small_480_change)
         self.open_after_convert_var.trace_add(
             "write", self._on_open_after_convert_change
         )
@@ -358,6 +363,7 @@ class TalksReducerGUI:
         self._sliders: list[tk.Scale] = []
 
         self._build_layout()
+        self._update_small_variant_state()
         self._apply_simple_mode(initial=True)
         self._apply_status_style(self._status_state)
         self._refresh_theme()
@@ -639,6 +645,16 @@ class TalksReducerGUI:
 
     def _on_small_video_change(self, *_: object) -> None:
         self.preferences.update("small_video", bool(self.small_var.get()))
+        self._update_small_variant_state()
+
+    def _on_small_480_change(self, *_: object) -> None:
+        self.preferences.update("small_video_480", bool(self.small_480_var.get()))
+
+    def _update_small_variant_state(self) -> None:
+        if not hasattr(self, "small_480_check"):
+            return
+        state = self.tk.NORMAL if self.small_var.get() else self.tk.DISABLED
+        self.small_480_check.configure(state=state)
 
     def _on_open_after_convert_change(self, *_: object) -> None:
         self.preferences.update(
@@ -862,6 +878,8 @@ class TalksReducerGUI:
             )
         if self.small_var.get():
             args["small"] = True
+            if self.small_480_var.get():
+                args["small_target_height"] = 480
         return args
 
     def _process_files_via_server(
