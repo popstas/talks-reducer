@@ -6,6 +6,16 @@
 - For documentation-only changes, describe the rationale behind updates so future contributors understand the context.
 - Keep Python formatting consistent by running `black` and `isort` (configured via `pyproject.toml`) before committing code changes.
 
+# Pull request naming
+Create name using angular commit message format.
+`feat:` and `fix:` are using in CHANGELOG.md. It's a release notes for users. Name your PRs in a way that it's easy to understand what was changed. Forbidden to use `feat:` and `fix:` prefixes for chore tasks that don't add new features or fix bugs.
+
+Name examples:
+- feat: Add 480p small preset option
+- fix: Switch to static-ffmpeg for bundled ffprobe
+Look at the commit history to get more examples.
+
+
 
 ### Graphical Interface
 
