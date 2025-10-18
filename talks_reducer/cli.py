@@ -93,7 +93,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--small",
         action="store_true",
-        help="Apply small file optimizations: resize video to 720p, audio to 128k bitrate, best compression (uses CUDA if available).",
+        help="Apply small file optimizations: resize video to 720p (or 480p with --480), audio to 128k bitrate, best compression (uses CUDA if available).",
+    )
+    parser.add_argument(
+        "--480",
+        dest="small_480",
+        action="store_true",
+        help="Use with --small to scale video to 480p instead of 720p.",
     )
     parser.add_argument(
         "--url",
@@ -175,6 +181,14 @@ class CliApplication:
         if len(files) > 1 and "output_file" in args:
             del args["output_file"]
 
+        if getattr(parsed_args, "small_480", False) and not getattr(
+            parsed_args, "small", False
+        ):
+            print(
+                "Warning: --480 has no effect unless --small is also provided.",
+                file=sys.stderr,
+            )
+
         error_messages: List[str] = []
         reporter_logs: List[str] = []
 
@@ -217,6 +231,8 @@ class CliApplication:
                 option_kwargs["sample_rate"] = int(local_options["sample_rate"])
             if "small" in local_options:
                 option_kwargs["small"] = bool(local_options["small"])
+            if local_options.get("small_480"):
+                option_kwargs["small_target_height"] = 480
             options = ProcessingOptions(**option_kwargs)
 
             try:
@@ -286,6 +302,12 @@ class CliApplication:
             print(
                 "Warning: the following options are ignored when using --url: "
                 + ", ".join(sorted(unsupported_options)),
+                file=sys.stderr,
+            )
+
+        if getattr(parsed_args, "small_480", False):
+            print(
+                "Warning: --480 is ignored when using --url.",
                 file=sys.stderr,
             )
 

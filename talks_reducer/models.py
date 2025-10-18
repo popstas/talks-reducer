@@ -51,6 +51,7 @@ class ProcessingOptions:
     audio_fade_envelope_size: int = 400
     temp_folder: Path = field(default_factory=default_temp_folder)
     small: bool = False
+    small_target_height: Optional[int] = None
 
 
 @dataclass(frozen=True)

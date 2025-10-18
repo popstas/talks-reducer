@@ -35,12 +35,14 @@ pip install talks-reducer
 **Note:** FFmpeg is now bundled automatically with the package, so you don't need to install it separately. You you need, don't know actually.
 
 The `--small` preset applies a 720p video scale and 128 kbps audio bitrate, making it useful for sharing talks over constrained
-connections. Without `--small`, the script aims to preserve original quality while removing silence.
+connections. Combine it with `--480` if you prefer a 480p target. Without `--small`, the script aims to preserve original quality
+while removing silence.
 
 Example CLI usage:
 
 ```sh
 talks-reducer --small input.mp4
+talks-reducer --small --480 input.mp4
 ```
 
 Need to offload work to a remote Talks Reducer server? Pass `--url` with the
