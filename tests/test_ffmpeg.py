@@ -334,6 +334,27 @@ def test_build_video_commands_small_cpu(monkeypatch):
     assert not use_cuda
 
 
+def test_build_video_commands_custom_keyframe_interval(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command, fallback, use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        small=True,
+        frame_rate=30.0,
+        keyframe_interval_seconds=1.5,
+    )
+
+    assert "-g 45" in command
+    assert "-keyint_min 45" in command
+    assert "-force_key_frames expr:gte(t,n_forced*1.5)" in command
+    assert fallback is None
+    assert not use_cuda
+
+
 def test_build_video_commands_large_cuda(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
 

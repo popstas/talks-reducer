@@ -876,6 +876,15 @@ class TalksReducerGUI:
             args["sample_rate"] = int(
                 round(self._parse_float(self.sample_rate_var.get(), "Sample rate"))
             )
+        if self.keyframe_interval_var.get():
+            interval = self._parse_float(
+                self.keyframe_interval_var.get(), "Keyframe interval"
+            )
+            if interval <= 0:
+                raise ValueError("Keyframe interval must be positive.")
+            clamped_interval = float(f"{interval:.6f}")
+            args["keyframe_interval_seconds"] = clamped_interval
+            self.preferences.update("keyframe_interval_seconds", clamped_interval)
         if self.small_var.get():
             args["small"] = True
             if self.small_480_var.get():

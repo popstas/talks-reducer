@@ -91,6 +91,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Sample rate of the input and output videos. Usually extracted automatically by FFmpeg.",
     )
     parser.add_argument(
+        "--keyframe-interval",
+        type=float,
+        dest="keyframe_interval_seconds",
+        help="Override the keyframe spacing in seconds when using --small. Defaults to 2.",
+    )
+    parser.add_argument(
         "--small",
         action="store_true",
         help="Apply small file optimizations: resize video to 720p (or 480p with --480), audio to 128k bitrate, best compression (uses CUDA if available).",
@@ -229,6 +235,10 @@ class CliApplication:
                 option_kwargs["frame_spreadage"] = int(local_options["frame_spreadage"])
             if "sample_rate" in local_options:
                 option_kwargs["sample_rate"] = int(local_options["sample_rate"])
+            if "keyframe_interval_seconds" in local_options:
+                option_kwargs["keyframe_interval_seconds"] = float(
+                    local_options["keyframe_interval_seconds"]
+                )
             if "small" in local_options:
                 option_kwargs["small"] = bool(local_options["small"])
             if local_options.get("small_480"):
@@ -294,7 +304,12 @@ class CliApplication:
             remote_option_values["sounded_speed"] = float(parsed_args.sounded_speed)
 
         unsupported_options: List[str] = []
-        for name in ("frame_spreadage", "sample_rate", "temp_folder"):
+        for name in (
+            "frame_spreadage",
+            "sample_rate",
+            "temp_folder",
+            "keyframe_interval_seconds",
+        ):
             if getattr(parsed_args, name) is not None:
                 unsupported_options.append(f"--{name.replace('_', '-')}")
 

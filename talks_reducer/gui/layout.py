@@ -250,6 +250,20 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.frame_margin_var = gui.tk.StringVar(value=str(frame_margin_default))
     add_entry(gui, gui.advanced_frame, "Frame margin", gui.frame_margin_var, row=3)
 
+    keyframe_interval_setting = gui.preferences.get_float(
+        "keyframe_interval_seconds", 2.0
+    )
+    gui.keyframe_interval_var = gui.tk.StringVar(
+        value=f"{keyframe_interval_setting:.6g}"
+    )
+    add_entry(
+        gui,
+        gui.advanced_frame,
+        "Keyframe interval (s)",
+        gui.keyframe_interval_var,
+        row=4,
+    )
+
     gui._toggle_advanced(initial=True)
     gui._update_processing_mode_state()
     update_basic_reset_state(gui)
