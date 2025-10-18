@@ -250,19 +250,59 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.frame_margin_var = gui.tk.StringVar(value=str(frame_margin_default))
     add_entry(gui, gui.advanced_frame, "Frame margin", gui.frame_margin_var, row=3)
 
+    min_interval = 1.0
+    max_interval = 60.0
+    interval_resolution = 0.5
     keyframe_interval_setting = gui.preferences.get_float(
-        "keyframe_interval_seconds", 2.0
+        "keyframe_interval_seconds", 10.0
     )
-    gui.keyframe_interval_var = gui.tk.StringVar(
-        value=f"{keyframe_interval_setting:.6g}"
+    try:
+        validated_interval = float(keyframe_interval_setting)
+    except (TypeError, ValueError):
+        validated_interval = 10.0
+    if not (min_interval <= validated_interval <= max_interval):
+        validated_interval = max(min_interval, min(max_interval, validated_interval))
+        gui.preferences.update(
+            "keyframe_interval_seconds", float(f"{validated_interval:.6f}")
+        )
+
+    gui.ttk.Label(gui.advanced_frame, text="Keyframe interval (s)").grid(
+        row=4, column=0, sticky="w", pady=4
     )
-    add_entry(
-        gui,
+
+    gui.keyframe_interval_var = gui.tk.DoubleVar(value=validated_interval)
+
+    gui.keyframe_interval_value_label = gui.ttk.Label(gui.advanced_frame)
+    gui.keyframe_interval_value_label.grid(row=4, column=2, sticky="e", pady=4)
+
+    def update_keyframe_interval(value: str) -> None:
+        numeric = float(value)
+        clamped = max(min_interval, min(max_interval, numeric))
+        steps = round((clamped - min_interval) / interval_resolution)
+        quantized = min_interval + steps * interval_resolution
+        if abs(gui.keyframe_interval_var.get() - quantized) > 1e-9:
+            gui.keyframe_interval_var.set(quantized)
+        gui.keyframe_interval_value_label.configure(text=f"{quantized:.1f}s")
+        gui.preferences.update("keyframe_interval_seconds", float(f"{quantized:.6f}"))
+
+    gui.keyframe_interval_slider = gui.tk.Scale(
         gui.advanced_frame,
-        "Keyframe interval (s)",
-        gui.keyframe_interval_var,
-        row=4,
+        variable=gui.keyframe_interval_var,
+        from_=min_interval,
+        to=max_interval,
+        orient=gui.tk.HORIZONTAL,
+        resolution=interval_resolution,
+        showvalue=False,
+        command=update_keyframe_interval,
+        length=240,
+        highlightthickness=0,
     )
+    gui.keyframe_interval_slider.grid(row=4, column=1, sticky="ew", pady=4, padx=(0, 8))
+
+    update_keyframe_interval(str(validated_interval))
+    sliders = getattr(gui, "_sliders", None)
+    if isinstance(sliders, list):
+        sliders.append(gui.keyframe_interval_slider)
 
     gui._toggle_advanced(initial=True)
     gui._update_processing_mode_state()

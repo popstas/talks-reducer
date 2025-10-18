@@ -357,7 +357,7 @@ def build_video_commands(
     cuda_available: bool,
     small: bool,
     frame_rate: Optional[float] = None,
-    keyframe_interval_seconds: float = 2.0,
+    keyframe_interval_seconds: float = 10.0,
 ) -> Tuple[str, Optional[str], bool]:
     """Create the FFmpeg command strings used to render the final video output.
 
@@ -389,9 +389,9 @@ def build_video_commands(
 
     if small:
         if keyframe_interval_seconds <= 0:
-            keyframe_interval_seconds = 2.0
+            keyframe_interval_seconds = 10.0
         formatted_interval = f"{keyframe_interval_seconds:.6g}"
-        gop_size = 48
+        gop_size = 300
         if frame_rate and frame_rate > 0:
             gop_size = max(1, int(round(frame_rate * keyframe_interval_seconds)))
         small_keyframe_args = [
