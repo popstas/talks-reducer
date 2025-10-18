@@ -56,6 +56,8 @@ else:  # pragma: no cover - requires Windows runtime
     import ctypes
     from ctypes import wintypes
 
+    HRESULT = getattr(wintypes, "HRESULT", getattr(ctypes, "HRESULT", ctypes.c_long))
+
     COINIT_APARTMENTTHREADED = 0x2
     CLSCTX_INPROC_SERVER = 0x1
     RPC_E_CHANGED_MODE = 0x80010106
@@ -75,7 +77,7 @@ else:  # pragma: no cover - requires Windows runtime
 
         guid = GUID()
         ole32 = ctypes.OleDLL("ole32")
-        ole32.CLSIDFromString.restype = wintypes.HRESULT
+        ole32.CLSIDFromString.restype = HRESULT
         ole32.CLSIDFromString.argtypes = (wintypes.LPCOLESTR, ctypes.POINTER(GUID))
         hr = ole32.CLSIDFromString(ctypes.c_wchar_p(value), ctypes.byref(guid))
         if hr < 0:
@@ -123,10 +125,10 @@ else:  # pragma: no cover - requires Windows runtime
                 )
 
             self._ole32 = ctypes.OleDLL("ole32")
-            self._ole32.CoInitializeEx.restype = wintypes.HRESULT
+            self._ole32.CoInitializeEx.restype = HRESULT
             self._ole32.CoInitializeEx.argtypes = (ctypes.c_void_p, wintypes.DWORD)
             self._ole32.CoUninitialize.argtypes = ()
-            self._ole32.CoCreateInstance.restype = wintypes.HRESULT
+            self._ole32.CoCreateInstance.restype = HRESULT
             self._ole32.CoCreateInstance.argtypes = (
                 ctypes.POINTER(GUID),
                 ctypes.c_void_p,
@@ -163,7 +165,7 @@ else:  # pragma: no cover - requires Windows runtime
             ).contents
 
             self._release = self._get_method(2, ctypes.c_ulong)
-            hr_init = self._get_method(3, wintypes.HRESULT)
+            hr_init = self._get_method(3, HRESULT)
             hr = hr_init(self._iface)
             if _failed(hr):
                 self.close()
@@ -173,14 +175,14 @@ else:  # pragma: no cover - requires Windows runtime
 
             self._set_progress_value = self._get_method(
                 9,
-                wintypes.HRESULT,
+                HRESULT,
                 wintypes.HWND,
                 ctypes.c_ulonglong,
                 ctypes.c_ulonglong,
             )
             self._set_progress_state = self._get_method(
                 10,
-                wintypes.HRESULT,
+                HRESULT,
                 wintypes.HWND,
                 ctypes.c_int,
             )
