@@ -9,7 +9,7 @@ from typing import List, Optional
 
 import pytest
 
-from talks_reducer import ffmpeg
+from talks_reducer import ffmpeg, windows_taskbar
 
 
 @pytest.fixture(autouse=True)
@@ -42,6 +42,17 @@ class DummyProgressReporter(ffmpeg.ProgressReporter):
         task = DummyTask(desc=desc, total=total, unit=unit)
         self.tasks.append(task)
         return DummyTaskManager(task)
+
+
+class DummyProgressReporterWithHandle(DummyProgressReporter):
+    """Dummy reporter that exposes a Windows taskbar window handle."""
+
+    def __init__(self, hwnd: int) -> None:
+        super().__init__()
+        self._hwnd = hwnd
+
+    def taskbar_hwnd(self) -> int:
+        return self._hwnd
 
 
 class DummyTask:
@@ -442,3 +453,48 @@ def test_run_timed_ffmpeg_command_reports_progress(monkeypatch):
     assert callbacks and isinstance(callbacks[0], FakeProcess)
     assert "stderr" in captured_kwargs["kwargs"]
     assert "frame=" in fake_stderr.getvalue()
+
+
+def test_run_timed_ffmpeg_command_uses_reporter_taskbar_hwnd(monkeypatch):
+    reporter = DummyProgressReporterWithHandle(0x1234)
+    fake_lines = ["frame=   10 fps=30.0 q=-1.0\n"]
+
+    monkeypatch.setattr(
+        ffmpeg.subprocess, "Popen", lambda *args, **kwargs: FakeProcess(fake_lines)
+    )
+    monkeypatch.setattr(ffmpeg.sys, "stderr", io.StringIO())
+    monkeypatch.setattr(ffmpeg.sys, "platform", "win32")
+
+    created: dict[str, object] = {}
+
+    class FakeTaskbar:
+        def __init__(self, hwnd: Optional[int] = None) -> None:
+            created["hwnd"] = hwnd
+
+        def set_progress_state(self, state) -> None:  # pragma: no cover - stub
+            created["state"] = state
+
+        def set_progress_value(self, completed, total) -> None:  # pragma: no cover
+            created["value"] = (completed, total)
+
+        def clear(self) -> None:  # pragma: no cover - stub
+            created["cleared"] = True
+
+        def close(self) -> None:  # pragma: no cover - stub
+            created["closed"] = True
+
+    def fake_taskbar_reporter(delegate, taskbar):
+        created["taskbar_instance"] = taskbar
+        return delegate
+
+    monkeypatch.setattr(windows_taskbar, "TaskbarProgress", FakeTaskbar)
+    monkeypatch.setattr(ffmpeg, "TaskbarProgressReporter", fake_taskbar_reporter)
+
+    ffmpeg.run_timed_ffmpeg_command(
+        "ffmpeg -i input.mp4",
+        reporter=reporter,
+        desc="Processing",
+        total=100,
+    )
+
+    assert created["hwnd"] == 0x1234

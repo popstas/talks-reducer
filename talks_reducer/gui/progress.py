@@ -54,10 +54,12 @@ class _TkProgressReporter(SignalProgressReporter):
         process_callback: Optional[Callable] = None,
         *,
         stop_callback: Optional[Callable[[], bool]] = None,
+        taskbar_hwnd: Optional[int] = None,
     ) -> None:
         self._log_callback = log_callback
         self.process_callback = process_callback
         self._stop_callback = stop_callback
+        self._taskbar_hwnd = taskbar_hwnd
 
     def log(self, message: str) -> None:
         self._log_callback(message)
@@ -75,6 +77,11 @@ class _TkProgressReporter(SignalProgressReporter):
         if self._stop_callback is None:
             return False
         return bool(self._stop_callback())
+
+    def taskbar_hwnd(self) -> Optional[int]:
+        """Return the HWND associated with the GUI window, if available."""
+
+        return self._taskbar_hwnd
 
 
 __all__ = ["_GuiProgressHandle", "_TkProgressReporter"]

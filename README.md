@@ -62,6 +62,18 @@ server trims and accelerates segments without falling back to local mode.
 Want to see progress as the remote server works? Add `--server-stream` so the
 CLI prints live progress bars and log lines while you wait for the download.
 
+### Windows taskbar progress
+
+On Windows the CLI mirrors FFmpeg frame counts onto the taskbar button so you
+can glance at progress without keeping the terminal focused. The integration
+uses the bundled `talks_reducer.windows_taskbar` helper, which now relies on
+[`pywin32`](https://pypi.org/project/pywin32/) to access the COM APIs exposed by
+`ITaskbarList3`. Install `pywin32` into your environment if you want taskbar
+progress, or skip it and the reporter will fall back to the regular progress bar
+while logging a verbose message explaining that taskbar updates were skipped.
+Set `LOG_LEVEL=DEBUG` before launching the CLI or GUI to surface the detailed
+diagnostic logs emitted by the taskbar integration.
+
 ### Speech detection
 
 Talks Reducer now relies on its built-in volume thresholding to detect speech. Adjust `--silent_threshold` if you need to fine-tune when segments count as silence. Dropping the optional Silero VAD integration keeps the install lightweight and avoids pulling in PyTorch.
