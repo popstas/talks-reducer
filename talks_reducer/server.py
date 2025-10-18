@@ -148,7 +148,9 @@ class GradioProgressReporter(SignalProgressReporter):
 
 
 _FAVICON_FILENAMES = (
-    ("app.ico", "app.png") if sys.platform.startswith("win") else ("app.png", "app.ico")
+    ("app.ico", "app-256.png", "app.png")
+    if sys.platform.startswith("win")
+    else ("app-256.png", "app.png", "app.ico")
 )
 _FAVICON_PATH = find_icon_path(filenames=_FAVICON_FILENAMES)
 _FAVICON_PATH_STR = str(_FAVICON_PATH) if _FAVICON_PATH else None

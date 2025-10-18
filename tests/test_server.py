@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from queue import SimpleQueue
 from typing import Iterator
@@ -356,6 +357,17 @@ def test_process_video_validates_input_arguments(tmp_path: Path) -> None:
 
     with pytest.raises(gr.Error, match="no longer available"):
         list(server.process_video(str(missing_path), small_video=False))
+
+
+def test_favicon_filenames_prefer_available_png() -> None:
+    """Ensure the web UI favicon search prefers bundled PNG assets."""
+
+    assert "app-256.png" in server._FAVICON_FILENAMES
+    if sys.platform.startswith("win"):
+        assert server._FAVICON_FILENAMES[0] == "app.ico"
+        assert server._FAVICON_FILENAMES[1] == "app-256.png"
+    else:
+        assert server._FAVICON_FILENAMES[0] == "app-256.png"
 
 
 def test_guess_local_url_uses_loopback_for_wildcard() -> None:
