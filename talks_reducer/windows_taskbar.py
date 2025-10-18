@@ -118,6 +118,11 @@ else:  # pragma: no cover - requires Windows runtime
         """Wrapper around ``ITaskbarList3`` for reporting taskbar progress."""
 
         def __init__(self, hwnd: Optional[int] = None) -> None:
+            self._closed = False
+            self._iface = None
+            self._release = None
+            self._should_uninit = False
+
             self._hwnd = hwnd or _default_hwnd()
             if not self._hwnd:
                 raise TaskbarUnavailableError(
@@ -234,7 +239,7 @@ else:  # pragma: no cover - requires Windows runtime
 
             self._closed = True
             try:
-                if getattr(self, "_iface", None):
+                if getattr(self, "_iface", None) and getattr(self, "_release", None):
                     self._release(self._iface)
                     self._iface = None
             finally:
