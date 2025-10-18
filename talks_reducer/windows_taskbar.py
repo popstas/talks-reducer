@@ -79,7 +79,7 @@ else:  # pragma: no cover - requires Windows runtime
         """Convert a GUID string into a :class:`GUID` instance."""
 
         guid = GUID()
-        ole32 = ctypes.OleDLL("ole32")
+        ole32 = ctypes.WinDLL("ole32", use_last_error=True)
         ole32.CLSIDFromString.restype = HRESULT
         ole32.CLSIDFromString.argtypes = (wintypes.LPCOLESTR, ctypes.POINTER(GUID))
         hr = ole32.CLSIDFromString(ctypes.c_wchar_p(value), ctypes.byref(guid))
@@ -128,8 +128,6 @@ else:  # pragma: no cover - requires Windows runtime
 
         return hr < 0
 
-    E_NOINTERFACE = 0x80004002
-
     class TaskbarProgress:
         """Wrapper around ``ITaskbarList3`` for reporting taskbar progress."""
 
@@ -147,7 +145,7 @@ else:  # pragma: no cover - requires Windows runtime
 
             logger.debug("Initialising TaskbarProgress for HWND %s", self._hwnd)
 
-            self._ole32 = ctypes.OleDLL("ole32")
+            self._ole32 = ctypes.WinDLL("ole32", use_last_error=True)
             self._ole32.CoInitializeEx.restype = HRESULT
             self._ole32.CoInitializeEx.argtypes = (ctypes.c_void_p, wintypes.DWORD)
             self._ole32.CoUninitialize.argtypes = ()
@@ -177,34 +175,7 @@ else:  # pragma: no cover - requires Windows runtime
                     self._should_uninit,
                 )
 
-            taskbar_ptr = ctypes.c_void_p()
-            hr = self._ole32.CoCreateInstance(
-                ctypes.byref(CLSID_TaskbarList),
-                None,
-                CLSCTX_INPROC_SERVER,
-                ctypes.byref(IID_ITaskbarList3),
-                ctypes.byref(taskbar_ptr),
-            )
-            if _failed(hr):
-                if (hr & 0xFFFFFFFF) == E_NOINTERFACE:
-                    logger.debug(
-                        "Direct CoCreateInstance for ITaskbarList3 returned E_NOINTERFACE; "
-                        "retrying via QueryInterface"
-                    )
-                    taskbar_ptr = self._create_taskbar_via_query_interface()
-                else:
-                    if self._should_uninit:
-                        self._ole32.CoUninitialize()
-                    raise TaskbarUnavailableError(
-                        "CoCreateInstance for ITaskbarList3 failed (HRESULT "
-                        f"0x{hr & 0xFFFFFFFF:08X})."
-                    )
-            else:
-                logger.debug(
-                    "CoCreateInstance for ITaskbarList3 succeeded: ptr=%s", taskbar_ptr
-                )
-
-            self._iface = taskbar_ptr
+            self._iface = self._create_taskbar_via_query_interface()
             self._vtable = ctypes.cast(
                 self._iface, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))
             ).contents
@@ -255,6 +226,7 @@ else:  # pragma: no cover - requires Windows runtime
             if _failed(hr):
                 if self._should_uninit:
                     self._ole32.CoUninitialize()
+                    self._should_uninit = False
                 raise TaskbarUnavailableError(
                     "CoCreateInstance for ITaskbarList failed (HRESULT "
                     f"0x{hr & 0xFFFFFFFF:08X})."
@@ -285,14 +257,14 @@ else:  # pragma: no cover - requires Windows runtime
             if _failed(hr):
                 if self._should_uninit:
                     self._ole32.CoUninitialize()
+                    self._should_uninit = False
                 raise TaskbarUnavailableError(
                     "QueryInterface for ITaskbarList3 failed (HRESULT "
                     f"0x{hr & 0xFFFFFFFF:08X})."
                 )
 
             logger.debug(
-                "QueryInterface for ITaskbarList3 succeeded after fallback: ptr=%s",
-                taskbar_list3_ptr,
+                "Obtained ITaskbarList3 via QueryInterface: ptr=%s", taskbar_list3_ptr
             )
             return taskbar_list3_ptr
 
