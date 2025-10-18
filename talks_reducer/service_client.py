@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import shutil
+import sys
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -74,6 +75,7 @@ def send_video(
     output_path: Optional[Path],
     server_url: str,
     small: bool = False,
+    small_480: bool = False,
     *,
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
@@ -103,6 +105,7 @@ def send_video(
     submit_args: Tuple[Any, ...] = (
         gradio_file(str(input_path)),
         bool(small),
+        bool(small_480),
         silent_threshold,
         sounded_speed,
         silent_speed,
@@ -403,6 +406,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Toggle the 'Small video' preset before processing.",
     )
     parser.add_argument(
+        "--480",
+        dest="small_480",
+        action="store_true",
+        help="Combine with --small to target 480p instead of 720p.",
+    )
+    parser.add_argument(
         "--print-log",
         action="store_true",
         help="Print the server log after processing completes.",
@@ -451,11 +460,20 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         message = " ".join(parts).strip()
         print(f"{key}: {message or 'update'}", flush=True)
 
+    if args.small_480 and not args.small:
+        print(
+            "Warning: --480 has no effect unless --small is also provided.",
+            file=sys.stderr,
+        )
+
+    small_480_mode = bool(args.small and args.small_480)
+
     destination, summary, log_text = send_video(
         input_path=args.input.expanduser(),
         output_path=args.output.expanduser() if args.output else None,
         server_url=args.server,
         small=args.small,
+        small_480=small_480_mode,
         log_callback=_stream if args.print_log else None,
         stream_updates=args.stream,
         progress_callback=_progress if args.stream else None,

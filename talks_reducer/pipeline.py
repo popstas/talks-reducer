@@ -137,8 +137,12 @@ def speed_up_video(
 
     reporter.log("Processing on: {}".format("GPU (CUDA)" if cuda_available else "CPU"))
     if options.small:
+        target_height = options.small_target_height or 720
+        if target_height <= 0:
+            target_height = 720
         reporter.log(
-            "Small mode enabled: 720p video, 128k audio, optimized compression"
+            "Small mode enabled: %dp video, 128k audio, optimized compression"
+            % target_height
         )
 
     hwaccel = (
@@ -231,7 +235,10 @@ def speed_up_video(
     with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
         filter_parts = []
         if options.small:
-            filter_parts.append("scale=-2:720")
+            target_height = options.small_target_height or 720
+            if target_height <= 0:
+                target_height = 720
+            filter_parts.append(f"scale=-2:{target_height}")
         filter_parts.append(f"fps=fps={frame_rate}")
         escaped_expression = expression.replace(",", "\\,")
         filter_parts.append(f"setpts={escaped_expression}")

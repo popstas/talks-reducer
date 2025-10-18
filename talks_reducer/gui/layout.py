@@ -60,11 +60,18 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=gui.small_var,
     ).grid(row=0, column=0, sticky="w")
 
+    gui.small_480_check = gui.ttk.Checkbutton(
+        checkbox_frame,
+        text="Target 480p",
+        variable=gui.small_480_var,
+    )
+    gui.small_480_check.grid(row=0, column=1, sticky="w", padx=(12, 0))
+
     gui.ttk.Checkbutton(
         checkbox_frame,
         text="Open after convert",
         variable=gui.open_after_convert_var,
-    ).grid(row=0, column=1, sticky="w", padx=(12, 0))
+    ).grid(row=0, column=2, sticky="w", padx=(12, 0))
 
     gui.simple_mode_check = gui.ttk.Checkbutton(
         checkbox_frame,

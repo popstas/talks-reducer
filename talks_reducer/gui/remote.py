@@ -288,6 +288,7 @@ def process_files_via_server(
     allowed_remote_keys = {
         "output_file",
         "small",
+        "small_target_height",
         "silent_threshold",
         "sounded_speed",
         "silent_speed",
@@ -298,6 +299,14 @@ def process_files_via_server(
         gui._append_log(f"Server mode ignores the following options: {ignored_options}")
 
     small_mode = bool(args.get("small", False))
+    small_target_height = args.get("small_target_height")
+    try:
+        small_target_height_value = (
+            int(small_target_height) if small_target_height is not None else None
+        )
+    except (TypeError, ValueError):
+        small_target_height_value = None
+    small_480_mode = small_mode and small_target_height_value == 480
 
     for index, file in enumerate(files, start=1):
         _ensure_not_stopped()
@@ -321,6 +330,7 @@ def process_files_via_server(
                 output_path=output_path,
                 server_url=server_url,
                 small=small_mode,
+                small_480=small_480_mode,
                 silent_threshold=args.get("silent_threshold"),
                 sounded_speed=args.get("sounded_speed"),
                 silent_speed=args.get("silent_speed"),

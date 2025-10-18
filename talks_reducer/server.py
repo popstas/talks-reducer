@@ -342,6 +342,7 @@ class ProcessVideoDependencies:
 def process_video(
     file_path: Optional[str],
     small_video: bool,
+    small_480: bool = False,
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
     silent_speed: Optional[float] = None,
@@ -372,6 +373,9 @@ def process_video(
         option_kwargs["sounded_speed"] = float(sounded_speed)
     if silent_speed is not None:
         option_kwargs["silent_speed"] = float(silent_speed)
+
+    if small_video and small_480:
+        option_kwargs["small_target_height"] = 480
 
     options = ProcessingOptions(
         input_file=input_path,
@@ -448,7 +452,8 @@ def build_interface() -> gr.Blocks:
             ## Talks Reducer Web UI{version_suffix}
             Drop a video into the zone below or click to browse. **Small video** is enabled
             by default to apply the 720p/128k preset before processing starts—clear it to
-            keep the original resolution.
+            keep the original resolution or pair it with **Target 480p** to downscale
+            further.
 
             Video will be rendered on server **{server_identity}**.
             """.strip()
@@ -463,6 +468,7 @@ def build_interface() -> gr.Blocks:
 
         with gr.Row():
             small_checkbox = gr.Checkbox(label="Small video", value=True)
+            small_480_checkbox = gr.Checkbox(label="Target 480p", value=False)
 
         with gr.Column():
             silent_speed_input = gr.Slider(
@@ -497,6 +503,7 @@ def build_interface() -> gr.Blocks:
             inputs=[
                 file_input,
                 small_checkbox,
+                small_480_checkbox,
                 silent_threshold_input,
                 sounded_speed_input,
                 silent_speed_input,

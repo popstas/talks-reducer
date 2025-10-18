@@ -93,7 +93,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--small",
         action="store_true",
-        help="Apply small file optimizations: resize video to 720p, audio to 128k bitrate, best compression (uses CUDA if available).",
+        help="Apply small file optimizations: resize video to 720p (or 480p with --480), audio to 128k bitrate, best compression (uses CUDA if available).",
+    )
+    parser.add_argument(
+        "--480",
+        dest="small_480",
+        action="store_true",
+        help="Use with --small to scale video to 480p instead of 720p.",
     )
     parser.add_argument(
         "--url",
@@ -175,6 +181,14 @@ class CliApplication:
         if len(files) > 1 and "output_file" in args:
             del args["output_file"]
 
+        if getattr(parsed_args, "small_480", False) and not getattr(
+            parsed_args, "small", False
+        ):
+            print(
+                "Warning: --480 has no effect unless --small is also provided.",
+                file=sys.stderr,
+            )
+
         error_messages: List[str] = []
         reporter_logs: List[str] = []
 
@@ -217,6 +231,8 @@ class CliApplication:
                 option_kwargs["sample_rate"] = int(local_options["sample_rate"])
             if "small" in local_options:
                 option_kwargs["small"] = bool(local_options["small"])
+            if local_options.get("small_480"):
+                option_kwargs["small_target_height"] = 480
             options = ProcessingOptions(**option_kwargs)
 
             try:
@@ -267,7 +283,7 @@ class CliApplication:
                 file=sys.stderr,
             )
 
-        remote_option_values: Dict[str, float] = {}
+        remote_option_values: Dict[str, object] = {}
         if parsed_args.silent_threshold is not None:
             remote_option_values["silent_threshold"] = float(
                 parsed_args.silent_threshold
@@ -288,6 +304,12 @@ class CliApplication:
                 + ", ".join(sorted(unsupported_options)),
                 file=sys.stderr,
             )
+
+        small_480_mode = bool(getattr(parsed_args, "small_480", False)) and bool(
+            getattr(parsed_args, "small", False)
+        )
+        if small_480_mode:
+            remote_option_values["small_480"] = True
 
         for index, file in enumerate(files, start=1):
             basename = os.path.basename(file)
@@ -332,6 +354,7 @@ class CliApplication:
                     output_path=output_override,
                     server_url=server_url,
                     small=bool(parsed_args.small),
+                    small_480=small_480_mode,
                     **remote_option_values,
                     log_callback=_stream_server_log,
                     stream_updates=stream_updates,
