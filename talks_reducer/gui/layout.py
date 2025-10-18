@@ -250,6 +250,29 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.frame_margin_var = gui.tk.StringVar(value=str(frame_margin_default))
     add_entry(gui, gui.advanced_frame, "Frame margin", gui.frame_margin_var, row=3)
 
+    keyframe_interval_setting = gui.preferences.get("small_keyframe_interval", 2.0)
+    try:
+        keyframe_interval_default = float(keyframe_interval_setting)
+    except (TypeError, ValueError):
+        keyframe_interval_default = 2.0
+        gui.preferences.update("small_keyframe_interval", keyframe_interval_default)
+    else:
+        clamped_value = max(0.5, min(10.0, keyframe_interval_default))
+        if abs(clamped_value - keyframe_interval_default) > 1e-9:
+            keyframe_interval_default = clamped_value
+            gui.preferences.update("small_keyframe_interval", keyframe_interval_default)
+
+    gui.small_keyframe_interval_var = gui.tk.StringVar(
+        value=f"{keyframe_interval_default:.2f}".rstrip("0").rstrip(".")
+    )
+    add_entry(
+        gui,
+        gui.advanced_frame,
+        "Keyframe interval (s)",
+        gui.small_keyframe_interval_var,
+        row=4,
+    )
+
     gui._toggle_advanced(initial=True)
     gui._update_processing_mode_state()
     update_basic_reset_state(gui)

@@ -869,12 +869,26 @@ class TalksReducerGUI:
         silent_speed = float(self.silent_speed_var.get())
         args["silent_speed"] = round(silent_speed, 2)
         if self.frame_margin_var.get():
-            args["frame_spreadage"] = int(
+            margin_value = int(
                 round(self._parse_float(self.frame_margin_var.get(), "Frame margin"))
             )
+            args["frame_spreadage"] = margin_value
+            self.preferences.update("frame_margin", margin_value)
         if self.sample_rate_var.get():
             args["sample_rate"] = int(
                 round(self._parse_float(self.sample_rate_var.get(), "Sample rate"))
+            )
+        if self.small_keyframe_interval_var.get():
+            interval_value = self._parse_float(
+                self.small_keyframe_interval_var.get(), "Keyframe interval"
+            )
+            clamped_interval = max(0.5, min(10.0, interval_value))
+            args["small_keyframe_interval"] = float(f"{clamped_interval:.3f}")
+            self.small_keyframe_interval_var.set(
+                f"{clamped_interval:.3f}".rstrip("0").rstrip(".")
+            )
+            self.preferences.update(
+                "small_keyframe_interval", args["small_keyframe_interval"]
             )
         if self.small_var.get():
             args["small"] = True

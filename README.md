@@ -36,7 +36,8 @@ pip install talks-reducer
 
 The `--small` preset applies a 720p video scale and 128 kbps audio bitrate, making it useful for sharing talks over constrained
 connections. Combine it with `--480` if you prefer a 480p target. Without `--small`, the script aims to preserve original quality
-while removing silence.
+while removing silence. Need tighter control over file size or scrubbing performance? Pair `--small` with `--small-keyframe-interval`
+to choose the distance between keyframes (defaults to 2 seconds).
 
 Example CLI usage:
 
@@ -123,6 +124,11 @@ to the configured server—the **Remote** option becomes available as soon as a
 URL is supplied. Leave the toggle on **Local** to keep rendering on this
 machine even if a server is saved; switch to **Remote** to hand jobs off while
 the GUI downloads the finished files automatically.
+
+Prefer to fine-tune file size versus scrubbing latency? The **Advanced** panel
+also exposes a *Keyframe interval (s)* field mirroring the new CLI flag so you
+can increase or decrease how often keyframes appear when the **Small video**
+preset is enabled.
 
 ### Uploading and retrieving a processed video
 

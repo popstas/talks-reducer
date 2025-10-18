@@ -102,6 +102,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Use with --small to scale video to 480p instead of 720p.",
     )
     parser.add_argument(
+        "--small-keyframe-interval",
+        type=float,
+        dest="small_keyframe_interval",
+        help="Seconds between keyframes when using --small (default: 2).",
+    )
+    parser.add_argument(
         "--url",
         dest="server_url",
         default=None,
@@ -233,6 +239,10 @@ class CliApplication:
                 option_kwargs["small"] = bool(local_options["small"])
             if local_options.get("small_480"):
                 option_kwargs["small_target_height"] = 480
+            if "small_keyframe_interval" in local_options:
+                option_kwargs["small_keyframe_interval"] = float(
+                    local_options["small_keyframe_interval"]
+                )
             options = ProcessingOptions(**option_kwargs)
 
             try:

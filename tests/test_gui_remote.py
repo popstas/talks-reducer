@@ -328,3 +328,37 @@ def test_process_files_via_server_processes_each_file(tmp_path: Path) -> None:
     assert send_calls and send_calls[0]["output_path"] == output_override
     assert gui.open_button.calls[-1] == {"state": "normal"}
     assert gui._clear_called is True
+
+
+def test_process_files_via_server_forwards_keyframe_interval(tmp_path: Path) -> None:
+    gui = StubGUI()
+    send_calls: list[dict[str, object]] = []
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            send_calls.append(kwargs)
+            return (
+                str(tmp_path / "output.mp4"),
+                "Summary",
+                "Server log entry",
+            )
+
+        return SimpleNamespace(send_video=send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={"small": True, "small_keyframe_interval": 4.5},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small: tmp_path
+        / "fallback.mp4",  # noqa: ARG005
+        parse_summary=lambda text: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    assert send_calls
+    assert send_calls[0]["small"] is True
+    assert send_calls[0]["small_keyframe_interval"] == 4.5

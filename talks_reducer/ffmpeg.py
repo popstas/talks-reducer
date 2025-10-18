@@ -357,12 +357,15 @@ def build_video_commands(
     cuda_available: bool,
     small: bool,
     frame_rate: Optional[float] = None,
+    small_keyframe_interval: Optional[float] = None,
 ) -> Tuple[str, Optional[str], bool]:
     """Create the FFmpeg command strings used to render the final video output.
 
     Args:
         frame_rate: Optional source frame rate used to size GOP/keyframe spacing for
             the small preset when generating hardware/software encoder commands.
+        small_keyframe_interval: Override the default 2 second keyframe interval used
+            by the small preset. Values are clamped between 0.5 and 10 seconds.
     """
 
     ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
@@ -387,11 +390,11 @@ def build_video_commands(
     use_cuda_encoder = False
 
     if small:
-        keyframe_interval_seconds = 2.0
+        interval_value = small_keyframe_interval if small_keyframe_interval else 2.0
+        keyframe_interval_seconds = max(0.5, min(10.0, float(interval_value)))
         formatted_interval = f"{keyframe_interval_seconds:.6g}"
-        gop_size = 48
-        if frame_rate and frame_rate > 0:
-            gop_size = max(1, int(round(frame_rate * keyframe_interval_seconds)))
+        base_rate = frame_rate if frame_rate and frame_rate > 0 else 24.0
+        gop_size = max(1, int(round(base_rate * keyframe_interval_seconds)))
         small_keyframe_args = [
             f"-g {gop_size}",
             f"-keyint_min {gop_size}",

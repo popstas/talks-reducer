@@ -240,7 +240,7 @@ def test_send_video_downloads_file(monkeypatch, tmp_path):
     submission_args, submission_kwargs = client_instance.submissions[0]
     assert submission_args[1] is True
     assert submission_args[2] is False
-    assert submission_args[3:6] == (None, None, None)
+    assert submission_args[3:7] == (None, None, None, None)
     assert submission_kwargs.get("api_name") == "/process_video"
 
 
@@ -353,7 +353,37 @@ def test_send_video_forwards_custom_options(monkeypatch, tmp_path):
     assert log_text == "log"
     submission_args, _ = client_instance.submissions[0]
     assert submission_args[2] is False
-    assert submission_args[3:6] == (0.12, 1.5, 6.0)
+    assert submission_args[3:7] == (0.12, 1.5, 6.0, None)
+
+
+def test_send_video_forwards_keyframe_interval(monkeypatch, tmp_path):
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"input")
+    server_file = tmp_path / "server_output.mp4"
+    server_file.write_bytes(b"processed")
+
+    client_instance = DummyClient("http://localhost:9005/")
+    client_instance.job_outputs = [
+        (str(server_file), "log", "summary", str(server_file))
+    ]
+
+    monkeypatch.setattr(service_client, "Client", lambda url: client_instance)
+    monkeypatch.setattr(
+        service_client, "gradio_file", lambda path: SimpleNamespace(path=path)
+    )
+
+    destination, _, _ = service_client.send_video(
+        input_path=input_file,
+        output_path=None,
+        server_url="http://localhost:9005/",
+        small=True,
+        small_keyframe_interval=4.25,
+    )
+
+    assert destination.name == server_file.name
+    submission_args, _ = client_instance.submissions[0]
+    assert submission_args[1] is True
+    assert submission_args[6] == 4.25
 
 
 def test_send_video_defaults_to_current_directory(monkeypatch, tmp_path, cwd_tmp_path):

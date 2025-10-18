@@ -239,6 +239,7 @@ def test_process_video_streams_events_and_returns_result(tmp_path: Path) -> None
         assert options.silent_threshold == pytest.approx(0.2)
         assert options.sounded_speed == pytest.approx(1.5)
         assert options.silent_speed == pytest.approx(3.0)
+        assert options.small_keyframe_interval == pytest.approx(2.0)
 
         with reporter.task(desc="Encode", total=10, unit="frames") as task:
             task.advance(5)
@@ -303,6 +304,7 @@ def test_process_video_honors_small_480_flag(tmp_path: Path) -> None:
     def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
         assert options.small is True
         assert options.small_target_height == 480
+        assert options.small_keyframe_interval == pytest.approx(2.0)
         return ProcessingResult(
             input_file=options.input_file,
             output_file=options.output_file or options.input_file,
@@ -340,6 +342,53 @@ def test_process_video_honors_small_480_flag(tmp_path: Path) -> None:
     assert outputs
     final = outputs[-1]
     assert Path(final[0]).name.endswith("_speedup_small.mp4")
+
+
+def test_process_video_forwards_keyframe_interval(tmp_path: Path) -> None:
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        assert options.small is True
+        assert options.small_keyframe_interval == pytest.approx(4.0)
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or options.input_file,
+            frame_rate=24.0,
+            original_duration=120.0,
+            output_duration=30.0,
+            chunk_count=5,
+            used_cuda=False,
+            max_audio_volume=0.6,
+            time_ratio=0.25,
+            size_ratio=0.3,
+        )
+
+    dependencies = server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=True,
+                silent_threshold=None,
+                sounded_speed=None,
+                silent_speed=None,
+                small_keyframe_interval=4.0,
+                progress=None,
+                dependencies=dependencies,
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+
+    assert outputs
 
 
 def test_process_video_raises_when_pipeline_reports_error(

@@ -88,6 +88,7 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
         frame_spreadage=4,
         sample_rate=48000,
         small=True,
+        small_keyframe_interval=3.5,
         server_url=None,
         host=None,
     )
@@ -135,6 +136,7 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
     assert options.frame_spreadage == 4
     assert options.sample_rate == 48000
     assert options.small is True
+    assert options.small_keyframe_interval == pytest.approx(3.5)
     assert "Completed: /videos/output.mp4" in logged_messages
     assert any(message.startswith("Result: ") for message in logged_messages)
 
@@ -350,6 +352,7 @@ def test_cli_application_uses_remote_server_when_url_provided() -> None:
     assert call["silent_threshold"] == 0.25
     assert call["silent_speed"] == 5.0
     assert call["sounded_speed"] == 1.75
+    assert "small_keyframe_interval" not in call
     assert call["log_callback"] is not None
     assert call["stream_updates"] is False
     assert call["progress_callback"] is None

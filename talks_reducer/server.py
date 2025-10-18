@@ -346,6 +346,7 @@ def process_video(
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
     silent_speed: Optional[float] = None,
+    small_keyframe_interval: Optional[float] = None,
     progress: Optional[gr.Progress] = gr.Progress(track_tqdm=False),
     *,
     dependencies: Optional[ProcessVideoDependencies] = None,
@@ -373,6 +374,8 @@ def process_video(
         option_kwargs["sounded_speed"] = float(sounded_speed)
     if silent_speed is not None:
         option_kwargs["silent_speed"] = float(silent_speed)
+    if small_keyframe_interval is not None:
+        option_kwargs["small_keyframe_interval"] = float(small_keyframe_interval)
 
     if small_video and small_480:
         option_kwargs["small_target_height"] = 480
@@ -492,6 +495,14 @@ def build_interface() -> gr.Blocks:
                 step=0.01,
                 label="Silent threshold",
             )
+            keyframe_interval_input = gr.Slider(
+                minimum=0.5,
+                maximum=10.0,
+                value=2.0,
+                step=0.25,
+                label="Keyframe interval (s)",
+                info="Higher values reduce file size but slow down scrubbing.",
+            )
 
         video_output = gr.Video(label="Processed video")
         summary_output = gr.Markdown()
@@ -507,6 +518,7 @@ def build_interface() -> gr.Blocks:
                 silent_threshold_input,
                 sounded_speed_input,
                 silent_speed_input,
+                keyframe_interval_input,
             ],
             outputs=[video_output, log_output, summary_output, download_output],
             queue=True,

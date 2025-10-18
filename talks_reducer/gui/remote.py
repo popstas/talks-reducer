@@ -292,6 +292,7 @@ def process_files_via_server(
         "silent_threshold",
         "sounded_speed",
         "silent_speed",
+        "small_keyframe_interval",
     }
     ignored = [key for key in args if key not in allowed_remote_keys]
     if ignored:
@@ -325,19 +326,24 @@ def process_files_via_server(
             output_path = default_remote_destination(input_path, small=small_mode)
 
         try:
-            destination, summary, log_text = service_module.send_video(
-                input_path=input_path,
-                output_path=output_path,
-                server_url=server_url,
-                small=small_mode,
-                small_480=small_480_mode,
-                silent_threshold=args.get("silent_threshold"),
-                sounded_speed=args.get("sounded_speed"),
-                silent_speed=args.get("silent_speed"),
-                stream_updates=True,
-                log_callback=gui._append_log,
-                should_cancel=lambda: gui._stop_requested,
-            )
+            send_kwargs: dict[str, object] = {
+                "input_path": input_path,
+                "output_path": output_path,
+                "server_url": server_url,
+                "small": small_mode,
+                "small_480": small_480_mode,
+                "silent_threshold": args.get("silent_threshold"),
+                "sounded_speed": args.get("sounded_speed"),
+                "silent_speed": args.get("silent_speed"),
+                "stream_updates": True,
+                "log_callback": gui._append_log,
+                "should_cancel": lambda: gui._stop_requested,
+            }
+            keyframe_interval = args.get("small_keyframe_interval")
+            if keyframe_interval is not None:
+                send_kwargs["small_keyframe_interval"] = keyframe_interval
+
+            destination, summary, log_text = service_module.send_video(**send_kwargs)
             _ensure_not_stopped()
         except ProcessingAborted:
             raise

@@ -334,6 +334,46 @@ def test_build_video_commands_small_cpu(monkeypatch):
     assert not use_cuda
 
 
+def test_build_video_commands_small_custom_interval(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command, fallback, _ = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=True,
+        small=True,
+        frame_rate=25.0,
+        small_keyframe_interval=5.0,
+    )
+
+    assert "-g 125" in command
+    assert "-keyint_min 125" in command
+    assert "-force_key_frames expr:gte(t,n_forced*5)" in command
+    assert fallback is not None
+    assert "-g 125" in fallback
+
+
+def test_build_video_commands_small_interval_clamped(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command, _, _ = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        small=True,
+        frame_rate=30.0,
+        small_keyframe_interval=0.1,
+    )
+
+    assert "-g 15" in command
+    assert "-keyint_min 15" in command
+    assert "-force_key_frames expr:gte(t,n_forced*0.5)" in command
+
+
 def test_build_video_commands_large_cuda(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
 

@@ -254,6 +254,7 @@ def speed_up_video(
             cuda_available=cuda_available,
             small=options.small,
             frame_rate=frame_rate,
+            small_keyframe_interval=options.small_keyframe_interval,
         )
     )
 

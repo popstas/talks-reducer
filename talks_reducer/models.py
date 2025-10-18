@@ -52,6 +52,7 @@ class ProcessingOptions:
     temp_folder: Path = field(default_factory=default_temp_folder)
     small: bool = False
     small_target_height: Optional[int] = None
+    small_keyframe_interval: float = 2.0
 
 
 @dataclass(frozen=True)
