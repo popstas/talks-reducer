@@ -57,41 +57,20 @@ else:  # pragma: no cover - requires Windows runtime
     import logging
     from ctypes import wintypes
 
-    HRESULT = getattr(wintypes, "HRESULT", getattr(ctypes, "HRESULT", ctypes.c_long))
+    try:  # Optional dependency that only ships on Windows
+        import pythoncom
+        import pywintypes
+    except ImportError:  # pragma: no cover - handled at runtime
+        pythoncom = None  # type: ignore[assignment]
+        pywintypes = None  # type: ignore[assignment]
 
-    COINIT_APARTMENTTHREADED = 0x2
-    CLSCTX_INPROC_SERVER = 0x1
+    CLSID_TASKBARLIST = "{56FDF344-FD6D-11d0-958A-006097C9A090}"
+    IID_ITASKBARLIST = "{56FDF342-FD6D-11d0-958A-006097C9A090}"
+    IID_ITASKBARLIST3 = "{EA1AFB91-9E28-4B86-90E9-9E9F8A5A2B2A}"
+    E_NOINTERFACE = 0x80004002
     RPC_E_CHANGED_MODE = 0x80010106
 
     logger = logging.getLogger(__name__)
-
-    class GUID(ctypes.Structure):
-        """ctypes representation of a Windows GUID."""
-
-        _fields_ = [
-            ("Data1", wintypes.DWORD),
-            ("Data2", wintypes.WORD),
-            ("Data3", wintypes.WORD),
-            ("Data4", wintypes.BYTE * 8),
-        ]
-
-    def _guid_from_string(value: str) -> GUID:
-        """Convert a GUID string into a :class:`GUID` instance."""
-
-        guid = GUID()
-        ole32 = ctypes.WinDLL("ole32", use_last_error=True)
-        ole32.CLSIDFromString.restype = HRESULT
-        ole32.CLSIDFromString.argtypes = (wintypes.LPCOLESTR, ctypes.POINTER(GUID))
-        hr = ole32.CLSIDFromString(ctypes.c_wchar_p(value), ctypes.byref(guid))
-        if hr < 0:
-            raise TaskbarUnavailableError(
-                f"Unable to parse GUID '{value}' (HRESULT 0x{hr & 0xFFFFFFFF:08X})."
-            )
-        return guid
-
-    CLSID_TaskbarList = _guid_from_string("{56FDF344-FD6D-11d0-958A-006097C9A090}")
-    IID_ITaskbarList = _guid_from_string("{56FDF342-FD6D-11d0-958A-006097C9A090}")
-    IID_ITaskbarList3 = _guid_from_string("{EA1AFB91-9E28-4B86-90E9-9E9F8A5A2B2A}")
 
     def _default_hwnd() -> Optional[int]:
         """Return the best-effort HWND for the current process."""
@@ -123,18 +102,17 @@ else:  # pragma: no cover - requires Windows runtime
             )
         return hwnd or None
 
-    def _failed(hr: int) -> bool:
-        """Return whether ``hr`` represents a failure HRESULT."""
-
-        return hr < 0
-
     class TaskbarProgress:
         """Wrapper around ``ITaskbarList3`` for reporting taskbar progress."""
 
         def __init__(self, hwnd: Optional[int] = None) -> None:
+            if pythoncom is None or pywintypes is None:
+                raise TaskbarUnavailableError(
+                    "pywin32 is required for Windows taskbar progress updates."
+                )
+
             self._closed = False
             self._iface = None
-            self._release = None
             self._should_uninit = False
 
             self._hwnd = hwnd or _default_hwnd()
@@ -145,128 +123,83 @@ else:  # pragma: no cover - requires Windows runtime
 
             logger.debug("Initialising TaskbarProgress for HWND %s", self._hwnd)
 
-            self._ole32 = ctypes.WinDLL("ole32", use_last_error=True)
-            self._ole32.CoInitializeEx.restype = HRESULT
-            self._ole32.CoInitializeEx.argtypes = (ctypes.c_void_p, wintypes.DWORD)
-            self._ole32.CoUninitialize.argtypes = ()
-            self._ole32.CoCreateInstance.restype = HRESULT
-            self._ole32.CoCreateInstance.argtypes = (
-                ctypes.POINTER(GUID),
-                ctypes.c_void_p,
-                wintypes.DWORD,
-                ctypes.POINTER(GUID),
-                ctypes.POINTER(ctypes.c_void_p),
-            )
+            try:
+                pythoncom.CoInitialize()
+                self._should_uninit = True
+                logger.debug("CoInitialize succeeded (should_uninit=%s)", True)
+            except pywintypes.com_error as exc:
+                if exc.hresult == RPC_E_CHANGED_MODE:
+                    logger.debug(
+                        "COM already initialised in a different mode; continuing with existing apartment"
+                    )
+                else:
+                    raise TaskbarUnavailableError(
+                        "CoInitialize failed with HRESULT "
+                        f"0x{exc.hresult & 0xFFFFFFFF:08X}."
+                    ) from exc
 
-            hr = self._ole32.CoInitializeEx(None, COINIT_APARTMENTTHREADED)
-            self._should_uninit = hr in (0, 1)
-            if hr not in (0, 1, RPC_E_CHANGED_MODE):
-                raise TaskbarUnavailableError(
-                    f"CoInitializeEx failed with HRESULT 0x{hr & 0xFFFFFFFF:08X}."
-                )
-            if hr == RPC_E_CHANGED_MODE:
-                logger.debug(
-                    "COM already initialised in a different mode; continuing with existing apartment"
-                )
-            else:
-                logger.debug(
-                    "CoInitializeEx succeeded with HRESULT 0x%08X (should_uninit=%s)",
-                    hr & 0xFFFFFFFF,
-                    self._should_uninit,
-                )
+            self._iface = self._create_taskbar_interface()
 
-            self._iface = self._create_taskbar_via_query_interface()
-            self._vtable = ctypes.cast(
-                self._iface, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))
-            ).contents
-
-            self._release = self._get_method(2, ctypes.c_ulong)
-            hr_init = self._get_method(3, HRESULT)
-            hr = hr_init(self._iface)
-            if _failed(hr):
+            try:
+                self._iface.HrInit()
+                logger.debug("ITaskbarList3.HrInit succeeded")
+            except pywintypes.com_error as exc:
                 self.close()
                 raise TaskbarUnavailableError(
-                    f"ITaskbarList3.HrInit failed with HRESULT 0x{hr & 0xFFFFFFFF:08X}."
+                    "ITaskbarList3.HrInit failed with HRESULT "
+                    f"0x{exc.hresult & 0xFFFFFFFF:08X}."
+                ) from exc
+
+        def _make_iid(self, value: str):
+            return pythoncom.MakeIID(value)
+
+        def _create_taskbar_interface(self):
+            """Create an ``ITaskbarList3`` COM interface via pywin32."""
+
+            try:
+                iface = pythoncom.CoCreateInstance(
+                    self._make_iid(CLSID_TASKBARLIST),
+                    None,
+                    pythoncom.CLSCTX_INPROC_SERVER,
+                    self._make_iid(IID_ITASKBARLIST3),
                 )
-            logger.debug("ITaskbarList3.HrInit succeeded")
-
-            self._set_progress_value = self._get_method(
-                9,
-                HRESULT,
-                wintypes.HWND,
-                ctypes.c_ulonglong,
-                ctypes.c_ulonglong,
-            )
-            self._set_progress_state = self._get_method(
-                10,
-                HRESULT,
-                wintypes.HWND,
-                ctypes.c_int,
-            )
-            self._closed = False
-
-        def _get_method(self, index: int, restype, *argtypes):
-            """Return a callable for the COM method located at ``index``."""
-
-            method = self._vtable[index]
-            prototype = ctypes.WINFUNCTYPE(restype, ctypes.c_void_p, *argtypes)
-            return prototype(method)
-
-        def _create_taskbar_via_query_interface(self) -> ctypes.c_void_p:
-            """Obtain ``ITaskbarList3`` via ``QueryInterface`` on ``ITaskbarList``."""
-
-            taskbar_ptr = ctypes.c_void_p()
-            hr = self._ole32.CoCreateInstance(
-                ctypes.byref(CLSID_TaskbarList),
-                None,
-                CLSCTX_INPROC_SERVER,
-                ctypes.byref(IID_ITaskbarList),
-                ctypes.byref(taskbar_ptr),
-            )
-            if _failed(hr):
-                if self._should_uninit:
-                    self._ole32.CoUninitialize()
-                    self._should_uninit = False
-                raise TaskbarUnavailableError(
-                    "CoCreateInstance for ITaskbarList failed (HRESULT "
-                    f"0x{hr & 0xFFFFFFFF:08X})."
+                logger.debug("CoCreateInstance for ITaskbarList3 succeeded via pywin32")
+                return iface
+            except pywintypes.com_error as exc:
+                if exc.hresult != E_NOINTERFACE:
+                    self._handle_creation_failure(
+                        exc, "CoCreateInstance for ITaskbarList3"
+                    )
+                logger.debug(
+                    "Direct ITaskbarList3 activation failed with E_NOINTERFACE; attempting QueryInterface fallback"
                 )
 
-            logger.debug(
-                "CoCreateInstance for ITaskbarList succeeded: ptr=%s", taskbar_ptr
-            )
-
-            vtable = ctypes.cast(
-                taskbar_ptr, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))
-            ).contents
-            query_interface = ctypes.WINFUNCTYPE(
-                HRESULT,
-                ctypes.c_void_p,
-                ctypes.POINTER(GUID),
-                ctypes.POINTER(ctypes.c_void_p),
-            )(vtable[0])
-            taskbar_list3_ptr = ctypes.c_void_p()
-            hr = query_interface(
-                taskbar_ptr,
-                ctypes.byref(IID_ITaskbarList3),
-                ctypes.byref(taskbar_list3_ptr),
-            )
-            release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtable[2])
-            release(taskbar_ptr)
-
-            if _failed(hr):
-                if self._should_uninit:
-                    self._ole32.CoUninitialize()
-                    self._should_uninit = False
-                raise TaskbarUnavailableError(
-                    "QueryInterface for ITaskbarList3 failed (HRESULT "
-                    f"0x{hr & 0xFFFFFFFF:08X})."
+            try:
+                base = pythoncom.CoCreateInstance(
+                    self._make_iid(CLSID_TASKBARLIST),
+                    None,
+                    pythoncom.CLSCTX_INPROC_SERVER,
+                    self._make_iid(IID_ITASKBARLIST),
                 )
+            except pywintypes.com_error as exc:
+                self._handle_creation_failure(exc, "CoCreateInstance for ITaskbarList")
 
-            logger.debug(
-                "Obtained ITaskbarList3 via QueryInterface: ptr=%s", taskbar_list3_ptr
-            )
-            return taskbar_list3_ptr
+            try:
+                iface = base.QueryInterface(self._make_iid(IID_ITASKBARLIST3))
+                logger.debug("Obtained ITaskbarList3 via QueryInterface fallback")
+                return iface
+            except pywintypes.com_error as exc:
+                self._handle_creation_failure(exc, "QueryInterface for ITaskbarList3")
+            finally:
+                base = None  # release reference eagerly
+
+        def _handle_creation_failure(self, exc, context: str) -> None:
+            if self._should_uninit:
+                pythoncom.CoUninitialize()
+                self._should_uninit = False
+            raise TaskbarUnavailableError(
+                f"{context} failed with HRESULT 0x{exc.hresult & 0xFFFFFFFF:08X}."
+            ) from exc
 
         def set_progress_value(self, completed: int, total: int) -> None:
             """Update the taskbar progress value."""
@@ -276,11 +209,17 @@ else:  # pragma: no cover - requires Windows runtime
                 return
 
             completed = max(0, min(completed, total))
-            hr = self._set_progress_value(self._iface, self._hwnd, completed, total)
-            if _failed(hr):
-                raise TaskbarUnavailableError(
-                    f"ITaskbarList3.SetProgressValue failed with HRESULT 0x{hr & 0xFFFFFFFF:08X}."
+
+            try:
+                self._iface.SetProgressValue(
+                    int(self._hwnd), int(completed), int(total)
                 )
+            except pywintypes.com_error as exc:
+                raise TaskbarUnavailableError(
+                    "ITaskbarList3.SetProgressValue failed with HRESULT "
+                    f"0x{exc.hresult & 0xFFFFFFFF:08X}."
+                ) from exc
+
             logger.debug(
                 "Updated taskbar progress: hwnd=%s completed=%s total=%s",
                 self._hwnd,
@@ -291,11 +230,14 @@ else:  # pragma: no cover - requires Windows runtime
         def set_progress_state(self, state: TaskbarProgressState) -> None:
             """Update the taskbar progress state."""
 
-            hr = self._set_progress_state(self._iface, self._hwnd, int(state))
-            if _failed(hr):
+            try:
+                self._iface.SetProgressState(int(self._hwnd), int(state))
+            except pywintypes.com_error as exc:
                 raise TaskbarUnavailableError(
-                    f"ITaskbarList3.SetProgressState failed with HRESULT 0x{hr & 0xFFFFFFFF:08X}."
-                )
+                    "ITaskbarList3.SetProgressState failed with HRESULT "
+                    f"0x{exc.hresult & 0xFFFFFFFF:08X}."
+                ) from exc
+
             logger.debug(
                 "Updated taskbar progress state: hwnd=%s state=%s", self._hwnd, state
             )
@@ -317,15 +259,13 @@ else:  # pragma: no cover - requires Windows runtime
                 return
 
             self._closed = True
+            self._iface = None
             try:
-                if getattr(self, "_iface", None) and getattr(self, "_release", None):
-                    self._release(self._iface)
-                    self._iface = None
-                    logger.debug("Released taskbar COM interface")
-            finally:
                 if self._should_uninit:
-                    self._ole32.CoUninitialize()
+                    pythoncom.CoUninitialize()
                     logger.debug("CoUninitialize called during TaskbarProgress cleanup")
+            finally:
+                self._should_uninit = False
 
         def __del__(self) -> None:
             self.close()

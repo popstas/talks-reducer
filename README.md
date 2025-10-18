@@ -64,11 +64,12 @@ CLI prints live progress bars and log lines while you wait for the download.
 
 On Windows the CLI mirrors FFmpeg frame counts onto the taskbar button so you
 can glance at progress without keeping the terminal focused. The integration
-uses the bundled `talks_reducer.windows_taskbar` helper, which relies on the
-standard library `ctypes` module that ships with Python on Windows. If the COM
-interface is unavailable the reporter falls back to the regular progress bar and
-logs a verbose message explaining that taskbar updates were skipped. Set
-`LOG_LEVEL=DEBUG` before launching the CLI or GUI to surface the detailed
+uses the bundled `talks_reducer.windows_taskbar` helper, which now relies on
+[`pywin32`](https://pypi.org/project/pywin32/) to access the COM APIs exposed by
+`ITaskbarList3`. Install `pywin32` into your environment if you want taskbar
+progress, or skip it and the reporter will fall back to the regular progress bar
+while logging a verbose message explaining that taskbar updates were skipped.
+Set `LOG_LEVEL=DEBUG` before launching the CLI or GUI to surface the detailed
 diagnostic logs emitted by the taskbar integration.
 
 ### Speech detection

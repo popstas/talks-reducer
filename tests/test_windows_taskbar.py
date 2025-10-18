@@ -1,0 +1,100 @@
+"""Tests for the Windows taskbar helper."""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+import talks_reducer
+
+
+class FakeComError(Exception):
+    """Minimal stand-in for :class:`pywintypes.com_error`."""
+
+    def __init__(self, hresult: int) -> None:
+        super().__init__(f"HRESULT 0x{hresult & 0xFFFFFFFF:08X}")
+        self.hresult = hresult
+
+
+class FakeTaskbarList3:
+    def __init__(self) -> None:
+        self.init_calls = 0
+        self.value_calls: list[tuple[int, int, int]] = []
+        self.state_calls: list[tuple[int, int]] = []
+
+    def HrInit(self) -> None:
+        self.init_calls += 1
+
+    def SetProgressValue(self, hwnd: int, completed: int, total: int) -> None:
+        self.value_calls.append((hwnd, completed, total))
+
+    def SetProgressState(self, hwnd: int, state: int) -> None:
+        self.state_calls.append((hwnd, state))
+
+
+class FakeTaskbarList:
+    def __init__(self, target: FakeTaskbarList3) -> None:
+        self._target = target
+
+    def QueryInterface(self, iid: str) -> FakeTaskbarList3:
+        return self._target
+
+
+@pytest.mark.parametrize("use_query_interface", [True, False])
+def test_taskbar_progress_uses_pywin32(monkeypatch, use_query_interface):
+    init_calls: list[str] = []
+    recorded: list[tuple[str, str]] = []
+    fake_interface = FakeTaskbarList3()
+
+    def co_create_instance(clsid: str, _outer, _ctx: int, iid: str):
+        recorded.append((clsid, iid))
+        if not use_query_interface and iid.endswith("2B2A}"):
+            # Direct ITaskbarList3 activation succeeds.
+            return fake_interface
+        if iid.endswith("2B2A}") and use_query_interface:
+            # Simulate E_NOINTERFACE so the fallback path runs.
+            raise FakeComError(0x80004002)
+        if iid.endswith("A090}") and use_query_interface:
+            return FakeTaskbarList(fake_interface)
+        raise AssertionError(f"Unexpected CoCreateInstance iid {iid}")
+
+    fake_pythoncom = SimpleNamespace(
+        CLSCTX_INPROC_SERVER=1,
+        CoInitialize=lambda: init_calls.append("init"),
+        CoUninitialize=lambda: init_calls.append("uninit"),
+        MakeIID=lambda value: value,
+        CoCreateInstance=co_create_instance,
+    )
+    fake_pywintypes = SimpleNamespace(com_error=FakeComError)
+
+    module_path = Path(talks_reducer.__file__).with_name("windows_taskbar.py")
+
+    monkeypatch.setattr(sys, "platform", "win32", raising=False)
+    monkeypatch.setitem(sys.modules, "pythoncom", fake_pythoncom)
+    monkeypatch.setitem(sys.modules, "pywintypes", fake_pywintypes)
+
+    spec = importlib.util.spec_from_file_location(
+        "talks_reducer.windows_taskbar_win32", module_path
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    taskbar = module.TaskbarProgress(hwnd=0x1234)
+    taskbar.set_progress_value(5, 10)
+    taskbar.set_progress_state(module.TaskbarProgressState.NORMAL)
+    taskbar.clear()
+    taskbar.close()
+
+    assert init_calls == ["init", "uninit"]
+    assert recorded[0][1].endswith("2B2A}")
+    if use_query_interface:
+        # Expect fallback path to create ITaskbarList before querying for v3.
+        assert recorded[1][1].endswith("A090}")
+    assert fake_interface.init_calls == 1
+    assert fake_interface.value_calls[-1] == (0x1234, 5, 10)
+    assert fake_interface.state_calls[0] == (0x1234, module.TaskbarProgressState.NORMAL)
