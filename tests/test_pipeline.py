@@ -14,17 +14,20 @@ from talks_reducer import pipeline
 
 
 @pytest.mark.parametrize(
-    "filename, small, expected",
+    "filename, small, small_target_height, expected",
     [
-        (Path("video.mp4"), False, Path("video_speedup.mp4")),
-        (Path("video.mp4"), True, Path("video_speedup_small.mp4")),
-        (Path("video"), False, Path("video_speedup")),
+        (Path("video.mp4"), False, None, Path("video_speedup.mp4")),
+        (Path("video.mp4"), True, None, Path("video_speedup_small.mp4")),
+        (Path("video.mp4"), True, 720, Path("video_speedup_small.mp4")),
+        (Path("video.mp4"), True, 480, Path("video_speedup_small_480.mp4")),
+        (Path("video"), False, None, Path("video_speedup")),
+        (Path("video"), True, 480, Path("video_speedup_small_480")),
     ],
 )
-def test_input_to_output_filename(filename: Path, small: bool, expected: Path) -> None:
+def test_input_to_output_filename(filename: Path, small: bool, small_target_height: int | None, expected: Path) -> None:
     """Appending the speedup suffix should respect the ``small`` flag and extension."""
 
-    output = pipeline._input_to_output_filename(filename, small)
+    output = pipeline._input_to_output_filename(filename, small, small_target_height)
     assert output == expected
 
 

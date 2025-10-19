@@ -104,7 +104,7 @@ def speed_up_video(
     ffmpeg_path = dependencies.get_ffmpeg_path()
 
     output_path = options.output_file or _input_to_output_filename(
-        input_path, options.small
+        input_path, options.small, options.small_target_height
     )
     output_path = Path(output_path)
 
@@ -359,12 +359,15 @@ def speed_up_video(
     )
 
 
-def _input_to_output_filename(filename: Path, small: bool = False) -> Path:
+def _input_to_output_filename(filename: Path, small: bool = False, small_target_height: int | None = None) -> Path:
     dot_index = filename.name.rfind(".")
     suffix_parts = []
 
     if small:
         suffix_parts.append("_small")
+
+    if small_target_height == 480:
+        suffix_parts.append("_480")
 
     if not suffix_parts:
         suffix_parts.append("")  # Default case
