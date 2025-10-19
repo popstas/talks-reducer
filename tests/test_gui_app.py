@@ -29,6 +29,17 @@ def test_default_remote_destination_without_suffix(tmp_path):
     assert result.name == "archive_speedup_small"
 
 
+def test_default_remote_destination_with_small_480(tmp_path):
+    input_path = tmp_path / "clip.mov"
+    input_path.write_text("data")
+
+    result = app._default_remote_destination(
+        input_path, small=True, small_480=True
+    )
+
+    assert result.name == "clip_speedup_small_480.mov"
+
+
 def test_parse_ratios_from_summary_extracts_values():
     summary = "**Duration:** — 42.5% of the original\n" "**Size:** 17.25%\n"
 
