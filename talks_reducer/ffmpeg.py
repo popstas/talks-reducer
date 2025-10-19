@@ -187,7 +187,7 @@ _FFMPEG_PATH_CACHE: dict[bool, Optional[str]] = {False: None, True: None}
 _FFPROBE_PATH_CACHE: dict[bool, Optional[str]] = {False: None, True: None}
 
 
-def get_ffmpeg_path(*, prefer_global: bool = False) -> str:
+def get_ffmpeg_path(prefer_global: bool = False) -> str:
     """Return the cached FFmpeg path, resolving it on first use."""
 
     cached = _FFMPEG_PATH_CACHE.get(prefer_global)
@@ -197,7 +197,7 @@ def get_ffmpeg_path(*, prefer_global: bool = False) -> str:
     return cached
 
 
-def get_ffprobe_path(*, prefer_global: bool = False) -> str:
+def get_ffprobe_path(prefer_global: bool = False) -> str:
     """Return the cached ffprobe path, resolving it on first use."""
 
     cached = _FFPROBE_PATH_CACHE.get(prefer_global)

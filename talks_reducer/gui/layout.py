@@ -160,16 +160,18 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.ttk.Label(gui.basic_options_frame, text="Video codec").grid(
         row=3, column=0, sticky="w", pady=(8, 0)
     )
-    gui.video_codec_combobox = gui.ttk.Combobox(
-        gui.basic_options_frame,
-        textvariable=gui.video_codec_var,
-        values=("h264", "av1"),
-        state="readonly",
-        width=8,
-    )
-    gui.video_codec_combobox.grid(
-        row=3, column=1, sticky="w", pady=(8, 0), padx=(12, 0)
-    )
+    codec_choice = gui.ttk.Frame(gui.basic_options_frame)
+    codec_choice.grid(row=3, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    gui.video_codec_buttons = {}
+    for value, label in (("h264", "H.264"), ("av1", "AV1")):
+        button = gui.ttk.Radiobutton(
+            codec_choice,
+            text=label,
+            value=value,
+            variable=gui.video_codec_var,
+        )
+        button.pack(side=gui.tk.LEFT, padx=(0, 8))
+        gui.video_codec_buttons[value] = button
 
     gui.ttk.Label(gui.basic_options_frame, text="Processing mode").grid(
         row=4, column=0, sticky="w", pady=(8, 0)
