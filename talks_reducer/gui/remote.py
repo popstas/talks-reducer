@@ -333,7 +333,7 @@ def process_files_via_server(
                 server_url=server_url,
                 small=small_mode,
                 small_480=small_480_mode,
-                video_codec=str(args.get("video_codec", "h264")),
+                video_codec=str(args.get("video_codec", "hevc")),
                 silent_threshold=args.get("silent_threshold"),
                 sounded_speed=args.get("sounded_speed"),
                 silent_speed=args.get("silent_speed"),

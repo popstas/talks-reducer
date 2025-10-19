@@ -339,9 +339,9 @@ class TalksReducerGUI:
         self.open_after_convert_var = tk.BooleanVar(
             value=self.preferences.get("open_after_convert", True)
         )
-        stored_codec = str(self.preferences.get("video_codec", "h264")).lower()
+        stored_codec = str(self.preferences.get("video_codec", "hevc")).lower()
         if stored_codec not in {"h264", "hevc", "av1"}:
-            stored_codec = "h264"
+            stored_codec = "hevc"
             self.preferences.update("video_codec", stored_codec)
         prefer_global = bool(self.preferences.get("use_global_ffmpeg", False))
         self.global_ffmpeg_available = is_global_ffmpeg_available()
@@ -677,7 +677,7 @@ class TalksReducerGUI:
     def _on_video_codec_change(self, *_: object) -> None:
         value = self.video_codec_var.get().strip().lower()
         if value not in {"h264", "hevc", "av1"}:
-            value = "h264"
+            value = "hevc"
             self.video_codec_var.set(value)
         self.preferences.update("video_codec", value)
 
@@ -890,7 +890,7 @@ class TalksReducerGUI:
 
         codec_value = self.video_codec_var.get().strip().lower()
         if codec_value not in {"h264", "hevc", "av1"}:
-            codec_value = "h264"
+            codec_value = "hevc"
             self.video_codec_var.set(codec_value)
         args["video_codec"] = codec_value
         args["prefer_global_ffmpeg"] = bool(self.use_global_ffmpeg_var.get())

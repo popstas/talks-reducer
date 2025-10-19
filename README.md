@@ -59,11 +59,11 @@ Remote jobs respect the same timing controls as the local CLI. Provide
 `--silent-threshold`, `--sounded-speed`, or `--silent-speed` to tweak how the
 server trims and accelerates segments without falling back to local mode.
 
-Need a different compression target? Add `--video-codec hevc` to render with
-H.265/HEVC (via NVENC when available) using a slower preset, adaptive
-quantization, and multipass lookahead tuned for smaller files, or
-`--video-codec av1` to favor modern AV1 output. Leave the default `h264` in
-place for the fastest turnaround.
+Need a different compression target? HEVC (`--video-codec hevc`) is now the
+default and targets roughly 25% smaller files with tuned presets, adaptive
+quantization, and multipass lookahead. Switch to `--video-codec h264` when you
+need the quickest NVENC path or `--video-codec av1` to experiment with modern
+AV1 output.
 Every interface—the CLI, GUI, and browser UI—shares the same encoder choices so
 you can pick once and get consistent results everywhere.
 
@@ -129,12 +129,12 @@ item (or relaunch the GUI separately) whenever you want to reopen it. The tray
 no longer opens a browser automatically—pass `--open-browser` if you prefer the
 web page to launch as soon as the server is ready.
 
-This opens a local web page featuring a drag-and-drop upload zone, **Small video** and **Target 480p** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between H.264, HEVC, and AV1, a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a live
+This opens a local web page featuring a drag-and-drop upload zone, **Small video** and **Target 480p** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a live
 progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current
 Talks Reducer version so you can confirm which build the server is running. Once the job completes you can inspect the resulting
 compression ratio and download the rendered video directly from the page.
 The desktop GUI mirrors this behaviour. A **Video codec** picker in the
-basic options lets you swap between H.264, HEVC, and AV1 without touching the CLI. Open **Advanced** settings to provide a
+basic options lets you swap between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) without touching the CLI. Open **Advanced** settings to provide a
 server URL and click **Discover** to scan your local network for Talks Reducer
 instances listening on port `9005`. The button now updates with the discovery
 progress, showing the scanned/total host count as `scanned / total`. A new
@@ -151,7 +151,7 @@ output size without touching the CLI.
 
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
 2. Drag a video onto the **Video file** drop zone or click to browse and select one from disk.
-3. **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear both boxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the speedy H.264 default, balanced HEVC, and denser AV1 compression, and enable **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the bundled build omits, before you submit.
+3. **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear both boxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the default h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) compression profiles, and enable **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the bundled build omits before you submit.
 4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives.
 5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally.
 
@@ -168,7 +168,7 @@ python -m talks_reducer.service_client --server http://127.0.0.1:9005/ --input d
 ```
 
 The helper wraps the Gradio API exposed by `server.py`, waits for processing to complete, then copies the rendered file to the
-path you provide. Pass `--small` (and optionally `--480`) to mirror the **Small video**/**Target 480p** checkboxes, `--video-codec hevc` or `--video-codec av1` to match the codec dropdown, `--prefer-global-ffmpeg` to reuse the system FFmpeg before the bundled copy, or `--print-log` to stream the server log after the
+path you provide. Pass `--small` (and optionally `--480`) to mirror the **Small video**/**Target 480p** checkboxes, `--video-codec hevc`, `--video-codec h264`, or `--video-codec av1` to match the codec radio buttons, `--prefer-global-ffmpeg` to reuse the system FFmpeg before the bundled copy, or `--print-log` to stream the server log after the
 download finishes.
 
 ## Windows installer packaging

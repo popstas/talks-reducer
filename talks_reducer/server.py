@@ -343,7 +343,7 @@ def process_video(
     file_path: Optional[str],
     small_video: bool,
     small_480: bool = False,
-    video_codec: str = "h264",
+    video_codec: str = "hevc",
     use_global_ffmpeg: bool = False,
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
@@ -368,9 +368,9 @@ def process_video(
     deps = dependencies or ProcessVideoDependencies()
     events = deps.queue_factory()
 
-    codec_value = (video_codec or "h264").strip().lower()
+    codec_value = (video_codec or "hevc").strip().lower()
     if codec_value not in {"h264", "hevc", "av1"}:
-        codec_value = "h264"
+        codec_value = "hevc"
 
     option_kwargs: dict[str, float | str | bool] = {
         "video_codec": codec_value,
@@ -463,9 +463,10 @@ def build_interface() -> gr.Blocks:
             Drop a video into the zone below or click to browse. **Small video** is enabled
             by default to apply the 720p/128k preset before processing starts—clear it to
             keep the original resolution or pair it with **Target 480p** to downscale
-            further. Choose **Video codec** to switch between H.264 (default), HEVC, and
-            AV1 compression, and enable **Use global FFmpeg** when your system install offers
-            hardware encoders that the bundled build lacks.
+            further. Choose **Video codec** to switch between h.265 (≈25% smaller),
+            h.264 (≈10% faster), and av1 (no advantages) compression, and enable
+            **Use global FFmpeg** when your system install offers hardware encoders that the
+            bundled build lacks.
 
             Video will be rendered on server **{server_identity}**.
             """.strip()
@@ -483,8 +484,12 @@ def build_interface() -> gr.Blocks:
             small_480_checkbox = gr.Checkbox(label="Target 480p", value=False)
 
         codec_dropdown = gr.Dropdown(
-            choices=["h264", "hevc", "av1"],
-            value="h264",
+            choices=[
+                ("hevc", "h.265 (25% smaller)"),
+                ("h264", "h.264 (10% faster)"),
+                ("av1", "av1 (no advantages)"),
+            ],
+            value="hevc",
             label="Video codec",
         )
 

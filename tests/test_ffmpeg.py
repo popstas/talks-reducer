@@ -373,18 +373,15 @@ def test_build_video_commands_small_cuda(monkeypatch):
         frame_rate=30.0,
     )
 
-    assert "-c:v h264_nvenc" in command
-    assert "-preset p1" in command
-    assert "-cq 28" in command
-    assert "-forced-idr 1" in command
+    assert "-c:v libx265" in command
+    assert "-preset medium" in command
+    assert "-crf 28" in command
+    assert "-forced-idr 1" not in command
     assert "-g 900" in command
     assert "-keyint_min 900" in command
     assert "-force_key_frames expr:gte(t,n_forced*30)" in command
-    assert fallback is not None and "-c:v libx264" in fallback
-    assert "-force_key_frames expr:gte(t,n_forced*30)" in fallback
-    assert "-forced-idr 1" not in fallback
-    assert "-g 900" in fallback
-    assert use_cuda
+    assert fallback is None
+    assert not use_cuda
 
 
 def test_build_video_commands_small_cpu(monkeypatch):
@@ -400,7 +397,7 @@ def test_build_video_commands_small_cpu(monkeypatch):
         frame_rate=30.0,
     )
 
-    assert "-c:v libx264" in command
+    assert "-c:v libx265" in command
     assert "-g 900" in command
     assert "-keyint_min 900" in command
     assert "-force_key_frames expr:gte(t,n_forced*30)" in command
@@ -448,10 +445,9 @@ def test_build_video_commands_large_cuda(monkeypatch):
 
     assert "-hwaccel cuda" in command
     assert "-filter_complex_threads 1" in command
-    assert fallback is not None
-    assert "-c:v libx264" in fallback
-    assert "-hwaccel" not in fallback
-    assert use_cuda
+    assert "-c:v libx265" in command
+    assert fallback is None
+    assert not use_cuda
 
 
 def test_build_video_commands_large_cpu(monkeypatch):
@@ -470,7 +466,7 @@ def test_build_video_commands_large_cpu(monkeypatch):
         frame_rate=30.0,
     )
 
-    assert "-c:v libx264" in command
+    assert "-c:v libx265" in command
     assert fallback is None
     assert not use_cuda
 

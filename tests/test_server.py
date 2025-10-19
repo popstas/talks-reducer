@@ -307,7 +307,7 @@ def test_process_video_honors_small_480_flag(tmp_path: Path) -> None:
     def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
         assert options.small is True
         assert options.small_target_height == 480
-        assert options.video_codec == "h264"
+        assert options.video_codec == "hevc"
         assert options.prefer_global_ffmpeg is False
         return ProcessingResult(
             input_file=options.input_file,

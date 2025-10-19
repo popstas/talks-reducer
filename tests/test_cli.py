@@ -26,7 +26,7 @@ def test_build_parser_includes_version_and_defaults(
     args = parser.parse_args(["input.mp4"])
     assert args.input_file == ["input.mp4"]
     assert args.temp_folder == str(default_temp)
-    assert args.video_codec == "h264"
+    assert args.video_codec == "hevc"
     assert args.prefer_global_ffmpeg is False
 
     with pytest.raises(SystemExit):

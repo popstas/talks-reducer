@@ -473,7 +473,7 @@ def build_video_commands(
     small: bool,
     frame_rate: Optional[float] = None,
     keyframe_interval_seconds: float = 30.0,
-    video_codec: str = "h264",
+    video_codec: str = "hevc",
 ) -> Tuple[str, Optional[str], bool]:
     """Create the FFmpeg command strings used to render the final video output.
 
@@ -499,9 +499,9 @@ def build_video_commands(
         f'-filter_script:v "{filter_script}"',
     ]
 
-    codec_choice = (video_codec or "h264").strip().lower()
+    codec_choice = (video_codec or "hevc").strip().lower()
     if codec_choice not in {"h264", "hevc", "av1"}:
-        codec_choice = "h264"
+        codec_choice = "hevc"
 
     video_encoder_args: List[str]
     fallback_encoder_args: List[str] = []
@@ -579,7 +579,7 @@ def build_video_commands(
         else:
             video_encoder_args = cpu_encoder_args
     else:
-        # Default to H.264
+        # Fallback to H.264
         if small:
             cpu_encoder_args = [
                 "-c:v libx264",
