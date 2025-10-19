@@ -190,6 +190,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         Radiobutton=WidgetFactory("Radiobutton"),
         Progressbar=WidgetFactory("Progressbar"),
         Scrollbar=WidgetFactory("Scrollbar"),
+        Combobox=WidgetFactory("Combobox"),
     )
     tk = SimpleNamespace(
         Label=WidgetFactory("Label"),
@@ -248,6 +249,9 @@ def test_build_layout_initializes_widgets(monkeypatch):
         theme_var=StringVarStub(value="os"),
         status_var=StringVarStub(value="Idle"),
         progress_var=DoubleVarStub(value=0.0),
+        video_codec_var=StringVarStub(value="hevc"),
+        use_global_ffmpeg_var=BooleanVarStub(value=False),
+        global_ffmpeg_available=True,
     )
 
     layout.build_layout(gui)
@@ -279,6 +283,89 @@ def test_build_layout_initializes_widgets(monkeypatch):
 
     configure_drop_targets.assert_any_call(gui.drop_hint_button)
     assert gui.drop_hint_button.grid_remove_calls
+
+    assert hasattr(gui, "video_codec_buttons")
+    assert set(gui.video_codec_buttons) == {"h264", "hevc", "av1"}
+    for value, button in gui.video_codec_buttons.items():
+        assert button.kwargs["variable"] is gui.video_codec_var
+        assert button.kwargs["value"] == value
+    assert gui.video_codec_var.get() == "hevc"
+    assert hasattr(gui, "use_global_ffmpeg_check")
+    assert gui.use_global_ffmpeg_check.kwargs["variable"] is gui.use_global_ffmpeg_var
+    assert gui.use_global_ffmpeg_check.kwargs["state"] == "normal"
+
+
+def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    ttk = SimpleNamespace(
+        Frame=WidgetFactory("Frame"),
+        Checkbutton=WidgetFactory("Checkbutton"),
+        Label=WidgetFactory("Label"),
+        Button=WidgetFactory("Button"),
+        Labelframe=WidgetFactory("Labelframe"),
+        Entry=WidgetFactory("Entry"),
+        Radiobutton=WidgetFactory("Radiobutton"),
+        Progressbar=WidgetFactory("Progressbar"),
+        Scrollbar=WidgetFactory("Scrollbar"),
+        Combobox=WidgetFactory("Combobox"),
+    )
+    tk = SimpleNamespace(
+        Label=WidgetFactory("Label"),
+        Text=WidgetFactory("Text"),
+        StringVar=StringVarStub,
+        DoubleVar=DoubleVarStub,
+        BooleanVar=BooleanVarStub,
+        Scale=WidgetFactory("Scale"),
+        FLAT="flat",
+        LEFT="left",
+        NORMAL="normal",
+        DISABLED="disabled",
+        HORIZONTAL="horizontal",
+        VERTICAL="vertical",
+    )
+
+    gui = SimpleNamespace(
+        root=RootStub(),
+        ttk=ttk,
+        tk=tk,
+        PADDING=8,
+        _configure_drop_targets=Mock(),
+        _on_drop_zone_click=Mock(),
+        _toggle_simple_mode=Mock(),
+        _reset_basic_defaults=Mock(),
+        _start_discovery=Mock(),
+        _refresh_theme=Mock(),
+        _toggle_advanced=Mock(),
+        _update_processing_mode_state=Mock(),
+        _stop_processing=Mock(),
+        _open_last_output=Mock(),
+        small_var=BooleanVarStub(value=True),
+        small_480_var=BooleanVarStub(value=False),
+        open_after_convert_var=BooleanVarStub(value=False),
+        simple_mode_var=BooleanVarStub(value=False),
+        preferences=SimpleNamespace(
+            get_float=lambda key, default: default,
+            get=lambda key, default: default,
+            update=Mock(),
+        ),
+        processing_mode_var=StringVarStub(value="local"),
+        server_url_var=StringVarStub(value=""),
+        theme_var=StringVarStub(value="os"),
+        status_var=StringVarStub(value="Idle"),
+        progress_var=DoubleVarStub(value=0.0),
+        video_codec_var=StringVarStub(value="hevc"),
+        use_global_ffmpeg_var=BooleanVarStub(value=True),
+        global_ffmpeg_available=False,
+    )
+
+    layout.build_layout(gui)
+
+    assert gui.use_global_ffmpeg_var.get() is False
+    assert gui.use_global_ffmpeg_check.kwargs["state"] == "disabled"
 
 
 def test_add_entry_with_browse(monkeypatch):

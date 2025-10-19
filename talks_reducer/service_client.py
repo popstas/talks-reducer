@@ -76,6 +76,8 @@ def send_video(
     server_url: str,
     small: bool = False,
     small_480: bool = False,
+    video_codec: str = "hevc",
+    prefer_global_ffmpeg: bool = False,
     *,
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
@@ -94,7 +96,9 @@ def send_video(
     """Upload *input_path* to the Gradio server and download the processed video.
 
     When *should_cancel* returns ``True`` the remote job is cancelled and a
-    :class:`ProcessingAborted` exception is raised.
+    :class:`ProcessingAborted` exception is raised. Set *prefer_global_ffmpeg*
+    when the PATH-provided FFmpeg offers hardware encoders that the bundled
+    static build omits.
     """
 
     if not input_path.exists():
@@ -106,6 +110,8 @@ def send_video(
         gradio_file(str(input_path)),
         bool(small),
         bool(small_480),
+        str(video_codec),
+        bool(prefer_global_ffmpeg),
         silent_threshold,
         sounded_speed,
         silent_speed,
@@ -412,6 +418,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Combine with --small to target 480p instead of 720p.",
     )
     parser.add_argument(
+        "--video-codec",
+        choices=["h264", "hevc", "av1"],
+        default="hevc",
+        help=(
+            "Select the video encoder used for the render (default: hevc — "
+            "h.265 for roughly 25% smaller files). Switch to h264 (about 10% "
+            "faster) or av1 (no advantages) when you want different trade-offs."
+        ),
+    )
+    parser.add_argument(
+        "--prefer-global-ffmpeg",
+        action="store_true",
+        help="Use the FFmpeg binary available on PATH before falling back to the bundled copy.",
+    )
+    parser.add_argument(
         "--print-log",
         action="store_true",
         help="Print the server log after processing completes.",
@@ -474,6 +495,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         server_url=args.server,
         small=args.small,
         small_480=small_480_mode,
+        video_codec=str(args.video_codec),
+        prefer_global_ffmpeg=bool(args.prefer_global_ffmpeg),
         log_callback=_stream if args.print_log else None,
         stream_updates=args.stream,
         progress_callback=_progress if args.stream else None,

@@ -36,7 +36,7 @@ class ProcessingAborted(RuntimeError):
 class PipelineDependencies:
     """Bundle of external dependencies used by :func:`speed_up_video`."""
 
-    get_ffmpeg_path: Callable[[], str] = get_ffmpeg_path
+    get_ffmpeg_path: Callable[[bool], str] = get_ffmpeg_path
     check_cuda_available: Callable[[str], bool] = check_cuda_available
     build_extract_audio_command: Callable[..., str] = build_extract_audio_command
     build_video_commands: Callable[..., tuple[str, str | None, bool]] = (
@@ -51,6 +51,30 @@ class PipelineDependencies:
             self.create_path = _create_path
         if self.delete_path is None:
             self.delete_path = _delete_path
+
+
+def _invoke_get_ffmpeg_path(
+    getter: Callable[..., str], prefer_global: bool
+) -> tuple[str, str]:
+    """Call a ``get_ffmpeg_path`` dependency while handling legacy signatures.
+
+    Some callables still expect the ``prefer_global`` flag as a positional
+    argument, while newer implementations accept only a keyword. This helper
+    normalises the call and reports which style ultimately succeeded.
+    """
+
+    try:
+        path = getter(prefer_global=prefer_global)
+    except TypeError as exc:
+        # Fallback to positional calls when the dependency rejects the keyword
+        # argument. Re-raise unexpected ``TypeError`` instances so we do not hide
+        # bugs raised from within the callable itself.
+        if "unexpected keyword" not in str(exc):
+            raise
+        path = getter(prefer_global)
+        return path, "positional"
+
+    return path, "keyword"
 
 
 def _stop_requested(reporter: ProgressReporter | None) -> bool:
@@ -101,7 +125,22 @@ def speed_up_video(
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    ffmpeg_path = dependencies.get_ffmpeg_path()
+    ffmpeg_path, ffmpeg_call_style = _invoke_get_ffmpeg_path(
+        dependencies.get_ffmpeg_path,
+        options.prefer_global_ffmpeg,
+    )
+    preference_label = (
+        "global PATH" if options.prefer_global_ffmpeg else "bundled/static"
+    )
+    reporter.log(
+        (
+            "FFmpeg preference: {preference} (resolved via {style} call -> {path})"
+        ).format(
+            preference=preference_label,
+            style=ffmpeg_call_style,
+            path=ffmpeg_path,
+        )
+    )
 
     output_path = options.output_file or _input_to_output_filename(
         input_path, options.small, options.small_target_height
@@ -255,6 +294,18 @@ def speed_up_video(
             small=options.small,
             frame_rate=frame_rate,
             keyframe_interval_seconds=options.keyframe_interval_seconds,
+            video_codec=options.video_codec,
+        )
+    )
+    reporter.log(
+        (
+            "Encoder plan: codec={codec} | CUDA available={cuda} | "
+            "using CUDA encoder={using_cuda} | fallback prepared={has_fallback}"
+        ).format(
+            codec=options.video_codec,
+            cuda=cuda_available,
+            using_cuda=use_cuda_encoder,
+            has_fallback=bool(fallback_command_str),
         )
     )
 

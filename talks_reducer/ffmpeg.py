@@ -22,7 +22,35 @@ def shutil_which(cmd: str) -> Optional[str]:
     return _shutil_which(cmd)
 
 
-def find_ffmpeg() -> Optional[str]:
+def _search_known_paths(paths: List[str]) -> Optional[str]:
+    """Return the first existing FFmpeg path from *paths*."""
+
+    for path in paths:
+        if os.path.isfile(path) or shutil_which(path):
+            return os.path.abspath(path) if os.path.isfile(path) else path
+
+    return None
+
+
+def _find_static_ffmpeg() -> Optional[str]:
+    """Return the FFmpeg path bundled with static-ffmpeg when available."""
+
+    try:
+        import static_ffmpeg
+
+        static_ffmpeg.add_paths()
+        bundled_path = shutil_which("ffmpeg")
+        if bundled_path:
+            return bundled_path
+    except ImportError:
+        return None
+    except Exception:
+        return None
+
+    return None
+
+
+def find_ffmpeg(*, prefer_global: bool = False) -> Optional[str]:
     """Locate the FFmpeg executable in common installation locations."""
 
     env_override = os.environ.get("TALKS_REDUCER_FFMPEG") or os.environ.get(
@@ -35,20 +63,6 @@ def find_ffmpeg() -> Optional[str]:
             else env_override
         )
 
-    # Try bundled ffmpeg from static-ffmpeg first
-    try:
-        import static_ffmpeg
-
-        static_ffmpeg.add_paths()
-        bundled_path = shutil_which("ffmpeg")
-        if bundled_path:
-            return bundled_path
-    except ImportError:
-        pass
-    except Exception:
-        # If static_ffmpeg is installed but fails, continue to other methods
-        pass
-
     common_paths = [
         "C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe",
         "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe",
@@ -59,14 +73,25 @@ def find_ffmpeg() -> Optional[str]:
         "ffmpeg",
     ]
 
-    for path in common_paths:
-        if os.path.isfile(path) or shutil_which(path):
-            return os.path.abspath(path) if os.path.isfile(path) else path
+    static_path: Optional[str] = None
+    if not prefer_global:
+        static_path = _find_static_ffmpeg()
+        if static_path:
+            return static_path
+
+    candidate = _search_known_paths(common_paths)
+    if candidate:
+        return candidate
+
+    if prefer_global:
+        static_path = _find_static_ffmpeg()
+        if static_path:
+            return static_path
 
     return None
 
 
-def find_ffprobe() -> Optional[str]:
+def find_ffprobe(*, prefer_global: bool = False) -> Optional[str]:
     """Locate the ffprobe executable, typically in the same directory as FFmpeg."""
 
     env_override = os.environ.get("TALKS_REDUCER_FFPROBE") or os.environ.get(
@@ -79,22 +104,8 @@ def find_ffprobe() -> Optional[str]:
             else env_override
         )
 
-    # Try bundled ffprobe from static-ffmpeg first
-    try:
-        import static_ffmpeg
-
-        static_ffmpeg.add_paths()
-        bundled_ffprobe = shutil_which("ffprobe")
-        if bundled_ffprobe:
-            return bundled_ffprobe
-    except ImportError:
-        pass
-    except Exception:
-        # If static_ffmpeg is installed but fails, continue to other methods
-        pass
-
     # Try to find ffprobe in the same directory as FFmpeg
-    ffmpeg_path = find_ffmpeg()
+    ffmpeg_path = find_ffmpeg(prefer_global=prefer_global)
     if ffmpeg_path:
         ffmpeg_dir = os.path.dirname(ffmpeg_path)
         ffprobe_path = os.path.join(ffmpeg_dir, "ffprobe")
@@ -116,17 +127,40 @@ def find_ffprobe() -> Optional[str]:
         "ffprobe",
     ]
 
-    for path in common_paths:
-        if os.path.isfile(path) or shutil_which(path):
-            return os.path.abspath(path) if os.path.isfile(path) else path
+    static_path: Optional[str] = None
+    if not prefer_global:
+        static_path = _find_static_ffmpeg()
+        if static_path:
+            ffprobe_candidate = os.path.join(os.path.dirname(static_path), "ffprobe")
+            if os.path.isfile(ffprobe_candidate) or shutil_which(ffprobe_candidate):
+                return (
+                    os.path.abspath(ffprobe_candidate)
+                    if os.path.isfile(ffprobe_candidate)
+                    else ffprobe_candidate
+                )
+
+    candidate = _search_known_paths(common_paths)
+    if candidate:
+        return candidate
+
+    if prefer_global:
+        static_path = _find_static_ffmpeg()
+        if static_path:
+            ffprobe_candidate = os.path.join(os.path.dirname(static_path), "ffprobe")
+            if os.path.isfile(ffprobe_candidate) or shutil_which(ffprobe_candidate):
+                return (
+                    os.path.abspath(ffprobe_candidate)
+                    if os.path.isfile(ffprobe_candidate)
+                    else ffprobe_candidate
+                )
 
     return None
 
 
-def _resolve_ffmpeg_path() -> str:
+def _resolve_ffmpeg_path(*, prefer_global: bool = False) -> str:
     """Resolve the FFmpeg executable path or raise ``FFmpegNotFoundError``."""
 
-    ffmpeg_path = find_ffmpeg()
+    ffmpeg_path = find_ffmpeg(prefer_global=prefer_global)
     if not ffmpeg_path:
         raise FFmpegNotFoundError(
             "FFmpeg not found. Please install static-ffmpeg (pip install static-ffmpeg) "
@@ -137,10 +171,10 @@ def _resolve_ffmpeg_path() -> str:
     return ffmpeg_path
 
 
-def _resolve_ffprobe_path() -> str:
+def _resolve_ffprobe_path(*, prefer_global: bool = False) -> str:
     """Resolve the ffprobe executable path or raise ``FFmpegNotFoundError``."""
 
-    ffprobe_path = find_ffprobe()
+    ffprobe_path = find_ffprobe(prefer_global=prefer_global)
     if not ffprobe_path:
         raise FFmpegNotFoundError(
             "ffprobe not found. Install FFmpeg (which includes ffprobe) and add it to PATH."
@@ -149,70 +183,151 @@ def _resolve_ffprobe_path() -> str:
     return ffprobe_path
 
 
-_FFMPEG_PATH: Optional[str] = None
-_FFPROBE_PATH: Optional[str] = None
+_FFMPEG_PATH_CACHE: dict[bool, Optional[str]] = {False: None, True: None}
+_FFPROBE_PATH_CACHE: dict[bool, Optional[str]] = {False: None, True: None}
+_GLOBAL_FFMPEG_AVAILABLE: Optional[bool] = None
 
 
-def get_ffmpeg_path() -> str:
+def get_ffmpeg_path(prefer_global: bool = False) -> str:
     """Return the cached FFmpeg path, resolving it on first use."""
 
-    global _FFMPEG_PATH
-    if _FFMPEG_PATH is None:
-        _FFMPEG_PATH = _resolve_ffmpeg_path()
-    return _FFMPEG_PATH
+    cached = _FFMPEG_PATH_CACHE.get(prefer_global)
+    if cached is None:
+        cached = _resolve_ffmpeg_path(prefer_global=prefer_global)
+        _FFMPEG_PATH_CACHE[prefer_global] = cached
+    return cached
 
 
-def get_ffprobe_path() -> str:
+def get_ffprobe_path(prefer_global: bool = False) -> str:
     """Return the cached ffprobe path, resolving it on first use."""
 
-    global _FFPROBE_PATH
-    if _FFPROBE_PATH is None:
-        _FFPROBE_PATH = _resolve_ffprobe_path()
-    return _FFPROBE_PATH
+    cached = _FFPROBE_PATH_CACHE.get(prefer_global)
+    if cached is None:
+        cached = _resolve_ffprobe_path(prefer_global=prefer_global)
+        _FFPROBE_PATH_CACHE[prefer_global] = cached
+    return cached
 
 
-def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
-    """Return whether CUDA hardware encoders are usable in the FFmpeg build."""
+def _normalize_executable_path(candidate: Optional[str]) -> Optional[str]:
+    """Return an absolute path for *candidate* when it can be resolved."""
 
-    # Hide console window on Windows
+    if not candidate:
+        return None
+
+    if os.path.isfile(candidate):
+        return os.path.abspath(candidate)
+
+    resolved = shutil_which(candidate)
+    if resolved:
+        return os.path.abspath(resolved)
+
+    return os.path.abspath(candidate) if os.path.exists(candidate) else None
+
+
+def is_global_ffmpeg_available() -> bool:
+    """Return ``True`` when a non-bundled FFmpeg binary is available."""
+
+    global _GLOBAL_FFMPEG_AVAILABLE
+    if _GLOBAL_FFMPEG_AVAILABLE is not None:
+        return _GLOBAL_FFMPEG_AVAILABLE
+
+    global_candidate = _normalize_executable_path(find_ffmpeg(prefer_global=True))
+    if not global_candidate:
+        _GLOBAL_FFMPEG_AVAILABLE = False
+        return False
+
+    static_candidate = _normalize_executable_path(_find_static_ffmpeg())
+    if static_candidate is None:
+        _GLOBAL_FFMPEG_AVAILABLE = True
+        return True
+
+    try:
+        same_binary = os.path.samefile(global_candidate, static_candidate)
+    except (FileNotFoundError, OSError, ValueError):
+        same_binary = os.path.normcase(global_candidate) == os.path.normcase(
+            static_candidate
+        )
+
+    _GLOBAL_FFMPEG_AVAILABLE = not same_binary
+    return _GLOBAL_FFMPEG_AVAILABLE
+
+
+_ENCODER_LISTING: dict[str, str] = {}
+
+
+def _probe_ffmpeg_output(args: List[str]) -> Optional[str]:
+    """Return stdout from an FFmpeg invocation, handling common failures."""
+
     creationflags = 0
     if sys.platform == "win32":
         # CREATE_NO_WINDOW = 0x08000000
         creationflags = 0x08000000
 
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=creationflags,
+        )
+    except (
+        subprocess.TimeoutExpired,
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+    ):
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    return result.stdout
+
+
+def _get_encoder_listing(ffmpeg_path: Optional[str] = None) -> Optional[str]:
+    """Return the cached FFmpeg encoder listing output."""
+
     ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+    cache_key = os.path.abspath(ffmpeg_path)
+    if cache_key in _ENCODER_LISTING:
+        return _ENCODER_LISTING[cache_key]
 
-    def _probe_ffmpeg(args: List[str]) -> Optional[str]:
-        try:
-            result = subprocess.run(
-                args,
-                capture_output=True,
-                text=True,
-                timeout=5,
-                creationflags=creationflags,
-            )
-        except (
-            subprocess.TimeoutExpired,
-            subprocess.CalledProcessError,
-            FileNotFoundError,
-        ):
-            return None
+    output = _probe_ffmpeg_output([ffmpeg_path, "-hide_banner", "-encoders"])
+    if output is None:
+        return None
 
-        if result.returncode != 0:
-            return None
+    normalized = output.lower()
+    _ENCODER_LISTING[cache_key] = normalized
+    return normalized
 
-        return result.stdout.lower()
 
-    hwaccels_output = _probe_ffmpeg([ffmpeg_path, "-hide_banner", "-hwaccels"])
-    if not hwaccels_output or "cuda" not in hwaccels_output:
+def encoder_available(encoder_name: str, ffmpeg_path: Optional[str] = None) -> bool:
+    """Return True if ``encoder_name`` is listed in the FFmpeg encoder catalog."""
+
+    listing = _get_encoder_listing(ffmpeg_path)
+    if not listing:
         return False
 
-    encoder_output = _probe_ffmpeg([ffmpeg_path, "-hide_banner", "-encoders"])
+    pattern = rf"\b{re.escape(encoder_name.lower())}\b"
+    return re.search(pattern, listing) is not None
+
+
+def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
+    """Return whether CUDA hardware encoders are usable in the FFmpeg build."""
+
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+
+    hwaccels_output = _probe_ffmpeg_output([ffmpeg_path, "-hide_banner", "-hwaccels"])
+    if not hwaccels_output or "cuda" not in hwaccels_output.lower():
+        return False
+
+    encoder_output = _get_encoder_listing(ffmpeg_path)
     if not encoder_output:
         return False
 
     return any(
-        encoder in encoder_output for encoder in ["h264_nvenc", "hevc_nvenc", "nvenc"]
+        encoder in encoder_output
+        for encoder in ["h264_nvenc", "hevc_nvenc", "av1_nvenc", "nvenc"]
     )
 
 
@@ -358,6 +473,7 @@ def build_video_commands(
     small: bool,
     frame_rate: Optional[float] = None,
     keyframe_interval_seconds: float = 30.0,
+    video_codec: str = "hevc",
 ) -> Tuple[str, Optional[str], bool]:
     """Create the FFmpeg command strings used to render the final video output.
 
@@ -383,10 +499,15 @@ def build_video_commands(
         f'-filter_script:v "{filter_script}"',
     ]
 
+    codec_choice = (video_codec or "hevc").strip().lower()
+    if codec_choice not in {"h264", "hevc", "av1"}:
+        codec_choice = "hevc"
+
     video_encoder_args: List[str]
     fallback_encoder_args: List[str] = []
     use_cuda_encoder = False
 
+    keyframe_args: List[str] = []
     if small:
         if keyframe_interval_seconds <= 0:
             keyframe_interval_seconds = 30.0
@@ -394,45 +515,100 @@ def build_video_commands(
         gop_size = 900
         if frame_rate and frame_rate > 0:
             gop_size = max(1, int(round(frame_rate * keyframe_interval_seconds)))
-        small_keyframe_args = [
+        keyframe_args = [
             f"-g {gop_size}",
             f"-keyint_min {gop_size}",
             f"-force_key_frames expr:gte(t,n_forced*{formatted_interval})",
         ]
-        if cuda_available:
-            use_cuda_encoder = True
-            video_encoder_args = [
-                "-c:v h264_nvenc",
-                "-preset p1",
-                "-cq 28",
-                "-tune",
-                "ll",
-                "-forced-idr 1",
-            ] + small_keyframe_args
-            fallback_encoder_args = [
-                "-c:v libx264",
-                "-preset veryfast",
-                "-crf 24",
-                "-tune",
-                "zerolatency",
-            ] + small_keyframe_args
-        else:
-            video_encoder_args = [
-                "-c:v libx264",
-                "-preset veryfast",
-                "-crf 24",
-                "-tune",
-                "zerolatency",
-            ] + small_keyframe_args
     else:
         global_parts.append("-filter_complex_threads 1")
-        if cuda_available:
-            video_encoder_args = ["-c:v h264_nvenc"]
-            use_cuda_encoder = True
+
+    if codec_choice == "av1":
+        if encoder_available("libsvtav1", ffmpeg_path=ffmpeg_path):
+            cpu_encoder_base = ["-c:v libsvtav1", "-preset 6", "-crf 28", "-b:v 0"]
         else:
-            # Cannot use copy codec when applying filters (speed modifications)
-            # Use a fast software encoder instead
-            video_encoder_args = ["-c:v libx264", "-preset veryfast", "-crf 23"]
+            cpu_encoder_base = ["-c:v libaom-av1", "-crf 32", "-b:v 0", "-row-mt 1"]
+
+        if small:
+            cpu_encoder_args = cpu_encoder_base + keyframe_args
+        else:
+            cpu_encoder_args = cpu_encoder_base
+
+        if cuda_available and encoder_available("av1_nvenc", ffmpeg_path=ffmpeg_path):
+            use_cuda_encoder = True
+            video_encoder_args = [
+                "-c:v av1_nvenc",
+                "-preset p6",
+                "-rc vbr",
+                "-b:v 0",
+                "-cq 36",
+                "-spatial-aq 1",
+                "-temporal-aq 1",
+            ]
+            if small:
+                video_encoder_args = video_encoder_args + keyframe_args
+            fallback_encoder_args = cpu_encoder_args
+        else:
+            video_encoder_args = cpu_encoder_args
+    elif codec_choice == "hevc":
+        if small:
+            cpu_encoder_args = [
+                "-c:v libx265",
+                "-preset medium",
+                "-crf 28",
+            ] + keyframe_args
+        else:
+            cpu_encoder_args = ["-c:v libx265", "-preset medium", "-crf 26"]
+
+        if cuda_available and encoder_available("hevc_nvenc", ffmpeg_path=ffmpeg_path):
+            use_cuda_encoder = True
+            video_encoder_args = [
+                "-c:v hevc_nvenc",
+                "-preset p6",
+                "-rc vbr",
+                "-b:v 0",
+                "-cq 32",
+                "-spatial-aq 1",
+                "-temporal-aq 1",
+                "-rc-lookahead 32",
+                "-multipass fullres",
+            ]
+            if small:
+                video_encoder_args = video_encoder_args + keyframe_args
+            fallback_encoder_args = cpu_encoder_args
+        else:
+            video_encoder_args = cpu_encoder_args
+    else:
+        # Fallback to H.264
+        if small:
+            cpu_encoder_args = [
+                "-c:v libx264",
+                "-preset veryfast",
+                "-crf 24",
+                "-tune",
+                "zerolatency",
+            ] + keyframe_args
+            if cuda_available:
+                use_cuda_encoder = True
+                video_encoder_args = [
+                    "-c:v h264_nvenc",
+                    "-preset p1",
+                    "-cq 28",
+                    "-tune",
+                    "ll",
+                    "-forced-idr 1",
+                ] + keyframe_args
+                fallback_encoder_args = cpu_encoder_args
+            else:
+                video_encoder_args = cpu_encoder_args
+        else:
+            software_args = ["-c:v libx264", "-preset veryfast", "-crf 23"]
+            if cuda_available:
+                use_cuda_encoder = True
+                video_encoder_args = ["-c:v h264_nvenc", "-preset p1", "-cq 23"]
+                fallback_encoder_args = software_args
+            else:
+                video_encoder_args = software_args
 
     audio_parts = [
         "-c:a aac",
@@ -447,8 +623,13 @@ def build_video_commands(
 
     fallback_command_str: Optional[str] = None
     if fallback_encoder_args:
+        fallback_global_parts = list(global_parts)
+        if hwaccel_args:
+            fallback_global_parts = [
+                part for part in fallback_global_parts if part not in hwaccel_args
+            ]
         fallback_parts = (
-            global_parts
+            fallback_global_parts
             + input_parts
             + output_parts
             + fallback_encoder_args

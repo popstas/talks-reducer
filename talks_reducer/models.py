@@ -52,7 +52,9 @@ class ProcessingOptions:
     temp_folder: Path = field(default_factory=default_temp_folder)
     small: bool = False
     small_target_height: Optional[int] = None
+    video_codec: str = "hevc"
     keyframe_interval_seconds: float = 30.0
+    prefer_global_ffmpeg: bool = False
 
 
 @dataclass(frozen=True)

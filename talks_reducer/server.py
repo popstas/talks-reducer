@@ -17,7 +17,7 @@ from typing import Callable, Iterator, Optional, Sequence, cast
 
 import gradio as gr
 
-from talks_reducer.ffmpeg import FFmpegNotFoundError
+from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
 from talks_reducer.icons import find_icon_path
 from talks_reducer.models import ProcessingOptions, ProcessingResult
 from talks_reducer.pipeline import speed_up_video
@@ -343,6 +343,8 @@ def process_video(
     file_path: Optional[str],
     small_video: bool,
     small_480: bool = False,
+    video_codec: str = "hevc",
+    use_global_ffmpeg: bool = False,
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
     silent_speed: Optional[float] = None,
@@ -366,7 +368,14 @@ def process_video(
     deps = dependencies or ProcessVideoDependencies()
     events = deps.queue_factory()
 
-    option_kwargs: dict[str, float] = {}
+    codec_value = (video_codec or "hevc").strip().lower()
+    if codec_value not in {"h264", "hevc", "av1"}:
+        codec_value = "hevc"
+
+    option_kwargs: dict[str, float | str | bool] = {
+        "video_codec": codec_value,
+        "prefer_global_ffmpeg": bool(use_global_ffmpeg),
+    }
     if silent_threshold is not None:
         option_kwargs["silent_threshold"] = float(silent_threshold)
     if sounded_speed is not None:
@@ -440,6 +449,7 @@ def build_interface() -> gr.Blocks:
     """Construct the Gradio Blocks application for the simple web UI."""
 
     server_identity = _describe_server_host()
+    global_ffmpeg_available = is_global_ffmpeg_available()
 
     app_version = resolve_version()
     version_suffix = (
@@ -453,7 +463,10 @@ def build_interface() -> gr.Blocks:
             Drop a video into the zone below or click to browse. **Small video** is enabled
             by default to apply the 720p/128k preset before processing starts—clear it to
             keep the original resolution or pair it with **Target 480p** to downscale
-            further.
+            further. Choose **Video codec** to switch between h.265 (≈25% smaller),
+            h.264 (≈10% faster), and av1 (no advantages) compression, and enable
+            **Use global FFmpeg** when your system install offers hardware encoders that the
+            bundled build lacks.
 
             Video will be rendered on server **{server_identity}**.
             """.strip()
@@ -469,6 +482,28 @@ def build_interface() -> gr.Blocks:
         with gr.Row():
             small_checkbox = gr.Checkbox(label="Small video", value=True)
             small_480_checkbox = gr.Checkbox(label="Target 480p", value=False)
+
+        codec_dropdown = gr.Dropdown(
+            choices=[
+                ("hevc", "h.265 (25% smaller)"),
+                ("h264", "h.264 (10% faster)"),
+                ("av1", "av1 (no advantages)"),
+            ],
+            value="hevc",
+            label="Video codec",
+        )
+
+        global_ffmpeg_info = (
+            "Prefer the FFmpeg binary from PATH instead of the bundled build."
+            if global_ffmpeg_available
+            else "Global FFmpeg not detected; the bundled build will be used."
+        )
+        use_global_ffmpeg_checkbox = gr.Checkbox(
+            label="Use global FFmpeg",
+            value=False,
+            info=global_ffmpeg_info,
+            interactive=global_ffmpeg_available,
+        )
 
         with gr.Column():
             silent_speed_input = gr.Slider(
@@ -504,6 +539,8 @@ def build_interface() -> gr.Blocks:
                 file_input,
                 small_checkbox,
                 small_480_checkbox,
+                codec_dropdown,
+                use_global_ffmpeg_checkbox,
                 silent_threshold_input,
                 sounded_speed_input,
                 silent_speed_input,

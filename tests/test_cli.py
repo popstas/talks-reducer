@@ -26,6 +26,8 @@ def test_build_parser_includes_version_and_defaults(
     args = parser.parse_args(["input.mp4"])
     assert args.input_file == ["input.mp4"]
     assert args.temp_folder == str(default_temp)
+    assert args.video_codec == "hevc"
+    assert args.prefer_global_ffmpeg is False
 
     with pytest.raises(SystemExit):
         parser.parse_args(["--version"])
@@ -89,8 +91,10 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
         sample_rate=48000,
         small=True,
         keyframe_interval_seconds=1.5,
+        video_codec="hevc",
         server_url=None,
         host=None,
+        prefer_global_ffmpeg=True,
     )
 
     gathered: list[list[str]] = []
@@ -136,7 +140,9 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
     assert options.frame_spreadage == 4
     assert options.sample_rate == 48000
     assert options.keyframe_interval_seconds == pytest.approx(1.5)
+    assert options.video_codec == "hevc"
     assert options.small is True
+    assert options.prefer_global_ffmpeg is True
     assert "Completed: /videos/output.mp4" in logged_messages
     assert any(message.startswith("Result: ") for message in logged_messages)
 
@@ -154,16 +160,20 @@ def test_cli_application_falls_back_to_local_after_remote_failure() -> None:
         frame_spreadage=None,
         sample_rate=None,
         keyframe_interval_seconds=None,
+        video_codec="h264",
         small=False,
         server_url="http://localhost:9005",
         server_stream=False,
         host=None,
+        prefer_global_ffmpeg=True,
     )
 
     def gather_files(_paths: list[str]) -> list[str]:
         return ["/videos/input.mp4"]
 
-    def failing_send_video(**_kwargs: object):
+    def failing_send_video(**kwargs: object):
+        assert kwargs.get("video_codec") == "h264"
+        assert kwargs.get("prefer_global_ffmpeg") is True
         raise RuntimeError("boom")
 
     local_runs: list[cli.ProcessingOptions] = []
@@ -231,6 +241,9 @@ def test_main_runs_cli_with_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
         keyframe_interval_seconds=None,
         small=False,
         server_url=None,
+        video_codec="h264",
+        host=None,
+        prefer_global_ffmpeg=False,
     )
 
     parser_mock = mock.Mock()
@@ -318,6 +331,8 @@ def test_cli_application_uses_remote_server_when_url_provided() -> None:
         server_url="http://localhost:9005/",
         server_stream=False,
         host=None,
+        video_codec="h264",
+        prefer_global_ffmpeg=False,
     )
 
     send_calls: list[dict[str, object]] = []
@@ -514,6 +529,9 @@ def test_process_via_server_handles_multiple_files_and_warnings(
         small=False,
         server_url="http://localhost:9005",
         server_stream=True,
+        video_codec="h264",
+        host=None,
+        prefer_global_ffmpeg=False,
     )
 
     send_calls: list[dict[str, object]] = []
@@ -601,6 +619,9 @@ def test_process_via_server_handles_missing_remote_support() -> None:
         keyframe_interval_seconds=None,
         small=False,
         server_stream=False,
+        video_codec="h264",
+        host=None,
+        prefer_global_ffmpeg=False,
     )
 
     app = cli.CliApplication(

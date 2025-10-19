@@ -100,7 +100,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.options_frame, padding=0, labelwidget=basic_label_container
     )
     gui.basic_options_frame.grid(
-        row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0)
     )
     gui.basic_options_frame.columnconfigure(1, weight=1)
 
@@ -157,11 +157,31 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         default_value=0.05,
     )
 
-    gui.ttk.Label(gui.basic_options_frame, text="Processing mode").grid(
+    gui.ttk.Label(gui.basic_options_frame, text="Video codec").grid(
         row=3, column=0, sticky="w", pady=(8, 0)
     )
+    codec_choice = gui.ttk.Frame(gui.basic_options_frame)
+    codec_choice.grid(row=3, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    gui.video_codec_buttons = {}
+    for value, label in (
+        ("hevc", "h.265 (25% smaller)"),
+        ("h264", "h.264 (10% faster)"),
+        ("av1", "av1 (no advantages)"),
+    ):
+        button = gui.ttk.Radiobutton(
+            codec_choice,
+            text=label,
+            value=value,
+            variable=gui.video_codec_var,
+        )
+        button.pack(side=gui.tk.LEFT, padx=(0, 8))
+        gui.video_codec_buttons[value] = button
+
+    gui.ttk.Label(gui.basic_options_frame, text="Processing mode").grid(
+        row=4, column=0, sticky="w", pady=(8, 0)
+    )
     mode_choice = gui.ttk.Frame(gui.basic_options_frame)
-    mode_choice.grid(row=3, column=1, sticky="w", pady=(8, 0))
+    mode_choice.grid(row=4, column=1, sticky="w", pady=(8, 0))
 
     gui.ttk.Radiobutton(
         mode_choice,
@@ -179,25 +199,25 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.remote_mode_button.pack(side=gui.tk.LEFT, padx=(0, 8))
 
     gui.ttk.Label(gui.basic_options_frame, text="Server URL").grid(
-        row=4, column=0, sticky="w", pady=(8, 0)
+        row=5, column=0, sticky="w", pady=(8, 0)
     )
     gui.server_entry = gui.ttk.Entry(
         gui.basic_options_frame,
         textvariable=gui.server_url_var,
         width=40,
     )
-    gui.server_entry.grid(row=4, column=1, sticky="ew", pady=(8, 0))
+    gui.server_entry.grid(row=5, column=1, sticky="ew", pady=(8, 0))
 
     gui.server_discover_button = gui.ttk.Button(
         gui.basic_options_frame, text="Discover", command=gui._start_discovery
     )
-    gui.server_discover_button.grid(row=4, column=2, padx=(8, 0))
+    gui.server_discover_button.grid(row=5, column=2, padx=(8, 0))
 
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
-        row=5, column=0, sticky="w", pady=(8, 0)
+        row=6, column=0, sticky="w", pady=(8, 0)
     )
     theme_choice = gui.ttk.Frame(gui.basic_options_frame)
-    theme_choice.grid(row=5, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    theme_choice.grid(row=6, column=1, columnspan=2, sticky="w", pady=(8, 0))
     for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
         gui.ttk.Radiobutton(
             theme_choice,
@@ -212,10 +232,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text="Advanced",
         command=gui._toggle_advanced,
     )
-    gui.advanced_button.grid(row=3, column=0, columnspan=2, sticky="w", pady=(12, 0))
+    gui.advanced_button.grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
     gui.advanced_frame = gui.ttk.Frame(gui.options_frame, padding=0)
-    gui.advanced_frame.grid(row=4, column=0, columnspan=2, sticky="nsew")
+    gui.advanced_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
     gui.advanced_frame.columnconfigure(1, weight=1)
 
     gui.output_var = gui.tk.StringVar()
@@ -239,7 +259,18 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
 
     gui.sample_rate_var = gui.tk.StringVar(value="48000")
-    add_entry(gui, gui.advanced_frame, "Sample rate", gui.sample_rate_var, row=2)
+    add_entry(gui, gui.advanced_frame, "Sample rate", gui.sample_rate_var, row=3)
+
+    global_ffmpeg_available = getattr(gui, "global_ffmpeg_available", True)
+    gui.use_global_ffmpeg_check = gui.ttk.Checkbutton(
+        gui.advanced_frame,
+        text="Use global FFmpeg",
+        variable=gui.use_global_ffmpeg_var,
+        state=gui.tk.NORMAL if global_ffmpeg_available else gui.tk.DISABLED,
+    )
+    if not global_ffmpeg_available:
+        gui.use_global_ffmpeg_var.set(False)
+    gui.use_global_ffmpeg_check.grid(row=2, column=0, columnspan=3, sticky="w", pady=4)
 
     frame_margin_setting = gui.preferences.get("frame_margin", 2)
     try:
@@ -249,7 +280,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.preferences.update("frame_margin", frame_margin_default)
 
     gui.frame_margin_var = gui.tk.StringVar(value=str(frame_margin_default))
-    add_entry(gui, gui.advanced_frame, "Frame margin", gui.frame_margin_var, row=3)
+    add_entry(gui, gui.advanced_frame, "Frame margin", gui.frame_margin_var, row=4)
 
     min_interval = 1.0
     max_interval = 60.0
@@ -269,13 +300,13 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         )
 
     gui.ttk.Label(gui.advanced_frame, text="Keyframe interval").grid(
-        row=4, column=0, sticky="w", pady=4
+        row=5, column=0, sticky="w", pady=4
     )
 
     gui.keyframe_interval_var = gui.tk.DoubleVar(value=validated_interval)
 
     gui.keyframe_interval_value_label = gui.ttk.Label(gui.advanced_frame)
-    gui.keyframe_interval_value_label.grid(row=4, column=2, sticky="e", pady=4)
+    gui.keyframe_interval_value_label.grid(row=5, column=2, sticky="e", pady=4)
 
     keyframe_percent_samples = [
         (60.0, 0.5),
@@ -340,7 +371,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         length=240,
         highlightthickness=0,
     )
-    gui.keyframe_interval_slider.grid(row=4, column=1, sticky="ew", pady=4, padx=(0, 8))
+    gui.keyframe_interval_slider.grid(row=5, column=1, sticky="ew", pady=4, padx=(0, 8))
 
     update_keyframe_interval(str(validated_interval))
     sliders = getattr(gui, "_sliders", None)

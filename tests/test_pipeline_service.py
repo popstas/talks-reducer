@@ -88,8 +88,14 @@ def test_speed_up_video_returns_result(monkeypatch, tmp_path):
             options.output_file.write_bytes(b"fake")
         return None
 
+    ffmpeg_calls: List[bool] = []
+
+    def positional_get_ffmpeg_path(flag: bool) -> str:
+        ffmpeg_calls.append(flag)
+        return "ffmpeg"
+
     dependencies = PipelineDependencies(
-        get_ffmpeg_path=lambda: "ffmpeg",
+        get_ffmpeg_path=positional_get_ffmpeg_path,
         check_cuda_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
@@ -104,6 +110,7 @@ def test_speed_up_video_returns_result(monkeypatch, tmp_path):
     assert result.time_ratio == 1.0
     assert result.size_ratio == 1.0
     assert reporter.messages  # progress logs should be collected
+    assert ffmpeg_calls == [options.prefer_global_ffmpeg]
 
 
 def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
@@ -114,6 +121,7 @@ def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
         input_file=input_path,
         temp_folder=tmp_path / "temp",
         output_file=tmp_path / "output.mp4",
+        prefer_global_ffmpeg=True,
     )
 
     reporter = DummyReporter()
@@ -167,8 +175,14 @@ def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
             options.output_file.write_bytes(b"fallback")
         return None
 
+    ffmpeg_calls: List[bool] = []
+
+    def positional_get_ffmpeg_path(flag: bool) -> str:
+        ffmpeg_calls.append(flag)
+        return "ffmpeg"
+
     dependencies = PipelineDependencies(
-        get_ffmpeg_path=lambda: "ffmpeg",
+        get_ffmpeg_path=positional_get_ffmpeg_path,
         check_cuda_available=lambda _path: True,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", "render-cpu", True),
@@ -180,6 +194,7 @@ def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
     assert commands == ["extract", "render", "render-cpu"]
     assert result.output_file.read_bytes() == b"fallback"
     assert any("CUDA encoding failed" in msg for msg in reporter.messages)
+    assert ffmpeg_calls == [options.prefer_global_ffmpeg]
 
 
 class ImmediateStopReporter(DummyReporter):
@@ -206,8 +221,14 @@ def test_speed_up_video_cleans_temp_on_abort(monkeypatch, tmp_path):
         lambda _input, _frame_rate: {"frame_rate": 30.0, "duration": 2.0},
     )
 
+    ffmpeg_calls: List[bool] = []
+
+    def positional_get_ffmpeg_path(flag: bool) -> str:
+        ffmpeg_calls.append(flag)
+        return "ffmpeg"
+
     dependencies = PipelineDependencies(
-        get_ffmpeg_path=lambda: "ffmpeg",
+        get_ffmpeg_path=positional_get_ffmpeg_path,
         check_cuda_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
@@ -218,6 +239,7 @@ def test_speed_up_video_cleans_temp_on_abort(monkeypatch, tmp_path):
         speed_up_video(options, reporter=reporter, dependencies=dependencies)
 
     assert not temp_path.exists()
+    assert ffmpeg_calls == [options.prefer_global_ffmpeg]
 
 
 def test_speed_up_video_computes_ratios(monkeypatch, tmp_path):
@@ -279,7 +301,7 @@ def test_speed_up_video_computes_ratios(monkeypatch, tmp_path):
         return None
 
     dependencies = PipelineDependencies(
-        get_ffmpeg_path=lambda: "ffmpeg",
+        get_ffmpeg_path=lambda prefer=False: "ffmpeg",
         check_cuda_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),

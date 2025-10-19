@@ -34,7 +34,7 @@ DARK_THEME = {
     "border": "#4b5563",
     "hover": "#333333",
     "hover_text": "#ffffff",
-    "selection_background": "#333333",
+    "selection_background": "#1e1e28",
     "selection_foreground": "#f3f4f6",
 }
 

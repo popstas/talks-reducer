@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 try:
     from ..cli import gather_input_files
-    from ..ffmpeg import FFmpegNotFoundError
+    from ..ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from ..models import ProcessingOptions
     from ..pipeline import ProcessingAborted, speed_up_video
     from ..progress import ProgressHandle
@@ -62,7 +62,7 @@ except ImportError:  # pragma: no cover - handled at runtime
         sys.path.insert(0, str(PACKAGE_ROOT))
 
     from talks_reducer.cli import gather_input_files
-    from talks_reducer.ffmpeg import FFmpegNotFoundError
+    from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from talks_reducer.gui import discovery as discovery_helpers
     from talks_reducer.gui import layout as layout_helpers
     from talks_reducer.gui.preferences import GUIPreferences, determine_config_path
@@ -339,6 +339,17 @@ class TalksReducerGUI:
         self.open_after_convert_var = tk.BooleanVar(
             value=self.preferences.get("open_after_convert", True)
         )
+        stored_codec = str(self.preferences.get("video_codec", "hevc")).lower()
+        if stored_codec not in {"h264", "hevc", "av1"}:
+            stored_codec = "hevc"
+            self.preferences.update("video_codec", stored_codec)
+        prefer_global = bool(self.preferences.get("use_global_ffmpeg", False))
+        self.global_ffmpeg_available = is_global_ffmpeg_available()
+        if prefer_global and not self.global_ffmpeg_available:
+            prefer_global = False
+            self.preferences.update("use_global_ffmpeg", False)
+        self.video_codec_var = tk.StringVar(value=stored_codec)
+        self.use_global_ffmpeg_var = tk.BooleanVar(value=prefer_global)
         stored_mode = str(self.preferences.get("processing_mode", "local"))
         if stored_mode not in {"local", "remote"}:
             stored_mode = "local"
@@ -351,6 +362,8 @@ class TalksReducerGUI:
         self.open_after_convert_var.trace_add(
             "write", self._on_open_after_convert_change
         )
+        self.video_codec_var.trace_add("write", self._on_video_codec_change)
+        self.use_global_ffmpeg_var.trace_add("write", self._on_use_global_ffmpeg_change)
         self.server_url_var = tk.StringVar(
             value=str(self.preferences.get("server_url", ""))
         )
@@ -661,6 +674,18 @@ class TalksReducerGUI:
             "open_after_convert", bool(self.open_after_convert_var.get())
         )
 
+    def _on_video_codec_change(self, *_: object) -> None:
+        value = self.video_codec_var.get().strip().lower()
+        if value not in {"h264", "hevc", "av1"}:
+            value = "hevc"
+            self.video_codec_var.set(value)
+        self.preferences.update("video_codec", value)
+
+    def _on_use_global_ffmpeg_change(self, *_: object) -> None:
+        self.preferences.update(
+            "use_global_ffmpeg", bool(self.use_global_ffmpeg_var.get())
+        )
+
     def _on_processing_mode_change(self, *_: object) -> None:
         value = self.processing_mode_var.get()
         if value not in {"local", "remote"}:
@@ -862,6 +887,13 @@ class TalksReducerGUI:
             args["temp_folder"] = Path(self.temp_var.get())
         silent_threshold = float(self.silent_threshold_var.get())
         args["silent_threshold"] = round(silent_threshold, 2)
+
+        codec_value = self.video_codec_var.get().strip().lower()
+        if codec_value not in {"h264", "hevc", "av1"}:
+            codec_value = "hevc"
+            self.video_codec_var.set(codec_value)
+        args["video_codec"] = codec_value
+        args["prefer_global_ffmpeg"] = bool(self.use_global_ffmpeg_var.get())
 
         sounded_speed = float(self.sounded_speed_var.get())
         args["sounded_speed"] = round(sounded_speed, 2)
