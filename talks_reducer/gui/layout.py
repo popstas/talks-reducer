@@ -62,7 +62,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     gui.small_480_check = gui.ttk.Checkbutton(
         checkbox_frame,
-        text="Target 480p",
+        text="480p",
         variable=gui.small_480_var,
     )
     gui.small_480_check.grid(row=0, column=1, sticky="w", padx=(12, 0))
@@ -252,7 +252,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     min_interval = 1.0
     max_interval = 60.0
-    interval_resolution = 0.5
+    interval_resolution = 1.0
     keyframe_interval_setting = gui.preferences.get_float(
         "keyframe_interval_seconds", 10.0
     )
@@ -266,7 +266,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             "keyframe_interval_seconds", float(f"{validated_interval:.6f}")
         )
 
-    gui.ttk.Label(gui.advanced_frame, text="Keyframe interval (s)").grid(
+    gui.ttk.Label(gui.advanced_frame, text="Keyframe interval").grid(
         row=4, column=0, sticky="w", pady=4
     )
 
@@ -275,6 +275,16 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.keyframe_interval_value_label = gui.ttk.Label(gui.advanced_frame)
     gui.keyframe_interval_value_label.grid(row=4, column=2, sticky="e", pady=4)
 
+    base_keyframe_interval = 10.0
+    base_keyframe_share = 0.12
+
+    def estimate_keyframe_overhead(interval_seconds: float) -> float:
+        """Estimate the percentage change in keyframe data vs the default interval."""
+
+        share = base_keyframe_share * (base_keyframe_interval / interval_seconds)
+        delta = (share - base_keyframe_share) * 100.0
+        return delta
+
     def update_keyframe_interval(value: str) -> None:
         numeric = float(value)
         clamped = max(min_interval, min(max_interval, numeric))
@@ -282,7 +292,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         quantized = min_interval + steps * interval_resolution
         if abs(gui.keyframe_interval_var.get() - quantized) > 1e-9:
             gui.keyframe_interval_var.set(quantized)
-        gui.keyframe_interval_value_label.configure(text=f"{quantized:.1f}s")
+        delta_percent = estimate_keyframe_overhead(quantized)
+        gui.keyframe_interval_value_label.configure(
+            text=f"{quantized:.0f}s, {delta_percent:+.0f}%"
+        )
         gui.preferences.update("keyframe_interval_seconds", float(f"{quantized:.6f}"))
 
     gui.keyframe_interval_slider = gui.tk.Scale(
