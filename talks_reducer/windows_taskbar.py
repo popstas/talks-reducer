@@ -69,6 +69,7 @@ else:  # pragma: no cover - requires Windows runtime
     IID_ITASKBARLIST3 = "{EA1AFB91-9E28-4B86-90E9-9E9F8A5A2B2A}"
     IID_ITASKBARLIST4 = "{C43DC798-95D1-4BEA-9030-BB99E2983A1A}"
     E_NOINTERFACE = 0x80004002
+    REGDB_E_CLASSNOTREG = 0x80040154
     RPC_E_CHANGED_MODE = 0x80010106
 
     logger = logging.getLogger(__name__)
@@ -202,13 +203,14 @@ else:  # pragma: no cover - requires Windows runtime
                     return iface
                 except pywintypes.com_error as exc:
                     last_error = exc
-                    if exc.hresult != E_NOINTERFACE:
+                    if exc.hresult not in (E_NOINTERFACE, REGDB_E_CLASSNOTREG):
                         self._handle_creation_failure(
                             exc, f"CoCreateInstance for {label}"
                         )
                     logger.debug(
-                        "Direct %s activation failed with E_NOINTERFACE; attempting fallback",
+                        "Direct %s activation failed with HRESULT 0x%08X; attempting fallback",
                         label,
+                        exc.hresult & 0xFFFFFFFF,
                     )
 
             try:

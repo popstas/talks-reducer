@@ -48,8 +48,11 @@ class FakeTaskbarList:
         return self._target
 
 
-@pytest.mark.parametrize("use_query_interface", [True, False])
-def test_taskbar_progress_uses_pywin32(monkeypatch, use_query_interface):
+@pytest.mark.parametrize(
+    "direct_error",
+    [None, 0x80004002, 0x80040154],
+)
+def test_taskbar_progress_uses_pywin32(monkeypatch, direct_error):
     init_calls: list[tuple[str, int | None]] = []
     recorded: list[tuple[str, str]] = []
     fake_interface = FakeTaskbarList3()
@@ -58,17 +61,17 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, use_query_interface):
 
     def co_create_instance(clsid: str, _outer, _ctx: int, iid: str):
         recorded.append((clsid, iid))
-        if not use_query_interface and iid.endswith("2B2A}"):
-            # Direct ITaskbarList3 activation succeeds.
-            return fake_interface
-        if iid.endswith("2B2A}") and use_query_interface:
-            # Simulate E_NOINTERFACE so the fallback path runs.
-            raise FakeComError(0x80004002)
+        if iid.endswith("2B2A}"):
+            if direct_error is None:
+                # Direct ITaskbarList3 activation succeeds.
+                return fake_interface
+            # Simulate failure so the fallback path runs.
+            raise FakeComError(direct_error)
         if iid.endswith("3A1A}"):
-            if use_query_interface:
-                raise FakeComError(0x80004002)
-            return fake_interface
-        if iid.endswith("A090}") and use_query_interface:
+            if direct_error is None:
+                return fake_interface
+            raise FakeComError(direct_error)
+        if iid.endswith("A090}") and direct_error is not None:
             nonlocal base_iface
             base_iface = FakeTaskbarList(fake_interface)
             return base_iface
@@ -107,7 +110,7 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, use_query_interface):
 
     assert init_calls == [("init_ex", 2), ("uninit", None)]
     assert recorded[0][1].endswith("2B2A}")
-    if use_query_interface:
+    if direct_error is not None:
         # Expect fallback path to probe v4, then create ITaskbarList before querying for v3.
         assert recorded[1][1].endswith("3A1A}")
         assert recorded[2][1].endswith("A090}")
