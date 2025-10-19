@@ -17,7 +17,7 @@ from typing import Callable, Iterator, Optional, Sequence, cast
 
 import gradio as gr
 
-from talks_reducer.ffmpeg import FFmpegNotFoundError
+from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
 from talks_reducer.icons import find_icon_path
 from talks_reducer.models import ProcessingOptions, ProcessingResult
 from talks_reducer.pipeline import speed_up_video
@@ -449,6 +449,7 @@ def build_interface() -> gr.Blocks:
     """Construct the Gradio Blocks application for the simple web UI."""
 
     server_identity = _describe_server_host()
+    global_ffmpeg_available = is_global_ffmpeg_available()
 
     app_version = resolve_version()
     version_suffix = (
@@ -487,10 +488,16 @@ def build_interface() -> gr.Blocks:
             label="Video codec",
         )
 
+        global_ffmpeg_info = (
+            "Prefer the FFmpeg binary from PATH instead of the bundled build."
+            if global_ffmpeg_available
+            else "Global FFmpeg not detected; the bundled build will be used."
+        )
         use_global_ffmpeg_checkbox = gr.Checkbox(
             label="Use global FFmpeg",
             value=False,
-            info="Prefer the FFmpeg binary from PATH instead of the bundled build.",
+            info=global_ffmpeg_info,
+            interactive=global_ffmpeg_available,
         )
 
         with gr.Column():

@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 try:
     from ..cli import gather_input_files
-    from ..ffmpeg import FFmpegNotFoundError
+    from ..ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from ..models import ProcessingOptions
     from ..pipeline import ProcessingAborted, speed_up_video
     from ..progress import ProgressHandle
@@ -62,7 +62,7 @@ except ImportError:  # pragma: no cover - handled at runtime
         sys.path.insert(0, str(PACKAGE_ROOT))
 
     from talks_reducer.cli import gather_input_files
-    from talks_reducer.ffmpeg import FFmpegNotFoundError
+    from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from talks_reducer.gui import discovery as discovery_helpers
     from talks_reducer.gui import layout as layout_helpers
     from talks_reducer.gui.preferences import GUIPreferences, determine_config_path
@@ -343,10 +343,13 @@ class TalksReducerGUI:
         if stored_codec not in {"h264", "av1"}:
             stored_codec = "h264"
             self.preferences.update("video_codec", stored_codec)
+        prefer_global = bool(self.preferences.get("use_global_ffmpeg", False))
+        self.global_ffmpeg_available = is_global_ffmpeg_available()
+        if prefer_global and not self.global_ffmpeg_available:
+            prefer_global = False
+            self.preferences.update("use_global_ffmpeg", False)
         self.video_codec_var = tk.StringVar(value=stored_codec)
-        self.use_global_ffmpeg_var = tk.BooleanVar(
-            value=bool(self.preferences.get("use_global_ffmpeg", False))
-        )
+        self.use_global_ffmpeg_var = tk.BooleanVar(value=prefer_global)
         stored_mode = str(self.preferences.get("processing_mode", "local"))
         if stored_mode not in {"local", "remote"}:
             stored_mode = "local"

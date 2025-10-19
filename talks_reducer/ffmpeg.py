@@ -185,6 +185,7 @@ def _resolve_ffprobe_path(*, prefer_global: bool = False) -> str:
 
 _FFMPEG_PATH_CACHE: dict[bool, Optional[str]] = {False: None, True: None}
 _FFPROBE_PATH_CACHE: dict[bool, Optional[str]] = {False: None, True: None}
+_GLOBAL_FFMPEG_AVAILABLE: Optional[bool] = None
 
 
 def get_ffmpeg_path(prefer_global: bool = False) -> str:
@@ -205,6 +206,50 @@ def get_ffprobe_path(prefer_global: bool = False) -> str:
         cached = _resolve_ffprobe_path(prefer_global=prefer_global)
         _FFPROBE_PATH_CACHE[prefer_global] = cached
     return cached
+
+
+def _normalize_executable_path(candidate: Optional[str]) -> Optional[str]:
+    """Return an absolute path for *candidate* when it can be resolved."""
+
+    if not candidate:
+        return None
+
+    if os.path.isfile(candidate):
+        return os.path.abspath(candidate)
+
+    resolved = shutil_which(candidate)
+    if resolved:
+        return os.path.abspath(resolved)
+
+    return os.path.abspath(candidate) if os.path.exists(candidate) else None
+
+
+def is_global_ffmpeg_available() -> bool:
+    """Return ``True`` when a non-bundled FFmpeg binary is available."""
+
+    global _GLOBAL_FFMPEG_AVAILABLE
+    if _GLOBAL_FFMPEG_AVAILABLE is not None:
+        return _GLOBAL_FFMPEG_AVAILABLE
+
+    global_candidate = _normalize_executable_path(find_ffmpeg(prefer_global=True))
+    if not global_candidate:
+        _GLOBAL_FFMPEG_AVAILABLE = False
+        return False
+
+    static_candidate = _normalize_executable_path(_find_static_ffmpeg())
+    if static_candidate is None:
+        _GLOBAL_FFMPEG_AVAILABLE = True
+        return True
+
+    try:
+        same_binary = os.path.samefile(global_candidate, static_candidate)
+    except (FileNotFoundError, OSError, ValueError):
+        same_binary = os.path.normcase(global_candidate) == os.path.normcase(
+            static_candidate
+        )
+
+    _GLOBAL_FFMPEG_AVAILABLE = not same_binary
+    return _GLOBAL_FFMPEG_AVAILABLE
 
 
 _ENCODER_LISTING: dict[str, str] = {}

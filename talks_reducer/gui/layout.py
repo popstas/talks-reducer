@@ -257,11 +257,15 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.sample_rate_var = gui.tk.StringVar(value="48000")
     add_entry(gui, gui.advanced_frame, "Sample rate", gui.sample_rate_var, row=3)
 
+    global_ffmpeg_available = getattr(gui, "global_ffmpeg_available", True)
     gui.use_global_ffmpeg_check = gui.ttk.Checkbutton(
         gui.advanced_frame,
         text="Use global FFmpeg",
         variable=gui.use_global_ffmpeg_var,
+        state=gui.tk.NORMAL if global_ffmpeg_available else gui.tk.DISABLED,
     )
+    if not global_ffmpeg_available:
+        gui.use_global_ffmpeg_var.set(False)
     gui.use_global_ffmpeg_check.grid(row=2, column=0, columnspan=3, sticky="w", pady=4)
 
     frame_margin_setting = gui.preferences.get("frame_margin", 2)

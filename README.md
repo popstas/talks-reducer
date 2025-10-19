@@ -126,7 +126,7 @@ item (or relaunch the GUI separately) whenever you want to reopen it. The tray
 no longer opens a browser automatically—pass `--open-browser` if you prefer the
 web page to launch as soon as the server is ready.
 
-This opens a local web page featuring a drag-and-drop upload zone, **Small video** and **Target 480p** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between H.264 and AV1, a **Use global FFmpeg** toggle to prioritise the system binary when you need encoders the bundled build lacks, a live
+This opens a local web page featuring a drag-and-drop upload zone, **Small video** and **Target 480p** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between H.264 and AV1, a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a live
 progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current
 Talks Reducer version so you can confirm which build the server is running. Once the job completes you can inspect the resulting
 compression ratio and download the rendered video directly from the page.
@@ -140,7 +140,7 @@ to the configured server—the **Remote** option becomes available as soon as a
 URL is supplied. Leave the toggle on **Local** to keep rendering on this
 machine even if a server is saved; switch to **Remote** to hand jobs off while
 the GUI downloads the finished files automatically. While you're there, enable
-**Use global FFmpeg** whenever your PATH provides newer GPU encoders and adjust
+**Use global FFmpeg** whenever your PATH provides newer GPU encoders—the toggle disables itself when no system binary is available—and adjust
 **Keyframe interval (s)** under **Advanced** to balance scroll smoothness and
 output size without touching the CLI.
 
@@ -148,7 +148,7 @@ output size without touching the CLI.
 
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
 2. Drag a video onto the **Video file** drop zone or click to browse and select one from disk.
-3. **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear both boxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the speedy H.264 default and denser AV1 compression, and enable **Use global FFmpeg** if your system FFmpeg exposes GPU encoders that the bundled build omits, before you submit.
+3. **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear both boxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the speedy H.264 default and denser AV1 compression, and enable **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the bundled build omits, before you submit.
 4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives.
 5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally.
 

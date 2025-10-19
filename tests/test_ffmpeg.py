@@ -25,6 +25,7 @@ def stub_static_ffmpeg(monkeypatch):
     monkeypatch.setattr(
         ffmpeg, "_FFPROBE_PATH_CACHE", {False: None, True: None}, raising=False
     )
+    monkeypatch.setattr(ffmpeg, "_GLOBAL_FFMPEG_AVAILABLE", None, raising=False)
     yield
     sys.modules.pop("static_ffmpeg", None)
 
@@ -209,6 +210,55 @@ def test_get_ffprobe_path_caches(monkeypatch):
     assert ffmpeg.get_ffprobe_path(prefer_global=True) == "cached-global"
     assert ffmpeg.get_ffprobe_path(prefer_global=True) == "cached-global"
     assert calls == ["bundled", "global"]
+
+
+def test_is_global_ffmpeg_available_when_only_system(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "find_ffmpeg", lambda prefer_global=False: "ffmpeg")
+    monkeypatch.setattr(ffmpeg, "_find_static_ffmpeg", lambda: None)
+    monkeypatch.setattr(
+        ffmpeg, "shutil_which", lambda cmd: "/usr/bin/ffmpeg" if cmd == "ffmpeg" else None
+    )
+
+    assert ffmpeg.is_global_ffmpeg_available() is True
+
+
+def test_is_global_ffmpeg_available_false_when_matches_static(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "find_ffmpeg", lambda prefer_global=False: "ffmpeg")
+    monkeypatch.setattr(ffmpeg, "_find_static_ffmpeg", lambda: "/opt/static/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg.os.path,
+        "isfile",
+        lambda path: path in {"/opt/static/ffmpeg"},
+    )
+    monkeypatch.setattr(
+        ffmpeg, "shutil_which", lambda cmd: "/opt/static/ffmpeg" if cmd == "ffmpeg" else None
+    )
+    monkeypatch.setattr(
+        ffmpeg.os.path,
+        "samefile",
+        lambda left, right: ffmpeg.os.path.normcase(left)
+        == ffmpeg.os.path.normcase(right),
+    )
+
+    assert ffmpeg.is_global_ffmpeg_available() is False
+
+
+def test_is_global_ffmpeg_available_true_when_both_present(monkeypatch):
+    monkeypatch.setattr(
+        ffmpeg,
+        "find_ffmpeg",
+        lambda prefer_global=False: "/usr/bin/ffmpeg" if prefer_global else "/opt/static/ffmpeg",
+    )
+    monkeypatch.setattr(ffmpeg, "_find_static_ffmpeg", lambda: "/opt/static/ffmpeg")
+    monkeypatch.setattr(ffmpeg.os.path, "isfile", lambda path: True)
+    monkeypatch.setattr(
+        ffmpeg.os.path,
+        "samefile",
+        lambda left, right: ffmpeg.os.path.normcase(left)
+        == ffmpeg.os.path.normcase(right),
+    )
+
+    assert ffmpeg.is_global_ffmpeg_available() is True
 
 
 def test_check_cuda_available_detects_nvenc(monkeypatch):
