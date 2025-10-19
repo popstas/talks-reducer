@@ -84,18 +84,6 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     gui.advanced_visible = gui.tk.BooleanVar(value=False)
 
-    codec_frame = gui.ttk.Frame(gui.options_frame)
-    codec_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
-    gui.ttk.Label(codec_frame, text="Video codec").grid(row=0, column=0, sticky="w")
-    gui.video_codec_combobox = gui.ttk.Combobox(
-        codec_frame,
-        textvariable=gui.video_codec_var,
-        values=("h264", "av1"),
-        state="readonly",
-        width=8,
-    )
-    gui.video_codec_combobox.grid(row=0, column=1, sticky="w", padx=(12, 0))
-
     basic_label_container = gui.ttk.Frame(gui.options_frame)
     basic_label = gui.ttk.Label(basic_label_container, text="Basic options")
     basic_label.pack(side=gui.tk.LEFT)
@@ -112,7 +100,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.options_frame, padding=0, labelwidget=basic_label_container
     )
     gui.basic_options_frame.grid(
-        row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0)
     )
     gui.basic_options_frame.columnconfigure(1, weight=1)
 
@@ -169,11 +157,25 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         default_value=0.05,
     )
 
-    gui.ttk.Label(gui.basic_options_frame, text="Processing mode").grid(
+    gui.ttk.Label(gui.basic_options_frame, text="Video codec").grid(
         row=3, column=0, sticky="w", pady=(8, 0)
     )
+    gui.video_codec_combobox = gui.ttk.Combobox(
+        gui.basic_options_frame,
+        textvariable=gui.video_codec_var,
+        values=("h264", "av1"),
+        state="readonly",
+        width=8,
+    )
+    gui.video_codec_combobox.grid(
+        row=3, column=1, sticky="w", pady=(8, 0), padx=(12, 0)
+    )
+
+    gui.ttk.Label(gui.basic_options_frame, text="Processing mode").grid(
+        row=4, column=0, sticky="w", pady=(8, 0)
+    )
     mode_choice = gui.ttk.Frame(gui.basic_options_frame)
-    mode_choice.grid(row=3, column=1, sticky="w", pady=(8, 0))
+    mode_choice.grid(row=4, column=1, sticky="w", pady=(8, 0))
 
     gui.ttk.Radiobutton(
         mode_choice,
@@ -191,25 +193,25 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.remote_mode_button.pack(side=gui.tk.LEFT, padx=(0, 8))
 
     gui.ttk.Label(gui.basic_options_frame, text="Server URL").grid(
-        row=4, column=0, sticky="w", pady=(8, 0)
+        row=5, column=0, sticky="w", pady=(8, 0)
     )
     gui.server_entry = gui.ttk.Entry(
         gui.basic_options_frame,
         textvariable=gui.server_url_var,
         width=40,
     )
-    gui.server_entry.grid(row=4, column=1, sticky="ew", pady=(8, 0))
+    gui.server_entry.grid(row=5, column=1, sticky="ew", pady=(8, 0))
 
     gui.server_discover_button = gui.ttk.Button(
         gui.basic_options_frame, text="Discover", command=gui._start_discovery
     )
-    gui.server_discover_button.grid(row=4, column=2, padx=(8, 0))
+    gui.server_discover_button.grid(row=5, column=2, padx=(8, 0))
 
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
-        row=5, column=0, sticky="w", pady=(8, 0)
+        row=6, column=0, sticky="w", pady=(8, 0)
     )
     theme_choice = gui.ttk.Frame(gui.basic_options_frame)
-    theme_choice.grid(row=5, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    theme_choice.grid(row=6, column=1, columnspan=2, sticky="w", pady=(8, 0))
     for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
         gui.ttk.Radiobutton(
             theme_choice,
@@ -224,10 +226,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text="Advanced",
         command=gui._toggle_advanced,
     )
-    gui.advanced_button.grid(row=3, column=0, columnspan=2, sticky="w", pady=(12, 0))
+    gui.advanced_button.grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
     gui.advanced_frame = gui.ttk.Frame(gui.options_frame, padding=0)
-    gui.advanced_frame.grid(row=4, column=0, columnspan=2, sticky="nsew")
+    gui.advanced_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
     gui.advanced_frame.columnconfigure(1, weight=1)
 
     gui.output_var = gui.tk.StringVar()
