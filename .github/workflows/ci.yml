@@ -69,6 +69,16 @@ jobs:
         run: bash scripts/build-gui.sh --clean --zip
         shell: bash
 
+      - name: Rename macOS artifact
+        if: matrix.os == 'macos-latest'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for archive in dist/talks-reducer.app-*.zip; do
+            mv "$archive" "${archive/talks-reducer.app/talks-reducer-macos.app}"
+          done
+        shell: bash
+
       - name: Upload PyInstaller artifact
         uses: actions/upload-artifact@v4
         with:
