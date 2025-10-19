@@ -578,9 +578,14 @@ def test_build_video_commands_hevc_cuda(monkeypatch):
     )
 
     assert "-c:v hevc_nvenc" in command
-    assert "-preset p2" in command
+    assert "-preset p6" in command
+    assert "-rc vbr" in command
     assert "-b:v 0" in command
-    assert "-cq 27" in command
+    assert "-cq 32" in command
+    assert "-spatial-aq 1" in command
+    assert "-temporal-aq 1" in command
+    assert "-rc-lookahead 32" in command
+    assert "-multipass fullres" in command
     assert "-g 900" in command
     assert fallback is not None
     assert "-c:v libx265" in fallback

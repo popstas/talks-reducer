@@ -60,8 +60,10 @@ Remote jobs respect the same timing controls as the local CLI. Provide
 server trims and accelerates segments without falling back to local mode.
 
 Need a different compression target? Add `--video-codec hevc` to render with
-H.265/HEVC (via NVENC when available) or `--video-codec av1` to favor modern
-AV1 output, or leave the default `h264` in place for the fastest turnaround.
+H.265/HEVC (via NVENC when available) using a slower preset, adaptive
+quantization, and multipass lookahead tuned for smaller files, or
+`--video-codec av1` to favor modern AV1 output. Leave the default `h264` in
+place for the fastest turnaround.
 Every interface—the CLI, GUI, and browser UI—shares the same encoder choices so
 you can pick once and get consistent results everywhere.
 

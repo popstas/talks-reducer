@@ -564,9 +564,14 @@ def build_video_commands(
             use_cuda_encoder = True
             video_encoder_args = [
                 "-c:v hevc_nvenc",
-                "-preset p2",
+                "-preset p6",
+                "-rc vbr",
                 "-b:v 0",
-                "-cq 27",
+                "-cq 32",
+                "-spatial-aq 1",
+                "-temporal-aq 1",
+                "-rc-lookahead 32",
+                "-multipass fullres",
             ]
             if small:
                 video_encoder_args = video_encoder_args + keyframe_args
