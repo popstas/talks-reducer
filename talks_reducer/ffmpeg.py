@@ -171,43 +171,77 @@ def get_ffprobe_path() -> str:
     return _FFPROBE_PATH
 
 
-def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
-    """Return whether CUDA hardware encoders are usable in the FFmpeg build."""
+_ENCODER_LISTING: Optional[str] = None
 
-    # Hide console window on Windows
+
+def _probe_ffmpeg_output(args: List[str]) -> Optional[str]:
+    """Return stdout from an FFmpeg invocation, handling common failures."""
+
     creationflags = 0
     if sys.platform == "win32":
         # CREATE_NO_WINDOW = 0x08000000
         creationflags = 0x08000000
 
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=creationflags,
+        )
+    except (
+        subprocess.TimeoutExpired,
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+    ):
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    return result.stdout
+
+
+def _get_encoder_listing(ffmpeg_path: Optional[str] = None) -> Optional[str]:
+    """Return the cached FFmpeg encoder listing output."""
+
+    global _ENCODER_LISTING
+    if _ENCODER_LISTING is not None:
+        return _ENCODER_LISTING
+
     ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+    output = _probe_ffmpeg_output([ffmpeg_path, "-hide_banner", "-encoders"])
+    if output is None:
+        return None
 
-    def _probe_ffmpeg(args: List[str]) -> Optional[str]:
-        try:
-            result = subprocess.run(
-                args,
-                capture_output=True,
-                text=True,
-                timeout=5,
-                creationflags=creationflags,
-            )
-        except (
-            subprocess.TimeoutExpired,
-            subprocess.CalledProcessError,
-            FileNotFoundError,
-        ):
-            return None
+    _ENCODER_LISTING = output.lower()
+    return _ENCODER_LISTING
 
-        if result.returncode != 0:
-            return None
 
-        return result.stdout.lower()
+def encoder_available(encoder_name: str, ffmpeg_path: Optional[str] = None) -> bool:
+    """Return True if ``encoder_name`` is listed in the FFmpeg encoder catalog."""
 
-    hwaccels_output = _probe_ffmpeg([ffmpeg_path, "-hide_banner", "-hwaccels"])
-    if not hwaccels_output or "cuda" not in hwaccels_output:
+    listing = _get_encoder_listing(ffmpeg_path)
+    if not listing:
         return False
 
-    encoder_output = _probe_ffmpeg([ffmpeg_path, "-hide_banner", "-encoders"])
+    pattern = rf"\b{re.escape(encoder_name.lower())}\b"
+    return re.search(pattern, listing) is not None
+
+
+def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
+    """Return whether CUDA hardware encoders are usable in the FFmpeg build."""
+
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+
+    hwaccels_output = _probe_ffmpeg_output(
+        [ffmpeg_path, "-hide_banner", "-hwaccels"]
+    )
+    if not hwaccels_output or "cuda" not in hwaccels_output.lower():
+        return False
+
+    encoder_output = _get_encoder_listing(ffmpeg_path)
     if not encoder_output:
         return False
 
@@ -410,7 +444,11 @@ def build_video_commands(
         global_parts.append("-filter_complex_threads 1")
 
     if codec_choice == "av1":
-        cpu_encoder_base = ["-c:v libaom-av1", "-crf 32", "-b:v 0", "-row-mt 1"]
+        if encoder_available("libsvtav1", ffmpeg_path=ffmpeg_path):
+            cpu_encoder_base = ["-c:v libsvtav1", "-preset 6", "-crf 28", "-b:v 0"]
+        else:
+            cpu_encoder_base = ["-c:v libaom-av1", "-crf 32", "-b:v 0", "-row-mt 1"]
+
         if small:
             cpu_encoder_args = cpu_encoder_base + keyframe_args
         else:

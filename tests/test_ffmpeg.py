@@ -18,6 +18,7 @@ def stub_static_ffmpeg(monkeypatch):
 
     stub = SimpleNamespace(add_paths=lambda: False)
     monkeypatch.setitem(sys.modules, "static_ffmpeg", stub)
+    monkeypatch.setattr(ffmpeg, "_ENCODER_LISTING", None)
     yield
     sys.modules.pop("static_ffmpeg", None)
 
@@ -359,6 +360,9 @@ def test_build_video_commands_custom_keyframe_interval(monkeypatch):
 
 def test_build_video_commands_large_cuda(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: False
+    )
 
     command, fallback, use_cuda = ffmpeg.build_video_commands(
         "input.mp4",
@@ -380,6 +384,9 @@ def test_build_video_commands_large_cuda(monkeypatch):
 
 def test_build_video_commands_large_cpu(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: False
+    )
 
     command, fallback, use_cuda = ffmpeg.build_video_commands(
         "input.mp4",
@@ -398,6 +405,9 @@ def test_build_video_commands_large_cpu(monkeypatch):
 
 def test_build_video_commands_av1_cuda(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: False
+    )
 
     command, fallback, use_cuda = ffmpeg.build_video_commands(
         "input.mp4",
@@ -421,6 +431,9 @@ def test_build_video_commands_av1_cuda(monkeypatch):
 
 def test_build_video_commands_av1_cpu(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: False
+    )
 
     command, fallback, use_cuda = ffmpeg.build_video_commands(
         "input.mp4",
@@ -437,6 +450,32 @@ def test_build_video_commands_av1_cpu(monkeypatch):
     assert "-crf 32" in command
     assert fallback is None
     assert not use_cuda
+
+
+def test_build_video_commands_av1_cuda_svt_fallback(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    def fake_encoder_available(name: str, ffmpeg_path: Optional[str] = None) -> bool:
+        return name == "libsvtav1"
+
+    monkeypatch.setattr(ffmpeg, "encoder_available", fake_encoder_available)
+
+    command, fallback, use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=True,
+        small=True,
+        frame_rate=30.0,
+        video_codec="av1",
+    )
+
+    assert "-c:v av1_nvenc" in command
+    assert fallback is not None
+    assert "-c:v libsvtav1" in fallback
+    assert "-preset 6" in fallback
+    assert use_cuda
 
 
 class FakeStream:
