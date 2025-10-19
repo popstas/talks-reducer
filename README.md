@@ -59,6 +59,13 @@ Remote jobs respect the same timing controls as the local CLI. Provide
 `--silent-threshold`, `--sounded-speed`, or `--silent-speed` to tweak how the
 server trims and accelerates segments without falling back to local mode.
 
+Tuned the jumpiness of the new scrolling-friendly preset in commit
+`c25a8f7b2dcb2735782bff71b02ee6a30445fa9e` and want to claw some bitrate back?
+Pass `--keyframe-interval 15` (or any other positive number of seconds) to space
+keyframes further apart when using `--small`, trading seek responsiveness for a
+smaller output file. The advanced GUI slider defaults to 30 seconds and lets you
+pick anywhere between snappy one-second GOPs and ultra-light 60-second spacing.
+
 Want to see progress as the remote server works? Add `--server-stream` so the
 CLI prints live progress bars and log lines while you wait for the download.
 
@@ -122,7 +129,9 @@ progress, showing the scanned/total host count as `scanned / total`. A new
 to the configured server—the **Remote** option becomes available as soon as a
 URL is supplied. Leave the toggle on **Local** to keep rendering on this
 machine even if a server is saved; switch to **Remote** to hand jobs off while
-the GUI downloads the finished files automatically.
+the GUI downloads the finished files automatically. While you're there, adjust
+**Keyframe interval (s)** under **Advanced** to balance scroll smoothness and
+output size without touching the CLI.
 
 ### Uploading and retrieving a processed video
 

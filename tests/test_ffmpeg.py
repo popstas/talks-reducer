@@ -302,13 +302,13 @@ def test_build_video_commands_small_cuda(monkeypatch):
 
     assert "-c:v h264_nvenc" in command
     assert "-forced-idr 1" in command
-    assert "-g 60" in command
-    assert "-keyint_min 60" in command
-    assert "-force_key_frames expr:gte(t,n_forced*2)" in command
+    assert "-g 900" in command
+    assert "-keyint_min 900" in command
+    assert "-force_key_frames expr:gte(t,n_forced*30)" in command
     assert fallback is not None and "-c:v libx264" in fallback
-    assert "-force_key_frames expr:gte(t,n_forced*2)" in fallback
+    assert "-force_key_frames expr:gte(t,n_forced*30)" in fallback
     assert "-forced-idr 1" not in fallback
-    assert "-g 60" in fallback
+    assert "-g 900" in fallback
     assert use_cuda
 
 
@@ -326,10 +326,31 @@ def test_build_video_commands_small_cpu(monkeypatch):
     )
 
     assert "-c:v libx264" in command
-    assert "-g 60" in command
-    assert "-keyint_min 60" in command
-    assert "-force_key_frames expr:gte(t,n_forced*2)" in command
+    assert "-g 900" in command
+    assert "-keyint_min 900" in command
+    assert "-force_key_frames expr:gte(t,n_forced*30)" in command
     assert "-forced-idr 1" not in command
+    assert fallback is None
+    assert not use_cuda
+
+
+def test_build_video_commands_custom_keyframe_interval(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command, fallback, use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        small=True,
+        frame_rate=30.0,
+        keyframe_interval_seconds=1.5,
+    )
+
+    assert "-g 45" in command
+    assert "-keyint_min 45" in command
+    assert "-force_key_frames expr:gte(t,n_forced*1.5)" in command
     assert fallback is None
     assert not use_cuda
 
