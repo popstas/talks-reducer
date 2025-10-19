@@ -97,6 +97,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override the keyframe spacing in seconds when using --small. Defaults to 30.",
     )
     parser.add_argument(
+        "--video-codec",
+        choices=["h264", "av1"],
+        default="h264",
+        help="Select the video encoder used for the final render (default: h264).",
+    )
+    parser.add_argument(
         "--small",
         action="store_true",
         help="Apply small file optimizations: resize video to 720p (or 480p with --480), audio to 128k bitrate, best compression (uses CUDA if available).",
@@ -239,6 +245,8 @@ class CliApplication:
                 option_kwargs["keyframe_interval_seconds"] = float(
                     local_options["keyframe_interval_seconds"]
                 )
+            if "video_codec" in local_options:
+                option_kwargs["video_codec"] = str(local_options["video_codec"])
             if "small" in local_options:
                 option_kwargs["small"] = bool(local_options["small"])
             if local_options.get("small_480"):
@@ -302,6 +310,8 @@ class CliApplication:
             remote_option_values["silent_speed"] = float(parsed_args.silent_speed)
         if parsed_args.sounded_speed is not None:
             remote_option_values["sounded_speed"] = float(parsed_args.sounded_speed)
+        if getattr(parsed_args, "video_codec", None):
+            remote_option_values["video_codec"] = str(parsed_args.video_codec)
 
         unsupported_options: List[str] = []
         for name in (

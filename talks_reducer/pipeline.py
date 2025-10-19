@@ -255,6 +255,7 @@ def speed_up_video(
             small=options.small,
             frame_rate=frame_rate,
             keyframe_interval_seconds=options.keyframe_interval_seconds,
+            video_codec=options.video_codec,
         )
     )
 

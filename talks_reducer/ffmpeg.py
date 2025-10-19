@@ -212,7 +212,8 @@ def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
         return False
 
     return any(
-        encoder in encoder_output for encoder in ["h264_nvenc", "hevc_nvenc", "nvenc"]
+        encoder in encoder_output
+        for encoder in ["h264_nvenc", "hevc_nvenc", "av1_nvenc", "nvenc"]
     )
 
 
@@ -358,6 +359,7 @@ def build_video_commands(
     small: bool,
     frame_rate: Optional[float] = None,
     keyframe_interval_seconds: float = 30.0,
+    video_codec: str = "h264",
 ) -> Tuple[str, Optional[str], bool]:
     """Create the FFmpeg command strings used to render the final video output.
 
@@ -383,10 +385,15 @@ def build_video_commands(
         f'-filter_script:v "{filter_script}"',
     ]
 
+    codec_choice = (video_codec or "h264").strip().lower()
+    if codec_choice not in {"h264", "av1"}:
+        codec_choice = "h264"
+
     video_encoder_args: List[str]
     fallback_encoder_args: List[str] = []
     use_cuda_encoder = False
 
+    keyframe_args: List[str] = []
     if small:
         if keyframe_interval_seconds <= 0:
             keyframe_interval_seconds = 30.0
@@ -394,45 +401,60 @@ def build_video_commands(
         gop_size = 900
         if frame_rate and frame_rate > 0:
             gop_size = max(1, int(round(frame_rate * keyframe_interval_seconds)))
-        small_keyframe_args = [
+        keyframe_args = [
             f"-g {gop_size}",
             f"-keyint_min {gop_size}",
             f"-force_key_frames expr:gte(t,n_forced*{formatted_interval})",
         ]
-        if cuda_available:
-            use_cuda_encoder = True
-            video_encoder_args = [
-                "-c:v h264_nvenc",
-                "-preset p1",
-                "-cq 28",
-                "-tune",
-                "ll",
-                "-forced-idr 1",
-            ] + small_keyframe_args
-            fallback_encoder_args = [
-                "-c:v libx264",
-                "-preset veryfast",
-                "-crf 24",
-                "-tune",
-                "zerolatency",
-            ] + small_keyframe_args
-        else:
-            video_encoder_args = [
-                "-c:v libx264",
-                "-preset veryfast",
-                "-crf 24",
-                "-tune",
-                "zerolatency",
-            ] + small_keyframe_args
     else:
         global_parts.append("-filter_complex_threads 1")
-        if cuda_available:
-            video_encoder_args = ["-c:v h264_nvenc"]
-            use_cuda_encoder = True
+
+    if codec_choice == "av1":
+        cpu_encoder_base = ["-c:v libaom-av1", "-crf 32", "-b:v 0", "-row-mt 1"]
+        if small:
+            cpu_encoder_args = cpu_encoder_base + keyframe_args
         else:
-            # Cannot use copy codec when applying filters (speed modifications)
-            # Use a fast software encoder instead
-            video_encoder_args = ["-c:v libx264", "-preset veryfast", "-crf 23"]
+            cpu_encoder_args = cpu_encoder_base
+
+        if cuda_available:
+            use_cuda_encoder = True
+            video_encoder_args = ["-c:v av1_nvenc", "-preset p5", "-cq 30"]
+            if small:
+                video_encoder_args = video_encoder_args + keyframe_args
+            fallback_encoder_args = cpu_encoder_args
+        else:
+            video_encoder_args = cpu_encoder_args
+    else:
+        # Default to H.264
+        if small:
+            cpu_encoder_args = [
+                "-c:v libx264",
+                "-preset veryfast",
+                "-crf 24",
+                "-tune",
+                "zerolatency",
+            ] + keyframe_args
+            if cuda_available:
+                use_cuda_encoder = True
+                video_encoder_args = [
+                    "-c:v h264_nvenc",
+                    "-preset p1",
+                    "-cq 28",
+                    "-tune",
+                    "ll",
+                    "-forced-idr 1",
+                ] + keyframe_args
+                fallback_encoder_args = cpu_encoder_args
+            else:
+                video_encoder_args = cpu_encoder_args
+        else:
+            software_args = ["-c:v libx264", "-preset veryfast", "-crf 23"]
+            if cuda_available:
+                use_cuda_encoder = True
+                video_encoder_args = ["-c:v h264_nvenc", "-preset p1", "-cq 23"]
+                fallback_encoder_args = software_args
+            else:
+                video_encoder_args = software_args
 
     audio_parts = [
         "-c:a aac",
@@ -447,8 +469,13 @@ def build_video_commands(
 
     fallback_command_str: Optional[str] = None
     if fallback_encoder_args:
+        fallback_global_parts = list(global_parts)
+        if hwaccel_args:
+            fallback_global_parts = [
+                part for part in fallback_global_parts if part not in hwaccel_args
+            ]
         fallback_parts = (
-            global_parts
+            fallback_global_parts
             + input_parts
             + output_parts
             + fallback_encoder_args

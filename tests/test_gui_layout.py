@@ -190,6 +190,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         Radiobutton=WidgetFactory("Radiobutton"),
         Progressbar=WidgetFactory("Progressbar"),
         Scrollbar=WidgetFactory("Scrollbar"),
+        Combobox=WidgetFactory("Combobox"),
     )
     tk = SimpleNamespace(
         Label=WidgetFactory("Label"),
@@ -248,6 +249,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         theme_var=StringVarStub(value="os"),
         status_var=StringVarStub(value="Idle"),
         progress_var=DoubleVarStub(value=0.0),
+        video_codec_var=StringVarStub(value="h264"),
     )
 
     layout.build_layout(gui)
@@ -279,6 +281,11 @@ def test_build_layout_initializes_widgets(monkeypatch):
 
     configure_drop_targets.assert_any_call(gui.drop_hint_button)
     assert gui.drop_hint_button.grid_remove_calls
+
+    assert hasattr(gui, "video_codec_combobox")
+    assert gui.video_codec_combobox.kwargs["textvariable"] is gui.video_codec_var
+    assert gui.video_codec_combobox.kwargs["values"] == ("h264", "av1")
+    assert gui.video_codec_var.get() == "h264"
 
 
 def test_add_entry_with_browse(monkeypatch):

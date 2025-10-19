@@ -239,6 +239,7 @@ def test_process_video_streams_events_and_returns_result(tmp_path: Path) -> None
         assert options.silent_threshold == pytest.approx(0.2)
         assert options.sounded_speed == pytest.approx(1.5)
         assert options.silent_speed == pytest.approx(3.0)
+        assert options.video_codec == "av1"
 
         with reporter.task(desc="Encode", total=10, unit="frames") as task:
             task.advance(5)
@@ -271,6 +272,7 @@ def test_process_video_streams_events_and_returns_result(tmp_path: Path) -> None
             server.process_video(
                 str(input_file),
                 small_video=False,
+                video_codec="av1",
                 silent_threshold=0.2,
                 sounded_speed=1.5,
                 silent_speed=3.0,
@@ -303,6 +305,7 @@ def test_process_video_honors_small_480_flag(tmp_path: Path) -> None:
     def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
         assert options.small is True
         assert options.small_target_height == 480
+        assert options.video_codec == "h264"
         return ProcessingResult(
             input_file=options.input_file,
             output_file=options.output_file or options.input_file,

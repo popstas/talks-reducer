@@ -343,6 +343,7 @@ def process_video(
     file_path: Optional[str],
     small_video: bool,
     small_480: bool = False,
+    video_codec: str = "h264",
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
     silent_speed: Optional[float] = None,
@@ -366,7 +367,11 @@ def process_video(
     deps = dependencies or ProcessVideoDependencies()
     events = deps.queue_factory()
 
-    option_kwargs: dict[str, float] = {}
+    codec_value = (video_codec or "h264").strip().lower()
+    if codec_value not in {"h264", "av1"}:
+        codec_value = "h264"
+
+    option_kwargs: dict[str, float | str] = {"video_codec": codec_value}
     if silent_threshold is not None:
         option_kwargs["silent_threshold"] = float(silent_threshold)
     if sounded_speed is not None:
@@ -453,7 +458,8 @@ def build_interface() -> gr.Blocks:
             Drop a video into the zone below or click to browse. **Small video** is enabled
             by default to apply the 720p/128k preset before processing starts—clear it to
             keep the original resolution or pair it with **Target 480p** to downscale
-            further.
+            further. Choose **Video codec** to switch between H.264 (default) and AV1
+            compression.
 
             Video will be rendered on server **{server_identity}**.
             """.strip()
@@ -469,6 +475,12 @@ def build_interface() -> gr.Blocks:
         with gr.Row():
             small_checkbox = gr.Checkbox(label="Small video", value=True)
             small_480_checkbox = gr.Checkbox(label="Target 480p", value=False)
+
+        codec_dropdown = gr.Dropdown(
+            choices=["h264", "av1"],
+            value="h264",
+            label="Video codec",
+        )
 
         with gr.Column():
             silent_speed_input = gr.Slider(
@@ -504,6 +516,7 @@ def build_interface() -> gr.Blocks:
                 file_input,
                 small_checkbox,
                 small_480_checkbox,
+                codec_dropdown,
                 silent_threshold_input,
                 sounded_speed_input,
                 silent_speed_input,

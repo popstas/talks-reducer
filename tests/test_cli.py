@@ -26,6 +26,7 @@ def test_build_parser_includes_version_and_defaults(
     args = parser.parse_args(["input.mp4"])
     assert args.input_file == ["input.mp4"]
     assert args.temp_folder == str(default_temp)
+    assert args.video_codec == "h264"
 
     with pytest.raises(SystemExit):
         parser.parse_args(["--version"])
@@ -89,6 +90,7 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
         sample_rate=48000,
         small=True,
         keyframe_interval_seconds=1.5,
+        video_codec="av1",
         server_url=None,
         host=None,
     )
@@ -136,6 +138,7 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
     assert options.frame_spreadage == 4
     assert options.sample_rate == 48000
     assert options.keyframe_interval_seconds == pytest.approx(1.5)
+    assert options.video_codec == "av1"
     assert options.small is True
     assert "Completed: /videos/output.mp4" in logged_messages
     assert any(message.startswith("Result: ") for message in logged_messages)
@@ -154,6 +157,7 @@ def test_cli_application_falls_back_to_local_after_remote_failure() -> None:
         frame_spreadage=None,
         sample_rate=None,
         keyframe_interval_seconds=None,
+        video_codec="h264",
         small=False,
         server_url="http://localhost:9005",
         server_stream=False,
@@ -163,7 +167,8 @@ def test_cli_application_falls_back_to_local_after_remote_failure() -> None:
     def gather_files(_paths: list[str]) -> list[str]:
         return ["/videos/input.mp4"]
 
-    def failing_send_video(**_kwargs: object):
+    def failing_send_video(**kwargs: object):
+        assert kwargs.get("video_codec") == "h264"
         raise RuntimeError("boom")
 
     local_runs: list[cli.ProcessingOptions] = []

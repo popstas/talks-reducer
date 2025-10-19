@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 
 import pytest
 
@@ -150,6 +151,41 @@ def test_parse_encode_target_duration_missing_returns_false():
 
     assert found is False
     assert duration is None
+
+
+def test_collect_arguments_includes_video_codec():
+    class DummyVar:
+        def __init__(self, value: str) -> None:
+            self._value = value
+            self.set_calls: list[str] = []
+
+        def get(self) -> str:
+            return self._value
+
+        def set(self, value: str) -> None:
+            self._value = value
+            self.set_calls.append(value)
+
+    gui = SimpleNamespace(
+        output_var=SimpleNamespace(get=lambda: ""),
+        temp_var=SimpleNamespace(get=lambda: ""),
+        silent_threshold_var=SimpleNamespace(get=lambda: 0.05),
+        sounded_speed_var=SimpleNamespace(get=lambda: 1.0),
+        silent_speed_var=SimpleNamespace(get=lambda: 4.0),
+        frame_margin_var=SimpleNamespace(get=lambda: "2"),
+        sample_rate_var=SimpleNamespace(get=lambda: "48000"),
+        keyframe_interval_var=SimpleNamespace(get=lambda: 30.0),
+        small_var=SimpleNamespace(get=lambda: False),
+        small_480_var=SimpleNamespace(get=lambda: False),
+        video_codec_var=DummyVar("AV1"),
+        preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
+    )
+    gui._parse_float = lambda value, _label: float(value)
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["video_codec"] == "av1"
+    assert gui.video_codec_var.set_calls == []
 
 
 def test_parse_video_duration_seconds_extracts_total_seconds():

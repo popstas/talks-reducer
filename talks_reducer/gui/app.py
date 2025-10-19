@@ -339,6 +339,11 @@ class TalksReducerGUI:
         self.open_after_convert_var = tk.BooleanVar(
             value=self.preferences.get("open_after_convert", True)
         )
+        stored_codec = str(self.preferences.get("video_codec", "h264")).lower()
+        if stored_codec not in {"h264", "av1"}:
+            stored_codec = "h264"
+            self.preferences.update("video_codec", stored_codec)
+        self.video_codec_var = tk.StringVar(value=stored_codec)
         stored_mode = str(self.preferences.get("processing_mode", "local"))
         if stored_mode not in {"local", "remote"}:
             stored_mode = "local"
@@ -351,6 +356,7 @@ class TalksReducerGUI:
         self.open_after_convert_var.trace_add(
             "write", self._on_open_after_convert_change
         )
+        self.video_codec_var.trace_add("write", self._on_video_codec_change)
         self.server_url_var = tk.StringVar(
             value=str(self.preferences.get("server_url", ""))
         )
@@ -661,6 +667,13 @@ class TalksReducerGUI:
             "open_after_convert", bool(self.open_after_convert_var.get())
         )
 
+    def _on_video_codec_change(self, *_: object) -> None:
+        value = self.video_codec_var.get().strip().lower()
+        if value not in {"h264", "av1"}:
+            value = "h264"
+            self.video_codec_var.set(value)
+        self.preferences.update("video_codec", value)
+
     def _on_processing_mode_change(self, *_: object) -> None:
         value = self.processing_mode_var.get()
         if value not in {"local", "remote"}:
@@ -862,6 +875,12 @@ class TalksReducerGUI:
             args["temp_folder"] = Path(self.temp_var.get())
         silent_threshold = float(self.silent_threshold_var.get())
         args["silent_threshold"] = round(silent_threshold, 2)
+
+        codec_value = self.video_codec_var.get().strip().lower()
+        if codec_value not in {"h264", "av1"}:
+            codec_value = "h264"
+            self.video_codec_var.set(codec_value)
+        args["video_codec"] = codec_value
 
         sounded_speed = float(self.sounded_speed_var.get())
         args["sounded_speed"] = round(sounded_speed, 2)

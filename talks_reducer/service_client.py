@@ -76,6 +76,7 @@ def send_video(
     server_url: str,
     small: bool = False,
     small_480: bool = False,
+    video_codec: str = "h264",
     *,
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
@@ -106,6 +107,7 @@ def send_video(
         gradio_file(str(input_path)),
         bool(small),
         bool(small_480),
+        str(video_codec),
         silent_threshold,
         sounded_speed,
         silent_speed,
@@ -412,6 +414,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Combine with --small to target 480p instead of 720p.",
     )
     parser.add_argument(
+        "--video-codec",
+        choices=["h264", "av1"],
+        default="h264",
+        help="Select the video encoder used for the render (default: h264).",
+    )
+    parser.add_argument(
         "--print-log",
         action="store_true",
         help="Print the server log after processing completes.",
@@ -474,6 +482,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         server_url=args.server,
         small=args.small,
         small_480=small_480_mode,
+        video_codec=str(args.video_codec),
         log_callback=_stream if args.print_log else None,
         stream_updates=args.stream,
         progress_callback=_progress if args.stream else None,

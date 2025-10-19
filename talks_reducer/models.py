@@ -52,6 +52,7 @@ class ProcessingOptions:
     temp_folder: Path = field(default_factory=default_temp_folder)
     small: bool = False
     small_target_height: Optional[int] = None
+    video_codec: str = "h264"
     keyframe_interval_seconds: float = 30.0
 
 

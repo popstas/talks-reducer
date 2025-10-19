@@ -84,6 +84,18 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     gui.advanced_visible = gui.tk.BooleanVar(value=False)
 
+    codec_frame = gui.ttk.Frame(gui.options_frame)
+    codec_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
+    gui.ttk.Label(codec_frame, text="Video codec").grid(row=0, column=0, sticky="w")
+    gui.video_codec_combobox = gui.ttk.Combobox(
+        codec_frame,
+        textvariable=gui.video_codec_var,
+        values=("h264", "av1"),
+        state="readonly",
+        width=8,
+    )
+    gui.video_codec_combobox.grid(row=0, column=1, sticky="w", padx=(12, 0))
+
     basic_label_container = gui.ttk.Frame(gui.options_frame)
     basic_label = gui.ttk.Label(basic_label_container, text="Basic options")
     basic_label.pack(side=gui.tk.LEFT)

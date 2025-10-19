@@ -301,6 +301,8 @@ def test_build_video_commands_small_cuda(monkeypatch):
     )
 
     assert "-c:v h264_nvenc" in command
+    assert "-preset p1" in command
+    assert "-cq 28" in command
     assert "-forced-idr 1" in command
     assert "-g 900" in command
     assert "-keyint_min 900" in command
@@ -370,7 +372,9 @@ def test_build_video_commands_large_cuda(monkeypatch):
 
     assert "-hwaccel cuda" in command
     assert "-filter_complex_threads 1" in command
-    assert fallback is None
+    assert fallback is not None
+    assert "-c:v libx264" in fallback
+    assert "-hwaccel" not in fallback
     assert use_cuda
 
 
@@ -388,6 +392,49 @@ def test_build_video_commands_large_cpu(monkeypatch):
     )
 
     assert "-c:v libx264" in command
+    assert fallback is None
+    assert not use_cuda
+
+
+def test_build_video_commands_av1_cuda(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command, fallback, use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=True,
+        small=True,
+        frame_rate=30.0,
+        video_codec="av1",
+    )
+
+    assert "-c:v av1_nvenc" in command
+    assert "-cq 30" in command
+    assert "-g 900" in command
+    assert fallback is not None
+    assert "-c:v libaom-av1" in fallback
+    assert "-row-mt 1" in fallback
+    assert use_cuda
+
+
+def test_build_video_commands_av1_cpu(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command, fallback, use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        small=False,
+        frame_rate=30.0,
+        video_codec="av1",
+    )
+
+    assert "-c:v libaom-av1" in command
+    assert "-crf 32" in command
     assert fallback is None
     assert not use_cuda
 
