@@ -293,6 +293,7 @@ def process_files_via_server(
         "sounded_speed",
         "silent_speed",
         "video_codec",
+        "prefer_global_ffmpeg",
     }
     ignored = [key for key in args if key not in allowed_remote_keys]
     if ignored:

@@ -36,7 +36,7 @@ class ProcessingAborted(RuntimeError):
 class PipelineDependencies:
     """Bundle of external dependencies used by :func:`speed_up_video`."""
 
-    get_ffmpeg_path: Callable[[], str] = get_ffmpeg_path
+    get_ffmpeg_path: Callable[[bool], str] = get_ffmpeg_path
     check_cuda_available: Callable[[str], bool] = check_cuda_available
     build_extract_audio_command: Callable[..., str] = build_extract_audio_command
     build_video_commands: Callable[..., tuple[str, str | None, bool]] = (
@@ -101,7 +101,7 @@ def speed_up_video(
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    ffmpeg_path = dependencies.get_ffmpeg_path()
+    ffmpeg_path = dependencies.get_ffmpeg_path(options.prefer_global_ffmpeg)
 
     output_path = options.output_file or _input_to_output_filename(
         input_path, options.small

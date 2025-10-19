@@ -344,6 +344,9 @@ class TalksReducerGUI:
             stored_codec = "h264"
             self.preferences.update("video_codec", stored_codec)
         self.video_codec_var = tk.StringVar(value=stored_codec)
+        self.use_global_ffmpeg_var = tk.BooleanVar(
+            value=bool(self.preferences.get("use_global_ffmpeg", False))
+        )
         stored_mode = str(self.preferences.get("processing_mode", "local"))
         if stored_mode not in {"local", "remote"}:
             stored_mode = "local"
@@ -357,6 +360,9 @@ class TalksReducerGUI:
             "write", self._on_open_after_convert_change
         )
         self.video_codec_var.trace_add("write", self._on_video_codec_change)
+        self.use_global_ffmpeg_var.trace_add(
+            "write", self._on_use_global_ffmpeg_change
+        )
         self.server_url_var = tk.StringVar(
             value=str(self.preferences.get("server_url", ""))
         )
@@ -674,6 +680,11 @@ class TalksReducerGUI:
             self.video_codec_var.set(value)
         self.preferences.update("video_codec", value)
 
+    def _on_use_global_ffmpeg_change(self, *_: object) -> None:
+        self.preferences.update(
+            "use_global_ffmpeg", bool(self.use_global_ffmpeg_var.get())
+        )
+
     def _on_processing_mode_change(self, *_: object) -> None:
         value = self.processing_mode_var.get()
         if value not in {"local", "remote"}:
@@ -881,6 +892,7 @@ class TalksReducerGUI:
             codec_value = "h264"
             self.video_codec_var.set(codec_value)
         args["video_codec"] = codec_value
+        args["prefer_global_ffmpeg"] = bool(self.use_global_ffmpeg_var.get())
 
         sounded_speed = float(self.sounded_speed_var.get())
         args["sounded_speed"] = round(sounded_speed, 2)

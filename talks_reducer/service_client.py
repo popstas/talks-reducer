@@ -77,6 +77,7 @@ def send_video(
     small: bool = False,
     small_480: bool = False,
     video_codec: str = "h264",
+    prefer_global_ffmpeg: bool = False,
     *,
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
@@ -95,7 +96,9 @@ def send_video(
     """Upload *input_path* to the Gradio server and download the processed video.
 
     When *should_cancel* returns ``True`` the remote job is cancelled and a
-    :class:`ProcessingAborted` exception is raised.
+    :class:`ProcessingAborted` exception is raised. Set *prefer_global_ffmpeg*
+    when the PATH-provided FFmpeg offers hardware encoders that the bundled
+    static build omits.
     """
 
     if not input_path.exists():
@@ -108,6 +111,7 @@ def send_video(
         bool(small),
         bool(small_480),
         str(video_codec),
+        bool(prefer_global_ffmpeg),
         silent_threshold,
         sounded_speed,
         silent_speed,
@@ -420,6 +424,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Select the video encoder used for the render (default: h264).",
     )
     parser.add_argument(
+        "--prefer-global-ffmpeg",
+        action="store_true",
+        help="Use the FFmpeg binary available on PATH before falling back to the bundled copy.",
+    )
+    parser.add_argument(
         "--print-log",
         action="store_true",
         help="Print the server log after processing completes.",
@@ -483,6 +492,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         small=args.small,
         small_480=small_480_mode,
         video_codec=str(args.video_codec),
+        prefer_global_ffmpeg=bool(args.prefer_global_ffmpeg),
         log_callback=_stream if args.print_log else None,
         stream_updates=args.stream,
         progress_callback=_progress if args.stream else None,

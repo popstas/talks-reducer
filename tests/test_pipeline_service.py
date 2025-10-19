@@ -89,7 +89,7 @@ def test_speed_up_video_returns_result(monkeypatch, tmp_path):
         return None
 
     dependencies = PipelineDependencies(
-        get_ffmpeg_path=lambda: "ffmpeg",
+        get_ffmpeg_path=lambda prefer=False: "ffmpeg",
         check_cuda_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
@@ -168,7 +168,7 @@ def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
         return None
 
     dependencies = PipelineDependencies(
-        get_ffmpeg_path=lambda: "ffmpeg",
+        get_ffmpeg_path=lambda prefer=False: "ffmpeg",
         check_cuda_available=lambda _path: True,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", "render-cpu", True),
@@ -207,7 +207,7 @@ def test_speed_up_video_cleans_temp_on_abort(monkeypatch, tmp_path):
     )
 
     dependencies = PipelineDependencies(
-        get_ffmpeg_path=lambda: "ffmpeg",
+        get_ffmpeg_path=lambda prefer=False: "ffmpeg",
         check_cuda_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
@@ -279,7 +279,7 @@ def test_speed_up_video_computes_ratios(monkeypatch, tmp_path):
         return None
 
     dependencies = PipelineDependencies(
-        get_ffmpeg_path=lambda: "ffmpeg",
+        get_ffmpeg_path=lambda prefer=False: "ffmpeg",
         check_cuda_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),

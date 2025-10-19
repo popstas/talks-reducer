@@ -18,7 +18,13 @@ def stub_static_ffmpeg(monkeypatch):
 
     stub = SimpleNamespace(add_paths=lambda: False)
     monkeypatch.setitem(sys.modules, "static_ffmpeg", stub)
-    monkeypatch.setattr(ffmpeg, "_ENCODER_LISTING", None)
+    monkeypatch.setattr(ffmpeg, "_ENCODER_LISTING", {}, raising=False)
+    monkeypatch.setattr(
+        ffmpeg, "_FFMPEG_PATH_CACHE", {False: None, True: None}, raising=False
+    )
+    monkeypatch.setattr(
+        ffmpeg, "_FFPROBE_PATH_CACHE", {False: None, True: None}, raising=False
+    )
     yield
     sys.modules.pop("static_ffmpeg", None)
 
@@ -133,7 +139,7 @@ def test_find_ffprobe_prefers_env_file(monkeypatch):
 def test_find_ffprobe_from_ffmpeg_directory(monkeypatch):
     fake_ffmpeg_path = "/opt/bin/ffmpeg"
     expected_ffprobe = "/opt/bin/ffprobe"
-    monkeypatch.setattr(ffmpeg, "find_ffmpeg", lambda: fake_ffmpeg_path)
+    monkeypatch.setattr(ffmpeg, "find_ffmpeg", lambda prefer_global=False: fake_ffmpeg_path)
     monkeypatch.setattr(ffmpeg.os.path, "isfile", lambda path: path == expected_ffprobe)
     monkeypatch.setattr(ffmpeg, "shutil_which", lambda path: None)
 
@@ -148,20 +154,20 @@ def test_find_ffprobe_returns_none_when_missing(monkeypatch):
 
     monkeypatch.setattr(ffmpeg.os.path, "isfile", lambda path: False)
     monkeypatch.setattr(ffmpeg, "shutil_which", lambda path: None)
-    monkeypatch.setattr(ffmpeg, "find_ffmpeg", lambda: None)
+    monkeypatch.setattr(ffmpeg, "find_ffmpeg", lambda prefer_global=False: None)
 
     assert ffmpeg.find_ffprobe() is None
 
 
 def test_resolve_ffmpeg_path_raises(monkeypatch):
-    monkeypatch.setattr(ffmpeg, "find_ffmpeg", lambda: None)
+    monkeypatch.setattr(ffmpeg, "find_ffmpeg", lambda prefer_global=False: None)
 
     with pytest.raises(ffmpeg.FFmpegNotFoundError):
         ffmpeg._resolve_ffmpeg_path()
 
 
 def test_resolve_ffprobe_path_raises(monkeypatch):
-    monkeypatch.setattr(ffmpeg, "find_ffprobe", lambda: None)
+    monkeypatch.setattr(ffmpeg, "find_ffprobe", lambda prefer_global=False: None)
 
     with pytest.raises(ffmpeg.FFmpegNotFoundError):
         ffmpeg._resolve_ffprobe_path()
@@ -170,31 +176,39 @@ def test_resolve_ffprobe_path_raises(monkeypatch):
 def test_get_ffmpeg_path_caches(monkeypatch):
     calls: List[str] = []
 
-    def fake_resolve() -> str:
-        calls.append("called")
-        return "cached-ffmpeg"
+    def fake_resolve(*, prefer_global: bool = False) -> str:
+        calls.append("global" if prefer_global else "bundled")
+        return "cached-global" if prefer_global else "cached-ffmpeg"
 
-    monkeypatch.setattr(ffmpeg, "_FFMPEG_PATH", None, raising=False)
     monkeypatch.setattr(ffmpeg, "_resolve_ffmpeg_path", fake_resolve)
+    monkeypatch.setattr(
+        ffmpeg, "_FFMPEG_PATH_CACHE", {False: None, True: None}, raising=False
+    )
 
     assert ffmpeg.get_ffmpeg_path() == "cached-ffmpeg"
     assert ffmpeg.get_ffmpeg_path() == "cached-ffmpeg"
-    assert len(calls) == 1
+    assert ffmpeg.get_ffmpeg_path(prefer_global=True) == "cached-global"
+    assert ffmpeg.get_ffmpeg_path(prefer_global=True) == "cached-global"
+    assert calls == ["bundled", "global"]
 
 
 def test_get_ffprobe_path_caches(monkeypatch):
     calls: List[str] = []
 
-    def fake_resolve() -> str:
-        calls.append("called")
-        return "cached-ffprobe"
+    def fake_resolve(*, prefer_global: bool = False) -> str:
+        calls.append("global" if prefer_global else "bundled")
+        return "cached-global" if prefer_global else "cached-ffprobe"
 
-    monkeypatch.setattr(ffmpeg, "_FFPROBE_PATH", None, raising=False)
     monkeypatch.setattr(ffmpeg, "_resolve_ffprobe_path", fake_resolve)
+    monkeypatch.setattr(
+        ffmpeg, "_FFPROBE_PATH_CACHE", {False: None, True: None}, raising=False
+    )
 
     assert ffmpeg.get_ffprobe_path() == "cached-ffprobe"
     assert ffmpeg.get_ffprobe_path() == "cached-ffprobe"
-    assert len(calls) == 1
+    assert ffmpeg.get_ffprobe_path(prefer_global=True) == "cached-global"
+    assert ffmpeg.get_ffprobe_path(prefer_global=True) == "cached-global"
+    assert calls == ["bundled", "global"]
 
 
 def test_check_cuda_available_detects_nvenc(monkeypatch):
@@ -405,9 +419,11 @@ def test_build_video_commands_large_cpu(monkeypatch):
 
 def test_build_video_commands_av1_cuda(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(
-        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: False
-    )
+
+    def fake_encoder_available(name: str, ffmpeg_path: Optional[str] = None) -> bool:
+        return name == "av1_nvenc"
+
+    monkeypatch.setattr(ffmpeg, "encoder_available", fake_encoder_available)
 
     command, fallback, use_cuda = ffmpeg.build_video_commands(
         "input.mp4",
@@ -446,6 +462,7 @@ def test_build_video_commands_av1_cpu(monkeypatch):
         video_codec="av1",
     )
 
+    assert "-c:v av1_nvenc" not in command
     assert "-c:v libaom-av1" in command
     assert "-crf 32" in command
     assert fallback is None
@@ -456,7 +473,7 @@ def test_build_video_commands_av1_cuda_svt_fallback(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
 
     def fake_encoder_available(name: str, ffmpeg_path: Optional[str] = None) -> bool:
-        return name == "libsvtav1"
+        return name in {"libsvtav1", "av1_nvenc"}
 
     monkeypatch.setattr(ffmpeg, "encoder_available", fake_encoder_available)
 

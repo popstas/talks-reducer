@@ -54,6 +54,7 @@ class ProcessingOptions:
     small_target_height: Optional[int] = None
     video_codec: str = "h264"
     keyframe_interval_seconds: float = 30.0
+    prefer_global_ffmpeg: bool = False
 
 
 @dataclass(frozen=True)

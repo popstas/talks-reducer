@@ -178,6 +178,7 @@ def test_collect_arguments_includes_video_codec():
         small_var=SimpleNamespace(get=lambda: False),
         small_480_var=SimpleNamespace(get=lambda: False),
         video_codec_var=DummyVar("AV1"),
+        use_global_ffmpeg_var=SimpleNamespace(get=lambda: True),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     gui._parse_float = lambda value, _label: float(value)
@@ -186,6 +187,7 @@ def test_collect_arguments_includes_video_codec():
 
     assert args["video_codec"] == "av1"
     assert gui.video_codec_var.set_calls == []
+    assert args["prefer_global_ffmpeg"] is True
 
 
 def test_parse_video_duration_seconds_extracts_total_seconds():

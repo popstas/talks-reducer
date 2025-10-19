@@ -344,6 +344,7 @@ def process_video(
     small_video: bool,
     small_480: bool = False,
     video_codec: str = "h264",
+    use_global_ffmpeg: bool = False,
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
     silent_speed: Optional[float] = None,
@@ -371,7 +372,10 @@ def process_video(
     if codec_value not in {"h264", "av1"}:
         codec_value = "h264"
 
-    option_kwargs: dict[str, float | str] = {"video_codec": codec_value}
+    option_kwargs: dict[str, float | str | bool] = {
+        "video_codec": codec_value,
+        "prefer_global_ffmpeg": bool(use_global_ffmpeg),
+    }
     if silent_threshold is not None:
         option_kwargs["silent_threshold"] = float(silent_threshold)
     if sounded_speed is not None:
@@ -459,7 +463,8 @@ def build_interface() -> gr.Blocks:
             by default to apply the 720p/128k preset before processing starts—clear it to
             keep the original resolution or pair it with **Target 480p** to downscale
             further. Choose **Video codec** to switch between H.264 (default) and AV1
-            compression.
+            compression, and enable **Use global FFmpeg** when your system install offers
+            hardware encoders that the bundled build lacks.
 
             Video will be rendered on server **{server_identity}**.
             """.strip()
@@ -480,6 +485,12 @@ def build_interface() -> gr.Blocks:
             choices=["h264", "av1"],
             value="h264",
             label="Video codec",
+        )
+
+        use_global_ffmpeg_checkbox = gr.Checkbox(
+            label="Use global FFmpeg",
+            value=False,
+            info="Prefer the FFmpeg binary from PATH instead of the bundled build.",
         )
 
         with gr.Column():
@@ -517,6 +528,7 @@ def build_interface() -> gr.Blocks:
                 small_checkbox,
                 small_480_checkbox,
                 codec_dropdown,
+                use_global_ffmpeg_checkbox,
                 silent_threshold_input,
                 sounded_speed_input,
                 silent_speed_input,

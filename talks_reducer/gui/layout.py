@@ -253,7 +253,14 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
 
     gui.sample_rate_var = gui.tk.StringVar(value="48000")
-    add_entry(gui, gui.advanced_frame, "Sample rate", gui.sample_rate_var, row=2)
+    add_entry(gui, gui.advanced_frame, "Sample rate", gui.sample_rate_var, row=3)
+
+    gui.use_global_ffmpeg_check = gui.ttk.Checkbutton(
+        gui.advanced_frame,
+        text="Use global FFmpeg",
+        variable=gui.use_global_ffmpeg_var,
+    )
+    gui.use_global_ffmpeg_check.grid(row=2, column=0, columnspan=3, sticky="w", pady=4)
 
     frame_margin_setting = gui.preferences.get("frame_margin", 2)
     try:
@@ -263,7 +270,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.preferences.update("frame_margin", frame_margin_default)
 
     gui.frame_margin_var = gui.tk.StringVar(value=str(frame_margin_default))
-    add_entry(gui, gui.advanced_frame, "Frame margin", gui.frame_margin_var, row=3)
+    add_entry(gui, gui.advanced_frame, "Frame margin", gui.frame_margin_var, row=4)
 
     min_interval = 1.0
     max_interval = 60.0
@@ -283,13 +290,13 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         )
 
     gui.ttk.Label(gui.advanced_frame, text="Keyframe interval").grid(
-        row=4, column=0, sticky="w", pady=4
+        row=5, column=0, sticky="w", pady=4
     )
 
     gui.keyframe_interval_var = gui.tk.DoubleVar(value=validated_interval)
 
     gui.keyframe_interval_value_label = gui.ttk.Label(gui.advanced_frame)
-    gui.keyframe_interval_value_label.grid(row=4, column=2, sticky="e", pady=4)
+    gui.keyframe_interval_value_label.grid(row=5, column=2, sticky="e", pady=4)
 
     keyframe_percent_samples = [
         (60.0, 0.5),
@@ -354,7 +361,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         length=240,
         highlightthickness=0,
     )
-    gui.keyframe_interval_slider.grid(row=4, column=1, sticky="ew", pady=4, padx=(0, 8))
+    gui.keyframe_interval_slider.grid(row=5, column=1, sticky="ew", pady=4, padx=(0, 8))
 
     update_keyframe_interval(str(validated_interval))
     sliders = getattr(gui, "_sliders", None)

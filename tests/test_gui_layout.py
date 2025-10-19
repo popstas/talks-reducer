@@ -250,6 +250,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         status_var=StringVarStub(value="Idle"),
         progress_var=DoubleVarStub(value=0.0),
         video_codec_var=StringVarStub(value="h264"),
+        use_global_ffmpeg_var=BooleanVarStub(value=False),
     )
 
     layout.build_layout(gui)
@@ -286,6 +287,8 @@ def test_build_layout_initializes_widgets(monkeypatch):
     assert gui.video_codec_combobox.kwargs["textvariable"] is gui.video_codec_var
     assert gui.video_codec_combobox.kwargs["values"] == ("h264", "av1")
     assert gui.video_codec_var.get() == "h264"
+    assert hasattr(gui, "use_global_ffmpeg_check")
+    assert gui.use_global_ffmpeg_check.kwargs["variable"] is gui.use_global_ffmpeg_var
 
 
 def test_add_entry_with_browse(monkeypatch):
