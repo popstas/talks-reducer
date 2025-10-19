@@ -857,26 +857,51 @@ class TalksReducerGUI:
         self._stop_requested = True
         # Update button text to indicate stopping state
         self.stop_button.configure(text="Stopping...")
+        process = self._ffmpeg_process
         if self._current_remote_mode:
             self._append_log("Cancelling remote job...")
-        elif self._ffmpeg_process and self._ffmpeg_process.poll() is None:
+        elif process and process.poll() is None:
             self._append_log("Stopping FFmpeg process...")
             try:
                 # Send SIGTERM to FFmpeg process
                 if sys.platform == "win32":
                     # Windows doesn't have SIGTERM, use terminate()
-                    self._ffmpeg_process.terminate()
+                    process.terminate()
                 else:
                     # Unix-like systems can use SIGTERM
-                    self._ffmpeg_process.send_signal(signal.SIGTERM)
+                    process.send_signal(signal.SIGTERM)
 
-                self._append_log("FFmpeg process stopped.")
+                threading.Thread(
+                    target=self._wait_for_ffmpeg_stop,
+                    args=(process,),
+                    daemon=True,
+                ).start()
             except Exception as e:
                 self._append_log(f"Error stopping process: {e}")
         else:
             self._append_log("No active FFmpeg process to stop.")
 
         self._hide_stop_button()
+
+    def _wait_for_ffmpeg_stop(self, process: subprocess.Popen[Any]) -> None:
+        """Wait for FFmpeg to exit and escalate to SIGKILL if required."""
+
+        try:
+            process.wait(timeout=5)
+            self._append_log("FFmpeg process stopped.")
+        except subprocess.TimeoutExpired:
+            self._append_log(
+                "FFmpeg did not exit after SIGTERM; forcing termination..."
+            )
+            try:
+                process.kill()
+                process.wait()
+                self._append_log("FFmpeg process killed.")
+            except Exception as exc:
+                self._append_log(f"Error killing process: {exc}")
+        finally:
+            if process is self._ffmpeg_process:
+                self._ffmpeg_process = None
 
     def _hide_stop_button(self) -> None:
         """Hide Stop button."""
@@ -1217,9 +1242,7 @@ class TalksReducerGUI:
         )
         percentage = (audio_percentage / 100.0) * self.AUDIO_PROGRESS_WEIGHT
         self._set_progress(percentage)
-        self._set_status(
-            "processing", f"Audio processing: {audio_percentage:.1f}%"
-        )
+        self._set_status("processing", f"Audio processing: {audio_percentage:.1f}%")
 
         if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
             interval_ms = (
