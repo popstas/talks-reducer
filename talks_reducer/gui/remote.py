@@ -232,7 +232,7 @@ def process_files_via_server(
     server_url: str,
     *,
     open_after_convert: bool,
-    default_remote_destination: Callable[[Path, bool], Path],
+    default_remote_destination: Callable[[Path, bool, bool], Path],
     parse_summary: Callable[[str], tuple[Optional[float], Optional[float]]],
     load_service_client: Callable[[], object] = _load_service_client,
     check_server: Callable[..., bool] = check_remote_server_for_gui,
@@ -321,10 +321,14 @@ def process_files_via_server(
             if output_path.is_dir():
                 output_path = (
                     output_path
-                    / default_remote_destination(input_path, small=small_mode).name
+                    / default_remote_destination(
+                        input_path, small=small_mode, small_480=small_480_mode
+                    ).name
                 )
         else:
-            output_path = default_remote_destination(input_path, small=small_mode)
+            output_path = default_remote_destination(
+                input_path, small=small_mode, small_480=small_480_mode
+            )
 
         try:
             destination, summary, log_text = service_module.send_video(

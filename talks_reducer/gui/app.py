@@ -95,12 +95,22 @@ except ModuleNotFoundError:  # pragma: no cover - runtime dependency
     TkinterDnD = None  # type: ignore[assignment]
 
 
-def _default_remote_destination(input_file: Path, *, small: bool) -> Path:
+def _default_remote_destination(
+    input_file: Path, *, small: bool, small_480: bool = False
+) -> Path:
     """Return the default remote output path for *input_file*."""
 
     name = input_file.name
     dot_index = name.rfind(".")
-    suffix = "_speedup_small" if small else "_speedup"
+    suffix_parts: list[str] = []
+
+    if small:
+        suffix_parts.append("_small")
+
+    if small_480:
+        suffix_parts.append("_480")
+
+    suffix = "_speedup" + "".join(suffix_parts)
 
     if dot_index != -1:
         new_name = name[:dot_index] + suffix + name[dot_index:]
@@ -258,7 +268,8 @@ class TalksReducerGUI:
 
     PADDING = 10
     AUDIO_PROCESSING_RATIO = 0.02
-    AUDIO_PROGRESS_STEPS = 20
+    AUDIO_PROGRESS_STEPS = 100
+    AUDIO_PROGRESS_WEIGHT = 5.0
     MIN_AUDIO_INTERVAL_MS = 10
     DEFAULT_AUDIO_INTERVAL_MS = 200
 
@@ -295,8 +306,8 @@ class TalksReducerGUI:
 
         self._apply_window_icon()
 
-        self._full_size = (1150, 800)
-        self._simple_size = (364, 270)
+        self._full_size = (1200, 900)
+        self._simple_size = (363, 270)
         # self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
         self.style = self.ttk.Style(self.root)
 
@@ -318,7 +329,7 @@ class TalksReducerGUI:
         self._audio_progress_job: Optional[str] = None
         self._audio_progress_interval_ms: Optional[int] = None
         self._audio_progress_steps_completed = 0
-        self.progress_var = tk.IntVar(value=0)
+        self.progress_var = tk.DoubleVar(value=0.0)
         self._ffmpeg_process: Optional[subprocess.Popen] = None
         self._stop_requested = False
         self._ping_worker_stop_requested = False
@@ -1020,7 +1031,11 @@ class TalksReducerGUI:
             if self._encode_total_frames and self._encode_total_frames > 0:
                 self._complete_audio_phase()
                 frame_ratio = min(current_frame / self._encode_total_frames, 1.0)
-                percentage = min(100, 5 + int(frame_ratio * 95))
+                progress_target = self.AUDIO_PROGRESS_WEIGHT + frame_ratio * (
+                    100.0 - self.AUDIO_PROGRESS_WEIGHT
+                )
+                current_value = float(self.progress_var.get())
+                percentage = min(100.0, max(current_value, progress_target))
                 self._set_progress(percentage)
             else:
                 self._complete_audio_phase()
@@ -1066,7 +1081,11 @@ class TalksReducerGUI:
             ):
                 self._complete_audio_phase()
                 time_ratio = min(current_seconds / total_seconds, 1.0)
-                percentage = min(100, 5 + int(time_ratio * 95))
+                progress_target = self.AUDIO_PROGRESS_WEIGHT + time_ratio * (
+                    100.0 - self.AUDIO_PROGRESS_WEIGHT
+                )
+                current_value = float(self.progress_var.get())
+                percentage = min(100.0, max(current_value, progress_target))
                 self._set_progress(percentage)
 
             self._set_status("processing", status_msg)
@@ -1196,9 +1215,11 @@ class TalksReducerGUI:
         audio_percentage = (
             self._audio_progress_steps_completed / self.AUDIO_PROGRESS_STEPS * 100
         )
-        percentage = (audio_percentage / 100) * 5
+        percentage = (audio_percentage / 100.0) * self.AUDIO_PROGRESS_WEIGHT
         self._set_progress(percentage)
-        self._set_status("processing", "Audio processing: %d%%" % (audio_percentage))
+        self._set_status(
+            "processing", f"Audio processing: {audio_percentage:.1f}%"
+        )
 
         if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
             interval_ms = (
@@ -1239,9 +1260,9 @@ class TalksReducerGUI:
             self._audio_progress_interval_ms = None
             if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
                 self._audio_progress_steps_completed = self.AUDIO_PROGRESS_STEPS
-                current_value = self.progress_var.get()
-                if current_value < self.AUDIO_PROGRESS_STEPS:
-                    self._set_progress(self.AUDIO_PROGRESS_STEPS)
+                current_value = float(self.progress_var.get())
+                if current_value < self.AUDIO_PROGRESS_WEIGHT:
+                    self._set_progress(self.AUDIO_PROGRESS_WEIGHT)
 
         self._schedule_on_ui_thread(_complete)
 
@@ -1331,7 +1352,7 @@ class TalksReducerGUI:
         total_minutes = rounded_seconds // 60
         return f"{total_minutes}:{seconds:02d}"
 
-    def _calculate_gradient_color(self, percentage: int, darken: float = 1.0) -> str:
+    def _calculate_gradient_color(self, percentage: float, darken: float = 1.0) -> str:
         """Calculate color gradient from red (0%) to green (100%).
 
         Args:
@@ -1342,7 +1363,7 @@ class TalksReducerGUI:
             Hex color code string
         """
         # Clamp percentage between 0 and 100
-        percentage = max(0, min(100, percentage))
+        percentage = max(0.0, min(100.0, float(percentage)))
         # Clamp darken between 0.0 and 1.0
         darken = max(0.0, min(1.0, darken))
 
@@ -1368,13 +1389,14 @@ class TalksReducerGUI:
 
         return f"#{r:02x}{g:02x}{b:02x}"
 
-    def _set_progress(self, percentage: int) -> None:
+    def _set_progress(self, percentage: float) -> None:
         """Update the progress bar value and color (thread-safe)."""
 
         def updater() -> None:
-            self.progress_var.set(percentage)
+            value = max(0.0, min(100.0, float(percentage)))
+            self.progress_var.set(value)
             # Update color based on percentage gradient
-            color = self._calculate_gradient_color(percentage, 0.5)
+            color = self._calculate_gradient_color(value, 0.5)
             palette = (
                 LIGHT_THEME if self._resolve_theme_mode() == "light" else DARK_THEME
             )
@@ -1395,7 +1417,7 @@ class TalksReducerGUI:
             self.progress_bar.configure(style="Dynamic.Horizontal.TProgressbar")
 
             # Show stop button when progress < 100
-            if percentage < 100:
+            if value < 100.0:
                 if hasattr(self, "status_frame"):
                     self.status_frame.grid()
                 self.stop_button.grid()
