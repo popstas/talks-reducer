@@ -94,7 +94,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--keyframe-interval",
         type=float,
         dest="keyframe_interval_seconds",
-        help="Override the keyframe spacing in seconds when using --small. Defaults to 10.",
+        help="Override the keyframe spacing in seconds when using --small. Defaults to 30.",
     )
     parser.add_argument(
         "--small",

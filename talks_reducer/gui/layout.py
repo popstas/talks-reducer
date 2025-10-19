@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 from typing import TYPE_CHECKING, Callable
 
@@ -253,13 +254,14 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     min_interval = 1.0
     max_interval = 60.0
     interval_resolution = 1.0
+    default_keyframe_interval = 30.0
     keyframe_interval_setting = gui.preferences.get_float(
-        "keyframe_interval_seconds", 10.0
+        "keyframe_interval_seconds", default_keyframe_interval
     )
     try:
         validated_interval = float(keyframe_interval_setting)
     except (TypeError, ValueError):
-        validated_interval = 10.0
+        validated_interval = default_keyframe_interval
     if not (min_interval <= validated_interval <= max_interval):
         validated_interval = max(min_interval, min(max_interval, validated_interval))
         gui.preferences.update(
@@ -275,15 +277,43 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.keyframe_interval_value_label = gui.ttk.Label(gui.advanced_frame)
     gui.keyframe_interval_value_label.grid(row=4, column=2, sticky="e", pady=4)
 
-    base_keyframe_interval = 10.0
-    base_keyframe_share = 0.12
+    keyframe_percent_samples = [
+        (60.0, 0.5),
+        (30.0, 1.4),
+        (10.0, 4.7),
+        (5.0, 9.6),
+        (1.0, 44.0),
+    ]
 
     def estimate_keyframe_overhead(interval_seconds: float) -> float:
-        """Estimate the percentage change in keyframe data vs the default interval."""
+        """Estimate percent size increase vs. encoding with no extra keyframes."""
 
-        share = base_keyframe_share * (base_keyframe_interval / interval_seconds)
-        delta = (share - base_keyframe_share) * 100.0
-        return delta
+        bounded = max(min_interval, min(max_interval, interval_seconds))
+        samples = keyframe_percent_samples
+        if bounded >= samples[0][0]:
+            return samples[0][1]
+        if bounded <= samples[-1][0]:
+            return samples[-1][1]
+
+        for upper_idx in range(len(samples) - 1):
+            upper_interval, upper_percent = samples[upper_idx]
+            lower_interval, lower_percent = samples[upper_idx + 1]
+            if lower_interval <= bounded <= upper_interval:
+                ratio = (math.log(bounded) - math.log(upper_interval)) / (
+                    math.log(lower_interval) - math.log(upper_interval)
+                )
+                interpolated = math.exp(
+                    math.log(upper_percent)
+                    + ratio * (math.log(lower_percent) - math.log(upper_percent))
+                )
+                return interpolated
+
+        return samples[-1][1]
+
+    def format_percent(delta_percent: float) -> str:
+        if abs(delta_percent) >= 10.0:
+            return f"{delta_percent:+.0f}%"
+        return f"{delta_percent:+.1f}%"
 
     def update_keyframe_interval(value: str) -> None:
         numeric = float(value)
@@ -294,7 +324,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             gui.keyframe_interval_var.set(quantized)
         delta_percent = estimate_keyframe_overhead(quantized)
         gui.keyframe_interval_value_label.configure(
-            text=f"{quantized:.0f}s, {delta_percent:+.0f}%"
+            text=f"{quantized:.0f}s, {format_percent(delta_percent)}"
         )
         gui.preferences.update("keyframe_interval_seconds", float(f"{quantized:.6f}"))
 

@@ -63,7 +63,7 @@ Tuned the jumpiness of the new scrolling-friendly preset in commit
 `c25a8f7b2dcb2735782bff71b02ee6a30445fa9e` and want to claw some bitrate back?
 Pass `--keyframe-interval 15` (or any other positive number of seconds) to space
 keyframes further apart when using `--small`, trading seek responsiveness for a
-smaller output file. The advanced GUI slider defaults to 10 seconds and lets you
+smaller output file. The advanced GUI slider defaults to 30 seconds and lets you
 pick anywhere between snappy one-second GOPs and ultra-light 60-second spacing.
 
 Want to see progress as the remote server works? Add `--server-stream` so the

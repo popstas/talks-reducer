@@ -302,13 +302,13 @@ def test_build_video_commands_small_cuda(monkeypatch):
 
     assert "-c:v h264_nvenc" in command
     assert "-forced-idr 1" in command
-    assert "-g 300" in command
-    assert "-keyint_min 300" in command
-    assert "-force_key_frames expr:gte(t,n_forced*10)" in command
+    assert "-g 900" in command
+    assert "-keyint_min 900" in command
+    assert "-force_key_frames expr:gte(t,n_forced*30)" in command
     assert fallback is not None and "-c:v libx264" in fallback
-    assert "-force_key_frames expr:gte(t,n_forced*10)" in fallback
+    assert "-force_key_frames expr:gte(t,n_forced*30)" in fallback
     assert "-forced-idr 1" not in fallback
-    assert "-g 300" in fallback
+    assert "-g 900" in fallback
     assert use_cuda
 
 
@@ -326,9 +326,9 @@ def test_build_video_commands_small_cpu(monkeypatch):
     )
 
     assert "-c:v libx264" in command
-    assert "-g 300" in command
-    assert "-keyint_min 300" in command
-    assert "-force_key_frames expr:gte(t,n_forced*10)" in command
+    assert "-g 900" in command
+    assert "-keyint_min 900" in command
+    assert "-force_key_frames expr:gte(t,n_forced*30)" in command
     assert "-forced-idr 1" not in command
     assert fallback is None
     assert not use_cuda
