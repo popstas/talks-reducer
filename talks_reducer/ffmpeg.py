@@ -540,7 +540,15 @@ def build_video_commands(
             "av1_nvenc", ffmpeg_path=ffmpeg_path
         ):
             use_cuda_encoder = True
-            video_encoder_args = ["-c:v av1_nvenc", "-preset p5", "-cq 30"]
+            video_encoder_args = [
+                "-c:v av1_nvenc",
+                "-preset p6",
+                "-rc vbr",
+                "-b:v 0",
+                "-cq 36",
+                "-spatial-aq 1",
+                "-temporal-aq 1",
+            ]
             if small:
                 video_encoder_args = video_encoder_args + keyframe_args
             fallback_encoder_args = cpu_encoder_args

@@ -487,7 +487,12 @@ def test_build_video_commands_av1_cuda(monkeypatch):
     )
 
     assert "-c:v av1_nvenc" in command
-    assert "-cq 30" in command
+    assert "-preset p6" in command
+    assert "-rc vbr" in command
+    assert "-b:v 0" in command
+    assert "-cq 36" in command
+    assert "-spatial-aq 1" in command
+    assert "-temporal-aq 1" in command
     assert "-g 900" in command
     assert fallback is not None
     assert "-c:v libaom-av1" in fallback
