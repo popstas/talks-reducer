@@ -91,7 +91,7 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
         sample_rate=48000,
         small=True,
         keyframe_interval_seconds=1.5,
-        video_codec="av1",
+        video_codec="hevc",
         server_url=None,
         host=None,
         prefer_global_ffmpeg=True,
@@ -140,7 +140,7 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
     assert options.frame_spreadage == 4
     assert options.sample_rate == 48000
     assert options.keyframe_interval_seconds == pytest.approx(1.5)
-    assert options.video_codec == "av1"
+    assert options.video_codec == "hevc"
     assert options.small is True
     assert options.prefer_global_ffmpeg is True
     assert "Completed: /videos/output.mp4" in logged_messages

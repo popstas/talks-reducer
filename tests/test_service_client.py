@@ -325,7 +325,8 @@ def test_send_video_stream_flag(monkeypatch, tmp_path):
     assert destination.name == server_file.name
 
 
-def test_send_video_forwards_custom_options(monkeypatch, tmp_path):
+@pytest.mark.parametrize("codec", ["av1", "hevc"])
+def test_send_video_forwards_custom_options(monkeypatch, tmp_path, codec):
     input_file = tmp_path / "input.mp4"
     input_file.write_bytes(b"input")
     server_file = tmp_path / "server_output.mp4"
@@ -345,7 +346,7 @@ def test_send_video_forwards_custom_options(monkeypatch, tmp_path):
         input_path=input_file,
         output_path=None,
         server_url="http://localhost:9005/",
-        video_codec="av1",
+        video_codec=codec,
         prefer_global_ffmpeg=True,
         silent_threshold=0.12,
         sounded_speed=1.5,
@@ -357,7 +358,7 @@ def test_send_video_forwards_custom_options(monkeypatch, tmp_path):
     assert log_text == "log"
     submission_args, _ = client_instance.submissions[0]
     assert submission_args[2] is False
-    assert submission_args[3] == "av1"
+    assert submission_args[3] == codec
     assert submission_args[4] is True
     assert submission_args[5:8] == (0.12, 1.5, 6.0)
 
@@ -507,14 +508,15 @@ def test_main_warns_when_480_without_small(monkeypatch, tmp_path, capsys):
     assert "Warning: --480 has no effect" in captured.err
 
 
-def test_main_video_codec_option(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("codec", ["av1", "hevc"])
+def test_main_video_codec_option(monkeypatch, tmp_path, capsys, codec):
     input_file = tmp_path / "input.mp4"
     destination_file = tmp_path / "output.mp4"
 
     input_file.write_bytes(b"input")
 
     def fake_send_video(**kwargs):
-        assert kwargs["video_codec"] == "av1"
+        assert kwargs["video_codec"] == codec
         return destination_file, "summary", "log"
 
     monkeypatch.setattr(service_client, "send_video", fake_send_video)
@@ -527,7 +529,7 @@ def test_main_video_codec_option(monkeypatch, tmp_path, capsys):
             "--output",
             str(destination_file),
             "--video-codec",
-            "av1",
+            codec,
         ]
     )
 

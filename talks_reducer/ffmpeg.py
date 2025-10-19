@@ -317,9 +317,7 @@ def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
 
     ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
 
-    hwaccels_output = _probe_ffmpeg_output(
-        [ffmpeg_path, "-hide_banner", "-hwaccels"]
-    )
+    hwaccels_output = _probe_ffmpeg_output([ffmpeg_path, "-hide_banner", "-hwaccels"])
     if not hwaccels_output or "cuda" not in hwaccels_output.lower():
         return False
 
@@ -502,7 +500,7 @@ def build_video_commands(
     ]
 
     codec_choice = (video_codec or "h264").strip().lower()
-    if codec_choice not in {"h264", "av1"}:
+    if codec_choice not in {"h264", "hevc", "av1"}:
         codec_choice = "h264"
 
     video_encoder_args: List[str]
@@ -536,9 +534,7 @@ def build_video_commands(
         else:
             cpu_encoder_args = cpu_encoder_base
 
-        if cuda_available and encoder_available(
-            "av1_nvenc", ffmpeg_path=ffmpeg_path
-        ):
+        if cuda_available and encoder_available("av1_nvenc", ffmpeg_path=ffmpeg_path):
             use_cuda_encoder = True
             video_encoder_args = [
                 "-c:v av1_nvenc",
@@ -548,6 +544,29 @@ def build_video_commands(
                 "-cq 36",
                 "-spatial-aq 1",
                 "-temporal-aq 1",
+            ]
+            if small:
+                video_encoder_args = video_encoder_args + keyframe_args
+            fallback_encoder_args = cpu_encoder_args
+        else:
+            video_encoder_args = cpu_encoder_args
+    elif codec_choice == "hevc":
+        if small:
+            cpu_encoder_args = [
+                "-c:v libx265",
+                "-preset medium",
+                "-crf 28",
+            ] + keyframe_args
+        else:
+            cpu_encoder_args = ["-c:v libx265", "-preset medium", "-crf 26"]
+
+        if cuda_available and encoder_available("hevc_nvenc", ffmpeg_path=ffmpeg_path):
+            use_cuda_encoder = True
+            video_encoder_args = [
+                "-c:v hevc_nvenc",
+                "-preset p2",
+                "-b:v 0",
+                "-cq 27",
             ]
             if small:
                 video_encoder_args = video_encoder_args + keyframe_args

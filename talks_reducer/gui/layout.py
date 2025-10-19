@@ -163,7 +163,11 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     codec_choice = gui.ttk.Frame(gui.basic_options_frame)
     codec_choice.grid(row=3, column=1, columnspan=2, sticky="w", pady=(8, 0))
     gui.video_codec_buttons = {}
-    for value, label in (("h264", "H.264"), ("av1", "AV1")):
+    for value, label in (
+        ("h264", "H.264"),
+        ("hevc", "HEVC (H.265)"),
+        ("av1", "AV1"),
+    ):
         button = gui.ttk.Radiobutton(
             codec_choice,
             text=label,

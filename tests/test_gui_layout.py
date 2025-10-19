@@ -285,7 +285,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
     assert gui.drop_hint_button.grid_remove_calls
 
     assert hasattr(gui, "video_codec_buttons")
-    assert set(gui.video_codec_buttons) == {"h264", "av1"}
+    assert set(gui.video_codec_buttons) == {"h264", "hevc", "av1"}
     for value, button in gui.video_codec_buttons.items():
         assert button.kwargs["variable"] is gui.video_codec_var
         assert button.kwargs["value"] == value

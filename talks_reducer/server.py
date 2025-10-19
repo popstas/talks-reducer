@@ -369,7 +369,7 @@ def process_video(
     events = deps.queue_factory()
 
     codec_value = (video_codec or "h264").strip().lower()
-    if codec_value not in {"h264", "av1"}:
+    if codec_value not in {"h264", "hevc", "av1"}:
         codec_value = "h264"
 
     option_kwargs: dict[str, float | str | bool] = {
@@ -463,8 +463,8 @@ def build_interface() -> gr.Blocks:
             Drop a video into the zone below or click to browse. **Small video** is enabled
             by default to apply the 720p/128k preset before processing starts—clear it to
             keep the original resolution or pair it with **Target 480p** to downscale
-            further. Choose **Video codec** to switch between H.264 (default) and AV1
-            compression, and enable **Use global FFmpeg** when your system install offers
+            further. Choose **Video codec** to switch between H.264 (default), HEVC, and
+            AV1 compression, and enable **Use global FFmpeg** when your system install offers
             hardware encoders that the bundled build lacks.
 
             Video will be rendered on server **{server_identity}**.
@@ -483,7 +483,7 @@ def build_interface() -> gr.Blocks:
             small_480_checkbox = gr.Checkbox(label="Target 480p", value=False)
 
         codec_dropdown = gr.Dropdown(
-            choices=["h264", "av1"],
+            choices=["h264", "hevc", "av1"],
             value="h264",
             label="Video codec",
         )

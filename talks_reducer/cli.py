@@ -98,9 +98,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--video-codec",
-        choices=["h264", "av1"],
+        choices=["h264", "hevc", "av1"],
         default="h264",
-        help="Select the video encoder used for the final render (default: h264).",
+        help=(
+            "Select the video encoder used for the final render (default: h264). "
+            "Choose hevc to target H.265/HEVC via NVENC when available."
+        ),
     )
     parser.add_argument(
         "--prefer-global-ffmpeg",

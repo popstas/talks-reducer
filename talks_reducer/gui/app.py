@@ -340,7 +340,7 @@ class TalksReducerGUI:
             value=self.preferences.get("open_after_convert", True)
         )
         stored_codec = str(self.preferences.get("video_codec", "h264")).lower()
-        if stored_codec not in {"h264", "av1"}:
+        if stored_codec not in {"h264", "hevc", "av1"}:
             stored_codec = "h264"
             self.preferences.update("video_codec", stored_codec)
         prefer_global = bool(self.preferences.get("use_global_ffmpeg", False))
@@ -363,9 +363,7 @@ class TalksReducerGUI:
             "write", self._on_open_after_convert_change
         )
         self.video_codec_var.trace_add("write", self._on_video_codec_change)
-        self.use_global_ffmpeg_var.trace_add(
-            "write", self._on_use_global_ffmpeg_change
-        )
+        self.use_global_ffmpeg_var.trace_add("write", self._on_use_global_ffmpeg_change)
         self.server_url_var = tk.StringVar(
             value=str(self.preferences.get("server_url", ""))
         )
@@ -678,7 +676,7 @@ class TalksReducerGUI:
 
     def _on_video_codec_change(self, *_: object) -> None:
         value = self.video_codec_var.get().strip().lower()
-        if value not in {"h264", "av1"}:
+        if value not in {"h264", "hevc", "av1"}:
             value = "h264"
             self.video_codec_var.set(value)
         self.preferences.update("video_codec", value)
@@ -891,7 +889,7 @@ class TalksReducerGUI:
         args["silent_threshold"] = round(silent_threshold, 2)
 
         codec_value = self.video_codec_var.get().strip().lower()
-        if codec_value not in {"h264", "av1"}:
+        if codec_value not in {"h264", "hevc", "av1"}:
             codec_value = "h264"
             self.video_codec_var.set(codec_value)
         args["video_codec"] = codec_value

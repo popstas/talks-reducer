@@ -140,7 +140,9 @@ def test_find_ffprobe_prefers_env_file(monkeypatch):
 def test_find_ffprobe_from_ffmpeg_directory(monkeypatch):
     fake_ffmpeg_path = "/opt/bin/ffmpeg"
     expected_ffprobe = "/opt/bin/ffprobe"
-    monkeypatch.setattr(ffmpeg, "find_ffmpeg", lambda prefer_global=False: fake_ffmpeg_path)
+    monkeypatch.setattr(
+        ffmpeg, "find_ffmpeg", lambda prefer_global=False: fake_ffmpeg_path
+    )
     monkeypatch.setattr(ffmpeg.os.path, "isfile", lambda path: path == expected_ffprobe)
     monkeypatch.setattr(ffmpeg, "shutil_which", lambda path: None)
 
@@ -216,7 +218,9 @@ def test_is_global_ffmpeg_available_when_only_system(monkeypatch):
     monkeypatch.setattr(ffmpeg, "find_ffmpeg", lambda prefer_global=False: "ffmpeg")
     monkeypatch.setattr(ffmpeg, "_find_static_ffmpeg", lambda: None)
     monkeypatch.setattr(
-        ffmpeg, "shutil_which", lambda cmd: "/usr/bin/ffmpeg" if cmd == "ffmpeg" else None
+        ffmpeg,
+        "shutil_which",
+        lambda cmd: "/usr/bin/ffmpeg" if cmd == "ffmpeg" else None,
     )
 
     assert ffmpeg.is_global_ffmpeg_available() is True
@@ -231,7 +235,9 @@ def test_is_global_ffmpeg_available_false_when_matches_static(monkeypatch):
         lambda path: path in {"/opt/static/ffmpeg"},
     )
     monkeypatch.setattr(
-        ffmpeg, "shutil_which", lambda cmd: "/opt/static/ffmpeg" if cmd == "ffmpeg" else None
+        ffmpeg,
+        "shutil_which",
+        lambda cmd: "/opt/static/ffmpeg" if cmd == "ffmpeg" else None,
     )
     monkeypatch.setattr(
         ffmpeg.os.path,
@@ -247,7 +253,9 @@ def test_is_global_ffmpeg_available_true_when_both_present(monkeypatch):
     monkeypatch.setattr(
         ffmpeg,
         "find_ffmpeg",
-        lambda prefer_global=False: "/usr/bin/ffmpeg" if prefer_global else "/opt/static/ffmpeg",
+        lambda prefer_global=False: (
+            "/usr/bin/ffmpeg" if prefer_global else "/opt/static/ffmpeg"
+        ),
     )
     monkeypatch.setattr(ffmpeg, "_find_static_ffmpeg", lambda: "/opt/static/ffmpeg")
     monkeypatch.setattr(ffmpeg.os.path, "isfile", lambda path: True)
@@ -548,6 +556,60 @@ def test_build_video_commands_av1_cuda_svt_fallback(monkeypatch):
     assert "-c:v libsvtav1" in fallback
     assert "-preset 6" in fallback
     assert use_cuda
+
+
+def test_build_video_commands_hevc_cuda(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    def fake_encoder_available(name: str, ffmpeg_path: Optional[str] = None) -> bool:
+        return name == "hevc_nvenc"
+
+    monkeypatch.setattr(ffmpeg, "encoder_available", fake_encoder_available)
+
+    command, fallback, use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=True,
+        small=True,
+        frame_rate=30.0,
+        video_codec="hevc",
+    )
+
+    assert "-c:v hevc_nvenc" in command
+    assert "-preset p2" in command
+    assert "-b:v 0" in command
+    assert "-cq 27" in command
+    assert "-g 900" in command
+    assert fallback is not None
+    assert "-c:v libx265" in fallback
+    assert "-preset medium" in fallback
+    assert use_cuda
+
+
+def test_build_video_commands_hevc_cpu(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: False
+    )
+
+    command, fallback, use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        small=False,
+        frame_rate=30.0,
+        video_codec="hevc",
+    )
+
+    assert "-c:v hevc_nvenc" not in command
+    assert "-c:v libx265" in command
+    assert "-crf 26" in command
+    assert fallback is None
+    assert not use_cuda
 
 
 class FakeStream:
