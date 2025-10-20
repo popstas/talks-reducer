@@ -76,6 +76,11 @@ else:  # pragma: no cover - requires Windows runtime
 
     logger = logging.getLogger(__name__)
 
+    def _normalize_hresult(value: int) -> int:
+        """Return the unsigned representation of a potentially signed HRESULT."""
+
+        return value & 0xFFFFFFFF
+
     def _default_hwnd() -> Optional[int]:
         """Return the best-effort HWND for the current process."""
 
@@ -165,7 +170,7 @@ else:  # pragma: no cover - requires Windows runtime
                 logger.debug("CoInitialize succeeded (should_uninit=True)")
                 return True
             except pywintypes.com_error as exc:
-                if exc.hresult == RPC_E_CHANGED_MODE:
+                if _normalize_hresult(exc.hresult) == RPC_E_CHANGED_MODE:
                     logger.debug(
                         "COM already initialised in a different mode; continuing without uninitialise"
                     )
@@ -224,7 +229,10 @@ else:  # pragma: no cover - requires Windows runtime
                     return iface
                 except pywintypes.com_error as exc:
                     last_error = exc
-                    if exc.hresult not in (E_NOINTERFACE, REGDB_E_CLASSNOTREG):
+                    if _normalize_hresult(exc.hresult) not in (
+                        E_NOINTERFACE,
+                        REGDB_E_CLASSNOTREG,
+                    ):
                         self._handle_creation_failure(
                             exc, f"CoCreateInstance for {label}"
                         )
@@ -263,7 +271,7 @@ else:  # pragma: no cover - requires Windows runtime
                     return iface
                 except pywintypes.com_error as exc:
                     last_error = exc
-                    if exc.hresult != E_NOINTERFACE:
+                    if _normalize_hresult(exc.hresult) != E_NOINTERFACE:
                         self._handle_creation_failure(
                             exc, f"QueryInterface for {label}"
                         )

@@ -17,7 +17,10 @@ class FakeComError(Exception):
 
     def __init__(self, hresult: int) -> None:
         super().__init__(f"HRESULT 0x{hresult & 0xFFFFFFFF:08X}")
-        self.hresult = hresult
+        # ``pywintypes.com_error`` exposes HRESULT values as signed integers.
+        self.hresult = (
+            hresult if hresult < 0x80000000 else hresult - 0x100000000
+        )
 
 
 class FakeTaskbarList3:
