@@ -33,11 +33,20 @@ def test_default_remote_destination_with_small_480(tmp_path):
     input_path = tmp_path / "clip.mov"
     input_path.write_text("data")
 
-    result = app._default_remote_destination(
-        input_path, small=True, small_480=True
-    )
+    result = app._default_remote_destination(input_path, small=True, small_480=True)
 
     assert result.name == "clip_speedup_small_480.mov"
+
+
+def test_default_remote_destination_with_codec_suffix(tmp_path):
+    input_path = tmp_path / "sample.mp4"
+    input_path.write_text("data")
+
+    result = app._default_remote_destination(
+        input_path, small=False, add_codec_suffix=True, video_codec="H264"
+    )
+
+    assert result.name == "sample_speedup_h264.mp4"
 
 
 def test_parse_ratios_from_summary_extracts_values():
@@ -189,6 +198,7 @@ def test_collect_arguments_includes_video_codec():
         small_var=SimpleNamespace(get=lambda: False),
         small_480_var=SimpleNamespace(get=lambda: False),
         video_codec_var=DummyVar("AV1"),
+        add_codec_suffix_var=SimpleNamespace(get=lambda: False),
         use_global_ffmpeg_var=SimpleNamespace(get=lambda: True),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
@@ -198,7 +208,31 @@ def test_collect_arguments_includes_video_codec():
 
     assert args["video_codec"] == "av1"
     assert gui.video_codec_var.set_calls == []
-    assert args["prefer_global_ffmpeg"] is True
+
+
+def test_collect_arguments_includes_add_codec_suffix():
+    gui = SimpleNamespace(
+        output_var=SimpleNamespace(get=lambda: ""),
+        temp_var=SimpleNamespace(get=lambda: ""),
+        silent_threshold_var=SimpleNamespace(get=lambda: 0.05),
+        sounded_speed_var=SimpleNamespace(get=lambda: 1.0),
+        silent_speed_var=SimpleNamespace(get=lambda: 4.0),
+        frame_margin_var=SimpleNamespace(get=lambda: "2"),
+        sample_rate_var=SimpleNamespace(get=lambda: "48000"),
+        keyframe_interval_var=SimpleNamespace(get=lambda: 30.0),
+        small_var=SimpleNamespace(get=lambda: False),
+        small_480_var=SimpleNamespace(get=lambda: False),
+        video_codec_var=SimpleNamespace(get=lambda: "hevc", set=lambda value: None),
+        add_codec_suffix_var=SimpleNamespace(get=lambda: True),
+        use_global_ffmpeg_var=SimpleNamespace(get=lambda: False),
+        preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
+    )
+    gui._parse_float = lambda value, _label: float(value)
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["add_codec_suffix"] is True
+    assert args["prefer_global_ffmpeg"] is False
 
 
 def test_parse_video_duration_seconds_extracts_total_seconds():

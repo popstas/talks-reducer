@@ -168,7 +168,7 @@ python -m talks_reducer.service_client --server http://127.0.0.1:9005/ --input d
 ```
 
 The helper wraps the Gradio API exposed by `server.py`, waits for processing to complete, then copies the rendered file to the
-path you provide. Pass `--small` (and optionally `--480`) to mirror the **Small video**/**Target 480p** checkboxes, `--video-codec hevc`, `--video-codec h264`, or `--video-codec av1` to match the codec radio buttons, `--prefer-global-ffmpeg` to reuse the system FFmpeg before the bundled copy, or `--print-log` to stream the server log after the
+path you provide. Pass `--small` (and optionally `--480`) to mirror the **Small video**/**Target 480p** checkboxes, `--video-codec hevc`, `--video-codec h264`, or `--video-codec av1` to match the codec radio buttons, `--add-codec-suffix` to append the selected codec to the default output filename, `--prefer-global-ffmpeg` to reuse the system FFmpeg before the bundled copy, or `--print-log` to stream the server log after the
 download finishes.
 
 ## Windows installer packaging

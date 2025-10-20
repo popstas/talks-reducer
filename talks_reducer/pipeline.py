@@ -143,7 +143,11 @@ def speed_up_video(
     )
 
     output_path = options.output_file or _input_to_output_filename(
-        input_path, options.small, options.small_target_height
+        input_path,
+        options.small,
+        options.small_target_height,
+        video_codec=options.video_codec,
+        add_codec_suffix=options.add_codec_suffix,
     )
     output_path = Path(output_path)
 
@@ -410,7 +414,14 @@ def speed_up_video(
     )
 
 
-def _input_to_output_filename(filename: Path, small: bool = False, small_target_height: int | None = None) -> Path:
+def _input_to_output_filename(
+    filename: Path,
+    small: bool = False,
+    small_target_height: int | None = None,
+    *,
+    video_codec: str | None = None,
+    add_codec_suffix: bool = False,
+) -> Path:
     dot_index = filename.name.rfind(".")
     suffix_parts = []
 
@@ -419,6 +430,11 @@ def _input_to_output_filename(filename: Path, small: bool = False, small_target_
 
     if small_target_height == 480:
         suffix_parts.append("_480")
+
+    if add_codec_suffix and video_codec:
+        normalized_codec = str(video_codec).strip().lower()
+        if normalized_codec:
+            suffix_parts.append(f"_{normalized_codec}")
 
     if not suffix_parts:
         suffix_parts.append("")  # Default case
