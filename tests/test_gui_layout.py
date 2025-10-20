@@ -250,6 +250,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         status_var=StringVarStub(value="Idle"),
         progress_var=DoubleVarStub(value=0.0),
         video_codec_var=StringVarStub(value="hevc"),
+        add_codec_suffix_var=BooleanVarStub(value=False),
         use_global_ffmpeg_var=BooleanVarStub(value=False),
         global_ffmpeg_available=True,
     )
@@ -290,6 +291,8 @@ def test_build_layout_initializes_widgets(monkeypatch):
         assert button.kwargs["variable"] is gui.video_codec_var
         assert button.kwargs["value"] == value
     assert gui.video_codec_var.get() == "hevc"
+    assert hasattr(gui, "add_codec_suffix_check")
+    assert gui.add_codec_suffix_check.kwargs["variable"] is gui.add_codec_suffix_var
     assert hasattr(gui, "use_global_ffmpeg_check")
     assert gui.use_global_ffmpeg_check.kwargs["variable"] is gui.use_global_ffmpeg_var
     assert gui.use_global_ffmpeg_check.kwargs["state"] == "normal"
@@ -358,6 +361,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         status_var=StringVarStub(value="Idle"),
         progress_var=DoubleVarStub(value=0.0),
         video_codec_var=StringVarStub(value="hevc"),
+        add_codec_suffix_var=BooleanVarStub(value=False),
         use_global_ffmpeg_var=BooleanVarStub(value=True),
         global_ffmpeg_available=False,
     )

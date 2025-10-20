@@ -96,7 +96,12 @@ except ModuleNotFoundError:  # pragma: no cover - runtime dependency
 
 
 def _default_remote_destination(
-    input_file: Path, *, small: bool, small_480: bool = False
+    input_file: Path,
+    *,
+    small: bool,
+    small_480: bool = False,
+    add_codec_suffix: bool = False,
+    video_codec: str = "hevc",
 ) -> Path:
     """Return the default remote output path for *input_file*."""
 
@@ -109,6 +114,11 @@ def _default_remote_destination(
 
     if small_480:
         suffix_parts.append("_480")
+
+    if add_codec_suffix:
+        normalized_codec = str(video_codec or "").strip().lower()
+        if normalized_codec:
+            suffix_parts.append(f"_{normalized_codec}")
 
     suffix = "_speedup" + "".join(suffix_parts)
 
@@ -360,6 +370,9 @@ class TalksReducerGUI:
             prefer_global = False
             self.preferences.update("use_global_ffmpeg", False)
         self.video_codec_var = tk.StringVar(value=stored_codec)
+        self.add_codec_suffix_var = tk.BooleanVar(
+            value=bool(self.preferences.get("add_codec_suffix", False))
+        )
         self.use_global_ffmpeg_var = tk.BooleanVar(value=prefer_global)
         stored_mode = str(self.preferences.get("processing_mode", "local"))
         if stored_mode not in {"local", "remote"}:
@@ -374,6 +387,7 @@ class TalksReducerGUI:
             "write", self._on_open_after_convert_change
         )
         self.video_codec_var.trace_add("write", self._on_video_codec_change)
+        self.add_codec_suffix_var.trace_add("write", self._on_add_codec_suffix_change)
         self.use_global_ffmpeg_var.trace_add("write", self._on_use_global_ffmpeg_change)
         self.server_url_var = tk.StringVar(
             value=str(self.preferences.get("server_url", ""))
@@ -692,6 +706,11 @@ class TalksReducerGUI:
             self.video_codec_var.set(value)
         self.preferences.update("video_codec", value)
 
+    def _on_add_codec_suffix_change(self, *_: object) -> None:
+        self.preferences.update(
+            "add_codec_suffix", bool(self.add_codec_suffix_var.get())
+        )
+
     def _on_use_global_ffmpeg_change(self, *_: object) -> None:
         self.preferences.update(
             "use_global_ffmpeg", bool(self.use_global_ffmpeg_var.get())
@@ -904,6 +923,8 @@ class TalksReducerGUI:
             codec_value = "hevc"
             self.video_codec_var.set(codec_value)
         args["video_codec"] = codec_value
+        if self.add_codec_suffix_var.get():
+            args["add_codec_suffix"] = True
         args["prefer_global_ffmpeg"] = bool(self.use_global_ffmpeg_var.get())
 
         sounded_speed = float(self.sounded_speed_var.get())
@@ -1217,9 +1238,7 @@ class TalksReducerGUI:
         )
         percentage = (audio_percentage / 100.0) * self.AUDIO_PROGRESS_WEIGHT
         self._set_progress(percentage)
-        self._set_status(
-            "processing", f"Audio processing: {audio_percentage:.1f}%"
-        )
+        self._set_status("processing", f"Audio processing: {audio_percentage:.1f}%")
 
         if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
             interval_ms = (

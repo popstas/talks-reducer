@@ -195,12 +195,33 @@ def _describe_server_host() -> str:
     return "unknown"
 
 
-def _build_output_path(input_path: Path, workspace: Path, small: bool) -> Path:
+def _build_output_path(
+    input_path: Path,
+    workspace: Path,
+    small: bool,
+    *,
+    small_480: bool = False,
+    add_codec_suffix: bool = False,
+    video_codec: str = "hevc",
+) -> Path:
     """Mirror the CLI output naming scheme inside the workspace directory."""
 
     suffix = input_path.suffix or ".mp4"
     stem = input_path.stem
-    marker = "_speedup_small" if small else "_speedup"
+    suffix_parts: list[str] = []
+
+    if small:
+        suffix_parts.append("_small")
+
+    if small and small_480:
+        suffix_parts.append("_480")
+
+    if add_codec_suffix:
+        normalized_codec = str(video_codec or "").strip().lower()
+        if normalized_codec:
+            suffix_parts.append(f"_{normalized_codec}")
+
+    marker = "_speedup" + "".join(suffix_parts)
     return workspace / f"{stem}{marker}{suffix}"
 
 
@@ -344,6 +365,7 @@ def process_video(
     small_video: bool,
     small_480: bool = False,
     video_codec: str = "hevc",
+    add_codec_suffix: bool = False,
     use_global_ffmpeg: bool = False,
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
@@ -361,21 +383,30 @@ def process_video(
     if not input_path.exists():
         raise gr.Error("The uploaded file is no longer available on the server.")
 
-    workspace = _allocate_workspace()
-    temp_folder = workspace / "temp"
-    output_file = _build_output_path(input_path, workspace, small_video)
-
-    deps = dependencies or ProcessVideoDependencies()
-    events = deps.queue_factory()
-
     codec_value = (video_codec or "hevc").strip().lower()
     if codec_value not in {"h264", "hevc", "av1"}:
         codec_value = "hevc"
+
+    workspace = _allocate_workspace()
+    temp_folder = workspace / "temp"
+    output_file = _build_output_path(
+        input_path,
+        workspace,
+        small_video,
+        small_480=small_480,
+        add_codec_suffix=add_codec_suffix,
+        video_codec=codec_value,
+    )
+
+    deps = dependencies or ProcessVideoDependencies()
+    events = deps.queue_factory()
 
     option_kwargs: dict[str, float | str | bool] = {
         "video_codec": codec_value,
         "prefer_global_ffmpeg": bool(use_global_ffmpeg),
     }
+    if add_codec_suffix:
+        option_kwargs["add_codec_suffix"] = True
     if silent_threshold is not None:
         option_kwargs["silent_threshold"] = float(silent_threshold)
     if sounded_speed is not None:

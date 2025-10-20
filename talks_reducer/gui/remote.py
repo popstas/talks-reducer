@@ -294,6 +294,7 @@ def process_files_via_server(
         "silent_speed",
         "video_codec",
         "prefer_global_ffmpeg",
+        "add_codec_suffix",
     }
     ignored = [key for key in args if key not in allowed_remote_keys]
     if ignored:
@@ -309,6 +310,10 @@ def process_files_via_server(
     except (TypeError, ValueError):
         small_target_height_value = None
     small_480_mode = small_mode and small_target_height_value == 480
+    add_codec_suffix = bool(args.get("add_codec_suffix", False))
+    codec_value = str(args.get("video_codec", "hevc")).strip().lower()
+    if codec_value not in {"h264", "hevc", "av1"}:
+        codec_value = "hevc"
 
     for index, file in enumerate(files, start=1):
         _ensure_not_stopped()
@@ -322,12 +327,20 @@ def process_files_via_server(
                 output_path = (
                     output_path
                     / default_remote_destination(
-                        input_path, small=small_mode, small_480=small_480_mode
+                        input_path,
+                        small=small_mode,
+                        small_480=small_480_mode,
+                        add_codec_suffix=add_codec_suffix,
+                        video_codec=codec_value,
                     ).name
                 )
         else:
             output_path = default_remote_destination(
-                input_path, small=small_mode, small_480=small_480_mode
+                input_path,
+                small=small_mode,
+                small_480=small_480_mode,
+                add_codec_suffix=add_codec_suffix,
+                video_codec=codec_value,
             )
 
         try:
@@ -337,7 +350,8 @@ def process_files_via_server(
                 server_url=server_url,
                 small=small_mode,
                 small_480=small_480_mode,
-                video_codec=str(args.get("video_codec", "hevc")),
+                video_codec=codec_value,
+                add_codec_suffix=add_codec_suffix,
                 silent_threshold=args.get("silent_threshold"),
                 sounded_speed=args.get("sounded_speed"),
                 silent_speed=args.get("silent_speed"),

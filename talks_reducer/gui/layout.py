@@ -177,6 +177,13 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         button.pack(side=gui.tk.LEFT, padx=(0, 8))
         gui.video_codec_buttons[value] = button
 
+    gui.add_codec_suffix_check = gui.ttk.Checkbutton(
+        codec_choice,
+        text="Add codec suffix to filename",
+        variable=gui.add_codec_suffix_var,
+    )
+    gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(0, 8))
+
     gui.ttk.Label(gui.basic_options_frame, text="Processing mode").grid(
         row=4, column=0, sticky="w", pady=(8, 0)
     )

@@ -28,12 +28,21 @@ def test_build_parser_includes_version_and_defaults(
     assert args.temp_folder == str(default_temp)
     assert args.video_codec == "hevc"
     assert args.prefer_global_ffmpeg is False
+    assert args.add_codec_suffix is False
 
     with pytest.raises(SystemExit):
         parser.parse_args(["--version"])
 
     out = capsys.readouterr().out
     assert "talks-reducer 9.9.9" in out
+
+    codec_suffix_args = parser.parse_args(
+        [
+            "--add-codec-suffix",
+            "input.mp4",
+        ]
+    )
+    assert codec_suffix_args.add_codec_suffix is True
 
 
 def test_gather_input_files_collects_valid_paths(
@@ -92,6 +101,7 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
         small=True,
         keyframe_interval_seconds=1.5,
         video_codec="hevc",
+        add_codec_suffix=True,
         server_url=None,
         host=None,
         prefer_global_ffmpeg=True,
@@ -142,6 +152,7 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
     assert options.keyframe_interval_seconds == pytest.approx(1.5)
     assert options.video_codec == "hevc"
     assert options.small is True
+    assert options.add_codec_suffix is True
     assert options.prefer_global_ffmpeg is True
     assert "Completed: /videos/output.mp4" in logged_messages
     assert any(message.startswith("Result: ") for message in logged_messages)
@@ -174,6 +185,7 @@ def test_cli_application_falls_back_to_local_after_remote_failure() -> None:
     def failing_send_video(**kwargs: object):
         assert kwargs.get("video_codec") == "h264"
         assert kwargs.get("prefer_global_ffmpeg") is True
+        assert kwargs.get("add_codec_suffix") is None
         raise RuntimeError("boom")
 
     local_runs: list[cli.ProcessingOptions] = []

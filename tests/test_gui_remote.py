@@ -332,7 +332,7 @@ def test_process_files_via_server_processes_each_file(tmp_path: Path) -> None:
 
 def test_process_files_via_server_includes_small_480_suffix(tmp_path: Path) -> None:
     gui = StubGUI()
-    captured: list[tuple[Path, bool, bool]] = []
+    captured: list[tuple[Path, bool, bool, dict[str, object]]] = []
 
     def load_client() -> object:
         return SimpleNamespace(
@@ -343,8 +343,10 @@ def test_process_files_via_server_includes_small_480_suffix(tmp_path: Path) -> N
             )
         )
 
-    def default_destination(path: Path, small: bool, small_480: bool) -> Path:
-        captured.append((path, small, small_480))
+    def default_destination(
+        path: Path, small: bool, small_480: bool, **kwargs: object
+    ) -> Path:
+        captured.append((path, small, small_480, dict(kwargs)))
         return tmp_path / (path.stem + "_speedup_small_480" + path.suffix)
 
     result = remote_module.process_files_via_server(
@@ -361,6 +363,7 @@ def test_process_files_via_server_includes_small_480_suffix(tmp_path: Path) -> N
 
     assert result is True
     assert captured
-    _, small_flag, small_480_flag = captured[0]
+    _, small_flag, small_480_flag, extra = captured[0]
     assert small_flag is True
     assert small_480_flag is True
+    assert extra.get("add_codec_suffix") is False

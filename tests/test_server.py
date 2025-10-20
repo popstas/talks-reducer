@@ -173,6 +173,21 @@ def test_build_output_path_mirrors_cli_naming(tmp_path: Path) -> None:
     assert small_output.name.endswith("_speedup_small.mp4")
 
 
+def test_build_output_path_includes_codec_suffix(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    output_path = server._build_output_path(
+        Path("video.mp4"),
+        workspace,
+        small=False,
+        add_codec_suffix=True,
+        video_codec="AV1",
+    )
+
+    assert output_path.name == "video_speedup_av1.mp4"
+
+
 def test_format_duration_handles_hours_minutes_seconds() -> None:
     assert server._format_duration(3665) == "1h 1m 5s"
     assert server._format_duration(0) == "0s"
@@ -240,6 +255,7 @@ def test_process_video_streams_events_and_returns_result(tmp_path: Path) -> None
         assert options.sounded_speed == pytest.approx(1.5)
         assert options.silent_speed == pytest.approx(3.0)
         assert options.video_codec == "av1"
+        assert options.add_codec_suffix is False
         assert options.prefer_global_ffmpeg is False
         assert options.prefer_global_ffmpeg is False
 
@@ -308,6 +324,7 @@ def test_process_video_honors_small_480_flag(tmp_path: Path) -> None:
         assert options.small is True
         assert options.small_target_height == 480
         assert options.video_codec == "hevc"
+        assert options.add_codec_suffix is False
         assert options.prefer_global_ffmpeg is False
         return ProcessingResult(
             input_file=options.input_file,
@@ -345,7 +362,50 @@ def test_process_video_honors_small_480_flag(tmp_path: Path) -> None:
 
     assert outputs
     final = outputs[-1]
-    assert Path(final[0]).name.endswith("_speedup_small.mp4")
+    assert Path(final[0]).name.endswith("_speedup_small_480.mp4")
+
+
+def test_process_video_honors_add_codec_suffix(tmp_path: Path) -> None:
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        assert options.add_codec_suffix is True
+        assert options.video_codec == "h264"
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or options.input_file,
+            frame_rate=24.0,
+            original_duration=120.0,
+            output_duration=30.0,
+            chunk_count=5,
+            used_cuda=False,
+            max_audio_volume=0.6,
+            time_ratio=0.25,
+            size_ratio=0.3,
+        )
+
+    dependencies = server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+
+    outputs = list(
+        server.process_video(
+            str(input_file),
+            small_video=False,
+            video_codec="h264",
+            add_codec_suffix=True,
+            dependencies=dependencies,
+        )
+    )
+
+    assert outputs
+    final = outputs[-1]
+    assert Path(final[0]).name.endswith("_speedup_h264.mp4")
 
 
 def test_process_video_honors_use_global_ffmpeg(tmp_path: Path) -> None:
@@ -354,6 +414,7 @@ def test_process_video_honors_use_global_ffmpeg(tmp_path: Path) -> None:
 
     def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
         assert options.prefer_global_ffmpeg is True
+        assert options.add_codec_suffix is False
         return ProcessingResult(
             input_file=options.input_file,
             output_file=options.output_file or options.input_file,

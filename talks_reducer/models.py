@@ -55,6 +55,7 @@ class ProcessingOptions:
     video_codec: str = "hevc"
     keyframe_interval_seconds: float = 30.0
     prefer_global_ffmpeg: bool = False
+    add_codec_suffix: bool = False
 
 
 @dataclass(frozen=True)

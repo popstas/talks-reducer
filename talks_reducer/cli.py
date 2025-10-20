@@ -107,6 +107,12 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--add-codec-suffix",
+        dest="add_codec_suffix",
+        action="store_true",
+        help="Append the selected video codec to the default output filename.",
+    )
+    parser.add_argument(
         "--prefer-global-ffmpeg",
         action="store_true",
         help="Use an FFmpeg binary from PATH before falling back to the bundled static build.",
@@ -256,6 +262,8 @@ class CliApplication:
                 )
             if "video_codec" in local_options:
                 option_kwargs["video_codec"] = str(local_options["video_codec"])
+            if local_options.get("add_codec_suffix"):
+                option_kwargs["add_codec_suffix"] = True
             if "small" in local_options:
                 option_kwargs["small"] = bool(local_options["small"])
             if local_options.get("small_480"):
@@ -325,6 +333,8 @@ class CliApplication:
             remote_option_values["sounded_speed"] = float(parsed_args.sounded_speed)
         if getattr(parsed_args, "video_codec", None):
             remote_option_values["video_codec"] = str(parsed_args.video_codec)
+        if getattr(parsed_args, "add_codec_suffix", False):
+            remote_option_values["add_codec_suffix"] = True
         if getattr(parsed_args, "prefer_global_ffmpeg", False):
             remote_option_values["prefer_global_ffmpeg"] = True
 

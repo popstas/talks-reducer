@@ -242,7 +242,8 @@ def test_send_video_downloads_file(monkeypatch, tmp_path):
     assert submission_args[2] is False
     assert submission_args[3] == "hevc"
     assert submission_args[4] is False
-    assert submission_args[5:8] == (None, None, None)
+    assert submission_args[5] is False
+    assert submission_args[6:9] == (None, None, None)
     assert submission_kwargs.get("api_name") == "/process_video"
 
 
@@ -359,8 +360,37 @@ def test_send_video_forwards_custom_options(monkeypatch, tmp_path, codec):
     submission_args, _ = client_instance.submissions[0]
     assert submission_args[2] is False
     assert submission_args[3] == codec
+    assert submission_args[4] is False
+    assert submission_args[5] is True
+    assert submission_args[6:9] == (0.12, 1.5, 6.0)
+
+
+def test_send_video_honors_add_codec_suffix(monkeypatch, tmp_path):
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"input")
+    server_file = tmp_path / "server_output.mp4"
+    server_file.write_bytes(b"processed")
+
+    client_instance = DummyClient("http://localhost:9005/")
+    client_instance.job_outputs = [
+        (str(server_file), "log", "summary", str(server_file))
+    ]
+
+    monkeypatch.setattr(service_client, "Client", lambda url: client_instance)
+    monkeypatch.setattr(
+        service_client, "gradio_file", lambda path: SimpleNamespace(path=path)
+    )
+
+    destination, *_ = service_client.send_video(
+        input_path=input_file,
+        output_path=None,
+        server_url="http://localhost:9005/",
+        add_codec_suffix=True,
+    )
+
+    assert destination.name == server_file.name
+    submission_args, _ = client_instance.submissions[0]
     assert submission_args[4] is True
-    assert submission_args[5:8] == (0.12, 1.5, 6.0)
 
 
 def test_send_video_defaults_to_current_directory(monkeypatch, tmp_path, cwd_tmp_path):
