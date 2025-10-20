@@ -334,6 +334,7 @@ class TalksReducerGUI:
         self._stop_requested = False
         self._ping_worker_stop_requested = False
         self._current_remote_mode = False
+        self._pending_ffmpeg_stop = False
 
         self.input_files: List[str] = []
 
@@ -468,6 +469,10 @@ class TalksReducerGUI:
         def worker() -> None:
             def set_process(proc: subprocess.Popen) -> None:
                 self._ffmpeg_process = proc
+                if self._stop_requested and self._pending_ffmpeg_stop:
+                    self._schedule_on_ui_thread(
+                        lambda: self._handle_pending_ffmpeg_stop(proc)
+                    )
 
             try:
                 files = gather_input_files(self.input_files)
@@ -852,36 +857,52 @@ class TalksReducerGUI:
 
     def _stop_processing(self) -> None:
         """Stop the currently running processing by terminating FFmpeg."""
-        import signal
 
         self._stop_requested = True
+        self._pending_ffmpeg_stop = True
         # Update button text to indicate stopping state
         self.stop_button.configure(text="Stopping...")
         process = self._ffmpeg_process
         if self._current_remote_mode:
             self._append_log("Cancelling remote job...")
-        elif process and process.poll() is None:
-            self._append_log("Stopping FFmpeg process...")
-            try:
-                # Send SIGTERM to FFmpeg process
-                if sys.platform == "win32":
-                    # Windows doesn't have SIGTERM, use terminate()
-                    process.terminate()
-                else:
-                    # Unix-like systems can use SIGTERM
-                    process.send_signal(signal.SIGTERM)
-
-                threading.Thread(
-                    target=self._wait_for_ffmpeg_stop,
-                    args=(process,),
-                    daemon=True,
-                ).start()
-            except Exception as e:
-                self._append_log(f"Error stopping process: {e}")
-        else:
-            self._append_log("No active FFmpeg process to stop.")
+            self._pending_ffmpeg_stop = False
+        elif not self._handle_pending_ffmpeg_stop(process):
+            self._append_log(
+                "Stop requested; waiting for FFmpeg to expose a process handle."
+            )
 
         self._hide_stop_button()
+
+    def _handle_pending_ffmpeg_stop(
+        self, process: Optional[subprocess.Popen[Any]]
+    ) -> bool:
+        """Attempt to stop *process* when a stop request is pending."""
+
+        if not self._stop_requested:
+            return False
+
+        if process is None or process.poll() is not None:
+            return False
+
+        import signal
+
+        self._append_log("Stopping FFmpeg process...")
+        try:
+            if sys.platform == "win32":
+                process.terminate()
+            else:
+                process.send_signal(signal.SIGTERM)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self._append_log(f"Error stopping process: {exc}")
+            return False
+
+        self._pending_ffmpeg_stop = False
+        threading.Thread(
+            target=self._wait_for_ffmpeg_stop,
+            args=(process,),
+            daemon=True,
+        ).start()
+        return True
 
     def _wait_for_ffmpeg_stop(self, process: subprocess.Popen[Any]) -> None:
         """Wait for FFmpeg to exit and escalate to SIGKILL if required."""
