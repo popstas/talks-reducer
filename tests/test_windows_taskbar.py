@@ -6,12 +6,15 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Optional
 
 import pytest
 
 import talks_reducer
 
+IID_ITASKBARLIST = "{56FDF342-FD6D-11d0-958A-006097C9A090}"
 IID_ITASKBARLIST3 = "{EA1AFB91-9E28-4B86-90E9-9E9F8A5A2B2A}"
+IID_ITASKBARLIST4 = "{C43DC798-95D1-4BEA-9030-BB99E2983A1A}"
 
 
 class FakeComError(Exception):
@@ -40,50 +43,66 @@ class FakeTaskbarList3:
 
 
 class FakeTaskbarList:
-    def __init__(self, target: FakeTaskbarList3) -> None:
+    def __init__(self, target: FakeTaskbarList3, direct_error: Optional[int]) -> None:
         self._target = target
+        self._direct_error = direct_error
         self.hr_init_calls = 0
+        self.query_calls: list[str] = []
 
     def HrInit(self) -> None:
         self.hr_init_calls += 1
 
     def QueryInterface(self, iid: str) -> FakeTaskbarList3:
-        return self._target
+        self.query_calls.append(iid)
+        if iid in {IID_ITASKBARLIST3, "IID_ITaskbarList3", f"made:{IID_ITASKBARLIST3}"}:
+            if self._direct_error is None:
+                return self._target
+            raise FakeComError(self._direct_error)
+        if iid in {IID_ITASKBARLIST4, "IID_ITaskbarList4", f"made:{IID_ITASKBARLIST4}"}:
+            if self._direct_error is None:
+                raise AssertionError("ITaskbarList4 should not be queried on success")
+            return self._target
+        raise AssertionError(f"Unexpected QueryInterface iid {iid}")
 
 
 @pytest.mark.parametrize(
     "direct_error",
-    [None, 0x80004002, 0x80040154],
+    [None, 0x80004002],
 )
 def test_taskbar_progress_uses_pywin32(monkeypatch, direct_error):
-    init_calls: list[tuple[str, int | None]] = []
+    init_calls: list[tuple[str, Optional[int]]] = []
     recorded: list[tuple[object, object]] = []
     fake_interface = FakeTaskbarList3()
 
-    base_iface: FakeTaskbarList | None = None
+    base_iface: Optional[FakeTaskbarList] = None
+
+    class FakeUnknown:
+        def __init__(self) -> None:
+            self.query_calls: list[str] = []
+
+        def QueryInterface(self, iid: str) -> FakeTaskbarList:
+            self.query_calls.append(iid)
+            if iid in {
+                "IID_ITaskbarList",
+                IID_ITASKBARLIST,
+                f"made:{IID_ITASKBARLIST}",
+            }:
+                nonlocal base_iface
+                base_iface = FakeTaskbarList(fake_interface, direct_error)
+                return base_iface
+            raise AssertionError(f"Unexpected QueryInterface iid {iid}")
 
     def co_create_instance(clsid, _outer, _ctx: int, iid):
         recorded.append((clsid, iid))
-        if iid == "IID_ITaskbarList3":
-            if direct_error is None:
-                # Direct ITaskbarList3 activation succeeds.
-                return fake_interface
-            # Simulate failure so the fallback path runs.
-            raise FakeComError(direct_error)
-        if iid == "IID_ITaskbarList4":
-            if direct_error is None:
-                return fake_interface
-            raise FakeComError(direct_error)
-        if iid == "IID_ITaskbarList" and direct_error is not None:
-            nonlocal base_iface
-            base_iface = FakeTaskbarList(fake_interface)
-            return base_iface
+        if iid == "IID_IUnknown":
+            return FakeUnknown()
         raise AssertionError(f"Unexpected CoCreateInstance iid {iid}")
 
     fake_pythoncom = SimpleNamespace(
         CLSCTX_INPROC_SERVER=1,
         CLSCTX_LOCAL_SERVER=2,
         CLSCTX_REMOTE_SERVER=4,
+        IID_IUnknown="IID_IUnknown",
         COINIT_APARTMENTTHREADED=2,
         CoInitialize=lambda: init_calls.append(("init", None)),
         CoInitializeEx=lambda flag: init_calls.append(("init_ex", flag)),
@@ -134,27 +153,46 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, direct_error):
     taskbar.close()
 
     assert init_calls == [("init_ex", 2), ("uninit", None)]
-    assert recorded[0][1] == "IID_ITaskbarList3"
-    if direct_error is not None:
-        # Expect fallback path to probe v4, then create ITaskbarList before querying for v3.
-        assert recorded[1][1] == "IID_ITaskbarList4"
-        assert recorded[2][1] == "IID_ITaskbarList"
-        assert base_iface is not None and base_iface.hr_init_calls == 1
+    assert recorded == [("CLSID_TaskbarList", "IID_IUnknown")]
+    assert base_iface is not None and base_iface.hr_init_calls == 1
+
+    def canonical(iid: str) -> str:
+        if iid.startswith("made:"):
+            iid = iid[5:]
+        mapping = {
+            IID_ITASKBARLIST: "IID_ITaskbarList",
+            IID_ITASKBARLIST3: "IID_ITaskbarList3",
+            IID_ITASKBARLIST4: "IID_ITaskbarList4",
+        }
+        return mapping.get(iid, iid)
+
+    normalized = [canonical(value) for value in base_iface.query_calls]
+    if direct_error is None:
+        assert normalized == ["IID_ITaskbarList3"]
+    else:
+        assert normalized == ["IID_ITaskbarList3", "IID_ITaskbarList4"]
     assert fake_interface.init_calls == 1
     assert fake_interface.value_calls[-1] == (0x1234, 5, 10)
     assert fake_interface.state_calls[0] == (0x1234, module.TaskbarProgressState.NORMAL)
 
 
 def test_taskbar_progress_uses_makeiid_when_shell_missing(monkeypatch):
-    init_calls: list[tuple[str, int | None]] = []
+    init_calls: list[tuple[str, Optional[int]]] = []
     recorded_iids: list[object] = []
     made_iids: list[str] = []
     fake_interface = FakeTaskbarList3()
 
+    class FakeUnknown:
+        def QueryInterface(self, iid: str):
+            recorded_iids.append(iid)
+            if iid == "made:" + IID_ITASKBARLIST:
+                return FakeTaskbarList(fake_interface, None)
+            raise AssertionError(f"Unexpected IID {iid}")
+
     def co_create_instance(clsid, _outer, _ctx: int, iid):
         recorded_iids.append(iid)
-        if iid == "made:" + IID_ITASKBARLIST3:
-            return fake_interface
+        if iid == "IID_IUnknown":
+            return FakeUnknown()
         raise AssertionError(f"Unexpected IID {iid}")
 
     def make_iid(value: str) -> str:
@@ -168,6 +206,7 @@ def test_taskbar_progress_uses_makeiid_when_shell_missing(monkeypatch):
         CLSCTX_INPROC_SERVER=1,
         CLSCTX_LOCAL_SERVER=2,
         CLSCTX_REMOTE_SERVER=4,
+        IID_IUnknown="IID_IUnknown",
         COINIT_APARTMENTTHREADED=2,
         CoInitialize=lambda: init_calls.append(("init", None)),
         CoInitializeEx=lambda flag: init_calls.append(("init_ex", flag)),
@@ -206,5 +245,21 @@ def test_taskbar_progress_uses_makeiid_when_shell_missing(monkeypatch):
     taskbar.set_progress_value(1, 2)
     taskbar.close()
 
-    assert made_iids == [IID_ITASKBARLIST3]
-    assert recorded_iids == ["made:" + IID_ITASKBARLIST3]
+    assert init_calls == [("init_ex", 2), ("uninit", None)]
+
+    def normalize_iid(value: str) -> str:
+        if value.startswith("made:"):
+            return value
+        if value == IID_ITASKBARLIST:
+            return f"made:{IID_ITASKBARLIST}"
+        if value == IID_ITASKBARLIST3:
+            return f"made:{IID_ITASKBARLIST3}"
+        return value
+
+    normalized_iids = [normalize_iid(value) for value in recorded_iids]
+    assert normalized_iids == [
+        "IID_IUnknown",
+        f"made:{IID_ITASKBARLIST}",
+    ]
+    assert IID_ITASKBARLIST in made_iids
+    assert IID_ITASKBARLIST3 in made_iids

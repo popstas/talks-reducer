@@ -214,53 +214,36 @@ else:  # pragma: no cover - requires Windows runtime
                 if value is not None:
                     context |= value
 
-            last_error: pywintypes.com_error | None = None
-
-            for label, iid in (
-                ("ITaskbarList3", IID_ITASKBARLIST3),
-                ("ITaskbarList4", IID_ITASKBARLIST4),
-            ):
-                try:
-                    iface = pythoncom.CoCreateInstance(
-                        self._clsid(),
-                        None,
-                        context,
-                        self._iid(iid),
-                    )
-                    logger.debug("CoCreateInstance for %s succeeded via pywin32", label)
-                    return iface
-                except pywintypes.com_error as exc:
-                    last_error = exc
-                    if _normalize_hresult(exc.hresult) not in (
-                        E_NOINTERFACE,
-                        REGDB_E_CLASSNOTREG,
-                    ):
-                        self._handle_creation_failure(
-                            exc, f"CoCreateInstance for {label}"
-                        )
-                    logger.debug(
-                        "Direct %s activation failed with HRESULT 0x%08X; attempting fallback",
-                        label,
-                        exc.hresult & 0xFFFFFFFF,
-                    )
+            iid_unknown = getattr(
+                pythoncom,
+                "IID_IUnknown",
+                self._iid(IID_ITASKBARLIST),
+            )
 
             try:
-                base = pythoncom.CoCreateInstance(
+                base_unknown = pythoncom.CoCreateInstance(
                     self._clsid(),
                     None,
                     context,
-                    self._iid(IID_ITASKBARLIST),
+                    iid_unknown,
                 )
+                logger.debug("CoCreateInstance for TaskbarList returned IUnknown")
             except pywintypes.com_error as exc:
-                self._handle_creation_failure(exc, "CoCreateInstance for ITaskbarList")
+                self._handle_creation_failure(exc, "CoCreateInstance for TaskbarList")
+
+            try:
+                base = base_unknown.QueryInterface(self._iid(IID_ITASKBARLIST))
+                logger.debug("Obtained ITaskbarList via QueryInterface")
+            except pywintypes.com_error as exc:
+                self._handle_creation_failure(exc, "QueryInterface for ITaskbarList")
 
             try:
                 base.HrInit()
-                logger.debug(
-                    "ITaskbarList.HrInit succeeded for QueryInterface fallback"
-                )
+                logger.debug("ITaskbarList.HrInit succeeded")
             except pywintypes.com_error as exc:
                 self._handle_creation_failure(exc, "ITaskbarList.HrInit")
+
+            last_error: Optional[pywintypes.com_error] = None
 
             for label, iid in (
                 ("ITaskbarList3", IID_ITASKBARLIST3),
@@ -268,8 +251,7 @@ else:  # pragma: no cover - requires Windows runtime
             ):
                 try:
                     iface = base.QueryInterface(self._iid(iid))
-                    logger.debug("Obtained %s via QueryInterface fallback", label)
-                    base = None
+                    logger.debug("Obtained %s via QueryInterface", label)
                     return iface
                 except pywintypes.com_error as exc:
                     last_error = exc
@@ -281,11 +263,11 @@ else:  # pragma: no cover - requires Windows runtime
                         "QueryInterface for %s returned E_NOINTERFACE; trying next candidate",
                         label,
                     )
-            else:
-                if last_error is not None:
-                    self._handle_creation_failure(
-                        last_error, "QueryInterface for taskbar interface"
-                    )
+
+            if last_error is not None:
+                self._handle_creation_failure(
+                    last_error, "QueryInterface for taskbar interface"
+                )
 
         def _handle_creation_failure(self, exc, context: str) -> None:
             if self._should_uninit:
