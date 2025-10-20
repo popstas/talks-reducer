@@ -198,6 +198,8 @@ else:  # pragma: no cover - requires Windows runtime
                 attr = mapping.get(value)
                 if attr and hasattr(shell, attr):
                     return getattr(shell, attr)
+            if hasattr(pythoncom, "MakeIID"):
+                return pythoncom.MakeIID(value)
             try:
                 return pythoncom.IIDFromString(value)
             except AttributeError:  # pragma: no cover - very old pywin32

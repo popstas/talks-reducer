@@ -11,6 +11,8 @@ import pytest
 
 import talks_reducer
 
+IID_ITASKBARLIST3 = "{EA1AFB91-9E28-4B86-90E9-9E9F8A5A2B2A}"
+
 
 class FakeComError(Exception):
     """Minimal stand-in for :class:`pywintypes.com_error`."""
@@ -18,9 +20,7 @@ class FakeComError(Exception):
     def __init__(self, hresult: int) -> None:
         super().__init__(f"HRESULT 0x{hresult & 0xFFFFFFFF:08X}")
         # ``pywintypes.com_error`` exposes HRESULT values as signed integers.
-        self.hresult = (
-            hresult if hresult < 0x80000000 else hresult - 0x100000000
-        )
+        self.hresult = hresult if hresult < 0x80000000 else hresult - 0x100000000
 
 
 class FakeTaskbarList3:
@@ -90,6 +90,7 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, direct_error):
         CoUninitialize=lambda: init_calls.append(("uninit", None)),
         CLSIDFromString=lambda value: value,
         IIDFromString=lambda value: value,
+        MakeIID=lambda value: value,
         CoCreateInstance=co_create_instance,
     )
     fake_pywintypes = SimpleNamespace(com_error=FakeComError, IID=lambda value: value)
@@ -142,3 +143,68 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, direct_error):
     assert fake_interface.init_calls == 1
     assert fake_interface.value_calls[-1] == (0x1234, 5, 10)
     assert fake_interface.state_calls[0] == (0x1234, module.TaskbarProgressState.NORMAL)
+
+
+def test_taskbar_progress_uses_makeiid_when_shell_missing(monkeypatch):
+    init_calls: list[tuple[str, int | None]] = []
+    recorded_iids: list[object] = []
+    made_iids: list[str] = []
+    fake_interface = FakeTaskbarList3()
+
+    def co_create_instance(clsid, _outer, _ctx: int, iid):
+        recorded_iids.append(iid)
+        if iid == "made:" + IID_ITASKBARLIST3:
+            return fake_interface
+        raise AssertionError(f"Unexpected IID {iid}")
+
+    def make_iid(value: str) -> str:
+        made_iids.append(value)
+        return "made:" + value
+
+    def iid_from_string(value: str) -> str:
+        raise AssertionError("IIDFromString should not be used")
+
+    fake_pythoncom = SimpleNamespace(
+        CLSCTX_INPROC_SERVER=1,
+        CLSCTX_LOCAL_SERVER=2,
+        CLSCTX_REMOTE_SERVER=4,
+        COINIT_APARTMENTTHREADED=2,
+        CoInitialize=lambda: init_calls.append(("init", None)),
+        CoInitializeEx=lambda flag: init_calls.append(("init_ex", flag)),
+        CoUninitialize=lambda: init_calls.append(("uninit", None)),
+        CLSIDFromString=lambda value: value,
+        IIDFromString=iid_from_string,
+        MakeIID=make_iid,
+        CoCreateInstance=co_create_instance,
+    )
+
+    fake_pywintypes = SimpleNamespace(com_error=FakeComError, IID=lambda value: value)
+
+    module_path = Path(talks_reducer.__file__).with_name("windows_taskbar.py")
+
+    monkeypatch.setattr(sys, "platform", "win32", raising=False)
+    monkeypatch.setitem(sys.modules, "pythoncom", fake_pythoncom)
+    monkeypatch.setitem(sys.modules, "pywintypes", fake_pywintypes)
+
+    win32com_module = ModuleType("win32com")
+    shell_package = ModuleType("win32com.shell")
+    shell_module = ModuleType("win32com.shell.shell")
+    shell_package.shell = shell_module
+    win32com_module.shell = shell_package
+    monkeypatch.setitem(sys.modules, "win32com", win32com_module)
+    monkeypatch.setitem(sys.modules, "win32com.shell", shell_package)
+    monkeypatch.setitem(sys.modules, "win32com.shell.shell", shell_module)
+
+    spec = importlib.util.spec_from_file_location(
+        "talks_reducer.windows_taskbar_makeiid", module_path
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    taskbar = module.TaskbarProgress(hwnd=0x9999)
+    taskbar.set_progress_value(1, 2)
+    taskbar.close()
+
+    assert made_iids == [IID_ITASKBARLIST3]
+    assert recorded_iids == ["made:" + IID_ITASKBARLIST3]
