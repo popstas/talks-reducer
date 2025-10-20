@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -54,24 +54,24 @@ class FakeTaskbarList:
 )
 def test_taskbar_progress_uses_pywin32(monkeypatch, direct_error):
     init_calls: list[tuple[str, int | None]] = []
-    recorded: list[tuple[str, str]] = []
+    recorded: list[tuple[object, object]] = []
     fake_interface = FakeTaskbarList3()
 
     base_iface: FakeTaskbarList | None = None
 
-    def co_create_instance(clsid: str, _outer, _ctx: int, iid: str):
+    def co_create_instance(clsid, _outer, _ctx: int, iid):
         recorded.append((clsid, iid))
-        if iid.endswith("2B2A}"):
+        if iid == "IID_ITaskbarList3":
             if direct_error is None:
                 # Direct ITaskbarList3 activation succeeds.
                 return fake_interface
             # Simulate failure so the fallback path runs.
             raise FakeComError(direct_error)
-        if iid.endswith("3A1A}"):
+        if iid == "IID_ITaskbarList4":
             if direct_error is None:
                 return fake_interface
             raise FakeComError(direct_error)
-        if iid.endswith("A090}") and direct_error is not None:
+        if iid == "IID_ITaskbarList" and direct_error is not None:
             nonlocal base_iface
             base_iface = FakeTaskbarList(fake_interface)
             return base_iface
@@ -79,21 +79,42 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, direct_error):
 
     fake_pythoncom = SimpleNamespace(
         CLSCTX_INPROC_SERVER=1,
-        CLSCTX_ALL=7,
+        CLSCTX_LOCAL_SERVER=2,
+        CLSCTX_REMOTE_SERVER=4,
         COINIT_APARTMENTTHREADED=2,
         CoInitialize=lambda: init_calls.append(("init", None)),
         CoInitializeEx=lambda flag: init_calls.append(("init_ex", flag)),
         CoUninitialize=lambda: init_calls.append(("uninit", None)),
-        MakeIID=lambda value: value,
+        CLSIDFromString=lambda value: value,
+        IIDFromString=lambda value: value,
         CoCreateInstance=co_create_instance,
     )
     fake_pywintypes = SimpleNamespace(com_error=FakeComError, IID=lambda value: value)
+    fake_shell = SimpleNamespace(
+        CLSID_TaskbarList="CLSID_TaskbarList",
+        IID_ITaskbarList="IID_ITaskbarList",
+        IID_ITaskbarList3="IID_ITaskbarList3",
+        IID_ITaskbarList4="IID_ITaskbarList4",
+    )
 
     module_path = Path(talks_reducer.__file__).with_name("windows_taskbar.py")
 
     monkeypatch.setattr(sys, "platform", "win32", raising=False)
     monkeypatch.setitem(sys.modules, "pythoncom", fake_pythoncom)
     monkeypatch.setitem(sys.modules, "pywintypes", fake_pywintypes)
+    win32com_module = ModuleType("win32com")
+    shell_package = ModuleType("win32com.shell")
+    shell_module = ModuleType("win32com.shell.shell")
+    shell_module.CLSID_TaskbarList = fake_shell.CLSID_TaskbarList
+    shell_module.IID_ITaskbarList = fake_shell.IID_ITaskbarList
+    shell_module.IID_ITaskbarList3 = fake_shell.IID_ITaskbarList3
+    shell_module.IID_ITaskbarList4 = fake_shell.IID_ITaskbarList4
+    shell_package.shell = shell_module
+    win32com_module.shell = shell_package
+
+    monkeypatch.setitem(sys.modules, "win32com", win32com_module)
+    monkeypatch.setitem(sys.modules, "win32com.shell", shell_package)
+    monkeypatch.setitem(sys.modules, "win32com.shell.shell", shell_module)
 
     spec = importlib.util.spec_from_file_location(
         "talks_reducer.windows_taskbar_win32", module_path
@@ -109,11 +130,11 @@ def test_taskbar_progress_uses_pywin32(monkeypatch, direct_error):
     taskbar.close()
 
     assert init_calls == [("init_ex", 2), ("uninit", None)]
-    assert recorded[0][1].endswith("2B2A}")
+    assert recorded[0][1] == "IID_ITaskbarList3"
     if direct_error is not None:
         # Expect fallback path to probe v4, then create ITaskbarList before querying for v3.
-        assert recorded[1][1].endswith("3A1A}")
-        assert recorded[2][1].endswith("A090}")
+        assert recorded[1][1] == "IID_ITaskbarList4"
+        assert recorded[2][1] == "IID_ITaskbarList"
         assert base_iface is not None and base_iface.hr_init_calls == 1
     assert fake_interface.init_calls == 1
     assert fake_interface.value_calls[-1] == (0x1234, 5, 10)

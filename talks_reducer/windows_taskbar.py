@@ -60,9 +60,11 @@ else:  # pragma: no cover - requires Windows runtime
     try:  # Optional dependency that only ships on Windows
         import pythoncom
         import pywintypes
+        from win32com.shell import shell
     except ImportError:  # pragma: no cover - handled at runtime
         pythoncom = None  # type: ignore[assignment]
         pywintypes = None  # type: ignore[assignment]
+        shell = None  # type: ignore[assignment]
 
     CLSID_TASKBARLIST = "{56FDF344-FD6D-11d0-958A-006097C9A090}"
     IID_ITASKBARLIST = "{56FDF342-FD6D-11d0-958A-006097C9A090}"
@@ -173,18 +175,37 @@ else:  # pragma: no cover - requires Windows runtime
                     f"0x{exc.hresult & 0xFFFFFFFF:08X}."
                 ) from exc
 
-        def _make_iid(self, value: str):
+        def _clsid(self):
+            if shell is not None and hasattr(shell, "CLSID_TaskbarList"):
+                return shell.CLSID_TaskbarList
             try:
-                return pywintypes.IID(value)
+                return pythoncom.CLSIDFromString(CLSID_TASKBARLIST)
             except AttributeError:  # pragma: no cover - very old pywin32
-                return pythoncom.MakeIID(value)
+                return pywintypes.IID(CLSID_TASKBARLIST)
+
+        def _iid(self, value: str):
+            if shell is not None:
+                mapping = {
+                    IID_ITASKBARLIST: "IID_ITaskbarList",
+                    IID_ITASKBARLIST3: "IID_ITaskbarList3",
+                    IID_ITASKBARLIST4: "IID_ITaskbarList4",
+                }
+                attr = mapping.get(value)
+                if attr and hasattr(shell, attr):
+                    return getattr(shell, attr)
+            try:
+                return pythoncom.IIDFromString(value)
+            except AttributeError:  # pragma: no cover - very old pywin32
+                return pywintypes.IID(value)
 
         def _create_taskbar_interface(self):
             """Create an ``ITaskbarList3`` COM interface via pywin32."""
 
-            context = getattr(
-                pythoncom, "CLSCTX_ALL", getattr(pythoncom, "CLSCTX_INPROC_SERVER", 1)
-            )
+            context = getattr(pythoncom, "CLSCTX_INPROC_SERVER", 1)
+            for name in ("CLSCTX_LOCAL_SERVER", "CLSCTX_REMOTE_SERVER"):
+                value = getattr(pythoncom, name, None)
+                if value is not None:
+                    context |= value
 
             last_error: pywintypes.com_error | None = None
 
@@ -194,10 +215,10 @@ else:  # pragma: no cover - requires Windows runtime
             ):
                 try:
                     iface = pythoncom.CoCreateInstance(
-                        self._make_iid(CLSID_TASKBARLIST),
+                        self._clsid(),
                         None,
                         context,
-                        self._make_iid(iid),
+                        self._iid(iid),
                     )
                     logger.debug("CoCreateInstance for %s succeeded via pywin32", label)
                     return iface
@@ -215,10 +236,10 @@ else:  # pragma: no cover - requires Windows runtime
 
             try:
                 base = pythoncom.CoCreateInstance(
-                    self._make_iid(CLSID_TASKBARLIST),
+                    self._clsid(),
                     None,
                     context,
-                    self._make_iid(IID_ITASKBARLIST),
+                    self._iid(IID_ITASKBARLIST),
                 )
             except pywintypes.com_error as exc:
                 self._handle_creation_failure(exc, "CoCreateInstance for ITaskbarList")
@@ -236,7 +257,7 @@ else:  # pragma: no cover - requires Windows runtime
                 ("ITaskbarList4", IID_ITASKBARLIST4),
             ):
                 try:
-                    iface = base.QueryInterface(self._make_iid(iid))
+                    iface = base.QueryInterface(self._iid(iid))
                     logger.debug("Obtained %s via QueryInterface fallback", label)
                     base = None
                     return iface
