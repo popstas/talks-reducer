@@ -232,7 +232,7 @@ def process_files_via_server(
     server_url: str,
     *,
     open_after_convert: bool,
-    default_remote_destination: Callable[[Path, bool, bool], Path],
+    default_remote_destination: Callable[..., Path],
     parse_summary: Callable[[str], tuple[Optional[float], Optional[float]]],
     load_service_client: Callable[[], object] = _load_service_client,
     check_server: Callable[..., bool] = check_remote_server_for_gui,
@@ -332,6 +332,8 @@ def process_files_via_server(
                         small_480=small_480_mode,
                         add_codec_suffix=add_codec_suffix,
                         video_codec=codec_value,
+                        silent_speed=args.get("silent_speed"),
+                        sounded_speed=args.get("sounded_speed"),
                     ).name
                 )
         else:
@@ -341,6 +343,8 @@ def process_files_via_server(
                 small_480=small_480_mode,
                 add_codec_suffix=add_codec_suffix,
                 video_codec=codec_value,
+                silent_speed=args.get("silent_speed"),
+                sounded_speed=args.get("sounded_speed"),
             )
 
         try:

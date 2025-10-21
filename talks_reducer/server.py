@@ -20,7 +20,7 @@ import gradio as gr
 from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
 from talks_reducer.icons import find_icon_path
 from talks_reducer.models import ProcessingOptions, ProcessingResult
-from talks_reducer.pipeline import speed_up_video
+from talks_reducer.pipeline import _input_to_output_filename, speed_up_video
 from talks_reducer.progress import ProgressHandle, SignalProgressReporter
 from talks_reducer.version_utils import resolve_version
 
@@ -203,26 +203,23 @@ def _build_output_path(
     small_480: bool = False,
     add_codec_suffix: bool = False,
     video_codec: str = "hevc",
+    silent_speed: float | None = None,
+    sounded_speed: float | None = None,
 ) -> Path:
     """Mirror the CLI output naming scheme inside the workspace directory."""
 
-    suffix = input_path.suffix or ".mp4"
-    stem = input_path.stem
-    suffix_parts: list[str] = []
-
-    if small:
-        suffix_parts.append("_small")
-
-    if small and small_480:
-        suffix_parts.append("_480")
-
-    if add_codec_suffix:
-        normalized_codec = str(video_codec or "").strip().lower()
-        if normalized_codec:
-            suffix_parts.append(f"_{normalized_codec}")
-
-    marker = "_speedup" + "".join(suffix_parts)
-    return workspace / f"{stem}{marker}{suffix}"
+    normalized_codec = str(video_codec or "hevc").strip().lower()
+    target_height = 480 if small and small_480 else None
+    output_name = _input_to_output_filename(
+        input_path,
+        small,
+        target_height,
+        video_codec=normalized_codec,
+        add_codec_suffix=add_codec_suffix,
+        silent_speed=silent_speed,
+        sounded_speed=sounded_speed,
+    )
+    return workspace / output_name.name
 
 
 def _format_duration(seconds: float) -> str:
@@ -387,6 +384,14 @@ def process_video(
     if codec_value not in {"h264", "hevc", "av1"}:
         codec_value = "hevc"
 
+    normalized_sounded_speed: Optional[float] = None
+    if sounded_speed is not None:
+        normalized_sounded_speed = float(sounded_speed)
+
+    normalized_silent_speed: Optional[float] = None
+    if silent_speed is not None:
+        normalized_silent_speed = float(silent_speed)
+
     workspace = _allocate_workspace()
     temp_folder = workspace / "temp"
     output_file = _build_output_path(
@@ -396,6 +401,8 @@ def process_video(
         small_480=small_480,
         add_codec_suffix=add_codec_suffix,
         video_codec=codec_value,
+        silent_speed=normalized_silent_speed,
+        sounded_speed=normalized_sounded_speed,
     )
 
     deps = dependencies or ProcessVideoDependencies()
@@ -409,10 +416,10 @@ def process_video(
         option_kwargs["add_codec_suffix"] = True
     if silent_threshold is not None:
         option_kwargs["silent_threshold"] = float(silent_threshold)
-    if sounded_speed is not None:
-        option_kwargs["sounded_speed"] = float(sounded_speed)
-    if silent_speed is not None:
-        option_kwargs["silent_speed"] = float(silent_speed)
+    if normalized_sounded_speed is not None:
+        option_kwargs["sounded_speed"] = normalized_sounded_speed
+    if normalized_silent_speed is not None:
+        option_kwargs["silent_speed"] = normalized_silent_speed
 
     if small_video and small_480:
         option_kwargs["small_target_height"] = 480
