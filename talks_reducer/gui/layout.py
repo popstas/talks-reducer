@@ -88,10 +88,29 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     basic_label = gui.ttk.Label(basic_label_container, text="Basic options")
     basic_label.pack(side=gui.tk.LEFT)
 
+    gui.basic_presets_frame = gui.ttk.Frame(basic_label_container)
+    gui.basic_presets_frame.pack(side=gui.tk.LEFT, padx=(12, 0))
+
+    gui.silence_speed_x10_button = gui.ttk.Button(
+        gui.basic_presets_frame,
+        text="Speedup silence ×10",
+        command=lambda: gui._apply_basic_preset("silence_x10"),
+        style="Link.TButton",
+    )
+    gui.silence_speed_x10_button.pack(side=gui.tk.LEFT, padx=(0, 8))
+
+    gui.no_speedup_button = gui.ttk.Button(
+        gui.basic_presets_frame,
+        text="No speedup, only compress",
+        command=lambda: gui._apply_basic_preset("compress_only"),
+        style="Link.TButton",
+    )
+    gui.no_speedup_button.pack(side=gui.tk.LEFT)
+
     gui.reset_basic_button = gui.ttk.Button(
         basic_label_container,
-        text="Reset to defaults",
-        command=gui._reset_basic_defaults,
+        text="Speedup silence ×5 (default speed and threshold)",
+        command=lambda: gui._apply_basic_preset("defaults"),
         state=gui.tk.DISABLED,
         style="Link.TButton",
     )
@@ -107,7 +126,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui._reset_button_visible = False
 
     gui.silent_speed_var = gui.tk.DoubleVar(
-        value=min(max(gui.preferences.get_float("silent_speed", 4.0), 1.0), 10.0)
+        value=min(max(gui.preferences.get_float("silent_speed", 5.0), 1.0), 10.0)
     )
     add_slider(
         gui,
@@ -120,7 +139,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         maximum=10.0,
         resolution=0.5,
         display_format="{:.1f}×",
-        default_value=4.0,
+        default_value=5.0,
     )
 
     gui.sounded_speed_var = gui.tk.DoubleVar(
@@ -155,6 +174,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         resolution=0.01,
         display_format="{:.2f}",
         default_value=0.05,
+        pady=(4, 12),
     )
 
     gui.ttk.Label(gui.basic_options_frame, text="Video codec").grid(
@@ -493,13 +513,14 @@ def add_slider(
     resolution: float,
     display_format: str,
     default_value: float,
+    pady: int | tuple[int, int] = 4,
 ) -> None:
     """Add a labeled slider to the given *parent* container."""
 
-    gui.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=4)
+    gui.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=pady)
 
     value_label = gui.ttk.Label(parent)
-    value_label.grid(row=row, column=2, sticky="e", pady=4)
+    value_label.grid(row=row, column=2, sticky="e", pady=pady)
 
     def update(value: str) -> None:
         numeric = float(value)
@@ -524,7 +545,7 @@ def add_slider(
         length=240,
         highlightthickness=0,
     )
-    slider.grid(row=row, column=1, sticky="ew", pady=4, padx=(0, 8))
+    slider.grid(row=row, column=1, sticky="ew", pady=pady, padx=(0, 8))
 
     update(str(variable.get()))
 
@@ -589,6 +610,46 @@ def reset_basic_defaults(gui: "TalksReducerGUI") -> None:
             updater(str(default_value))
         else:
             gui.preferences.update(key, float(f"{default_value:.6f}"))
+
+    update_basic_reset_state(gui)
+
+
+def apply_basic_preset(gui: "TalksReducerGUI", preset: str) -> None:
+    """Apply one of the predefined basic option presets."""
+
+    presets: dict[str, dict[str, float]] = {
+        "defaults": {
+            "silent_speed": 5.0,
+            "sounded_speed": 1.0,
+            "silent_threshold": 0.05,
+        },
+        "silence_x10": {
+            "silent_speed": 10.0,
+            "sounded_speed": 1.0,
+            "silent_threshold": 0.05,
+        },
+        "compress_only": {
+            "silent_speed": 1.0,
+            "sounded_speed": 1.0,
+            "silent_threshold": 0.05,
+        },
+    }
+
+    values = presets.get(preset)
+    if values is None:
+        return
+
+    for key, target in values.items():
+        variable = gui._basic_variables.get(key)
+        if variable is None:
+            continue
+
+        updater: Callable[[str], None] | None = gui._slider_updaters.get(key)
+        if updater is not None:
+            updater(str(target))
+        else:
+            variable.set(target)
+            gui.preferences.update(key, float(f"{target:.6f}"))
 
     update_basic_reset_state(gui)
 

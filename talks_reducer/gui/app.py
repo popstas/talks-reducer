@@ -584,6 +584,9 @@ class TalksReducerGUI:
     def _reset_basic_defaults(self) -> None:
         layout_helpers.reset_basic_defaults(self)
 
+    def _apply_basic_preset(self, preset: str) -> None:
+        layout_helpers.apply_basic_preset(self, preset)
+
     def _update_processing_mode_state(self) -> None:
         has_url = bool(self.server_url_var.get().strip())
         if not has_url and self.processing_mode_var.get() == "remote":
