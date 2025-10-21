@@ -41,7 +41,7 @@ Example CLI usage:
 ```sh
 talks-reducer input.mp4  # optimized encoding at the source resolution
 talks-reducer --small input.mp4  # optimized encoding plus 720p scaling
-talks-reducer --no-optimize input.mp4  # legacy encoder parameters
+talks-reducer --no-optimize input.mp4  # legacy encoder parameters and _copy suffix
 ```
 
 Need to offload work to a remote Talks Reducer server? Pass `--url` with the

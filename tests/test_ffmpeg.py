@@ -497,7 +497,7 @@ def test_build_video_commands_large_cuda_no_optimize(monkeypatch):
         frame_rate=30.0,
     )
 
-    assert "-hwaccel cuda" in command
+    assert "-hwaccel cuda" not in command
     assert "-filter_complex_threads 1" in command
     assert "-c:v copy" in command
     assert "-g 900" not in command

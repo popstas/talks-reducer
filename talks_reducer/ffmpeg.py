@@ -487,10 +487,6 @@ def build_video_commands(
     global_parts: List[str] = [f'"{ffmpeg_path}"', "-y"]
     hwaccel_args: List[str] = []
 
-    if cuda_available and not small and not optimize:
-        hwaccel_args = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
-        global_parts.extend(hwaccel_args)
-
     input_parts = [f'-i "{input_file}"', f'-i "{audio_file}"']
 
     output_parts = [
@@ -533,7 +529,9 @@ def build_video_commands(
 
             cpu_encoder_args = cpu_encoder_base + keyframe_args
 
-            if cuda_available and encoder_available("av1_nvenc", ffmpeg_path=ffmpeg_path):
+            if cuda_available and encoder_available(
+                "av1_nvenc", ffmpeg_path=ffmpeg_path
+            ):
                 use_cuda_encoder = True
                 video_encoder_args = [
                     "-c:v av1_nvenc",
@@ -554,7 +552,9 @@ def build_video_commands(
                 "-crf 28",
             ] + keyframe_args
 
-            if cuda_available and encoder_available("hevc_nvenc", ffmpeg_path=ffmpeg_path):
+            if cuda_available and encoder_available(
+                "hevc_nvenc", ffmpeg_path=ffmpeg_path
+            ):
                 use_cuda_encoder = True
                 video_encoder_args = [
                     "-c:v hevc_nvenc",

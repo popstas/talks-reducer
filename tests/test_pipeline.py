@@ -94,6 +94,36 @@ def test_input_to_output_filename(
     assert output == expected
 
 
+def test_input_to_output_filename_adds_copy_suffix() -> None:
+    """Disabling optimization on large runs appends the legacy copy suffix."""
+
+    output = pipeline._input_to_output_filename(
+        Path("video.mp4"),
+        False,
+        None,
+        optimize=False,
+        video_codec="hevc",
+        add_codec_suffix=False,
+    )
+
+    assert output == Path("video_speedup_copy.mp4")
+
+
+def test_input_to_output_filename_orders_copy_before_codec() -> None:
+    """The copy suffix should precede the optional codec suffix."""
+
+    output = pipeline._input_to_output_filename(
+        Path("clip.mp4"),
+        False,
+        None,
+        optimize=False,
+        video_codec="h264",
+        add_codec_suffix=True,
+    )
+
+    assert output == Path("clip_speedup_copy_h264.mp4")
+
+
 def test_extract_video_metadata_uses_ffprobe(monkeypatch) -> None:
     """Metadata should be parsed from ffprobe output for the demo asset."""
 

@@ -146,6 +146,7 @@ def speed_up_video(
         input_path,
         options.small,
         options.small_target_height,
+        optimize=options.optimize,
         video_codec=options.video_codec,
         add_codec_suffix=options.add_codec_suffix,
     )
@@ -421,6 +422,7 @@ def _input_to_output_filename(
     small: bool = False,
     small_target_height: int | None = None,
     *,
+    optimize: bool = True,
     video_codec: str | None = None,
     add_codec_suffix: bool = False,
 ) -> Path:
@@ -432,6 +434,9 @@ def _input_to_output_filename(
 
     if small_target_height == 480:
         suffix_parts.append("_480")
+
+    if not optimize and not small:
+        suffix_parts.append("_copy")
 
     if add_codec_suffix and video_codec:
         normalized_codec = str(video_codec).strip().lower()
