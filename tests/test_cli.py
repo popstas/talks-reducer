@@ -98,6 +98,7 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
         sounded_speed=1.75,
         frame_spreadage=4,
         sample_rate=48000,
+        optimize=True,
         small=True,
         keyframe_interval_seconds=1.5,
         video_codec="hevc",
@@ -151,6 +152,7 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
     assert options.sample_rate == 48000
     assert options.keyframe_interval_seconds == pytest.approx(1.5)
     assert options.video_codec == "hevc"
+    assert options.optimize is True
     assert options.small is True
     assert options.add_codec_suffix is True
     assert options.prefer_global_ffmpeg is True
@@ -172,6 +174,7 @@ def test_cli_application_falls_back_to_local_after_remote_failure() -> None:
         sample_rate=None,
         keyframe_interval_seconds=None,
         video_codec="h264",
+        optimize=True,
         small=False,
         server_url="http://localhost:9005",
         server_stream=False,
@@ -216,6 +219,7 @@ def test_cli_application_falls_back_to_local_after_remote_failure() -> None:
     ]
     assert logged_messages[:2] == error_messages
     assert len(local_runs) == 1
+    assert local_runs[0].optimize is True
 
 
 def test_main_launches_gui_when_no_args(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -339,6 +343,7 @@ def test_cli_application_uses_remote_server_when_url_provided() -> None:
         frame_spreadage=None,
         sample_rate=None,
         keyframe_interval_seconds=None,
+        optimize=True,
         small=True,
         server_url="http://localhost:9005/",
         server_stream=False,
@@ -538,6 +543,7 @@ def test_process_via_server_handles_multiple_files_and_warnings(
         frame_spreadage=3,
         sample_rate=44100,
         keyframe_interval_seconds=2.5,
+        optimize=True,
         small=False,
         server_url="http://localhost:9005",
         server_stream=True,
@@ -629,6 +635,7 @@ def test_process_via_server_handles_missing_remote_support() -> None:
         sample_rate=None,
         temp_folder=None,
         keyframe_interval_seconds=None,
+        optimize=True,
         small=False,
         server_stream=False,
         video_codec="h264",

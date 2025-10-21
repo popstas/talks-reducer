@@ -470,6 +470,7 @@ def build_video_commands(
     *,
     ffmpeg_path: Optional[str] = None,
     cuda_available: bool,
+    optimize: bool,
     small: bool,
     frame_rate: Optional[float] = None,
     keyframe_interval_seconds: float = 30.0,
@@ -486,11 +487,9 @@ def build_video_commands(
     global_parts: List[str] = [f'"{ffmpeg_path}"', "-y"]
     hwaccel_args: List[str] = []
 
-    if cuda_available and not small:
+    if cuda_available and not small and not optimize:
         hwaccel_args = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
         global_parts.extend(hwaccel_args)
-    elif small and cuda_available:
-        pass
 
     input_parts = [f'-i "{input_file}"', f'-i "{audio_file}"']
 
@@ -508,7 +507,7 @@ def build_video_commands(
     use_cuda_encoder = False
 
     keyframe_args: List[str] = []
-    if small:
+    if optimize:
         if keyframe_interval_seconds <= 0:
             keyframe_interval_seconds = 30.0
         formatted_interval = f"{keyframe_interval_seconds:.6g}"
@@ -529,7 +528,7 @@ def build_video_commands(
         else:
             cpu_encoder_base = ["-c:v libaom-av1", "-crf 32", "-b:v 0", "-row-mt 1"]
 
-        if small:
+        if optimize:
             cpu_encoder_args = cpu_encoder_base + keyframe_args
         else:
             cpu_encoder_args = cpu_encoder_base
@@ -545,13 +544,13 @@ def build_video_commands(
                 "-spatial-aq 1",
                 "-temporal-aq 1",
             ]
-            if small:
+            if optimize:
                 video_encoder_args = video_encoder_args + keyframe_args
             fallback_encoder_args = cpu_encoder_args
         else:
             video_encoder_args = cpu_encoder_args
     elif codec_choice == "hevc":
-        if small:
+        if optimize:
             cpu_encoder_args = [
                 "-c:v libx265",
                 "-preset medium",
@@ -573,14 +572,14 @@ def build_video_commands(
                 "-rc-lookahead 32",
                 "-multipass fullres",
             ]
-            if small:
+            if optimize:
                 video_encoder_args = video_encoder_args + keyframe_args
             fallback_encoder_args = cpu_encoder_args
         else:
             video_encoder_args = cpu_encoder_args
     else:
         # Fallback to H.264
-        if small:
+        if optimize:
             cpu_encoder_args = [
                 "-c:v libx264",
                 "-preset veryfast",

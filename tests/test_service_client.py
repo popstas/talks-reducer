@@ -240,10 +240,11 @@ def test_send_video_downloads_file(monkeypatch, tmp_path):
     submission_args, submission_kwargs = client_instance.submissions[0]
     assert submission_args[1] is True
     assert submission_args[2] is False
-    assert submission_args[3] == "hevc"
-    assert submission_args[4] is False
+    assert submission_args[3] is True
+    assert submission_args[4] == "hevc"
     assert submission_args[5] is False
-    assert submission_args[6:9] == (None, None, None)
+    assert submission_args[6] is False
+    assert submission_args[7:10] == (None, None, None)
     assert submission_kwargs.get("api_name") == "/process_video"
 
 
@@ -359,10 +360,11 @@ def test_send_video_forwards_custom_options(monkeypatch, tmp_path, codec):
     assert log_text == "log"
     submission_args, _ = client_instance.submissions[0]
     assert submission_args[2] is False
-    assert submission_args[3] == codec
-    assert submission_args[4] is False
-    assert submission_args[5] is True
-    assert submission_args[6:9] == (0.12, 1.5, 6.0)
+    assert submission_args[3] is True
+    assert submission_args[4] == codec
+    assert submission_args[5] is False
+    assert submission_args[6] is True
+    assert submission_args[7:10] == (0.12, 1.5, 6.0)
 
 
 def test_send_video_honors_add_codec_suffix(monkeypatch, tmp_path):
@@ -390,7 +392,8 @@ def test_send_video_honors_add_codec_suffix(monkeypatch, tmp_path):
 
     assert destination.name == server_file.name
     submission_args, _ = client_instance.submissions[0]
-    assert submission_args[4] is True
+    assert submission_args[3] is True
+    assert submission_args[5] is True
 
 
 def test_send_video_defaults_to_current_directory(monkeypatch, tmp_path, cwd_tmp_path):

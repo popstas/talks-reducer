@@ -34,15 +34,14 @@ pip install talks-reducer
 
 **Note:** FFmpeg is now bundled automatically with the package, so you don't need to install it separately. You you need, don't know actually.
 
-The `--small` preset applies a 720p video scale and 128 kbps audio bitrate, making it useful for sharing talks over constrained
-connections. Combine it with `--480` if you prefer a 480p target. Without `--small`, the script aims to preserve original quality
-while removing silence.
+By default the CLI applies the same tuned encoder settings everywhere: adaptive keyframes, 128 kbps AAC audio, and NVENC fallbacks that previously lived behind `--small`. The `--small` preset now layers on a 720p scale (or 480p with `--480`) for a smaller output, while `--no-optimize` restores the legacy "copy-style" parameters if you need to keep the original compression.
 
 Example CLI usage:
 
 ```sh
-talks-reducer --small input.mp4
-talks-reducer --small --480 input.mp4
+talks-reducer input.mp4  # optimized encoding at the source resolution
+talks-reducer --small input.mp4  # optimized encoding plus 720p scaling
+talks-reducer --no-optimize input.mp4  # legacy encoder parameters
 ```
 
 Need to offload work to a remote Talks Reducer server? Pass `--url` with the
@@ -129,7 +128,7 @@ item (or relaunch the GUI separately) whenever you want to reopen it. The tray
 no longer opens a browser automatically—pass `--open-browser` if you prefer the
 web page to launch as soon as the server is ready.
 
-This opens a local web page featuring a drag-and-drop upload zone, **Small video** and **Target 480p** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a live
+This opens a local web page featuring a drag-and-drop upload zone, **Small video**, **Target 480p**, and **Optimized encoding** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a live
 progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current
 Talks Reducer version so you can confirm which build the server is running. Once the job completes you can inspect the resulting
 compression ratio and download the rendered video directly from the page.
@@ -151,7 +150,7 @@ output size without touching the CLI.
 
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
 2. Drag a video onto the **Video file** drop zone or click to browse and select one from disk.
-3. **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear both boxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the default h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) compression profiles, and enable **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the bundled build omits before you submit.
+3. **Optimized encoding** stays enabled to apply the tuned codec arguments, and **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear the checkboxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the default h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) compression profiles, and enable **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the bundled build omits before you submit. Disable **Optimized encoding** or pass `--no-optimize` when you need the legacy parameters.
 4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives.
 5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally.
 
@@ -168,7 +167,7 @@ python -m talks_reducer.service_client --server http://127.0.0.1:9005/ --input d
 ```
 
 The helper wraps the Gradio API exposed by `server.py`, waits for processing to complete, then copies the rendered file to the
-path you provide. Pass `--small` (and optionally `--480`) to mirror the **Small video**/**Target 480p** checkboxes, `--video-codec hevc`, `--video-codec h264`, or `--video-codec av1` to match the codec radio buttons, `--add-codec-suffix` to append the selected codec to the default output filename, `--prefer-global-ffmpeg` to reuse the system FFmpeg before the bundled copy, or `--print-log` to stream the server log after the
+path you provide. Pass `--small` (and optionally `--480`) to mirror the **Small video**/**Target 480p** checkboxes, toggle `--no-optimize` to disable the optimized encoding preset, `--video-codec hevc`, `--video-codec h264`, or `--video-codec av1` to match the codec radio buttons, `--add-codec-suffix` to append the selected codec to the default output filename, `--prefer-global-ffmpeg` to reuse the system FFmpeg before the bundled copy, or `--print-log` to stream the server log after the
 download finishes.
 
 ## Windows installer packaging

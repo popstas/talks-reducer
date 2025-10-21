@@ -50,6 +50,7 @@ class ProcessingOptions:
     frame_spreadage: int = 2
     audio_fade_envelope_size: int = 400
     temp_folder: Path = field(default_factory=default_temp_folder)
+    optimize: bool = True
     small: bool = False
     small_target_height: Optional[int] = None
     video_codec: str = "hevc"

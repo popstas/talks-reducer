@@ -179,19 +179,20 @@ def speed_up_video(
     )
 
     reporter.log("Processing on: {}".format("GPU (CUDA)" if cuda_available else "CPU"))
+    if options.optimize:
+        reporter.log("Optimized encoding enabled")
+    else:
+        reporter.log("Optimization disabled: using legacy encoder settings")
     if options.small:
         target_height = options.small_target_height or 720
         if target_height <= 0:
             target_height = 720
-        reporter.log(
-            "Small mode enabled: %dp video, 128k audio, optimized compression"
-            % target_height
-        )
+        reporter.log("Small mode scaling to %dp" % target_height)
 
     hwaccel = (
         ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if cuda_available else []
     )
-    audio_bitrate = "128k" if options.small else "160k"
+    audio_bitrate = "128k" if options.optimize else "160k"
     audio_wav = temp_path / "audio.wav"
 
     extraction_sample_rate = options.sample_rate
@@ -295,6 +296,7 @@ def speed_up_video(
             os.fspath(output_path),
             ffmpeg_path=ffmpeg_path,
             cuda_available=cuda_available,
+            optimize=options.optimize,
             small=options.small,
             frame_rate=frame_rate,
             keyframe_interval_seconds=options.keyframe_interval_seconds,
