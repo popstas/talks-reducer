@@ -295,6 +295,7 @@ def process_files_via_server(
         "video_codec",
         "prefer_global_ffmpeg",
         "add_codec_suffix",
+        "optimize",
     }
     ignored = [key for key in args if key not in allowed_remote_keys]
     if ignored:
@@ -354,6 +355,7 @@ def process_files_via_server(
                 server_url=server_url,
                 small=small_mode,
                 small_480=small_480_mode,
+                optimize=bool(args.get("optimize", True)),
                 video_codec=codec_value,
                 add_codec_suffix=add_codec_suffix,
                 silent_threshold=args.get("silent_threshold"),

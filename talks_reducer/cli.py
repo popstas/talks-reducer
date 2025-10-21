@@ -30,6 +30,8 @@ def _build_parser() -> argparse.ArgumentParser:
     # Add version argument
     pkg_version = resolve_version()
 
+    parser.set_defaults(optimize=True)
+
     parser.add_argument(
         "--version",
         action="version",
@@ -127,6 +129,12 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="small_480",
         action="store_true",
         help="Use with --small to scale video to 480p instead of 720p.",
+    )
+    parser.add_argument(
+        "--no-optimize",
+        dest="optimize",
+        action="store_false",
+        help="Disable optimized encoding presets and save with the legacy copy-style parameters.",
     )
     parser.add_argument(
         "--url",
@@ -264,6 +272,8 @@ class CliApplication:
                 option_kwargs["video_codec"] = str(local_options["video_codec"])
             if local_options.get("add_codec_suffix"):
                 option_kwargs["add_codec_suffix"] = True
+            if "optimize" in local_options:
+                option_kwargs["optimize"] = bool(local_options["optimize"])
             if "small" in local_options:
                 option_kwargs["small"] = bool(local_options["small"])
             if local_options.get("small_480"):
@@ -337,6 +347,8 @@ class CliApplication:
             remote_option_values["add_codec_suffix"] = True
         if getattr(parsed_args, "prefer_global_ffmpeg", False):
             remote_option_values["prefer_global_ffmpeg"] = True
+        if getattr(parsed_args, "optimize", True) is False:
+            remote_option_values["optimize"] = False
 
         unsupported_options: List[str] = []
         for name in (

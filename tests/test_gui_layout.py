@@ -242,6 +242,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         _open_last_output=open_last_output,
         small_var=BooleanVarStub(value=True),
         small_480_var=BooleanVarStub(value=False),
+        optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
         simple_mode_var=BooleanVarStub(value=False),
         preferences=preferences,
@@ -350,6 +351,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         _open_last_output=Mock(),
         small_var=BooleanVarStub(value=True),
         small_480_var=BooleanVarStub(value=False),
+        optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
         simple_mode_var=BooleanVarStub(value=False),
         preferences=SimpleNamespace(

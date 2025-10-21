@@ -372,6 +372,9 @@ class TalksReducerGUI:
         self.add_codec_suffix_var = tk.BooleanVar(
             value=bool(self.preferences.get("add_codec_suffix", False))
         )
+        self.optimize_var = tk.BooleanVar(
+            value=bool(self.preferences.get("optimize", True))
+        )
         self.use_global_ffmpeg_var = tk.BooleanVar(value=prefer_global)
         stored_mode = str(self.preferences.get("processing_mode", "local"))
         if stored_mode not in {"local", "remote"}:
@@ -387,6 +390,7 @@ class TalksReducerGUI:
         )
         self.video_codec_var.trace_add("write", self._on_video_codec_change)
         self.add_codec_suffix_var.trace_add("write", self._on_add_codec_suffix_change)
+        self.optimize_var.trace_add("write", self._on_optimize_change)
         self.use_global_ffmpeg_var.trace_add("write", self._on_use_global_ffmpeg_change)
         self.server_url_var = tk.StringVar(
             value=str(self.preferences.get("server_url", ""))
@@ -713,6 +717,9 @@ class TalksReducerGUI:
             "add_codec_suffix", bool(self.add_codec_suffix_var.get())
         )
 
+    def _on_optimize_change(self, *_: object) -> None:
+        self.preferences.update("optimize", bool(self.optimize_var.get()))
+
     def _on_use_global_ffmpeg_change(self, *_: object) -> None:
         self.preferences.update(
             "use_global_ffmpeg", bool(self.use_global_ffmpeg_var.get())
@@ -949,6 +956,7 @@ class TalksReducerGUI:
             clamped_interval = float(f"{interval:.6f}")
             args["keyframe_interval_seconds"] = clamped_interval
             self.preferences.update("keyframe_interval_seconds", clamped_interval)
+        args["optimize"] = bool(self.optimize_var.get())
         if self.small_var.get():
             args["small"] = True
             if self.small_480_var.get():
