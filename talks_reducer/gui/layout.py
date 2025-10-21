@@ -15,6 +15,27 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from .app import TalksReducerGUI
 
 
+BASIC_PRESETS: dict[str, dict[str, float]] = {
+    "compress_only": {
+        "silent_speed": 1.0,
+        "sounded_speed": 1.0,
+        "silent_threshold": 0.05,
+    },
+    "defaults": {
+        "silent_speed": 5.0,
+        "sounded_speed": 1.0,
+        "silent_threshold": 0.05,
+    },
+    "silence_x10": {
+        "silent_speed": 10.0,
+        "sounded_speed": 1.0,
+        "silent_threshold": 0.05,
+    },
+}
+
+BASIC_PRESET_TOLERANCE = 1e-9
+
+
 def build_layout(gui: "TalksReducerGUI") -> None:
     """Construct the main layout for the GUI."""
 
@@ -91,13 +112,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.basic_presets_frame = gui.ttk.Frame(basic_label_container)
     gui.basic_presets_frame.pack(side=gui.tk.LEFT, padx=(12, 0))
 
-    gui.silence_speed_x10_button = gui.ttk.Button(
-        gui.basic_presets_frame,
-        text="Speedup silence ×10",
-        command=lambda: gui._apply_basic_preset("silence_x10"),
-        style="Link.TButton",
-    )
-    gui.silence_speed_x10_button.pack(side=gui.tk.LEFT, padx=(0, 8))
+    gui.basic_preset_buttons: dict[str, "tk.Misc"] = {}
 
     gui.no_speedup_button = gui.ttk.Button(
         gui.basic_presets_frame,
@@ -105,15 +120,27 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         command=lambda: gui._apply_basic_preset("compress_only"),
         style="Link.TButton",
     )
-    gui.no_speedup_button.pack(side=gui.tk.LEFT)
+    gui.no_speedup_button.pack(side=gui.tk.LEFT, padx=(0, 8))
+    gui.basic_preset_buttons["compress_only"] = gui.no_speedup_button
 
     gui.reset_basic_button = gui.ttk.Button(
-        basic_label_container,
+        gui.basic_presets_frame,
         text="Speedup silence ×5 (default speed and threshold)",
         command=lambda: gui._apply_basic_preset("defaults"),
         state=gui.tk.DISABLED,
         style="Link.TButton",
     )
+    gui.reset_basic_button.pack(side=gui.tk.LEFT, padx=(0, 8))
+    gui.basic_preset_buttons["defaults"] = gui.reset_basic_button
+
+    gui.silence_speed_x10_button = gui.ttk.Button(
+        gui.basic_presets_frame,
+        text="Speedup silence ×10",
+        command=lambda: gui._apply_basic_preset("silence_x10"),
+        style="Link.TButton",
+    )
+    gui.silence_speed_x10_button.pack(side=gui.tk.LEFT)
+    gui.basic_preset_buttons["silence_x10"] = gui.silence_speed_x10_button
 
     gui.basic_options_frame = gui.ttk.Labelframe(
         gui.options_frame, padding=0, labelwidget=basic_label_container
@@ -122,8 +149,6 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0)
     )
     gui.basic_options_frame.columnconfigure(1, weight=1)
-
-    gui._reset_button_visible = False
 
     gui.silent_speed_var = gui.tk.DoubleVar(
         value=min(max(gui.preferences.get_float("silent_speed", 5.0), 1.0), 10.0)
@@ -576,16 +601,48 @@ def update_basic_reset_state(gui: "TalksReducerGUI") -> None:
             should_enable = True
             break
 
-    if should_enable:
-        if not getattr(gui, "_reset_button_visible", False):
-            gui.reset_basic_button.pack(side=gui.tk.LEFT, padx=(8, 0))
-            gui._reset_button_visible = True
-        gui.reset_basic_button.configure(state=gui.tk.NORMAL)
-    else:
-        if getattr(gui, "_reset_button_visible", False):
-            gui.reset_basic_button.pack_forget()
-            gui._reset_button_visible = False
-        gui.reset_basic_button.configure(state=gui.tk.DISABLED)
+    state = gui.tk.NORMAL if should_enable else gui.tk.DISABLED
+    gui.reset_basic_button.configure(state=state)
+    update_basic_preset_highlight(gui)
+
+
+def update_basic_preset_highlight(gui: "TalksReducerGUI") -> None:
+    """Highlight the preset button that matches current slider values."""
+
+    buttons = getattr(gui, "basic_preset_buttons", None)
+    if not buttons:
+        gui._active_basic_preset = None
+        return
+
+    active: str | None = None
+    variables = getattr(gui, "_basic_variables", {})
+    for preset, values in BASIC_PRESETS.items():
+        match = True
+        for key, target in values.items():
+            variable = variables.get(key)
+            if variable is None:
+                match = False
+                break
+            try:
+                current_value = float(variable.get())
+            except (TypeError, ValueError):
+                match = False
+                break
+            if abs(current_value - target) > BASIC_PRESET_TOLERANCE:
+                match = False
+                break
+        if match:
+            active = preset
+            break
+
+    for preset, button in buttons.items():
+        try:
+            style = "SelectedLink.TButton" if preset == active else "Link.TButton"
+            button.configure(style=style)
+        except Exception:
+            continue
+
+    gui._active_basic_preset = active
 
 
 def reset_basic_defaults(gui: "TalksReducerGUI") -> None:
@@ -617,25 +674,7 @@ def reset_basic_defaults(gui: "TalksReducerGUI") -> None:
 def apply_basic_preset(gui: "TalksReducerGUI", preset: str) -> None:
     """Apply one of the predefined basic option presets."""
 
-    presets: dict[str, dict[str, float]] = {
-        "defaults": {
-            "silent_speed": 5.0,
-            "sounded_speed": 1.0,
-            "silent_threshold": 0.05,
-        },
-        "silence_x10": {
-            "silent_speed": 10.0,
-            "sounded_speed": 1.0,
-            "silent_threshold": 0.05,
-        },
-        "compress_only": {
-            "silent_speed": 1.0,
-            "sounded_speed": 1.0,
-            "silent_threshold": 0.05,
-        },
-    }
-
-    values = presets.get(preset)
+    values = BASIC_PRESETS.get(preset)
     if values is None:
         return
 
