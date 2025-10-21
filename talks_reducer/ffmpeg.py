@@ -498,10 +498,6 @@ def build_video_commands(
         f'-filter_script:v "{filter_script}"',
     ]
 
-    codec_choice = (video_codec or "hevc").strip().lower()
-    if codec_choice not in {"h264", "hevc", "av1"}:
-        codec_choice = "hevc"
-
     video_encoder_args: List[str]
     fallback_encoder_args: List[str] = []
     use_cuda_encoder = False
@@ -519,67 +515,63 @@ def build_video_commands(
             f"-keyint_min {gop_size}",
             f"-force_key_frames expr:gte(t,n_forced*{formatted_interval})",
         ]
-    else:
+    elif not small:
         global_parts.append("-filter_complex_threads 1")
 
-    if codec_choice == "av1":
-        if encoder_available("libsvtav1", ffmpeg_path=ffmpeg_path):
-            cpu_encoder_base = ["-c:v libsvtav1", "-preset 6", "-crf 28", "-b:v 0"]
-        else:
-            cpu_encoder_base = ["-c:v libaom-av1", "-crf 32", "-b:v 0", "-row-mt 1"]
+    if not optimize and not small:
+        video_encoder_args = ["-c:v copy"]
+    else:
+        codec_choice = (video_codec or "hevc").strip().lower()
+        if codec_choice not in {"h264", "hevc", "av1"}:
+            codec_choice = "hevc"
 
-        if optimize:
+        if codec_choice == "av1":
+            if encoder_available("libsvtav1", ffmpeg_path=ffmpeg_path):
+                cpu_encoder_base = ["-c:v libsvtav1", "-preset 6", "-crf 28", "-b:v 0"]
+            else:
+                cpu_encoder_base = ["-c:v libaom-av1", "-crf 32", "-b:v 0", "-row-mt 1"]
+
             cpu_encoder_args = cpu_encoder_base + keyframe_args
-        else:
-            cpu_encoder_args = cpu_encoder_base
 
-        if cuda_available and encoder_available("av1_nvenc", ffmpeg_path=ffmpeg_path):
-            use_cuda_encoder = True
-            video_encoder_args = [
-                "-c:v av1_nvenc",
-                "-preset p6",
-                "-rc vbr",
-                "-b:v 0",
-                "-cq 36",
-                "-spatial-aq 1",
-                "-temporal-aq 1",
-            ]
-            if optimize:
-                video_encoder_args = video_encoder_args + keyframe_args
-            fallback_encoder_args = cpu_encoder_args
-        else:
-            video_encoder_args = cpu_encoder_args
-    elif codec_choice == "hevc":
-        if optimize:
+            if cuda_available and encoder_available("av1_nvenc", ffmpeg_path=ffmpeg_path):
+                use_cuda_encoder = True
+                video_encoder_args = [
+                    "-c:v av1_nvenc",
+                    "-preset p6",
+                    "-rc vbr",
+                    "-b:v 0",
+                    "-cq 36",
+                    "-spatial-aq 1",
+                    "-temporal-aq 1",
+                ] + keyframe_args
+                fallback_encoder_args = cpu_encoder_args
+            else:
+                video_encoder_args = cpu_encoder_args
+        elif codec_choice == "hevc":
             cpu_encoder_args = [
                 "-c:v libx265",
                 "-preset medium",
                 "-crf 28",
             ] + keyframe_args
-        else:
-            cpu_encoder_args = ["-c:v libx265", "-preset medium", "-crf 26"]
 
-        if cuda_available and encoder_available("hevc_nvenc", ffmpeg_path=ffmpeg_path):
-            use_cuda_encoder = True
-            video_encoder_args = [
-                "-c:v hevc_nvenc",
-                "-preset p6",
-                "-rc vbr",
-                "-b:v 0",
-                "-cq 32",
-                "-spatial-aq 1",
-                "-temporal-aq 1",
-                "-rc-lookahead 32",
-                "-multipass fullres",
-            ]
-            if optimize:
-                video_encoder_args = video_encoder_args + keyframe_args
-            fallback_encoder_args = cpu_encoder_args
+            if cuda_available and encoder_available("hevc_nvenc", ffmpeg_path=ffmpeg_path):
+                use_cuda_encoder = True
+                video_encoder_args = [
+                    "-c:v hevc_nvenc",
+                    "-preset p6",
+                    "-rc vbr",
+                    "-b:v 0",
+                    "-cq 32",
+                    "-spatial-aq 1",
+                    "-temporal-aq 1",
+                    "-rc-lookahead 32",
+                    "-multipass fullres",
+                ] + keyframe_args
+                fallback_encoder_args = cpu_encoder_args
+            else:
+                video_encoder_args = cpu_encoder_args
         else:
-            video_encoder_args = cpu_encoder_args
-    else:
-        # Fallback to H.264
-        if optimize:
+            # Fallback to H.264
             cpu_encoder_args = [
                 "-c:v libx264",
                 "-preset veryfast",
@@ -600,14 +592,6 @@ def build_video_commands(
                 fallback_encoder_args = cpu_encoder_args
             else:
                 video_encoder_args = cpu_encoder_args
-        else:
-            software_args = ["-c:v libx264", "-preset veryfast", "-crf 23"]
-            if cuda_available:
-                use_cuda_encoder = True
-                video_encoder_args = ["-c:v h264_nvenc", "-preset p1", "-cq 23"]
-                fallback_encoder_args = software_args
-            else:
-                video_encoder_args = software_args
 
     audio_parts = [
         "-c:a aac",
