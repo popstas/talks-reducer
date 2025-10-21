@@ -363,10 +363,15 @@ def speed_up_video(
             process_callback=process_callback,
         )
     except subprocess.CalledProcessError:
-        if fallback_command_str and use_cuda_encoder:
+        if fallback_command_str:
             _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
 
-            reporter.log("CUDA encoding failed, retrying with CPU encoder...")
+            if use_cuda_encoder:
+                reporter.log("CUDA encoding failed, retrying with CPU encoder...")
+            else:
+                reporter.log(
+                    "Primary encoder failed, retrying with fallback settings..."
+                )
             if final_total_frames > 0:
                 reporter.log(
                     f"Final encode target frames (fallback): {final_total_frames}"

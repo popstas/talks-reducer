@@ -501,7 +501,7 @@ def test_build_video_commands_large_cuda_no_optimize(monkeypatch):
     assert "-filter_complex_threads 1" in command
     assert "-c:v copy" in command
     assert "-g 900" not in command
-    assert fallback is None
+    assert fallback is not None
     assert not use_cuda
 
 
@@ -525,7 +525,7 @@ def test_build_video_commands_hevc_cpu_no_optimize(monkeypatch):
 
     assert "-c:v copy" in command
     assert "-g 900" not in command
-    assert fallback is None
+    assert fallback is not None
     assert not use_cuda
 
 
