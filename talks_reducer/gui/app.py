@@ -30,7 +30,11 @@ try:
     from ..cli import gather_input_files
     from ..ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from ..models import ProcessingOptions
-    from ..pipeline import ProcessingAborted, speed_up_video
+    from ..pipeline import (
+        ProcessingAborted,
+        _input_to_output_filename,
+        speed_up_video,
+    )
     from ..progress import ProgressHandle
     from ..version_utils import resolve_version
     from . import discovery as discovery_helpers
@@ -84,7 +88,11 @@ except ImportError:  # pragma: no cover - handled at runtime
         run_defaults_command,
     )
     from talks_reducer.models import ProcessingOptions
-    from talks_reducer.pipeline import ProcessingAborted, speed_up_video
+    from talks_reducer.pipeline import (
+        ProcessingAborted,
+        _input_to_output_filename,
+        speed_up_video,
+    )
     from talks_reducer.progress import ProgressHandle
     from talks_reducer.version_utils import resolve_version
 
@@ -102,32 +110,23 @@ def _default_remote_destination(
     small_480: bool = False,
     add_codec_suffix: bool = False,
     video_codec: str = "hevc",
+    silent_speed: float | None = None,
+    sounded_speed: float | None = None,
 ) -> Path:
     """Return the default remote output path for *input_file*."""
 
-    name = input_file.name
-    dot_index = name.rfind(".")
-    suffix_parts: list[str] = []
+    normalized_codec = str(video_codec or "hevc").strip().lower()
+    target_height = 480 if small_480 else None
 
-    if small:
-        suffix_parts.append("_small")
-
-    if small_480:
-        suffix_parts.append("_480")
-
-    if add_codec_suffix:
-        normalized_codec = str(video_codec or "").strip().lower()
-        if normalized_codec:
-            suffix_parts.append(f"_{normalized_codec}")
-
-    suffix = "_speedup" + "".join(suffix_parts)
-
-    if dot_index != -1:
-        new_name = name[:dot_index] + suffix + name[dot_index:]
-    else:
-        new_name = name + suffix
-
-    return input_file.with_name(new_name)
+    return _input_to_output_filename(
+        input_file,
+        small,
+        target_height,
+        video_codec=normalized_codec,
+        add_codec_suffix=add_codec_suffix,
+        silent_speed=silent_speed,
+        sounded_speed=sounded_speed,
+    )
 
 
 def _parse_ratios_from_summary(summary: str) -> Tuple[Optional[float], Optional[float]]:
@@ -583,6 +582,9 @@ class TalksReducerGUI:
 
     def _reset_basic_defaults(self) -> None:
         layout_helpers.reset_basic_defaults(self)
+
+    def _apply_basic_preset(self, preset: str) -> None:
+        layout_helpers.apply_basic_preset(self, preset)
 
     def _update_processing_mode_state(self) -> None:
         has_url = bool(self.server_url_var.get().strip())

@@ -188,6 +188,22 @@ def test_build_output_path_includes_codec_suffix(tmp_path: Path) -> None:
     assert output_path.name == "video_speedup_av1.mp4"
 
 
+def test_build_output_path_without_speedup_forces_codec(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    output_path = server._build_output_path(
+        Path("video.mp4"),
+        workspace,
+        small=False,
+        video_codec="h264",
+        silent_speed=1.0,
+        sounded_speed=1.0,
+    )
+
+    assert output_path.name == "video_h264.mp4"
+
+
 def test_format_duration_handles_hours_minutes_seconds() -> None:
     assert server._format_duration(3665) == "1h 1m 5s"
     assert server._format_duration(0) == "0s"
@@ -406,6 +422,52 @@ def test_process_video_honors_add_codec_suffix(tmp_path: Path) -> None:
     assert outputs
     final = outputs[-1]
     assert Path(final[0]).name.endswith("_speedup_h264.mp4")
+
+
+def test_process_video_without_speedup_forces_codec(tmp_path: Path) -> None:
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        assert options.silent_speed == pytest.approx(1.0)
+        assert options.sounded_speed == pytest.approx(1.0)
+        assert options.video_codec == "av1"
+        assert options.add_codec_suffix is False
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or options.input_file,
+            frame_rate=24.0,
+            original_duration=120.0,
+            output_duration=30.0,
+            chunk_count=5,
+            used_cuda=False,
+            max_audio_volume=0.6,
+            time_ratio=0.25,
+            size_ratio=0.3,
+        )
+
+    dependencies = server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+
+    outputs = list(
+        server.process_video(
+            str(input_file),
+            small_video=False,
+            video_codec="av1",
+            silent_speed=1.0,
+            sounded_speed=1.0,
+            dependencies=dependencies,
+        )
+    )
+
+    assert outputs
+    final = outputs[-1]
+    assert Path(final[0]).name == "clip_av1.mp4"
 
 
 def test_process_video_honors_use_global_ffmpeg(tmp_path: Path) -> None:

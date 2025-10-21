@@ -162,6 +162,29 @@ def apply_theme(
             ("disabled", palette["foreground"]),
         ],
     )
+    selected_background = palette.get("surface", palette["background"])
+    selected_foreground = palette.get("accent", palette["foreground"])
+    style.configure(
+        "SelectedLink.TButton",
+        background=selected_background,
+        foreground=selected_foreground,
+        borderwidth=0,
+        relief="flat",
+        highlightthickness=0,
+        padding=2,
+        font=("TkDefaultFont", 8, "underline"),
+    )
+    style.map(
+        "SelectedLink.TButton",
+        background=[
+            ("active", selected_background),
+            ("disabled", selected_background),
+        ],
+        foreground=[
+            ("active", selected_foreground),
+            ("disabled", selected_foreground),
+        ],
+    )
     style.configure(
         "TButton",
         background=palette["surface"],

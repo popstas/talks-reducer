@@ -148,6 +148,8 @@ def speed_up_video(
         options.small_target_height,
         video_codec=options.video_codec,
         add_codec_suffix=options.add_codec_suffix,
+        silent_speed=options.silent_speed,
+        sounded_speed=options.sounded_speed,
     )
     output_path = Path(output_path)
 
@@ -414,6 +416,21 @@ def speed_up_video(
     )
 
 
+_DEFAULT_SILENT_SPEED = ProcessingOptions.__dataclass_fields__[  # type: ignore[index]
+    "silent_speed"
+].default
+_DEFAULT_SOUNDED_SPEED = ProcessingOptions.__dataclass_fields__[  # type: ignore[index]
+    "sounded_speed"
+].default
+
+
+def _normalize_speed(value: float | None, fallback: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):  # pragma: no cover - defensive fallback
+        return fallback
+
+
 def _input_to_output_filename(
     filename: Path,
     small: bool = False,
@@ -421,25 +438,35 @@ def _input_to_output_filename(
     *,
     video_codec: str | None = None,
     add_codec_suffix: bool = False,
+    silent_speed: float | None = None,
+    sounded_speed: float | None = None,
 ) -> Path:
     dot_index = filename.name.rfind(".")
-    suffix_parts = []
+    normalized_silent = _normalize_speed(silent_speed, _DEFAULT_SILENT_SPEED)
+    normalized_sounded = _normalize_speed(sounded_speed, _DEFAULT_SOUNDED_SPEED)
+    neutral_silent = math.isclose(normalized_silent, 1.0, rel_tol=1e-9, abs_tol=1e-9)
+    neutral_sounded = math.isclose(normalized_sounded, 1.0, rel_tol=1e-9, abs_tol=1e-9)
+    include_speed_marker = not (neutral_silent and neutral_sounded)
+
+    normalized_codec = str(video_codec or "hevc").strip().lower()
+    force_codec_suffix = not include_speed_marker and not small
+    include_codec_suffix = (add_codec_suffix or force_codec_suffix) and normalized_codec
+
+    suffix_tokens: list[str] = []
+
+    if include_speed_marker:
+        suffix_tokens.append("speedup")
 
     if small:
-        suffix_parts.append("_small")
+        suffix_tokens.append("small")
 
     if small_target_height == 480:
-        suffix_parts.append("_480")
+        suffix_tokens.append("480")
 
-    if add_codec_suffix and video_codec:
-        normalized_codec = str(video_codec).strip().lower()
-        if normalized_codec:
-            suffix_parts.append(f"_{normalized_codec}")
+    if include_codec_suffix:
+        suffix_tokens.append(normalized_codec)
 
-    if not suffix_parts:
-        suffix_parts.append("")  # Default case
-
-    suffix = "_speedup" + "".join(suffix_parts)
+    suffix = f"_{'_'.join(suffix_tokens)}" if suffix_tokens else ""
     new_name = (
         filename.name[:dot_index] + suffix + filename.name[dot_index:]
         if dot_index != -1
