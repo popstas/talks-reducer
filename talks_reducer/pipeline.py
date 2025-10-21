@@ -183,7 +183,7 @@ def speed_up_video(
     if options.optimize:
         reporter.log("Optimized encoding enabled")
     else:
-        reporter.log("Optimization disabled: using legacy encoder settings")
+        reporter.log("Optimization disabled: using speed-focused encoder preset")
     if options.small:
         target_height = options.small_target_height or 720
         if target_height <= 0:
@@ -441,7 +441,7 @@ def _input_to_output_filename(
         suffix_parts.append("_480")
 
     if not optimize and not small:
-        suffix_parts.append("_copy")
+        suffix_parts.append("_fast")
 
     if add_codec_suffix and video_codec:
         normalized_codec = str(video_codec).strip().lower()

@@ -94,8 +94,8 @@ def test_input_to_output_filename(
     assert output == expected
 
 
-def test_input_to_output_filename_adds_copy_suffix() -> None:
-    """Disabling optimization on large runs appends the legacy copy suffix."""
+def test_input_to_output_filename_adds_fast_suffix() -> None:
+    """Disabling optimization on large runs appends the fast suffix."""
 
     output = pipeline._input_to_output_filename(
         Path("video.mp4"),
@@ -106,11 +106,11 @@ def test_input_to_output_filename_adds_copy_suffix() -> None:
         add_codec_suffix=False,
     )
 
-    assert output == Path("video_speedup_copy.mp4")
+    assert output == Path("video_speedup_fast.mp4")
 
 
-def test_input_to_output_filename_orders_copy_before_codec() -> None:
-    """The copy suffix should precede the optional codec suffix."""
+def test_input_to_output_filename_orders_fast_before_codec() -> None:
+    """The fast suffix should precede the optional codec suffix."""
 
     output = pipeline._input_to_output_filename(
         Path("clip.mp4"),
@@ -121,7 +121,7 @@ def test_input_to_output_filename_orders_copy_before_codec() -> None:
         add_codec_suffix=True,
     )
 
-    assert output == Path("clip_speedup_copy_h264.mp4")
+    assert output == Path("clip_speedup_fast_h264.mp4")
 
 
 def test_extract_video_metadata_uses_ffprobe(monkeypatch) -> None:

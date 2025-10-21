@@ -447,7 +447,7 @@ def test_build_video_commands_large_cuda(monkeypatch):
         frame_rate=30.0,
     )
 
-    assert "-hwaccel cuda" not in command
+    assert "-hwaccel cuda" in command
     assert "-filter_complex_threads 1" not in command
     assert "-c:v libx265" in command
     assert "-g 900" in command
@@ -480,11 +480,13 @@ def test_build_video_commands_large_cpu(monkeypatch):
     assert not use_cuda
 
 
-def test_build_video_commands_large_cuda_no_optimize(monkeypatch):
+def test_build_video_commands_large_cuda_fast(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(
-        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: False
-    )
+
+    def fake_encoder_available(name: str, ffmpeg_path: Optional[str] = None) -> bool:
+        return name == "hevc_nvenc"
+
+    monkeypatch.setattr(ffmpeg, "encoder_available", fake_encoder_available)
 
     command, fallback, use_cuda = ffmpeg.build_video_commands(
         "input.mp4",
@@ -495,14 +497,20 @@ def test_build_video_commands_large_cuda_no_optimize(monkeypatch):
         optimize=False,
         small=False,
         frame_rate=30.0,
+        video_codec="hevc",
     )
 
-    assert "-hwaccel cuda" not in command
+    assert "-hwaccel cuda" in command
     assert "-filter_complex_threads 1" in command
-    assert "-c:v copy" in command
+    assert "-c:v hevc_nvenc" in command
+    assert "-preset p1" in command
+    assert "-rc constqp" in command
+    assert "-qp 28" in command
     assert "-g 900" not in command
     assert fallback is not None
-    assert not use_cuda
+    assert "-c:v libx265" in fallback
+    assert "-preset ultrafast" in fallback
+    assert use_cuda
 
 
 def test_build_video_commands_hevc_cpu_no_optimize(monkeypatch):
@@ -523,9 +531,11 @@ def test_build_video_commands_hevc_cpu_no_optimize(monkeypatch):
         video_codec="hevc",
     )
 
-    assert "-c:v copy" in command
+    assert "-c:v libx265" in command
+    assert "-preset ultrafast" in command
+    assert "-crf 30" in command
     assert "-g 900" not in command
-    assert fallback is not None
+    assert fallback is None
     assert not use_cuda
 
 

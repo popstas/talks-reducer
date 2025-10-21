@@ -250,7 +250,7 @@ def test_speed_up_video_falls_back_without_cuda(monkeypatch, tmp_path):
 
     def fake_run(command, *args, **kwargs):
         commands.append(command)
-        if command == "render-copy":
+        if command == "render-fast":
             raise subprocess.CalledProcessError(1, command)
         if command == "render-cpu":
             options.output_file.write_bytes(b"fallback")
@@ -261,7 +261,7 @@ def test_speed_up_video_falls_back_without_cuda(monkeypatch, tmp_path):
         check_cuda_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: (
-            "render-copy",
+            "render-fast",
             "render-cpu",
             False,
         ),
@@ -270,7 +270,7 @@ def test_speed_up_video_falls_back_without_cuda(monkeypatch, tmp_path):
 
     result = speed_up_video(options, reporter=reporter, dependencies=dependencies)
 
-    assert commands == ["extract", "render-copy", "render-cpu"]
+    assert commands == ["extract", "render-fast", "render-cpu"]
     assert result.output_file.read_bytes() == b"fallback"
     assert any("Primary encoder failed" in msg for msg in reporter.messages)
 

@@ -99,9 +99,9 @@ def send_video(
 
     When *should_cancel* returns ``True`` the remote job is cancelled and a
     :class:`ProcessingAborted` exception is raised. Set *optimize* to ``False``
-    to reuse the legacy copy-style parameters, and set *prefer_global_ffmpeg*
-    when the PATH-provided FFmpeg offers hardware encoders that the bundled
-    static build omits.
+    to switch to the fastest CUDA-oriented preset when available, and set
+    *prefer_global_ffmpeg* when the PATH-provided FFmpeg offers hardware
+    encoders that the bundled static build omits.
     """
 
     if not input_path.exists():
@@ -427,7 +427,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-optimize",
         dest="optimize",
         action="store_false",
-        help="Disable optimized encoding presets and use the legacy copy-style parameters.",
+        help="Disable the tuned presets and request the fastest CUDA-oriented settings instead.",
     )
     parser.add_argument(
         "--video-codec",

@@ -34,14 +34,14 @@ pip install talks-reducer
 
 **Note:** FFmpeg is now bundled automatically with the package, so you don't need to install it separately. You you need, don't know actually.
 
-By default the CLI applies the same tuned encoder settings everywhere: adaptive keyframes, 128 kbps AAC audio, and NVENC fallbacks that previously lived behind `--small`. The `--small` preset now layers on a 720p scale (or 480p with `--480`) for a smaller output, while `--no-optimize` restores the legacy "copy-style" parameters if you need to keep the original compression.
+By default the CLI applies the same tuned encoder settings everywhere: adaptive keyframes, 128 kbps AAC audio, and NVENC fallbacks that previously lived behind `--small`. The `--small` preset now layers on a 720p scale (or 480p with `--480`) for a smaller output, while `--no-optimize` switches to a speed-focused CUDA preset that prioritizes turnaround time over compression efficiency.
 
 Example CLI usage:
 
 ```sh
 talks-reducer input.mp4  # optimized encoding at the source resolution
 talks-reducer --small input.mp4  # optimized encoding plus 720p scaling
-talks-reducer --no-optimize input.mp4  # legacy encoder parameters and _copy suffix
+talks-reducer --no-optimize input.mp4  # fastest CUDA preset with a _fast suffix when applicable
 ```
 
 Need to offload work to a remote Talks Reducer server? Pass `--url` with the
@@ -150,7 +150,7 @@ output size without touching the CLI.
 
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
 2. Drag a video onto the **Video file** drop zone or click to browse and select one from disk.
-3. **Optimized encoding** stays enabled to apply the tuned codec arguments, and **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear the checkboxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the default h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) compression profiles, and enable **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the bundled build omits before you submit. Disable **Optimized encoding** or pass `--no-optimize` when you need the legacy parameters.
+3. **Optimized encoding** stays enabled to apply the tuned codec arguments, and **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear the checkboxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the default h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) compression profiles, and enable **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the bundled build omits before you submit. Disable **Optimized encoding** or pass `--no-optimize` when you want the fastest CUDA-oriented preset.
 4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives.
 5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally.
 

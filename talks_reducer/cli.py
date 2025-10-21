@@ -134,7 +134,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-optimize",
         dest="optimize",
         action="store_false",
-        help="Disable optimized encoding presets and save with the legacy copy-style parameters.",
+        help="Disable the tuned encoding presets and use the fastest CUDA-oriented settings instead.",
     )
     parser.add_argument(
         "--url",
