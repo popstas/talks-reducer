@@ -164,6 +164,8 @@ def speed_up_video(
     frame_rate = metadata["frame_rate"]
     original_duration = metadata["duration"]
     frame_count = metadata.get("frame_count", 0)
+    original_width = metadata.get("width", 0)
+    original_height = metadata.get("height", 0)
 
     app_version = resolve_version()
     if app_version and app_version != "unknown":
@@ -172,11 +174,13 @@ def speed_up_video(
     reporter.log(
         (
             "Source metadata: duration: {duration:.2f}s, frame rate: {fps:.3f} fps,"
-            " frames: {frames}"
+            " frames: {frames}, resolution: {width}x{height}"
         ).format(
             duration=original_duration,
             fps=frame_rate,
             frames=frame_count if frame_count > 0 else "unknown",
+            width=original_width if original_width > 0 else "unknown",
+            height=original_height if original_height > 0 else "unknown",
         )
     )
 
@@ -283,7 +287,16 @@ def speed_up_video(
             target_height = options.small_target_height or 720
             if target_height <= 0:
                 target_height = 720
-            filter_parts.append(f"scale=-2:{target_height}")
+            # Only scale down if the original height is greater than or equal to target
+            if original_height > 0 and original_height >= target_height:
+                filter_parts.append(f"scale=-2:{target_height}")
+                reporter.log(
+                    f"Scaling down from {int(original_height)}p to {target_height}p"
+                )
+            else:
+                reporter.log(
+                    f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
+                )
         filter_parts.append(f"fps={frame_rate}")
         escaped_expression = expression.replace(",", "\\,")
         filter_parts.append(f"setpts={escaped_expression}")
@@ -516,7 +529,7 @@ def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, fl
         "-select_streams",
         "v",
         "-show_entries",
-        "format=duration:stream=avg_frame_rate,nb_frames",
+        "format=duration:stream=avg_frame_rate,nb_frames,width,height",
     ]
     process = subprocess.Popen(
         command,
@@ -537,10 +550,18 @@ def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, fl
     match_frames = re.search(r"nb_frames=(\d+)", str(stdout))
     frame_count = int(match_frames.group(1)) if match_frames else 0
 
+    match_width = re.search(r"width=(\d+)", str(stdout))
+    width = int(match_width.group(1)) if match_width else 0
+
+    match_height = re.search(r"height=(\d+)", str(stdout))
+    height = int(match_height.group(1)) if match_height else 0
+
     return {
         "frame_rate": frame_rate,
         "duration": original_duration,
         "frame_count": frame_count,
+        "width": float(width),
+        "height": float(height),
     }
 
 

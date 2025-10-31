@@ -1,0 +1,153 @@
+[1mdiff --git a/talks_reducer/pipeline.py b/talks_reducer/pipeline.py[m
+[1mindex 644a90a..581a5e8 100644[m
+[1m--- a/talks_reducer/pipeline.py[m
+[1m+++ b/talks_reducer/pipeline.py[m
+[36m@@ -164,6 +164,8 @@[m [mdef speed_up_video([m
+     frame_rate = metadata["frame_rate"][m
+     original_duration = metadata["duration"][m
+     frame_count = metadata.get("frame_count", 0)[m
+[32m+[m[32m    original_width = metadata.get("width", 0)[m
+[32m+[m[32m    original_height = metadata.get("height", 0)[m
+ [m
+     app_version = resolve_version()[m
+     if app_version and app_version != "unknown":[m
+[36m@@ -172,11 +174,13 @@[m [mdef speed_up_video([m
+     reporter.log([m
+         ([m
+             "Source metadata: duration: {duration:.2f}s, frame rate: {fps:.3f} fps,"[m
+[31m-            " frames: {frames}"[m
+[32m+[m[32m            " frames: {frames}, resolution: {width}x{height}"[m
+         ).format([m
+             duration=original_duration,[m
+             fps=frame_rate,[m
+             frames=frame_count if frame_count > 0 else "unknown",[m
+[32m+[m[32m            width=original_width if original_width > 0 else "unknown",[m
+[32m+[m[32m            height=original_height if original_height > 0 else "unknown",[m
+         )[m
+     )[m
+ [m
+[36m@@ -283,7 +287,16 @@[m [mdef speed_up_video([m
+             target_height = options.small_target_height or 720[m
+             if target_height <= 0:[m
+                 target_height = 720[m
+[31m-            filter_parts.append(f"scale=-2:{target_height}")[m
+[32m+[m[32m            # Only scale down if the original height is greater than or equal to target[m
+[32m+[m[32m            if original_height > 0 and original_height >= target_height:[m
+[32m+[m[32m                filter_parts.append(f"scale=-2:{target_height}")[m
+[32m+[m[32m                reporter.log([m
+[32m+[m[32m                    f"Scaling down from {int(original_height)}p to {target_height}p"[m
+[32m+[m[32m                )[m
+[32m+[m[32m            else:[m
+[32m+[m[32m                reporter.log([m
+[32m+[m[32m                    f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"[m
+[32m+[m[32m                )[m
+         filter_parts.append(f"fps={frame_rate}")[m
+         escaped_expression = expression.replace(",", "\\,")[m
+         filter_parts.append(f"setpts={escaped_expression}")[m
+[36m@@ -516,7 +529,7 @@[m [mdef _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, fl[m
+         "-select_streams",[m
+         "v",[m
+         "-show_entries",[m
+[31m-        "format=duration:stream=avg_frame_rate,nb_frames",[m
+[32m+[m[32m        "format=duration:stream=avg_frame_rate,nb_frames,width,height",[m
+     ][m
+     process = subprocess.Popen([m
+         command,[m
+[36m@@ -537,10 +550,18 @@[m [mdef _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, fl[m
+     match_frames = re.search(r"nb_frames=(\d+)", str(stdout))[m
+     frame_count = int(match_frames.group(1)) if match_frames else 0[m
+ [m
+[32m+[m[32m    match_width = re.search(r"width=(\d+)", str(stdout))[m
+[32m+[m[32m    width = int(match_width.group(1)) if match_width else 0[m
+[32m+[m
+[32m+[m[32m    match_height = re.search(r"height=(\d+)", str(stdout))[m
+[32m+[m[32m    height = int(match_height.group(1)) if match_height else 0[m
+[32m+[m
+     return {[m
+         "frame_rate": frame_rate,[m
+         "duration": original_duration,[m
+         "frame_count": frame_count,[m
+[32m+[m[32m        "width": float(width),[m
+[32m+[m[32m        "height": float(height),[m
+     }[m
+ [m
+ [m
+[1mdiff --git a/tests/test_cli.py b/tests/test_cli.py[m
+[1mindex ec54a97..e6e53e9 100644[m
+[1m--- a/tests/test_cli.py[m
+[1m+++ b/tests/test_cli.py[m
+[36m@@ -154,7 +154,8 @@[m [mdef test_cli_application_builds_processing_options_and_runs_local_pipeline() ->[m
+     assert options.small is True[m
+     assert options.add_codec_suffix is True[m
+     assert options.prefer_global_ffmpeg is True[m
+[31m-    assert "Completed: /videos/output.mp4" in logged_messages[m
+[32m+[m[32m    # Check for output path with platform-agnostic separator[m
+[32m+[m[32m    assert any("Completed: /videos/output.mp4" in msg or "Completed: \\videos\\output.mp4" in msg for msg in logged_messages)[m
+     assert any(message.startswith("Result: ") for message in logged_messages)[m
+ [m
+ [m
+[1mdiff --git a/tests/test_pipeline.py b/tests/test_pipeline.py[m
+[1mindex 4856484..b235f4a 100644[m
+[1m--- a/tests/test_pipeline.py[m
+[1m+++ b/tests/test_pipeline.py[m
+[36m@@ -170,6 +170,8 @@[m [mdef test_extract_video_metadata_uses_ffprobe(monkeypatch) -> None:[m
+                         "[STREAM]",[m
+                         "avg_frame_rate=25/1",[m
+                         "nb_frames=125",[m
+[32m+[m[32m                        "width=1920",[m
+[32m+[m[32m                        "height=1080",[m
+                         "[/STREAM]",[m
+                         "[FORMAT]",[m
+                         "duration=5.0",[m
+[36m@@ -192,6 +194,8 @@[m [mdef test_extract_video_metadata_uses_ffprobe(monkeypatch) -> None:[m
+     assert metadata["frame_rate"] == pytest.approx(25.0)[m
+     assert metadata["duration"] == pytest.approx(5.0)[m
+     assert metadata["frame_count"] == 125[m
+[32m+[m[32m    assert metadata["width"] == pytest.approx(1920.0)[m
+[32m+[m[32m    assert metadata["height"] == pytest.approx(1080.0)[m
+ [m
+ [m
+ def test_stop_requested_handles_callable_and_bool() -> None:[m
+[1mdiff --git a/tests/test_pipeline_service.py b/tests/test_pipeline_service.py[m
+[1mindex 8cc9272..702b5b0 100644[m
+[1m--- a/tests/test_pipeline_service.py[m
+[1m+++ b/tests/test_pipeline_service.py[m
+[36m@@ -48,7 +48,7 @@[m [mdef test_speed_up_video_returns_result(monkeypatch, tmp_path):[m
+     # Stub heavy external dependencies.[m
+     monkeypatch.setattr([m
+         "talks_reducer.pipeline._extract_video_metadata",[m
+[31m-        lambda _input, _frame_rate: {"frame_rate": 30.0, "duration": 2.0},[m
+[32m+[m[32m        lambda _input, _frame_rate: {"frame_rate": 30.0, "duration": 2.0, "width": 1920.0, "height": 1080.0},[m
+     )[m
+ [m
+     def fake_read(_path):[m
+[36m@@ -128,8 +128,8 @@[m [mdef test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):[m
+ [m
+     def fake_metadata(path, _frame_rate):[m
+         if Path(path) == input_path:[m
+[31m-            return {"frame_rate": 24.0, "duration": 4.0, "frame_count": 96}[m
+[31m-        return {"frame_rate": 24.0, "duration": 2.0, "frame_count": 48}[m
+[32m+[m[32m            return {"frame_rate": 24.0, "duration": 4.0, "frame_count": 96, "width": 1920.0, "height": 1080.0}[m
+[32m+[m[32m        return {"frame_rate": 24.0, "duration": 2.0, "frame_count": 48, "width": 1920.0, "height": 1080.0}[m
+ [m
+     monkeypatch.setattr("talks_reducer.pipeline._extract_video_metadata", fake_metadata)[m
+ [m
+[36m@@ -218,7 +218,7 @@[m [mdef test_speed_up_video_cleans_temp_on_abort(monkeypatch, tmp_path):[m
+ [m
+     monkeypatch.setattr([m
+         "talks_reducer.pipeline._extract_video_metadata",[m
+[31m-        lambda _input, _frame_rate: {"frame_rate": 30.0, "duration": 2.0},[m
+[32m+[m[32m        lambda _input, _frame_rate: {"frame_rate": 30.0, "duration": 2.0, "width": 1920.0, "height": 1080.0},[m
+     )[m
+ [m
+     ffmpeg_calls: List[bool] = [][m
+[36m@@ -258,8 +258,8 @@[m [mdef test_speed_up_video_computes_ratios(monkeypatch, tmp_path):[m
+ [m
+     def fake_metadata(path, _frame_rate):[m
+         if Path(path) == input_path:[m
+[31m-            return {"frame_rate": 25.0, "duration": 5.0, "frame_count": 125}[m
+[31m-        return {"frame_rate": 25.0, "duration": 2.0, "frame_count": 50}[m
+[32m+[m[32m            return {"frame_rate": 25.0, "duration": 5.0, "frame_count": 125, "width": 1920.0, "height": 1080.0}[m
+[32m+[m[32m        return {"frame_rate": 25.0, "duration": 2.0, "frame_count": 50, "width": 1920.0, "height": 1080.0}[m
+ [m
+     monkeypatch.setattr("talks_reducer.pipeline._extract_video_meta

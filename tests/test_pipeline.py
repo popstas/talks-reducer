@@ -170,6 +170,8 @@ def test_extract_video_metadata_uses_ffprobe(monkeypatch) -> None:
                         "[STREAM]",
                         "avg_frame_rate=25/1",
                         "nb_frames=125",
+                        "width=1920",
+                        "height=1080",
                         "[/STREAM]",
                         "[FORMAT]",
                         "duration=5.0",
@@ -192,6 +194,8 @@ def test_extract_video_metadata_uses_ffprobe(monkeypatch) -> None:
     assert metadata["frame_rate"] == pytest.approx(25.0)
     assert metadata["duration"] == pytest.approx(5.0)
     assert metadata["frame_count"] == 125
+    assert metadata["width"] == pytest.approx(1920.0)
+    assert metadata["height"] == pytest.approx(1080.0)
 
 
 def test_stop_requested_handles_callable_and_bool() -> None:
