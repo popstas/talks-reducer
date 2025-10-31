@@ -80,7 +80,11 @@ def _get_tree_expression_rec(chunks: Sequence[Sequence[int]]) -> str:
             _get_tree_expression_rec(chunks[split_index:]),
         )
     chunk = chunks[0]
-    local_speedup = (chunk[3] - chunk[2]) / (chunk[1] - chunk[0])
+    chunk_duration = chunk[1] - chunk[0]
+    if chunk_duration == 0:
+        # If chunk has zero duration, use identity transformation
+        return "PTS"
+    local_speedup = (chunk[3] - chunk[2]) / chunk_duration
     offset = -chunk[0] * local_speedup + chunk[2]
     return "N*{}{:+}".format(local_speedup, offset)
 

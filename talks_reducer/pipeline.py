@@ -284,7 +284,7 @@ def speed_up_video(
             if target_height <= 0:
                 target_height = 720
             filter_parts.append(f"scale=-2:{target_height}")
-        filter_parts.append(f"fps=fps={frame_rate}")
+        filter_parts.append(f"fps={frame_rate}")
         escaped_expression = expression.replace(",", "\\,")
         filter_parts.append(f"setpts={escaped_expression}")
         filter_graph_file.write(",".join(filter_parts))
