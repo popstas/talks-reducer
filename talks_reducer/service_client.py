@@ -76,6 +76,7 @@ def send_video(
     server_url: str,
     small: bool = False,
     small_480: bool = False,
+    optimize: bool = True,
     video_codec: str = "hevc",
     add_codec_suffix: bool = False,
     prefer_global_ffmpeg: bool = False,
@@ -97,9 +98,10 @@ def send_video(
     """Upload *input_path* to the Gradio server and download the processed video.
 
     When *should_cancel* returns ``True`` the remote job is cancelled and a
-    :class:`ProcessingAborted` exception is raised. Set *prefer_global_ffmpeg*
-    when the PATH-provided FFmpeg offers hardware encoders that the bundled
-    static build omits.
+    :class:`ProcessingAborted` exception is raised. Set *optimize* to ``False``
+    to switch to the fastest CUDA-oriented preset when available, and set
+    *prefer_global_ffmpeg* when the PATH-provided FFmpeg offers hardware
+    encoders that the bundled static build omits.
     """
 
     if not input_path.exists():
@@ -111,6 +113,7 @@ def send_video(
         gradio_file(str(input_path)),
         bool(small),
         bool(small_480),
+        bool(optimize),
         str(video_codec),
         bool(add_codec_suffix),
         bool(prefer_global_ffmpeg),
@@ -396,6 +399,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Send a video to a running talks-reducer server and download the result.",
     )
+    parser.set_defaults(optimize=True)
     parser.add_argument("input", type=Path, help="Path to the video file to upload.")
     parser.add_argument(
         "--server",
@@ -418,6 +422,12 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="small_480",
         action="store_true",
         help="Combine with --small to target 480p instead of 720p.",
+    )
+    parser.add_argument(
+        "--no-optimize",
+        dest="optimize",
+        action="store_false",
+        help="Disable the tuned presets and request the fastest CUDA-oriented settings instead.",
     )
     parser.add_argument(
         "--video-codec",
@@ -497,6 +507,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         server_url=args.server,
         small=args.small,
         small_480=small_480_mode,
+        optimize=bool(args.optimize),
         video_codec=str(args.video_codec),
         prefer_global_ffmpeg=bool(args.prefer_global_ffmpeg),
         log_callback=_stream if args.print_log else None,

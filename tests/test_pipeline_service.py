@@ -197,6 +197,84 @@ def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
     assert ffmpeg_calls == [options.prefer_global_ffmpeg]
 
 
+def test_speed_up_video_falls_back_without_cuda(monkeypatch, tmp_path):
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"input")
+
+    options = ProcessingOptions(
+        input_file=input_path,
+        temp_folder=tmp_path / "temp-copy",
+        output_file=tmp_path / "output.mp4",
+        optimize=False,
+    )
+
+    reporter = DummyReporter()
+
+    monkeypatch.setattr(
+        "talks_reducer.pipeline._extract_video_metadata",
+        lambda *_args, **_kwargs: {
+            "frame_rate": 30.0,
+            "duration": 5.0,
+            "frame_count": 150,
+        },
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.wavfile.read",
+        lambda _path: (48000, np.zeros((60, 1), dtype=np.int16)),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.wavfile.write",
+        lambda path, sample_rate, data: Path(path).write_bytes(b"audio"),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.get_max_volume", lambda _data: 1.0
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.process_audio_chunks",
+        lambda *args, **kwargs: (np.zeros((5, 1)), [[0, 5, 0, 25]]),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.detect_loud_frames",
+        lambda *args, **kwargs: np.array([True] * 5),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.build_chunks",
+        lambda *_args, **_kwargs: ([[0, 5, 0]], np.array([True] * 5)),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.get_tree_expression",
+        lambda _chunks: "X",
+    )
+
+    commands: List[str] = []
+
+    def fake_run(command, *args, **kwargs):
+        commands.append(command)
+        if command == "render-fast":
+            raise subprocess.CalledProcessError(1, command)
+        if command == "render-cpu":
+            options.output_file.write_bytes(b"fallback")
+        return None
+
+    dependencies = PipelineDependencies(
+        get_ffmpeg_path=lambda flag: "ffmpeg",
+        check_cuda_available=lambda _path: False,
+        build_extract_audio_command=lambda *args, **kwargs: "extract",
+        build_video_commands=lambda *args, **kwargs: (
+            "render-fast",
+            "render-cpu",
+            False,
+        ),
+        run_timed_ffmpeg_command=fake_run,
+    )
+
+    result = speed_up_video(options, reporter=reporter, dependencies=dependencies)
+
+    assert commands == ["extract", "render-fast", "render-cpu"]
+    assert result.output_file.read_bytes() == b"fallback"
+    assert any("Primary encoder failed" in msg for msg in reporter.messages)
+
+
 class ImmediateStopReporter(DummyReporter):
     def stop_requested(self) -> bool:
         return True

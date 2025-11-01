@@ -146,6 +146,7 @@ def speed_up_video(
         input_path,
         options.small,
         options.small_target_height,
+        optimize=options.optimize,
         video_codec=options.video_codec,
         add_codec_suffix=options.add_codec_suffix,
         silent_speed=options.silent_speed,
@@ -185,19 +186,20 @@ def speed_up_video(
     )
 
     reporter.log("Processing on: {}".format("GPU (CUDA)" if cuda_available else "CPU"))
+    if options.optimize:
+        reporter.log("Optimized encoding enabled")
+    else:
+        reporter.log("Optimization disabled: using speed-focused encoder preset")
     if options.small:
         target_height = options.small_target_height or 720
         if target_height <= 0:
             target_height = 720
-        reporter.log(
-            "Small mode enabled: %dp video, 128k audio, optimized compression"
-            % target_height
-        )
+        reporter.log("Small mode scaling to %dp" % target_height)
 
     hwaccel = (
         ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if cuda_available else []
     )
-    audio_bitrate = "128k" if options.small else "160k"
+    audio_bitrate = "128k" if options.optimize else "160k"
     audio_wav = temp_path / "audio.wav"
 
     extraction_sample_rate = options.sample_rate
@@ -310,6 +312,7 @@ def speed_up_video(
             os.fspath(output_path),
             ffmpeg_path=ffmpeg_path,
             cuda_available=cuda_available,
+            optimize=options.optimize,
             small=options.small,
             frame_rate=frame_rate,
             keyframe_interval_seconds=options.keyframe_interval_seconds,
@@ -375,10 +378,15 @@ def speed_up_video(
             process_callback=process_callback,
         )
     except subprocess.CalledProcessError:
-        if fallback_command_str and use_cuda_encoder:
+        if fallback_command_str:
             _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
 
-            reporter.log("CUDA encoding failed, retrying with CPU encoder...")
+            if use_cuda_encoder:
+                reporter.log("CUDA encoding failed, retrying with CPU encoder...")
+            else:
+                reporter.log(
+                    "Primary encoder failed, retrying with fallback settings..."
+                )
             if final_total_frames > 0:
                 reporter.log(
                     f"Final encode target frames (fallback): {final_total_frames}"
@@ -449,6 +457,7 @@ def _input_to_output_filename(
     small: bool = False,
     small_target_height: int | None = None,
     *,
+    optimize: bool = True,
     video_codec: str | None = None,
     add_codec_suffix: bool = False,
     silent_speed: float | None = None,
@@ -474,7 +483,15 @@ def _input_to_output_filename(
         suffix_tokens.append("small")
 
     if small_target_height == 480:
-        suffix_tokens.append("480")
+        suffix_parts.append("_480")
+
+    if not optimize and not small:
+        suffix_parts.append("_fast")
+
+    if add_codec_suffix and video_codec:
+        normalized_codec = str(video_codec).strip().lower()
+        if normalized_codec:
+            suffix_parts.append(f"_{normalized_codec}")
 
     if include_codec_suffix:
         suffix_tokens.append(normalized_codec)

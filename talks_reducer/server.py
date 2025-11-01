@@ -361,6 +361,7 @@ def process_video(
     file_path: Optional[str],
     small_video: bool,
     small_480: bool = False,
+    optimize: bool = True,
     video_codec: str = "hevc",
     add_codec_suffix: bool = False,
     use_global_ffmpeg: bool = False,
@@ -411,6 +412,7 @@ def process_video(
     option_kwargs: dict[str, float | str | bool] = {
         "video_codec": codec_value,
         "prefer_global_ffmpeg": bool(use_global_ffmpeg),
+        "optimize": bool(optimize),
     }
     if add_codec_suffix:
         option_kwargs["add_codec_suffix"] = True
@@ -520,6 +522,7 @@ def build_interface() -> gr.Blocks:
         with gr.Row():
             small_checkbox = gr.Checkbox(label="Small video", value=True)
             small_480_checkbox = gr.Checkbox(label="Target 480p", value=False)
+            optimize_checkbox = gr.Checkbox(label="Optimized encoding", value=True)
 
         codec_dropdown = gr.Dropdown(
             choices=[
@@ -577,6 +580,7 @@ def build_interface() -> gr.Blocks:
                 file_input,
                 small_checkbox,
                 small_480_checkbox,
+                optimize_checkbox,
                 codec_dropdown,
                 use_global_ffmpeg_checkbox,
                 silent_threshold_input,

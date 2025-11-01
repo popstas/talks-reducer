@@ -229,6 +229,7 @@ def test_collect_arguments_includes_video_codec():
         video_codec_var=DummyVar("AV1"),
         add_codec_suffix_var=SimpleNamespace(get=lambda: False),
         use_global_ffmpeg_var=SimpleNamespace(get=lambda: True),
+        optimize_var=SimpleNamespace(get=lambda: True),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     gui._parse_float = lambda value, _label: float(value)
@@ -254,6 +255,7 @@ def test_collect_arguments_includes_add_codec_suffix():
         video_codec_var=SimpleNamespace(get=lambda: "hevc", set=lambda value: None),
         add_codec_suffix_var=SimpleNamespace(get=lambda: True),
         use_global_ffmpeg_var=SimpleNamespace(get=lambda: False),
+        optimize_var=SimpleNamespace(get=lambda: True),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     gui._parse_float = lambda value, _label: float(value)

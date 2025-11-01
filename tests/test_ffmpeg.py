@@ -369,6 +369,7 @@ def test_build_video_commands_small_cuda(monkeypatch):
         "filter.txt",
         "output.mp4",
         cuda_available=True,
+        optimize=True,
         small=True,
         frame_rate=30.0,
     )
@@ -393,6 +394,7 @@ def test_build_video_commands_small_cpu(monkeypatch):
         "filter.txt",
         "output.mp4",
         cuda_available=False,
+        optimize=True,
         small=True,
         frame_rate=30.0,
     )
@@ -415,6 +417,7 @@ def test_build_video_commands_custom_keyframe_interval(monkeypatch):
         "filter.txt",
         "output.mp4",
         cuda_available=False,
+        optimize=True,
         small=True,
         frame_rate=30.0,
         keyframe_interval_seconds=1.5,
@@ -439,13 +442,16 @@ def test_build_video_commands_large_cuda(monkeypatch):
         "filter.txt",
         "output.mp4",
         cuda_available=True,
+        optimize=True,
         small=False,
         frame_rate=30.0,
     )
 
     assert "-hwaccel cuda" in command
-    assert "-filter_complex_threads 1" in command
+    assert "-filter_complex_threads 1" not in command
     assert "-c:v libx265" in command
+    assert "-g 900" in command
+    assert "-keyint_min 900" in command
     assert fallback is None
     assert not use_cuda
 
@@ -462,11 +468,73 @@ def test_build_video_commands_large_cpu(monkeypatch):
         "filter.txt",
         "output.mp4",
         cuda_available=False,
+        optimize=True,
         small=False,
         frame_rate=30.0,
     )
 
     assert "-c:v libx265" in command
+    assert "-g 900" in command
+    assert "-keyint_min 900" in command
+    assert fallback is None
+    assert not use_cuda
+
+
+def test_build_video_commands_large_cuda_fast(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    def fake_encoder_available(name: str, ffmpeg_path: Optional[str] = None) -> bool:
+        return name == "hevc_nvenc"
+
+    monkeypatch.setattr(ffmpeg, "encoder_available", fake_encoder_available)
+
+    command, fallback, use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=True,
+        optimize=False,
+        small=False,
+        frame_rate=30.0,
+        video_codec="hevc",
+    )
+
+    assert "-hwaccel cuda" in command
+    assert "-filter_complex_threads 1" in command
+    assert "-c:v hevc_nvenc" in command
+    assert "-preset p1" in command
+    assert "-rc constqp" in command
+    assert "-qp 28" in command
+    assert "-g 900" not in command
+    assert fallback is not None
+    assert "-c:v libx265" in fallback
+    assert "-preset ultrafast" in fallback
+    assert use_cuda
+
+
+def test_build_video_commands_hevc_cpu_no_optimize(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: False
+    )
+
+    command, fallback, use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        optimize=False,
+        small=False,
+        frame_rate=30.0,
+        video_codec="hevc",
+    )
+
+    assert "-c:v libx265" in command
+    assert "-preset ultrafast" in command
+    assert "-crf 30" in command
+    assert "-g 900" not in command
     assert fallback is None
     assert not use_cuda
 
@@ -485,6 +553,7 @@ def test_build_video_commands_av1_cuda(monkeypatch):
         "filter.txt",
         "output.mp4",
         cuda_available=True,
+        optimize=True,
         small=True,
         frame_rate=30.0,
         video_codec="av1",
@@ -516,6 +585,7 @@ def test_build_video_commands_av1_cpu(monkeypatch):
         "filter.txt",
         "output.mp4",
         cuda_available=False,
+        optimize=True,
         small=False,
         frame_rate=30.0,
         video_codec="av1",
@@ -524,6 +594,7 @@ def test_build_video_commands_av1_cpu(monkeypatch):
     assert "-c:v av1_nvenc" not in command
     assert "-c:v libaom-av1" in command
     assert "-crf 32" in command
+    assert "-g 900" in command
     assert fallback is None
     assert not use_cuda
 
@@ -542,6 +613,7 @@ def test_build_video_commands_av1_cuda_svt_fallback(monkeypatch):
         "filter.txt",
         "output.mp4",
         cuda_available=True,
+        optimize=True,
         small=True,
         frame_rate=30.0,
         video_codec="av1",
@@ -568,6 +640,7 @@ def test_build_video_commands_hevc_cuda(monkeypatch):
         "filter.txt",
         "output.mp4",
         cuda_available=True,
+        optimize=True,
         small=True,
         frame_rate=30.0,
         video_codec="hevc",
@@ -601,6 +674,7 @@ def test_build_video_commands_hevc_cpu(monkeypatch):
         "filter.txt",
         "output.mp4",
         cuda_available=False,
+        optimize=True,
         small=False,
         frame_rate=30.0,
         video_codec="hevc",
@@ -608,7 +682,8 @@ def test_build_video_commands_hevc_cpu(monkeypatch):
 
     assert "-c:v hevc_nvenc" not in command
     assert "-c:v libx265" in command
-    assert "-crf 26" in command
+    assert "-crf 28" in command
+    assert "-g 900" in command
     assert fallback is None
     assert not use_cuda
 
