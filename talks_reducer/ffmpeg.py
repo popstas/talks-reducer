@@ -494,7 +494,7 @@ def build_video_commands(
     input_parts = [f'-i "{input_file}"', f'-i "{audio_file}"']
 
     output_parts = [
-        "-map 0 -map -0:a -map 1:a",
+        "-map 0:v:0 -map 1:a",
         f'-filter_script:v "{filter_script}"',
     ]
 

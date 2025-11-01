@@ -149,6 +149,8 @@ def speed_up_video(
         optimize=options.optimize,
         video_codec=options.video_codec,
         add_codec_suffix=options.add_codec_suffix,
+        silent_speed=options.silent_speed,
+        sounded_speed=options.sounded_speed,
     )
     output_path = Path(output_path)
 
@@ -163,6 +165,8 @@ def speed_up_video(
     frame_rate = metadata["frame_rate"]
     original_duration = metadata["duration"]
     frame_count = metadata.get("frame_count", 0)
+    original_width = metadata.get("width", 0)
+    original_height = metadata.get("height", 0)
 
     app_version = resolve_version()
     if app_version and app_version != "unknown":
@@ -171,11 +175,13 @@ def speed_up_video(
     reporter.log(
         (
             "Source metadata: duration: {duration:.2f}s, frame rate: {fps:.3f} fps,"
-            " frames: {frames}"
+            " frames: {frames}, resolution: {width}x{height}"
         ).format(
             duration=original_duration,
             fps=frame_rate,
             frames=frame_count if frame_count > 0 else "unknown",
+            width=original_width if original_width > 0 else "unknown",
+            height=original_height if original_height > 0 else "unknown",
         )
     )
 
@@ -283,8 +289,17 @@ def speed_up_video(
             target_height = options.small_target_height or 720
             if target_height <= 0:
                 target_height = 720
-            filter_parts.append(f"scale=-2:{target_height}")
-        filter_parts.append(f"fps=fps={frame_rate}")
+            # Only scale down if the original height is greater than or equal to target
+            if original_height > 0 and original_height >= target_height:
+                filter_parts.append(f"scale=-2:{target_height}")
+                reporter.log(
+                    f"Scaling down from {int(original_height)}p to {target_height}p"
+                )
+            else:
+                reporter.log(
+                    f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
+                )
+        filter_parts.append(f"fps={frame_rate}")
         escaped_expression = expression.replace(",", "\\,")
         filter_parts.append(f"setpts={escaped_expression}")
         filter_graph_file.write(",".join(filter_parts))
@@ -422,6 +437,21 @@ def speed_up_video(
     )
 
 
+_DEFAULT_SILENT_SPEED = ProcessingOptions.__dataclass_fields__[  # type: ignore[index]
+    "silent_speed"
+].default
+_DEFAULT_SOUNDED_SPEED = ProcessingOptions.__dataclass_fields__[  # type: ignore[index]
+    "sounded_speed"
+].default
+
+
+def _normalize_speed(value: float | None, fallback: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):  # pragma: no cover - defensive fallback
+        return fallback
+
+
 def _input_to_output_filename(
     filename: Path,
     small: bool = False,
@@ -430,12 +460,27 @@ def _input_to_output_filename(
     optimize: bool = True,
     video_codec: str | None = None,
     add_codec_suffix: bool = False,
+    silent_speed: float | None = None,
+    sounded_speed: float | None = None,
 ) -> Path:
     dot_index = filename.name.rfind(".")
-    suffix_parts = []
+    normalized_silent = _normalize_speed(silent_speed, _DEFAULT_SILENT_SPEED)
+    normalized_sounded = _normalize_speed(sounded_speed, _DEFAULT_SOUNDED_SPEED)
+    neutral_silent = math.isclose(normalized_silent, 1.0, rel_tol=1e-9, abs_tol=1e-9)
+    neutral_sounded = math.isclose(normalized_sounded, 1.0, rel_tol=1e-9, abs_tol=1e-9)
+    include_speed_marker = not (neutral_silent and neutral_sounded)
+
+    normalized_codec = str(video_codec or "hevc").strip().lower()
+    force_codec_suffix = not include_speed_marker and not small
+    include_codec_suffix = (add_codec_suffix or force_codec_suffix) and normalized_codec
+
+    suffix_tokens: list[str] = []
+
+    if include_speed_marker:
+        suffix_tokens.append("speedup")
 
     if small:
-        suffix_parts.append("_small")
+        suffix_tokens.append("small")
 
     if small_target_height == 480:
         suffix_parts.append("_480")
@@ -448,10 +493,10 @@ def _input_to_output_filename(
         if normalized_codec:
             suffix_parts.append(f"_{normalized_codec}")
 
-    if not suffix_parts:
-        suffix_parts.append("")  # Default case
+    if include_codec_suffix:
+        suffix_tokens.append(normalized_codec)
 
-    suffix = "_speedup" + "".join(suffix_parts)
+    suffix = f"_{'_'.join(suffix_tokens)}" if suffix_tokens else ""
     new_name = (
         filename.name[:dot_index] + suffix + filename.name[dot_index:]
         if dot_index != -1
@@ -501,7 +546,7 @@ def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, fl
         "-select_streams",
         "v",
         "-show_entries",
-        "format=duration:stream=avg_frame_rate,nb_frames",
+        "format=duration:stream=avg_frame_rate,nb_frames,width,height",
     ]
     process = subprocess.Popen(
         command,
@@ -522,10 +567,18 @@ def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, fl
     match_frames = re.search(r"nb_frames=(\d+)", str(stdout))
     frame_count = int(match_frames.group(1)) if match_frames else 0
 
+    match_width = re.search(r"width=(\d+)", str(stdout))
+    width = int(match_width.group(1)) if match_width else 0
+
+    match_height = re.search(r"height=(\d+)", str(stdout))
+    height = int(match_height.group(1)) if match_height else 0
+
     return {
         "frame_rate": frame_rate,
         "duration": original_duration,
         "frame_count": frame_count,
+        "width": float(width),
+        "height": float(height),
     }
 
 

@@ -49,6 +49,35 @@ def test_default_remote_destination_with_codec_suffix(tmp_path):
     assert result.name == "sample_speedup_h264.mp4"
 
 
+def test_default_remote_destination_without_speedup(tmp_path):
+    input_path = tmp_path / "plain.mp4"
+    input_path.write_text("data")
+
+    result = app._default_remote_destination(
+        input_path,
+        small=False,
+        silent_speed=1.0,
+        sounded_speed=1.0,
+        video_codec="av1",
+    )
+
+    assert result.name == "plain_av1.mp4"
+
+
+def test_default_remote_destination_small_without_speedup(tmp_path):
+    input_path = tmp_path / "mini.mp4"
+    input_path.write_text("data")
+
+    result = app._default_remote_destination(
+        input_path,
+        small=True,
+        silent_speed=1.0,
+        sounded_speed=1.0,
+    )
+
+    assert result.name == "mini_small.mp4"
+
+
 def test_parse_ratios_from_summary_extracts_values():
     summary = "**Duration:** — 42.5% of the original\n" "**Size:** 17.25%\n"
 

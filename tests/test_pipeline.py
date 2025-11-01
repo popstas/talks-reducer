@@ -14,7 +14,7 @@ from talks_reducer import pipeline
 
 
 @pytest.mark.parametrize(
-    "filename, small, small_target_height, add_codec_suffix, video_codec, expected",
+    "filename, small, small_target_height, add_codec_suffix, video_codec, silent_speed, sounded_speed, expected",
     [
         (
             Path("video.mp4"),
@@ -22,6 +22,8 @@ from talks_reducer import pipeline
             None,
             False,
             "hevc",
+            None,
+            None,
             Path("video_speedup.mp4"),
         ),
         (
@@ -30,6 +32,8 @@ from talks_reducer import pipeline
             None,
             False,
             "hevc",
+            None,
+            None,
             Path("video_speedup_small.mp4"),
         ),
         (
@@ -38,6 +42,8 @@ from talks_reducer import pipeline
             720,
             False,
             "hevc",
+            None,
+            None,
             Path("video_speedup_small.mp4"),
         ),
         (
@@ -46,6 +52,8 @@ from talks_reducer import pipeline
             480,
             False,
             "hevc",
+            None,
+            None,
             Path("video_speedup_small_480.mp4"),
         ),
         (
@@ -54,6 +62,8 @@ from talks_reducer import pipeline
             None,
             False,
             "hevc",
+            None,
+            None,
             Path("video_speedup"),
         ),
         (
@@ -62,6 +72,8 @@ from talks_reducer import pipeline
             480,
             True,
             "h264",
+            None,
+            None,
             Path("video_speedup_small_480_h264"),
         ),
         (
@@ -70,7 +82,49 @@ from talks_reducer import pipeline
             None,
             True,
             "AV1",
+            None,
+            None,
             Path("clip_speedup_av1.mov"),
+        ),
+        (
+            Path("plain.mp4"),
+            False,
+            None,
+            False,
+            "hevc",
+            1.0,
+            1.0,
+            Path("plain_hevc.mp4"),
+        ),
+        (
+            Path("plain.mp4"),
+            True,
+            None,
+            False,
+            "hevc",
+            1.0,
+            1.0,
+            Path("plain_small.mp4"),
+        ),
+        (
+            Path("plain.mp4"),
+            True,
+            480,
+            False,
+            "hevc",
+            1.0,
+            1.0,
+            Path("plain_small_480.mp4"),
+        ),
+        (
+            Path("plain.mp4"),
+            False,
+            None,
+            True,
+            "H264",
+            1.0,
+            1.0,
+            Path("plain_h264.mp4"),
         ),
     ],
 )
@@ -80,6 +134,8 @@ def test_input_to_output_filename(
     small_target_height: int | None,
     add_codec_suffix: bool,
     video_codec: str,
+    silent_speed: float | None,
+    sounded_speed: float | None,
     expected: Path,
 ) -> None:
     """Appending the speedup suffix should respect the ``small`` flag and extension."""
@@ -90,6 +146,8 @@ def test_input_to_output_filename(
         small_target_height,
         video_codec=video_codec,
         add_codec_suffix=add_codec_suffix,
+        silent_speed=silent_speed,
+        sounded_speed=sounded_speed,
     )
     assert output == expected
 
@@ -142,6 +200,8 @@ def test_extract_video_metadata_uses_ffprobe(monkeypatch) -> None:
                         "[STREAM]",
                         "avg_frame_rate=25/1",
                         "nb_frames=125",
+                        "width=1920",
+                        "height=1080",
                         "[/STREAM]",
                         "[FORMAT]",
                         "duration=5.0",
@@ -164,6 +224,8 @@ def test_extract_video_metadata_uses_ffprobe(monkeypatch) -> None:
     assert metadata["frame_rate"] == pytest.approx(25.0)
     assert metadata["duration"] == pytest.approx(5.0)
     assert metadata["frame_count"] == 125
+    assert metadata["width"] == pytest.approx(1920.0)
+    assert metadata["height"] == pytest.approx(1080.0)
 
 
 def test_stop_requested_handles_callable_and_bool() -> None:

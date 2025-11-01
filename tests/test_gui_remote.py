@@ -238,7 +238,7 @@ def test_process_files_via_server_handles_missing_client_module(tmp_path: Path) 
         args={},
         server_url="http://example.com",
         open_after_convert=False,
-        default_remote_destination=lambda path, small, small_480: path,  # noqa: ARG005
+        default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
         parse_summary=lambda text: (None, None),  # noqa: ARG005
         load_service_client=load_client,
         check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
@@ -272,7 +272,7 @@ def test_process_files_via_server_returns_false_when_server_unavailable(
         args={},
         server_url="http://example.com",
         open_after_convert=False,
-        default_remote_destination=lambda path, small, small_480: path,  # noqa: ARG005
+        default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
         parse_summary=lambda text: (None, None),  # noqa: ARG005
         load_service_client=load_client,
         check_server=lambda *args, **kwargs: False,  # noqa: ANN002,ANN003
@@ -310,7 +310,7 @@ def test_process_files_via_server_processes_each_file(tmp_path: Path) -> None:
         args={"output_file": str(output_override), "silent_threshold": 0.2},
         server_url="http://example.com",
         open_after_convert=False,
-        default_remote_destination=lambda path, small, small_480: tmp_path
+        default_remote_destination=lambda path, small, small_480, **_: tmp_path
         / "fallback.mp4",  # noqa: ARG005
         parse_summary=parse_summary,
         load_service_client=load_client,
@@ -367,3 +367,45 @@ def test_process_files_via_server_includes_small_480_suffix(tmp_path: Path) -> N
     assert small_flag is True
     assert small_480_flag is True
     assert extra.get("add_codec_suffix") is False
+
+
+def test_process_files_via_server_passes_speed_options(tmp_path: Path) -> None:
+    gui = StubGUI()
+    captured_kwargs: dict[str, object] = {}
+
+    def load_client() -> object:
+        return SimpleNamespace(
+            send_video=lambda **kwargs: (
+                str(tmp_path / "clip_av1.mp4"),
+                "Summary",
+                "",
+            )
+        )
+
+    def default_destination(
+        path: Path, small: bool, small_480: bool, **kwargs: object
+    ) -> Path:
+        captured_kwargs.update(kwargs)
+        return tmp_path / f"{path.stem}_av1{path.suffix}"
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "clip.mp4")],
+        args={
+            "silent_speed": 1.0,
+            "sounded_speed": 1.0,
+            "video_codec": "av1",
+            "add_codec_suffix": False,
+        },
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=default_destination,
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    assert captured_kwargs.get("silent_speed") == 1.0
+    assert captured_kwargs.get("sounded_speed") == 1.0
+    assert captured_kwargs.get("video_codec") == "av1"

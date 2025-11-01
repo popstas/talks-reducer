@@ -233,6 +233,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         _on_drop_zone_click=on_drop_zone_click,
         _toggle_simple_mode=toggle_simple_mode,
         _reset_basic_defaults=reset_basic_defaults,
+        _apply_basic_preset=Mock(),
         _start_discovery=start_discovery,
         _refresh_theme=refresh_theme,
         _toggle_advanced=toggle_advanced,
@@ -341,6 +342,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         _on_drop_zone_click=Mock(),
         _toggle_simple_mode=Mock(),
         _reset_basic_defaults=Mock(),
+        _apply_basic_preset=Mock(),
         _start_discovery=Mock(),
         _refresh_theme=Mock(),
         _toggle_advanced=Mock(),
@@ -446,7 +448,7 @@ def test_add_slider_quantizes_and_updates_preferences(monkeypatch):
         _sliders=[],
     )
 
-    variable = DummyVar(4.0)
+    variable = DummyVar(5.0)
     parent = Mock()
 
     layout.add_slider(
@@ -460,7 +462,7 @@ def test_add_slider_quantizes_and_updates_preferences(monkeypatch):
         maximum=10.0,
         resolution=0.5,
         display_format="{:.1f}×",
-        default_value=4.0,
+        default_value=5.0,
     )
 
     ttk_label.assert_has_calls(
@@ -476,13 +478,13 @@ def test_add_slider_quantizes_and_updates_preferences(monkeypatch):
         row=0, column=1, sticky="ew", pady=4, padx=(0, 8)
     )
     assert gui._sliders == [slider_widget]
-    assert gui._basic_defaults["silent_speed"] == 4.0
+    assert gui._basic_defaults["silent_speed"] == 5.0
     assert gui._basic_variables["silent_speed"] is variable
     assert "silent_speed" in gui._slider_updaters
     assert variable.traces and variable.traces[0][0] == "write"
 
-    value_label.configure.assert_called_with(text="4.0×")
-    preferences.update.assert_called_with("silent_speed", 4.0)
+    value_label.configure.assert_called_with(text="5.0×")
+    preferences.update.assert_called_with("silent_speed", 5.0)
     update_state.assert_called()
 
     preferences.update.reset_mock()
@@ -493,26 +495,70 @@ def test_add_slider_quantizes_and_updates_preferences(monkeypatch):
     assert value_label.configure.call_args_list[-1].kwargs["text"] == "10.0×"
 
 
-def test_update_basic_reset_state_toggles_visibility():
-    variable = DummyVar(1.0)
-    button = make_widget_mock()
+def test_update_basic_reset_state_updates_state_and_highlight():
+    silent_var = DummyVar(5.0)
+    sounded_var = DummyVar(1.0)
+    threshold_var = DummyVar(0.05)
+    defaults_button = make_widget_mock()
+    compress_button = make_widget_mock()
+    silence_button = make_widget_mock()
     gui = SimpleNamespace(
-        _basic_defaults={"speed": 1.0},
-        _basic_variables={"speed": variable},
-        _reset_button_visible=False,
-        reset_basic_button=button,
-        tk=SimpleNamespace(LEFT="left", NORMAL="normal", DISABLED="disabled"),
+        _basic_defaults={
+            "silent_speed": 5.0,
+            "sounded_speed": 1.0,
+            "silent_threshold": 0.05,
+        },
+        _basic_variables={
+            "silent_speed": silent_var,
+            "sounded_speed": sounded_var,
+            "silent_threshold": threshold_var,
+        },
+        reset_basic_button=defaults_button,
+        basic_preset_buttons={
+            "compress_only": compress_button,
+            "defaults": defaults_button,
+            "silence_x10": silence_button,
+        },
+        tk=SimpleNamespace(NORMAL="normal", DISABLED="disabled"),
     )
 
     layout.update_basic_reset_state(gui)
-    button.pack.assert_not_called()
-    button.configure.assert_called_with(state="disabled")
 
-    variable.set(2.0)
+    assert any(
+        call.kwargs == {"state": "disabled"}
+        for call in defaults_button.configure.call_args_list
+    )
+    assert any(
+        call.kwargs == {"style": "SelectedLink.TButton"}
+        for call in defaults_button.configure.call_args_list
+    )
+    assert any(
+        call.kwargs == {"style": "Link.TButton"}
+        for call in compress_button.configure.call_args_list
+    )
+    assert gui._active_basic_preset == "defaults"
+
+    defaults_button.configure.reset_mock()
+    compress_button.configure.reset_mock()
+    silence_button.configure.reset_mock()
+
+    silent_var.set(2.0)
     layout.update_basic_reset_state(gui)
-    button.pack.assert_called_once_with(side="left", padx=(8, 0))
-    assert gui._reset_button_visible is True
-    assert button.configure.call_args_list[-1].kwargs == {"state": "normal"}
+
+    assert defaults_button.configure.call_args_list[0].kwargs == {"state": "normal"}
+    assert all(
+        call.kwargs == {"style": "Link.TButton"}
+        for call in defaults_button.configure.call_args_list[1:]
+    )
+    assert any(
+        call.kwargs == {"style": "Link.TButton"}
+        for call in compress_button.configure.call_args_list
+    )
+    assert any(
+        call.kwargs == {"style": "Link.TButton"}
+        for call in silence_button.configure.call_args_list
+    )
+    assert gui._active_basic_preset is None
 
 
 def test_reset_basic_defaults_updates_variables(monkeypatch):
@@ -544,6 +590,84 @@ def test_reset_basic_defaults_updates_variables(monkeypatch):
     assert second.get() == pytest.approx(3.0)
     assert third.get() == pytest.approx(3.0)
     update_state.assert_called_once()
+
+
+def test_apply_basic_preset_updates_values(monkeypatch):
+    update_state = Mock()
+    monkeypatch.setattr(layout, "update_basic_reset_state", update_state)
+
+    silent_var = DummyVar(2.5)
+    sounded_var = DummyVar(0.8)
+    threshold_var = DummyVar(0.2)
+
+    def silent_updater(value: str) -> None:
+        silent_var.set(float(value))
+
+    def sounded_updater(value: str) -> None:
+        sounded_var.set(float(value))
+
+    preferences = SimpleNamespace(update=Mock())
+    gui = SimpleNamespace(
+        _basic_variables={
+            "silent_speed": silent_var,
+            "sounded_speed": sounded_var,
+            "silent_threshold": threshold_var,
+        },
+        _slider_updaters={
+            "silent_speed": silent_updater,
+            "sounded_speed": sounded_updater,
+        },
+        preferences=preferences,
+    )
+
+    layout.apply_basic_preset(gui, "silence_x10")
+    assert silent_var.get() == pytest.approx(10.0)
+    assert sounded_var.get() == pytest.approx(1.0)
+    preferences.update.assert_called_with("silent_threshold", 0.05)
+
+    layout.apply_basic_preset(gui, "compress_only")
+    assert silent_var.get() == pytest.approx(1.0)
+    assert sounded_var.get() == pytest.approx(1.0)
+    update_state.assert_called()
+
+
+def test_update_basic_preset_highlight_selects_active_button():
+    silent_var = DummyVar(10.0)
+    sounded_var = DummyVar(1.0)
+    threshold_var = DummyVar(0.05)
+
+    compress_button = make_widget_mock()
+    defaults_button = make_widget_mock()
+    silence_button = make_widget_mock()
+
+    gui = SimpleNamespace(
+        _basic_variables={
+            "silent_speed": silent_var,
+            "sounded_speed": sounded_var,
+            "silent_threshold": threshold_var,
+        },
+        basic_preset_buttons={
+            "compress_only": compress_button,
+            "defaults": defaults_button,
+            "silence_x10": silence_button,
+        },
+    )
+
+    layout.update_basic_preset_highlight(gui)
+
+    assert gui._active_basic_preset == "silence_x10"
+    assert any(
+        call.kwargs == {"style": "SelectedLink.TButton"}
+        for call in silence_button.configure.call_args_list
+    )
+    assert all(
+        call.kwargs == {"style": "Link.TButton"}
+        for call in compress_button.configure.call_args_list
+    )
+    assert all(
+        call.kwargs == {"style": "Link.TButton"}
+        for call in defaults_button.configure.call_args_list
+    )
 
 
 def test_apply_window_icon_prefers_windows_ico(monkeypatch):

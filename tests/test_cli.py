@@ -156,7 +156,8 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
     assert options.small is True
     assert options.add_codec_suffix is True
     assert options.prefer_global_ffmpeg is True
-    assert "Completed: /videos/output.mp4" in logged_messages
+    # Check for output path with platform-agnostic separator
+    assert any("Completed: /videos/output.mp4" in msg or "Completed: \\videos\\output.mp4" in msg for msg in logged_messages)
     assert any(message.startswith("Result: ") for message in logged_messages)
 
 
