@@ -483,15 +483,10 @@ def _input_to_output_filename(
         suffix_tokens.append("small")
 
     if small_target_height == 480:
-        suffix_parts.append("_480")
+        suffix_tokens.append("480")
 
     if not optimize and not small:
-        suffix_parts.append("_fast")
-
-    if add_codec_suffix and video_codec:
-        normalized_codec = str(video_codec).strip().lower()
-        if normalized_codec:
-            suffix_parts.append(f"_{normalized_codec}")
+        suffix_tokens.append("fast")
 
     if include_codec_suffix:
         suffix_tokens.append(normalized_codec)
