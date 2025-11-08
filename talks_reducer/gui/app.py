@@ -109,13 +109,13 @@ def _default_remote_destination(
     small: bool,
     small_480: bool = False,
     add_codec_suffix: bool = False,
-    video_codec: str = "hevc",
+    video_codec: str = "h264",
     silent_speed: float | None = None,
     sounded_speed: float | None = None,
 ) -> Path:
     """Return the default remote output path for *input_file*."""
 
-    normalized_codec = str(video_codec or "hevc").strip().lower()
+    normalized_codec = str(video_codec or "h264").strip().lower()
     target_height = 480 if small_480 else None
 
     return _input_to_output_filename(
@@ -359,9 +359,9 @@ class TalksReducerGUI:
         self.open_after_convert_var = tk.BooleanVar(
             value=self.preferences.get("open_after_convert", True)
         )
-        stored_codec = str(self.preferences.get("video_codec", "hevc")).lower()
+        stored_codec = str(self.preferences.get("video_codec", "h264")).lower()
         if stored_codec not in {"h264", "hevc", "av1"}:
-            stored_codec = "hevc"
+            stored_codec = "h264"
             self.preferences.update("video_codec", stored_codec)
         prefer_global = bool(self.preferences.get("use_global_ffmpeg", False))
         self.global_ffmpeg_available = is_global_ffmpeg_available()
@@ -708,7 +708,7 @@ class TalksReducerGUI:
     def _on_video_codec_change(self, *_: object) -> None:
         value = self.video_codec_var.get().strip().lower()
         if value not in {"h264", "hevc", "av1"}:
-            value = "hevc"
+            value = "h264"
             self.video_codec_var.set(value)
         self.preferences.update("video_codec", value)
 
@@ -929,7 +929,7 @@ class TalksReducerGUI:
 
         codec_value = self.video_codec_var.get().strip().lower()
         if codec_value not in {"h264", "hevc", "av1"}:
-            codec_value = "hevc"
+            codec_value = "h264"
             self.video_codec_var.set(codec_value)
         args["video_codec"] = codec_value
         if self.add_codec_suffix_var.get():
