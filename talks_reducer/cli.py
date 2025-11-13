@@ -62,7 +62,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--silent_threshold",
         type=float,
         dest="silent_threshold",
-        help="The volume amount that frames' audio needs to surpass to be considered sounded. Defaults to 0.05.",
+        help="The volume amount that frames' audio needs to surpass to be considered sounded. Defaults to 0.01.",
     )
     parser.add_argument(
         "-S",

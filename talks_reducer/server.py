@@ -558,13 +558,13 @@ def build_interface() -> gr.Blocks:
                 minimum=0.5,
                 maximum=3.0,
                 value=1.0,
-                step=0.05,
+                step=0.01,
                 label="Sounded speed",
             )
             silent_threshold_input = gr.Slider(
                 minimum=0.0,
                 maximum=1.0,
-                value=0.05,
+                value=0.01,
                 step=0.01,
                 label="Silent threshold",
             )

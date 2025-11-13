@@ -218,7 +218,7 @@ def test_collect_arguments_includes_video_codec():
     gui = SimpleNamespace(
         output_var=SimpleNamespace(get=lambda: ""),
         temp_var=SimpleNamespace(get=lambda: ""),
-        silent_threshold_var=SimpleNamespace(get=lambda: 0.05),
+        silent_threshold_var=SimpleNamespace(get=lambda: 0.01),
         sounded_speed_var=SimpleNamespace(get=lambda: 1.0),
         silent_speed_var=SimpleNamespace(get=lambda: 4.0),
         frame_margin_var=SimpleNamespace(get=lambda: "2"),
@@ -244,7 +244,7 @@ def test_collect_arguments_includes_add_codec_suffix():
     gui = SimpleNamespace(
         output_var=SimpleNamespace(get=lambda: ""),
         temp_var=SimpleNamespace(get=lambda: ""),
-        silent_threshold_var=SimpleNamespace(get=lambda: 0.05),
+        silent_threshold_var=SimpleNamespace(get=lambda: 0.01),
         sounded_speed_var=SimpleNamespace(get=lambda: 1.0),
         silent_speed_var=SimpleNamespace(get=lambda: 4.0),
         frame_margin_var=SimpleNamespace(get=lambda: "2"),

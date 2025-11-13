@@ -19,17 +19,17 @@ BASIC_PRESETS: dict[str, dict[str, float]] = {
     "compress_only": {
         "silent_speed": 1.0,
         "sounded_speed": 1.0,
-        "silent_threshold": 0.05,
+        "silent_threshold": 0.01,
     },
     "defaults": {
         "silent_speed": 5.0,
         "sounded_speed": 1.0,
-        "silent_threshold": 0.05,
+        "silent_threshold": 0.01,
     },
     "silence_x10": {
         "silent_speed": 10.0,
         "sounded_speed": 1.0,
-        "silent_threshold": 0.05,
+        "silent_threshold": 0.01,
     },
 }
 
@@ -185,7 +185,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
 
     gui.silent_threshold_var = gui.tk.DoubleVar(
-        value=min(max(gui.preferences.get_float("silent_threshold", 0.05), 0.0), 1.0)
+        value=min(max(gui.preferences.get_float("silent_threshold", 0.01), 0.0), 1.0)
     )
     add_slider(
         gui,
@@ -198,7 +198,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         maximum=1.0,
         resolution=0.01,
         display_format="{:.2f}",
-        default_value=0.05,
+        default_value=0.01,
         pady=(4, 12),
     )
 

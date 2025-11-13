@@ -498,7 +498,7 @@ def test_add_slider_quantizes_and_updates_preferences(monkeypatch):
 def test_update_basic_reset_state_updates_state_and_highlight():
     silent_var = DummyVar(5.0)
     sounded_var = DummyVar(1.0)
-    threshold_var = DummyVar(0.05)
+    threshold_var = DummyVar(0.01)
     defaults_button = make_widget_mock()
     compress_button = make_widget_mock()
     silence_button = make_widget_mock()
@@ -506,7 +506,7 @@ def test_update_basic_reset_state_updates_state_and_highlight():
         _basic_defaults={
             "silent_speed": 5.0,
             "sounded_speed": 1.0,
-            "silent_threshold": 0.05,
+            "silent_threshold": 0.01,
         },
         _basic_variables={
             "silent_speed": silent_var,
@@ -623,7 +623,7 @@ def test_apply_basic_preset_updates_values(monkeypatch):
     layout.apply_basic_preset(gui, "silence_x10")
     assert silent_var.get() == pytest.approx(10.0)
     assert sounded_var.get() == pytest.approx(1.0)
-    preferences.update.assert_called_with("silent_threshold", 0.05)
+    preferences.update.assert_called_with("silent_threshold", 0.01)
 
     layout.apply_basic_preset(gui, "compress_only")
     assert silent_var.get() == pytest.approx(1.0)
@@ -634,7 +634,7 @@ def test_apply_basic_preset_updates_values(monkeypatch):
 def test_update_basic_preset_highlight_selects_active_button():
     silent_var = DummyVar(10.0)
     sounded_var = DummyVar(1.0)
-    threshold_var = DummyVar(0.05)
+    threshold_var = DummyVar(0.01)
 
     compress_button = make_widget_mock()
     defaults_button = make_widget_mock()
