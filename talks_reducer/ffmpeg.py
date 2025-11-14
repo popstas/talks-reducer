@@ -464,8 +464,8 @@ def build_extract_audio_command(
 
 def build_video_commands(
     input_file: str,
-    audio_file: str,
-    filter_script: str,
+    audio_file: Optional[str],
+    filter_script: Optional[str],
     output_file: str,
     *,
     ffmpeg_path: Optional[str] = None,
@@ -479,6 +479,10 @@ def build_video_commands(
     """Create the FFmpeg command strings used to render the final video output.
 
     Args:
+        input_file: Path to the input video file.
+        audio_file: Optional path to the processed audio file. If None, video will be encoded without audio.
+        filter_script: Optional path to the filter script file. If None, video will be re-encoded without speed modification.
+        output_file: Path to the output video file.
         frame_rate: Optional source frame rate used to size GOP/keyframe spacing for
             the small preset when generating hardware/software encoder commands.
     """
@@ -491,12 +495,18 @@ def build_video_commands(
         hwaccel_args = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
         global_parts.extend(hwaccel_args)
 
-    input_parts = [f'-i "{input_file}"', f'-i "{audio_file}"']
+    input_parts = [f'-i "{input_file}"']
+    if audio_file:
+        input_parts.append(f'-i "{audio_file}"')
 
-    output_parts = [
-        "-map 0:v:0 -map 1:a",
-        f'-filter_script:v "{filter_script}"',
-    ]
+    output_parts: List[str] = []
+    if audio_file:
+        output_parts.append("-map 0:v:0 -map 1:a")
+    else:
+        output_parts.append("-map 0:v:0")
+
+    if filter_script:
+        output_parts.append(f'-filter_script:v "{filter_script}"')
 
     codec_choice = (video_codec or "hevc").strip().lower()
     if codec_choice not in {"h264", "hevc", "av1"}:
@@ -664,11 +674,16 @@ def build_video_commands(
     fallback_encoder_args = primary_fallback
     use_cuda_encoder = primary_uses_cuda
 
-    audio_parts = [
-        "-c:a aac",
+    audio_parts: List[str] = []
+    if audio_file:
+        audio_parts.append("-c:a aac")
+    else:
+        audio_parts.append("-an")  # No audio
+
+    audio_parts.extend([
         f'"{output_file}"',
         "-loglevel warning -stats -hide_banner",
-    ]
+    ])
 
     full_command_parts = (
         global_parts + input_parts + output_parts + video_encoder_args + audio_parts

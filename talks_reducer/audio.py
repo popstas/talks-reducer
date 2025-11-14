@@ -20,6 +20,49 @@ def get_max_volume(samples: np.ndarray) -> float:
     return float(max(-np.min(samples), np.max(samples)))
 
 
+def is_valid_video_file(filename: str) -> bool:
+    """Check whether ``ffprobe`` recognises the input file and finds a video stream."""
+
+    ffprobe_path = get_ffprobe_path()
+    command = [
+        ffprobe_path,
+        "-i",
+        filename,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-select_streams",
+        "v",
+        "-show_entries",
+        "stream=codec_type",
+    ]
+
+    # Hide console window on Windows
+    creationflags = 0
+    if sys.platform == "win32":
+        # CREATE_NO_WINDOW = 0x08000000
+        creationflags = 0x08000000
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=creationflags,
+        )
+    except subprocess.TimeoutExpired:
+        print("Timeout while checking the input file. Aborting. Command:")
+        print(" ".join(command))
+        return False
+
+    if result.returncode != 0:
+        return False
+
+    stdout = result.stdout or ""
+    return "codec_type=video" in stdout
+
+
 def is_valid_input_file(filename: str) -> bool:
     """Check whether ``ffprobe`` recognises the input file and finds an audio stream."""
 
@@ -61,6 +104,12 @@ def is_valid_input_file(filename: str) -> bool:
 
     stdout = result.stdout or ""
     return "codec_type=audio" in stdout
+
+
+def has_audio_stream(filename: str) -> bool:
+    """Check whether the input file contains an audio stream."""
+
+    return is_valid_input_file(filename)
 
 
 def process_audio_chunks(

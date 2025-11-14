@@ -196,94 +196,127 @@ def speed_up_video(
             target_height = 720
         reporter.log("Small mode scaling to %dp" % target_height)
 
+    # Check if the video has an audio stream
+    has_audio = audio_utils.has_audio_stream(os.fspath(input_path))
+    if not has_audio:
+        reporter.log("No audio stream found. Video will be re-encoded without speed modification.")
+
     hwaccel = (
         ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if cuda_available else []
     )
-    audio_bitrate = "128k" if options.optimize else "160k"
-    audio_wav = temp_path / "audio.wav"
-
-    extraction_sample_rate = options.sample_rate
-
-    extract_command = dependencies.build_extract_audio_command(
-        os.fspath(input_path),
-        os.fspath(audio_wav),
-        extraction_sample_rate,
-        audio_bitrate,
-        hwaccel,
-        ffmpeg_path=ffmpeg_path,
-    )
-
-    _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
-    reporter.log("Extracting audio...")
     process_callback = getattr(reporter, "process_callback", None)
     estimated_total_frames = frame_count
     if estimated_total_frames <= 0 and original_duration > 0 and frame_rate > 0:
         estimated_total_frames = int(math.ceil(original_duration * frame_rate))
 
-    if estimated_total_frames > 0:
-        reporter.log(f"Extract audio target frames: {estimated_total_frames}")
+    audio_new_path: Path | None = None
+    filter_graph_path: Path | None = None
+    updated_chunks: list[list[int]] = []
+    max_audio_volume = 0.0
+
+    if has_audio:
+        # Process with audio-based speed modification
+        audio_bitrate = "128k" if options.optimize else "160k"
+        audio_wav = temp_path / "audio.wav"
+        extraction_sample_rate = options.sample_rate
+
+        extract_command = dependencies.build_extract_audio_command(
+            os.fspath(input_path),
+            os.fspath(audio_wav),
+            extraction_sample_rate,
+            audio_bitrate,
+            hwaccel,
+            ffmpeg_path=ffmpeg_path,
+        )
+
+        _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+        reporter.log("Extracting audio...")
+
+        if estimated_total_frames > 0:
+            reporter.log(f"Extract audio target frames: {estimated_total_frames}")
+        else:
+            reporter.log("Extract audio target frames: unknown")
+
+        dependencies.run_timed_ffmpeg_command(
+            extract_command,
+            reporter=reporter,
+            total=estimated_total_frames if estimated_total_frames > 0 else None,
+            unit="frames",
+            desc="Extracting audio:",
+            process_callback=process_callback,
+        )
+
+        wav_sample_rate, audio_data = wavfile.read(os.fspath(audio_wav))
+        audio_data = _ensure_two_dimensional(audio_data)
+        audio_sample_count = audio_data.shape[0]
+        max_audio_volume = audio_utils.get_max_volume(audio_data)
+
+        reporter.log(f"Max Audio Volume: {max_audio_volume}")
+
+        samples_per_frame = wav_sample_rate / frame_rate
+        audio_frame_count = int(math.ceil(audio_sample_count / samples_per_frame))
+
+        _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+
+        has_loud_audio = chunk_utils.detect_loud_frames(
+            audio_data,
+            audio_frame_count,
+            samples_per_frame,
+            max_audio_volume,
+            options.silent_threshold,
+        )
+
+        chunks, _ = chunk_utils.build_chunks(has_loud_audio, options.frame_spreadage)
+
+        reporter.log(f"Processing {len(chunks)} chunks...")
+
+        _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+
+        new_speeds = [options.silent_speed, options.sounded_speed]
+        output_audio_data, updated_chunks = audio_utils.process_audio_chunks(
+            audio_data,
+            chunks,
+            samples_per_frame,
+            new_speeds,
+            options.audio_fade_envelope_size,
+            max_audio_volume,
+        )
+
+        audio_new_path = temp_path / "audioNew.wav"
+        # Use the sample rate that was actually used for processing
+        output_sample_rate = extraction_sample_rate
+        wavfile.write(
+            os.fspath(audio_new_path),
+            output_sample_rate,
+            _prepare_output_audio(output_audio_data),
+        )
+
+        _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+
+        expression = chunk_utils.get_tree_expression(updated_chunks)
+        filter_graph_path = temp_path / "filterGraph.txt"
+        with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
+            filter_parts = []
+            if options.small:
+                target_height = options.small_target_height or 720
+                if target_height <= 0:
+                    target_height = 720
+                # Only scale down if the original height is greater than or equal to target
+                if original_height > 0 and original_height >= target_height:
+                    filter_parts.append(f"scale=-2:{target_height}")
+                    reporter.log(
+                        f"Scaling down from {int(original_height)}p to {target_height}p"
+                    )
+                else:
+                    reporter.log(
+                        f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
+                    )
+            filter_parts.append(f"fps={frame_rate}")
+            escaped_expression = expression.replace(",", "\\,")
+            filter_parts.append(f"setpts={escaped_expression}")
+            filter_graph_file.write(",".join(filter_parts))
     else:
-        reporter.log("Extract audio target frames: unknown")
-
-    dependencies.run_timed_ffmpeg_command(
-        extract_command,
-        reporter=reporter,
-        total=estimated_total_frames if estimated_total_frames > 0 else None,
-        unit="frames",
-        desc="Extracting audio:",
-        process_callback=process_callback,
-    )
-
-    wav_sample_rate, audio_data = wavfile.read(os.fspath(audio_wav))
-    audio_data = _ensure_two_dimensional(audio_data)
-    audio_sample_count = audio_data.shape[0]
-    max_audio_volume = audio_utils.get_max_volume(audio_data)
-
-    reporter.log(f"Max Audio Volume: {max_audio_volume}")
-
-    samples_per_frame = wav_sample_rate / frame_rate
-    audio_frame_count = int(math.ceil(audio_sample_count / samples_per_frame))
-
-    _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
-
-    has_loud_audio = chunk_utils.detect_loud_frames(
-        audio_data,
-        audio_frame_count,
-        samples_per_frame,
-        max_audio_volume,
-        options.silent_threshold,
-    )
-
-    chunks, _ = chunk_utils.build_chunks(has_loud_audio, options.frame_spreadage)
-
-    reporter.log(f"Processing {len(chunks)} chunks...")
-
-    _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
-
-    new_speeds = [options.silent_speed, options.sounded_speed]
-    output_audio_data, updated_chunks = audio_utils.process_audio_chunks(
-        audio_data,
-        chunks,
-        samples_per_frame,
-        new_speeds,
-        options.audio_fade_envelope_size,
-        max_audio_volume,
-    )
-
-    audio_new_path = temp_path / "audioNew.wav"
-    # Use the sample rate that was actually used for processing
-    output_sample_rate = extraction_sample_rate
-    wavfile.write(
-        os.fspath(audio_new_path),
-        output_sample_rate,
-        _prepare_output_audio(output_audio_data),
-    )
-
-    _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
-
-    expression = chunk_utils.get_tree_expression(updated_chunks)
-    filter_graph_path = temp_path / "filterGraph.txt"
-    with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
+        # No audio - just re-encode video without speed modification
         filter_parts = []
         if options.small:
             target_height = options.small_target_height or 720
@@ -299,16 +332,19 @@ def speed_up_video(
                 reporter.log(
                     f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
                 )
-        filter_parts.append(f"fps={frame_rate}")
-        escaped_expression = expression.replace(",", "\\,")
-        filter_parts.append(f"setpts={escaped_expression}")
-        filter_graph_file.write(",".join(filter_parts))
+        # Only create filter script if we have filters to apply
+        if filter_parts:
+            filter_graph_path = temp_path / "filterGraph.txt"
+            with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
+                filter_graph_file.write(",".join(filter_parts))
+        else:
+            filter_graph_path = None
 
     command_str, fallback_command_str, use_cuda_encoder = (
         dependencies.build_video_commands(
             os.fspath(input_path),
-            os.fspath(audio_new_path),
-            os.fspath(filter_graph_path),
+            os.fspath(audio_new_path) if audio_new_path else None,
+            os.fspath(filter_graph_path) if filter_graph_path else None,
             os.fspath(output_path),
             ffmpeg_path=ffmpeg_path,
             cuda_available=cuda_available,
@@ -339,18 +375,25 @@ def speed_up_video(
     reporter.log("\nExecuting FFmpeg command:")
     reporter.log(command_str)
 
-    if not audio_new_path.exists():
+    if has_audio and audio_new_path and not audio_new_path.exists():
         dependencies.delete_path(temp_path)
         raise FileNotFoundError("Audio intermediate file was not generated")
 
-    if not filter_graph_path.exists():
+    if filter_graph_path and not filter_graph_path.exists():
         dependencies.delete_path(temp_path)
         raise FileNotFoundError("Filter graph file was not generated")
 
     _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
 
     try:
-        final_total_frames = updated_chunks[-1][3] if updated_chunks else 0
+        if has_audio and updated_chunks:
+            final_total_frames = updated_chunks[-1][3] if updated_chunks else 0
+        else:
+            # No audio - use original frame count
+            final_total_frames = frame_count if frame_count > 0 else 0
+            if final_total_frames <= 0 and original_duration > 0 and frame_rate > 0:
+                final_total_frames = int(math.ceil(original_duration * frame_rate))
+
         if final_total_frames > 0:
             reporter.log(f"Final encode target frames: {final_total_frames}")
             if frame_rate > 0:
@@ -429,7 +472,7 @@ def speed_up_video(
         frame_rate=frame_rate,
         original_duration=original_duration,
         output_duration=output_duration,
-        chunk_count=len(chunks),
+        chunk_count=len(updated_chunks) if updated_chunks else 0,
         used_cuda=use_cuda_encoder,
         max_audio_volume=max_audio_volume,
         time_ratio=time_ratio,

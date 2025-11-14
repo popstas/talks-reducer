@@ -157,16 +157,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def gather_input_files(paths: List[str]) -> List[str]:
-    """Expand provided paths into a flat list of files that contain audio streams."""
+    """Expand provided paths into a flat list of files that contain video streams."""
 
     files: List[str] = []
     for input_path in paths:
-        if os.path.isfile(input_path) and audio.is_valid_input_file(input_path):
+        if os.path.isfile(input_path) and audio.is_valid_video_file(input_path):
             files.append(os.path.abspath(input_path))
         elif os.path.isdir(input_path):
             for file in os.listdir(input_path):
                 candidate = os.path.join(input_path, file)
-                if audio.is_valid_input_file(candidate):
+                if audio.is_valid_video_file(candidate):
                     files.append(candidate)
     return files
 
@@ -205,6 +205,30 @@ class CliApplication:
         start_time = time.time()
         files = self._gather_files(parsed_args.input_file)
 
+        # Check if any files were found
+        if not files:
+            error_messages: List[str] = []
+            for input_path in parsed_args.input_file:
+                if os.path.isfile(input_path):
+                    # File exists but was rejected - check if it's a valid video file
+                    if not audio.is_valid_video_file(input_path):
+                        error_messages.append(
+                            f"Error: '{input_path}' is not a valid video file."
+                        )
+                    else:
+                        error_messages.append(
+                            f"Error: '{input_path}' could not be processed."
+                        )
+                elif os.path.isdir(input_path):
+                    error_messages.append(
+                        f"Error: No valid video files found in '{input_path}'."
+                    )
+                else:
+                    error_messages.append(
+                        f"Error: '{input_path}' does not exist or is not accessible."
+                    )
+            return 1, error_messages
+
         args: Dict[str, object] = {
             key: value for key, value in vars(parsed_args).items() if value is not None
         }
@@ -224,7 +248,7 @@ class CliApplication:
                 file=sys.stderr,
             )
 
-        error_messages: List[str] = []
+        error_messages = []
         reporter_logs: List[str] = []
 
         if getattr(parsed_args, "server_url", None):

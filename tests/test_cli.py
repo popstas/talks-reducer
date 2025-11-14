@@ -61,7 +61,7 @@ def test_gather_input_files_collects_valid_paths(
 
     monkeypatch.setattr(
         cli.audio,
-        "is_valid_input_file",
+        "is_valid_video_file",
         lambda candidate: str(candidate).endswith(("video1.mp4", "clip.mp4")),
     )
 
@@ -514,7 +514,7 @@ def test_gather_input_files_returns_only_valid_entries(
 
     monkeypatch.setattr(
         cli.audio,
-        "is_valid_input_file",
+        "is_valid_video_file",
         lambda path: Path(path).name in {"video_valid.mp4", "clip_keep.mp4"},
     )
 
