@@ -50,6 +50,10 @@ def test_speed_up_video_returns_result(monkeypatch, tmp_path):
         "talks_reducer.pipeline._extract_video_metadata",
         lambda _input, _frame_rate: {"frame_rate": 30.0, "duration": 2.0, "width": 1920.0, "height": 1080.0},
     )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.has_audio_stream",
+        lambda _path: True,
+    )
 
     def fake_read(_path):
         audio = np.zeros((30, 1), dtype=np.int16)
@@ -132,6 +136,10 @@ def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
         return {"frame_rate": 24.0, "duration": 2.0, "frame_count": 48, "width": 1920.0, "height": 1080.0}
 
     monkeypatch.setattr("talks_reducer.pipeline._extract_video_metadata", fake_metadata)
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.has_audio_stream",
+        lambda _path: True,
+    )
 
     def fake_read(_path):
         audio = np.zeros((48, 1), dtype=np.int16)
@@ -168,7 +176,9 @@ def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
     commands: List[str] = []
 
     def fake_run(command, *args, **kwargs):
-        commands.append(command)
+        # Track all commands, not just render commands
+        if isinstance(command, str):
+            commands.append(command)
         if command == "render":
             raise subprocess.CalledProcessError(1, command)
         if command == "render-cpu":
@@ -219,6 +229,10 @@ def test_speed_up_video_falls_back_without_cuda(monkeypatch, tmp_path):
         },
     )
     monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.has_audio_stream",
+        lambda _path: True,
+    )
+    monkeypatch.setattr(
         "talks_reducer.pipeline.wavfile.read",
         lambda _path: (48000, np.zeros((60, 1), dtype=np.int16)),
     )
@@ -249,7 +263,9 @@ def test_speed_up_video_falls_back_without_cuda(monkeypatch, tmp_path):
     commands: List[str] = []
 
     def fake_run(command, *args, **kwargs):
-        commands.append(command)
+        # Track all commands, not just render commands
+        if isinstance(command, str):
+            commands.append(command)
         if command == "render-fast":
             raise subprocess.CalledProcessError(1, command)
         if command == "render-cpu":
@@ -415,6 +431,10 @@ def test_small_mode_preserves_lower_resolution(monkeypatch, tmp_path):
         return {"frame_rate": 30.0, "duration": 2.0, "frame_count": 60, "width": 854.0, "height": 480.0}
 
     monkeypatch.setattr("talks_reducer.pipeline._extract_video_metadata", fake_metadata)
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.has_audio_stream",
+        lambda _path: True,
+    )
 
     def fake_read(_path):
         audio = np.zeros((60, 1), dtype=np.int16)

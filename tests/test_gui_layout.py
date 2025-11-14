@@ -240,6 +240,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         _update_processing_mode_state=update_processing_mode_state,
         _stop_processing=stop_processing,
         _open_last_output=open_last_output,
+        _check_for_updates=Mock(),
         small_var=BooleanVarStub(value=True),
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
@@ -349,6 +350,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         _update_processing_mode_state=Mock(),
         _stop_processing=Mock(),
         _open_last_output=Mock(),
+        _check_for_updates=Mock(),
         small_var=BooleanVarStub(value=True),
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
@@ -760,7 +762,7 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
         simple_mode_var=SimpleNamespace(get=lambda: True),
         basic_options_frame=make_widget_mock(),
         log_frame=make_widget_mock(),
-        advanced_button=make_widget_mock(),
+        button_frame=make_widget_mock(),
         advanced_frame=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
@@ -771,7 +773,7 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
 
     gui.basic_options_frame.grid_remove.assert_called_once()
     gui.log_frame.grid_remove.assert_called_once()
-    gui.advanced_button.grid_remove.assert_called_once()
+    gui.button_frame.grid_remove.assert_called_once()
     gui.advanced_frame.grid_remove.assert_called_once()
     gui.run_after_drop_var.set.assert_called_once_with(True)
     apply_size.assert_called_once_with(gui, simple=True)
@@ -786,7 +788,7 @@ def test_apply_simple_mode_full_branch(monkeypatch):
         simple_mode_var=SimpleNamespace(get=lambda: False),
         basic_options_frame=make_widget_mock(),
         log_frame=make_widget_mock(),
-        advanced_button=make_widget_mock(),
+        button_frame=make_widget_mock(),
         advanced_frame=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: True),
@@ -797,7 +799,7 @@ def test_apply_simple_mode_full_branch(monkeypatch):
 
     gui.basic_options_frame.grid.assert_called_once()
     gui.log_frame.grid.assert_called_once()
-    gui.advanced_button.grid.assert_called_once()
+    gui.button_frame.grid.assert_called_once()
     gui.advanced_frame.grid.assert_called_once()
     apply_size.assert_called_once_with(gui, simple=False)
     gui.run_after_drop_var.set.assert_not_called()
