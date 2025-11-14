@@ -279,12 +279,34 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             command=gui._refresh_theme,
         ).pack(side=gui.tk.LEFT, padx=(0, 8))
 
+    # Button frame for Advanced, Check updates button, and status label
+    gui.button_frame = gui.ttk.Frame(gui.options_frame)
+    gui.button_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+    gui.button_frame.columnconfigure(2, weight=1)
+    
     gui.advanced_button = gui.ttk.Button(
-        gui.options_frame,
+        gui.button_frame,
         text="Advanced",
         command=gui._toggle_advanced,
     )
-    gui.advanced_button.grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
+    gui.advanced_button.grid(row=0, column=0, sticky="w")
+    
+    # Check updates button and status label (Windows only)
+    if sys.platform == "win32":
+        gui.check_updates_button = gui.ttk.Button(
+            gui.button_frame,
+            text="Check updates",
+            command=gui._check_for_updates,
+        )
+        gui.check_updates_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        
+        # Update status label (one-line)
+        gui.update_status_label = gui.ttk.Label(
+            gui.button_frame,
+            text="",
+            foreground="gray",
+        )
+        gui.update_status_label.grid(row=0, column=2, sticky="w", padx=(8, 0))
 
     gui.advanced_frame = gui.ttk.Frame(gui.options_frame, padding=0)
     gui.advanced_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
@@ -745,14 +767,16 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
     if simple:
         gui.basic_options_frame.grid_remove()
         gui.log_frame.grid_remove()
-        gui.advanced_button.grid_remove()
+        if hasattr(gui, "button_frame"):
+            gui.button_frame.grid_remove()
         gui.advanced_frame.grid_remove()
         gui.run_after_drop_var.set(True)
         apply_window_size(gui, simple=True)
     else:
         gui.basic_options_frame.grid()
         gui.log_frame.grid()
-        gui.advanced_button.grid()
+        if hasattr(gui, "button_frame"):
+            gui.button_frame.grid()
         if gui.advanced_visible.get():
             gui.advanced_frame.grid()
         apply_window_size(gui, simple=False)

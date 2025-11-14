@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -39,6 +40,7 @@ try:
     from ..version_utils import resolve_version
     from . import discovery as discovery_helpers
     from . import layout as layout_helpers
+    from . import update_checker
     from .preferences import GUIPreferences, determine_config_path
     from .progress import _TkProgressReporter
     from .remote import (
@@ -69,6 +71,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from talks_reducer.gui import discovery as discovery_helpers
     from talks_reducer.gui import layout as layout_helpers
+    from talks_reducer.gui import update_checker
     from talks_reducer.gui.preferences import GUIPreferences, determine_config_path
     from talks_reducer.gui.progress import _TkProgressReporter
     from talks_reducer.gui.remote import (
@@ -343,6 +346,14 @@ class TalksReducerGUI:
         self._stop_requested = False
         self._ping_worker_stop_requested = False
         self._current_remote_mode = False
+        
+        # Update checker state
+        self._update_check_thread: Optional[threading.Thread] = None
+        self._download_thread: Optional[threading.Thread] = None
+        self._latest_version: Optional[str] = None
+        self._installer_url: Optional[str] = None
+        self._portable_url: Optional[str] = None
+        self._update_link_labels: List[Any] = []
 
         self.input_files: List[str] = []
 
@@ -682,6 +693,268 @@ class TalksReducerGUI:
         else:
             self.advanced_frame.grid_remove()
             self.advanced_button.configure(text="Advanced")
+
+    def _check_for_updates(self) -> None:
+        """Check for updates from GitHub releases."""
+        if not sys.platform == "win32":
+            return
+        
+        if not hasattr(self, "check_updates_button"):
+            return
+        
+        # Disable button during check
+        self.check_updates_button.configure(state=self.tk.DISABLED, text="Checking...")
+        self._clear_update_status()
+        self._set_update_status("Checking for updates...")
+        
+        def check_worker() -> None:
+            try:
+                latest_version, error = update_checker.fetch_latest_version()
+                
+                if error:
+                    self._schedule_on_ui_thread(
+                        lambda: self._on_update_check_complete(None, error)
+                    )
+                    return
+                
+                current_version = resolve_version()
+                if current_version == "unknown":
+                    self._schedule_on_ui_thread(
+                        lambda: self._on_update_check_complete(
+                            None, "Could not determine current version"
+                        )
+                    )
+                    return
+                
+                # Compare versions
+                is_newer = update_checker.compare_versions(current_version, latest_version)
+                
+                if is_newer:
+                    installer_url = update_checker.get_installer_url(latest_version)
+                    portable_url = update_checker.get_portable_url(latest_version)
+                    self._schedule_on_ui_thread(
+                        lambda: self._on_update_check_complete(
+                            latest_version, None, installer_url, portable_url
+                        )
+                    )
+                else:
+                    self._schedule_on_ui_thread(
+                        lambda: self._on_update_check_complete(None, "up_to_date")
+                    )
+                    
+            except Exception as exc:
+                self._schedule_on_ui_thread(
+                    lambda: self._on_update_check_complete(None, f"Error: {str(exc)}")
+                )
+        
+        self._update_check_thread = threading.Thread(target=check_worker, daemon=True)
+        self._update_check_thread.start()
+
+    def _on_update_check_complete(
+        self,
+        latest_version: Optional[str],
+        error: Optional[str],
+        installer_url: Optional[str] = None,
+        portable_url: Optional[str] = None,
+    ) -> None:
+        """Handle update check completion."""
+        if not hasattr(self, "check_updates_button"):
+            return
+        
+        self.check_updates_button.configure(state=self.tk.NORMAL)
+        
+        if error:
+            if error == "up_to_date":
+                self._clear_update_status()
+                self._set_update_status("You are using the latest version.")
+                self.check_updates_button.configure(text="Check updates")
+            else:
+                self._clear_update_status()
+                self._set_update_status(f"Update check failed: {error}")
+                self.check_updates_button.configure(text="Check updates")
+            return
+        
+        if latest_version:
+            self._latest_version = latest_version
+            self._installer_url = installer_url
+            self._portable_url = portable_url
+            
+            # Change button to download
+            self.check_updates_button.configure(
+                text=f"Download {latest_version}",
+                command=self._download_and_install_update,
+            )
+            
+            # Show status and links
+            self._clear_update_status()
+            status_text = f"New version {latest_version} is available!"
+            links = [
+                ("Download portable", portable_url or ""),
+                ("Releases page", update_checker.get_releases_page_url()),
+            ]
+            self._set_update_status_with_links(status_text, links)
+
+    def _download_and_install_update(self) -> None:
+        """Download and install the update."""
+        if not self._installer_url or not self._latest_version:
+            return
+        
+        if not hasattr(self, "check_updates_button"):
+            return
+        
+        # Disable button during download
+        self.check_updates_button.configure(state=self.tk.DISABLED)
+        self._clear_update_status()
+        self._set_update_status("Downloading installer...")
+        
+        def download_worker() -> None:
+            def update_status_label(percent: int) -> None:
+                if hasattr(self, "update_status_label"):
+                    self._set_update_status(f"Downloading installer... {percent}%")
+            
+            try:
+                def progress_callback(downloaded: int, total: int) -> None:
+                    if total > 0:
+                        percent = int((downloaded / total) * 100)
+                        self._schedule_on_ui_thread(
+                            lambda: self.check_updates_button.configure(
+                                text=f"Downloading... {percent}%"
+                            )
+                        )
+                        self._schedule_on_ui_thread(lambda p=percent: update_status_label(p))
+                
+                file_path, error = update_checker.download_file(
+                    self._installer_url, progress_callback
+                )
+                
+                if error:
+                    self._schedule_on_ui_thread(
+                        lambda: self._on_download_complete(None, error)
+                    )
+                    return
+                
+                if file_path:
+                    self._schedule_on_ui_thread(
+                        lambda: self._on_download_complete(file_path, None)
+                    )
+                    
+            except Exception as exc:
+                self._schedule_on_ui_thread(
+                    lambda: self._on_download_complete(None, f"Error: {str(exc)}")
+                )
+        
+        self._download_thread = threading.Thread(target=download_worker, daemon=True)
+        self._download_thread.start()
+
+    def _on_download_complete(
+        self, file_path: Optional[Path], error: Optional[str]
+    ) -> None:
+        """Handle download completion."""
+        if not hasattr(self, "check_updates_button"):
+            return
+        
+        if error:
+            self.check_updates_button.configure(state=self.tk.NORMAL)
+            self._clear_update_status()
+            self._set_update_status(f"Download failed: {error}")
+            if self._latest_version:
+                self.check_updates_button.configure(
+                    text=f"Download {self._latest_version}",
+                )
+            return
+        
+        if file_path and file_path.exists():
+            # Launch installer
+            try:
+                if sys.platform == "win32":
+                    os.startfile(str(file_path))
+                else:
+                    subprocess.Popen([str(file_path)])
+                
+                self._clear_update_status()
+                self._set_update_status(
+                    "Installer launched. Please follow the installation wizard."
+                )
+                self.check_updates_button.configure(
+                    state=self.tk.NORMAL, text="Check updates", command=self._check_for_updates
+                )
+                # Reset state
+                self._latest_version = None
+                self._installer_url = None
+                self._portable_url = None
+            except Exception as exc:
+                self._clear_update_status()
+                self._set_update_status(f"Failed to launch installer: {str(exc)}")
+                self.check_updates_button.configure(state=self.tk.NORMAL)
+
+    def _clear_update_status(self) -> None:
+        """Clear the update status label."""
+        if hasattr(self, "update_status_label"):
+            self.update_status_label.config(text="")
+            # Remove any link labels if they exist
+            if hasattr(self, "_update_link_labels"):
+                for link_label in self._update_link_labels:
+                    link_label.destroy()
+                self._update_link_labels = []
+
+    def _set_update_status(self, text: str) -> None:
+        """Set text in the update status label."""
+        if hasattr(self, "update_status_label"):
+            self.update_status_label.config(text=text)
+
+    def _set_update_status_with_links(
+        self, text: str, links: list[tuple[str, str]]
+    ) -> None:
+        """Set text and add clickable links to the update status area."""
+        if not hasattr(self, "update_status_label"):
+            return
+        
+        # Clear previous link labels
+        if hasattr(self, "_update_link_labels"):
+            for link_label in self._update_link_labels:
+                link_label.destroy()
+            self._update_link_labels = []
+        else:
+            self._update_link_labels = []
+        
+        # Clear status label
+        self.update_status_label.config(text=text)
+        
+        # Get accent color from current theme (same as Link.TButton)
+        mode = self._resolve_theme_mode()
+        palette = LIGHT_THEME if mode == "light" else DARK_THEME
+        accent_color = palette["accent"]
+        
+        # Create link labels in the button_frame
+        button_frame = self.update_status_label.master
+        current_column = 3  # Start after status label (column 2)
+        
+        for i, (link_text, url) in enumerate(links):
+            # Add separator if not first link
+            if i > 0:
+                separator = self.ttk.Label(button_frame, text=" | ")
+                separator.grid(row=0, column=current_column, sticky="w", padx=(4, 0))
+                current_column += 1
+                self._update_link_labels.append(separator)
+            
+            # Create clickable link label with same style as Link.TButton
+            link_label = self.ttk.Label(
+                button_frame,
+                text=link_text,
+                foreground=accent_color,
+                cursor="hand2",
+                font=("TkDefaultFont", 8, "underline"),
+            )
+            link_label.grid(row=0, column=current_column, sticky="w", padx=(4, 0))
+            
+            # Bind click event
+            def on_link_click(event: Any, link_url: str = url) -> None:
+                if link_url:
+                    webbrowser.open(link_url)
+            
+            link_label.bind("<Button-1>", on_link_click)
+            self._update_link_labels.append(link_label)
+            current_column += 1
 
     def _on_theme_change(self, *_: object) -> None:
         self.preferences.update("theme", self.theme_var.get())
