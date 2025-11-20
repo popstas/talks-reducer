@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import atexit
 import shutil
 import socket
@@ -26,6 +25,7 @@ from talks_reducer.progress import (
     ProgressHandle,
     SignalProgressReporter,
 )
+from talks_reducer.server_args import build_server_parser
 from talks_reducer.version_utils import resolve_version
 
 
@@ -570,28 +570,9 @@ def build_interface() -> gr.Blocks:
 def main(argv: Optional[Sequence[str]] = None) -> None:
     """Launch the Gradio server from the command line."""
 
-    parser = argparse.ArgumentParser(description="Launch the Talks Reducer web UI.")
-    parser.add_argument(
-        "--host", dest="host", default="0.0.0.0", help="Custom host to bind."
+    parser = build_server_parser(
+        description="Launch the Talks Reducer web UI.", default_open_browser=True
     )
-    parser.add_argument(
-        "--port",
-        dest="port",
-        type=int,
-        default=9005,
-        help="Port number for the web server (default: 9005).",
-    )
-    parser.add_argument(
-        "--share",
-        action="store_true",
-        help="Create a temporary public Gradio link.",
-    )
-    parser.add_argument(
-        "--no-browser",
-        action="store_true",
-        help="Do not automatically open the browser window.",
-    )
-
     args = parser.parse_args(argv)
 
     demo = build_interface()
@@ -599,7 +580,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         server_name=args.host,
         server_port=args.port,
         share=args.share,
-        inbrowser=not args.no_browser,
+        inbrowser=args.open_browser,
         favicon_path=_FAVICON_PATH_STR,
     )
 
