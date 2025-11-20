@@ -44,7 +44,15 @@ try:
     from .summaries import (
         SummaryManager,
         default_remote_destination,
+        is_encode_target_duration_unknown,
+        is_encode_total_frames_unknown,
+        parse_current_frame,
+        parse_encode_target_duration,
+        parse_encode_total_frames,
+        parse_ffmpeg_progress,
         parse_ratios_from_summary,
+        parse_source_duration_seconds,
+        parse_video_duration_seconds,
     )
     from .theme import (
         DARK_THEME,
@@ -79,7 +87,15 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.gui.summaries import (
         SummaryManager,
         default_remote_destination,
+        is_encode_target_duration_unknown,
+        is_encode_total_frames_unknown,
+        parse_current_frame,
+        parse_encode_target_duration,
+        parse_encode_total_frames,
+        parse_ffmpeg_progress,
         parse_ratios_from_summary,
+        parse_source_duration_seconds,
+        parse_video_duration_seconds,
     )
     from talks_reducer.gui.theme import (
         DARK_THEME,
@@ -1177,7 +1193,7 @@ class TalksReducerGUI:
         self.root.after(0, apply)
 
     def _format_progress_time(self, total_seconds: float) -> str:
-        return self.summary_manager.format_progress_time(total_seconds)
+        return SummaryManager.format_progress_time(total_seconds)
 
     def _calculate_gradient_color(self, percentage: float, darken: float = 1.0) -> str:
         """Calculate color gradient from red (0%) to green (100%).
@@ -1289,4 +1305,26 @@ __all__ = [
     "TalksReducerGUI",
     "default_remote_destination",
     "parse_ratios_from_summary",
+    "_default_remote_destination",
+    "_parse_ratios_from_summary",
+    "_parse_source_duration_seconds",
+    "_parse_encode_total_frames",
+    "_parse_current_frame",
+    "_parse_encode_target_duration",
+    "_parse_video_duration_seconds",
+    "_parse_ffmpeg_progress",
+    "_is_encode_total_frames_unknown",
+    "_is_encode_target_duration_unknown",
 ]
+
+# Backwards compatibility for legacy imports
+_default_remote_destination = default_remote_destination
+_parse_ratios_from_summary = parse_ratios_from_summary
+_parse_source_duration_seconds = parse_source_duration_seconds
+_parse_encode_total_frames = parse_encode_total_frames
+_parse_current_frame = parse_current_frame
+_parse_encode_target_duration = parse_encode_target_duration
+_parse_video_duration_seconds = parse_video_duration_seconds
+_parse_ffmpeg_progress = parse_ffmpeg_progress
+_is_encode_total_frames_unknown = is_encode_total_frames_unknown
+_is_encode_target_duration_unknown = is_encode_target_duration_unknown

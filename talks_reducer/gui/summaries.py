@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-"""Progress parsing and log handling helpers for the Talks Reducer GUI."""
-
-from __future__ import annotations
-
 import re
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from ..pipeline import _input_to_output_filename
 
@@ -389,7 +385,8 @@ class SummaryManager:
 
         return False
 
-    def format_progress_time(self, total_seconds: float | int | None) -> str:
+    @staticmethod
+    def format_progress_time(total_seconds: float | int | None) -> str:
         try:
             rounded_seconds = max(0, int(round(total_seconds)))
         except (TypeError, ValueError):
