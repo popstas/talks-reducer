@@ -48,7 +48,12 @@ def test_speed_up_video_returns_result(monkeypatch, tmp_path):
     # Stub heavy external dependencies.
     monkeypatch.setattr(
         "talks_reducer.pipeline._extract_video_metadata",
-        lambda _input, _frame_rate: {"frame_rate": 30.0, "duration": 2.0, "width": 1920.0, "height": 1080.0},
+        lambda _input, _frame_rate: {
+            "frame_rate": 30.0,
+            "duration": 2.0,
+            "width": 1920.0,
+            "height": 1080.0,
+        },
     )
     monkeypatch.setattr(
         "talks_reducer.pipeline.audio_utils.has_audio_stream",
@@ -132,8 +137,20 @@ def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
 
     def fake_metadata(path, _frame_rate):
         if Path(path) == input_path:
-            return {"frame_rate": 24.0, "duration": 4.0, "frame_count": 96, "width": 1920.0, "height": 1080.0}
-        return {"frame_rate": 24.0, "duration": 2.0, "frame_count": 48, "width": 1920.0, "height": 1080.0}
+            return {
+                "frame_rate": 24.0,
+                "duration": 4.0,
+                "frame_count": 96,
+                "width": 1920.0,
+                "height": 1080.0,
+            }
+        return {
+            "frame_rate": 24.0,
+            "duration": 2.0,
+            "frame_count": 48,
+            "width": 1920.0,
+            "height": 1080.0,
+        }
 
     monkeypatch.setattr("talks_reducer.pipeline._extract_video_metadata", fake_metadata)
     monkeypatch.setattr(
@@ -312,7 +329,12 @@ def test_speed_up_video_cleans_temp_on_abort(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "talks_reducer.pipeline._extract_video_metadata",
-        lambda _input, _frame_rate: {"frame_rate": 30.0, "duration": 2.0, "width": 1920.0, "height": 1080.0},
+        lambda _input, _frame_rate: {
+            "frame_rate": 30.0,
+            "duration": 2.0,
+            "width": 1920.0,
+            "height": 1080.0,
+        },
     )
 
     ffmpeg_calls: List[bool] = []
@@ -352,8 +374,20 @@ def test_speed_up_video_computes_ratios(monkeypatch, tmp_path):
 
     def fake_metadata(path, _frame_rate):
         if Path(path) == input_path:
-            return {"frame_rate": 25.0, "duration": 5.0, "frame_count": 125, "width": 1920.0, "height": 1080.0}
-        return {"frame_rate": 25.0, "duration": 2.0, "frame_count": 50, "width": 1920.0, "height": 1080.0}
+            return {
+                "frame_rate": 25.0,
+                "duration": 5.0,
+                "frame_count": 125,
+                "width": 1920.0,
+                "height": 1080.0,
+            }
+        return {
+            "frame_rate": 25.0,
+            "duration": 2.0,
+            "frame_count": 50,
+            "width": 1920.0,
+            "height": 1080.0,
+        }
 
     monkeypatch.setattr("talks_reducer.pipeline._extract_video_metadata", fake_metadata)
 
@@ -427,8 +461,20 @@ def test_small_mode_preserves_lower_resolution(monkeypatch, tmp_path):
     # Original video is 480p, which is less than target 720p
     def fake_metadata(path, _frame_rate):
         if Path(path) == input_path:
-            return {"frame_rate": 30.0, "duration": 2.0, "frame_count": 60, "width": 854.0, "height": 480.0}
-        return {"frame_rate": 30.0, "duration": 2.0, "frame_count": 60, "width": 854.0, "height": 480.0}
+            return {
+                "frame_rate": 30.0,
+                "duration": 2.0,
+                "frame_count": 60,
+                "width": 854.0,
+                "height": 480.0,
+            }
+        return {
+            "frame_rate": 30.0,
+            "duration": 2.0,
+            "frame_count": 60,
+            "width": 854.0,
+            "height": 480.0,
+        }
 
     monkeypatch.setattr("talks_reducer.pipeline._extract_video_metadata", fake_metadata)
     monkeypatch.setattr(
@@ -489,7 +535,7 @@ def test_small_mode_preserves_lower_resolution(monkeypatch, tmp_path):
     # Should keep original 480p resolution, not scale to 720p
     assert any("Keeping original resolution" in msg for msg in reporter.messages)
     assert not any("Scaling down from" in msg for msg in reporter.messages)
-    
+
     # Read the actual filter graph file that was created
     filter_graph_path = tmp_path / "temp" / "filterGraph.txt"
     assert filter_graph_path.exists()
@@ -517,8 +563,20 @@ def test_small_mode_scales_down_when_larger(monkeypatch, tmp_path):
     # Original video is 720p, target is 480p
     def fake_metadata(path, _frame_rate):
         if Path(path) == input_path:
-            return {"frame_rate": 30.0, "duration": 2.0, "frame_count": 60, "width": 1280.0, "height": 720.0}
-        return {"frame_rate": 30.0, "duration": 2.0, "frame_count": 60, "width": 1280.0, "height": 720.0}
+            return {
+                "frame_rate": 30.0,
+                "duration": 2.0,
+                "frame_count": 60,
+                "width": 1280.0,
+                "height": 720.0,
+            }
+        return {
+            "frame_rate": 30.0,
+            "duration": 2.0,
+            "frame_count": 60,
+            "width": 1280.0,
+            "height": 720.0,
+        }
 
     monkeypatch.setattr("talks_reducer.pipeline._extract_video_metadata", fake_metadata)
 
@@ -574,7 +632,7 @@ def test_small_mode_scales_down_when_larger(monkeypatch, tmp_path):
 
     # Should scale down from 720p to 480p
     assert any("Scaling down from 720p to 480p" in msg for msg in reporter.messages)
-    
+
     # Read the actual filter graph file that was created
     filter_graph_path = tmp_path / "temp" / "filterGraph.txt"
     assert filter_graph_path.exists()

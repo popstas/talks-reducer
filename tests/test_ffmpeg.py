@@ -143,14 +143,21 @@ def test_find_ffprobe_from_ffmpeg_directory(monkeypatch):
     monkeypatch.setattr(
         ffmpeg, "find_ffmpeg", lambda prefer_global=False: fake_ffmpeg_path
     )
-    monkeypatch.setattr(ffmpeg.os.path, "isfile", lambda path: path == expected_ffprobe or ffmpeg.os.path.normpath(path) == ffmpeg.os.path.normpath(expected_ffprobe))
+    monkeypatch.setattr(
+        ffmpeg.os.path,
+        "isfile",
+        lambda path: path == expected_ffprobe
+        or ffmpeg.os.path.normpath(path) == ffmpeg.os.path.normpath(expected_ffprobe),
+    )
     monkeypatch.setattr(ffmpeg, "shutil_which", lambda path: None)
 
     result = ffmpeg.find_ffprobe()
 
     assert result is not None
     # Result should be the absolute path or the original path
-    assert result == ffmpeg.os.path.abspath(expected_ffprobe) or result == expected_ffprobe
+    assert (
+        result == ffmpeg.os.path.abspath(expected_ffprobe) or result == expected_ffprobe
+    )
 
 
 def test_find_ffprobe_returns_none_when_missing(monkeypatch):

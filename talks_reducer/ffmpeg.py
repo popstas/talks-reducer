@@ -680,10 +680,12 @@ def build_video_commands(
     else:
         audio_parts.append("-an")  # No audio
 
-    audio_parts.extend([
-        f'"{output_file}"',
-        "-loglevel warning -stats -hide_banner",
-    ])
+    audio_parts.extend(
+        [
+            f'"{output_file}"',
+            "-loglevel warning -stats -hide_banner",
+        ]
+    )
 
     full_command_parts = (
         global_parts + input_parts + output_parts + video_encoder_args + audio_parts
