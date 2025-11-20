@@ -4,45 +4,29 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from ..progress import ProgressHandle, SignalProgressReporter
+from ..progress import CallbackProgressHandle, ProgressHandle, SignalProgressReporter
 
 
-class _GuiProgressHandle(ProgressHandle):
+class _GuiProgressHandle(CallbackProgressHandle):
     """Simple progress handle that records totals but only logs milestones."""
 
     def __init__(self, log_callback: Callable[[str], None], desc: str) -> None:
         self._log_callback = log_callback
-        self._desc = desc
-        self._current = 0
-        self._total: Optional[int] = None
+        super().__init__(
+            desc=desc,
+            on_start=self._on_start,
+            on_finish=self._on_finish,
+        )
+
+    def _on_start(self, desc: str, total: Optional[int]) -> None:
+        del total
         if desc:
             self._log_callback(f"{desc} started")
 
-    @property
-    def current(self) -> int:
-        return self._current
-
-    def ensure_total(self, total: int) -> None:
-        if self._total is None or total > self._total:
-            self._total = total
-
-    def advance(self, amount: int) -> None:
-        if amount > 0:
-            self._current += amount
-
-    def finish(self) -> None:
-        if self._total is not None:
-            self._current = self._total
-        if self._desc:
-            self._log_callback(f"{self._desc} completed")
-
-    def __enter__(self) -> "_GuiProgressHandle":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> bool:
-        if exc_type is None:
-            self.finish()
-        return False
+    def _on_finish(self, current: int, total: Optional[int], desc: str) -> None:
+        del current, total
+        if desc:
+            self._log_callback(f"{desc} completed")
 
 
 class _TkProgressReporter(SignalProgressReporter):

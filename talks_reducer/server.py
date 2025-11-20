@@ -20,12 +20,16 @@ from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
 from talks_reducer.icons import find_icon_path
 from talks_reducer.models import ProcessingOptions, ProcessingResult
 from talks_reducer.pipeline import _input_to_output_filename, speed_up_video
-from talks_reducer.progress import ProgressHandle, SignalProgressReporter
+from talks_reducer.progress import (
+    CallbackProgressHandle,
+    ProgressHandle,
+    SignalProgressReporter,
+)
 from talks_reducer.server_args import build_server_parser
 from talks_reducer.version_utils import resolve_version
 
 
-class _GradioProgressHandle(AbstractContextManager[ProgressHandle]):
+class _GradioProgressHandle(CallbackProgressHandle):
     """Translate pipeline progress updates into Gradio progress callbacks."""
 
     def __init__(
@@ -37,53 +41,20 @@ class _GradioProgressHandle(AbstractContextManager[ProgressHandle]):
         unit: str,
     ) -> None:
         self._reporter = reporter
-        self._desc = desc.strip() or "Processing"
+        super().__init__(
+            desc=desc.strip() or "Processing",
+            total=total,
+            on_start=self._on_start,
+            on_update=self._on_update,
+            infer_total_on_finish=True,
+        )
         self._unit = unit
-        self._total = total
-        self._current = 0
-        self._reporter._start_task(self._desc, self._total)
 
-    @property
-    def current(self) -> int:
-        """Return the number of processed units reported so far."""
+    def _on_start(self, desc: str, total: Optional[int]) -> None:
+        self._reporter._start_task(desc, total)
 
-        return self._current
-
-    def ensure_total(self, total: int) -> None:
-        """Update the total units when FFmpeg discovers a larger frame count."""
-
-        if total > 0 and (self._total is None or total > self._total):
-            self._total = total
-            self._reporter._update_progress(self._current, self._total, self._desc)
-
-    def advance(self, amount: int) -> None:
-        """Advance the current progress and notify the UI."""
-
-        if amount <= 0:
-            return
-        self._current += amount
-        self._reporter._update_progress(self._current, self._total, self._desc)
-
-    def finish(self) -> None:
-        """Fill the progress bar when FFmpeg completes."""
-
-        if self._total is not None:
-            self._current = self._total
-        else:
-            # Without a known total, treat the final frame count as the total so the
-            # progress bar reaches 100%.
-            inferred_total = self._current if self._current > 0 else 1
-            self._reporter._update_progress(self._current, inferred_total, self._desc)
-            return
-        self._reporter._update_progress(self._current, self._total, self._desc)
-
-    def __enter__(self) -> "_GradioProgressHandle":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> bool:
-        if exc_type is None:
-            self.finish()
-        return False
+    def _on_update(self, current: int, total: Optional[int], desc: str) -> None:
+        self._reporter._update_progress(current, total, desc)
 
 
 class GradioProgressReporter(SignalProgressReporter):

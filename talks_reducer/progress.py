@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Optional, Protocol, runtime_checkable
+from typing import Callable, Optional, Protocol, runtime_checkable
 
 from tqdm import tqdm
 
@@ -83,6 +83,67 @@ class NullProgressReporter(ProgressReporter):
         return _Context(_NullProgressHandle(total=total))
 
 
+class CallbackProgressHandle(AbstractContextManager[ProgressHandle]):
+    """Progress handle that triggers callbacks when progress changes."""
+
+    def __init__(
+        self,
+        *,
+        desc: str = "",
+        total: Optional[int] = None,
+        on_start: Optional[Callable[[str, Optional[int]], None]] = None,
+        on_update: Optional[Callable[[int, Optional[int], str], None]] = None,
+        on_finish: Optional[Callable[[int, Optional[int], str], None]] = None,
+        infer_total_on_finish: bool = False,
+    ) -> None:
+        self._desc = desc
+        self._total = total
+        self._current = 0
+        self._on_update = on_update
+        self._on_finish = on_finish
+        self._infer_total_on_finish = infer_total_on_finish
+        self._on_start = on_start
+
+        if self._on_start is not None:
+            self._on_start(self._desc, self._total)
+
+    @property
+    def current(self) -> int:
+        return self._current
+
+    def ensure_total(self, total: int) -> None:
+        if total > 0 and (self._total is None or total > self._total):
+            self._total = total
+            if self._on_update is not None:
+                self._on_update(self._current, self._total, self._desc)
+
+    def advance(self, amount: int) -> None:
+        if amount <= 0:
+            return
+        self._current += amount
+        if self._on_update is not None:
+            self._on_update(self._current, self._total, self._desc)
+
+    def finish(self) -> None:
+        if self._total is not None and self._current < self._total:
+            self._current = self._total
+        elif self._total is None and self._infer_total_on_finish:
+            self._total = self._current if self._current > 0 else 1
+
+        if self._on_update is not None:
+            self._on_update(self._current, self._total, self._desc)
+        if self._on_finish is not None:
+            self._on_finish(self._current, self._total, self._desc)
+
+    def __enter__(self) -> ProgressHandle:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        if exc_type is None:
+            self.finish()
+        return False
+
+
 @dataclass
 class _TqdmProgressHandle(AbstractContextManager[ProgressHandle]):
     """Wraps a :class:`tqdm.tqdm` instance to match :class:`ProgressHandle`."""
@@ -152,6 +213,7 @@ class SignalProgressReporter(NullProgressReporter):
 
 
 __all__ = [
+    "CallbackProgressHandle",
     "ProgressHandle",
     "ProgressReporter",
     "NullProgressReporter",

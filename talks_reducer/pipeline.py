@@ -199,7 +199,9 @@ def speed_up_video(
     # Check if the video has an audio stream
     has_audio = audio_utils.has_audio_stream(os.fspath(input_path))
     if not has_audio:
-        reporter.log("No audio stream found. Video will be re-encoded without speed modification.")
+        reporter.log(
+            "No audio stream found. Video will be re-encoded without speed modification."
+        )
 
     hwaccel = (
         ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if cuda_available else []

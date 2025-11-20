@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable, Sequence
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from tkinter import Misc

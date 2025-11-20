@@ -283,14 +283,14 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.button_frame = gui.ttk.Frame(gui.options_frame)
     gui.button_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
     gui.button_frame.columnconfigure(2, weight=1)
-    
+
     gui.advanced_button = gui.ttk.Button(
         gui.button_frame,
         text="Advanced",
         command=gui._toggle_advanced,
     )
     gui.advanced_button.grid(row=0, column=0, sticky="w")
-    
+
     # Check updates button and status label (Windows only)
     if sys.platform == "win32":
         gui.check_updates_button = gui.ttk.Button(
@@ -299,7 +299,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             command=gui._check_for_updates,
         )
         gui.check_updates_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
-        
+
         # Update status label (one-line)
         gui.update_status_label = gui.ttk.Label(
             gui.button_frame,
