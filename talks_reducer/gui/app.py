@@ -31,24 +31,20 @@ try:
     from ..cli import gather_input_files
     from ..ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from ..models import ProcessingOptions
-    from ..pipeline import (
-        ProcessingAborted,
-        _input_to_output_filename,
-        speed_up_video,
-    )
+    from ..pipeline import ProcessingAborted, speed_up_video
     from ..progress import ProgressHandle
     from ..version_utils import resolve_version
     from . import discovery as discovery_helpers
     from . import layout as layout_helpers
     from . import update_checker
-    from .preferences import GUIPreferences, determine_config_path
+    from .inputs import InputController
+    from .preferences import GUIPreferences, PreferenceController, determine_config_path
     from .progress import _TkProgressReporter
-    from .remote import (
-        check_remote_server_for_gui,
-        format_server_host,
-        normalize_server_url,
-        ping_server,
-        process_files_via_server,
+    from .remote_io import RemoteController
+    from .summaries import (
+        SummaryManager,
+        default_remote_destination,
+        parse_ratios_from_summary,
     )
     from .theme import (
         DARK_THEME,
@@ -72,14 +68,18 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.gui import discovery as discovery_helpers
     from talks_reducer.gui import layout as layout_helpers
     from talks_reducer.gui import update_checker
-    from talks_reducer.gui.preferences import GUIPreferences, determine_config_path
+    from talks_reducer.gui.inputs import InputController
+    from talks_reducer.gui.preferences import (
+        GUIPreferences,
+        PreferenceController,
+        determine_config_path,
+    )
     from talks_reducer.gui.progress import _TkProgressReporter
-    from talks_reducer.gui.remote import (
-        check_remote_server_for_gui,
-        format_server_host,
-        normalize_server_url,
-        ping_server,
-        process_files_via_server,
+    from talks_reducer.gui.remote_io import RemoteController
+    from talks_reducer.gui.summaries import (
+        SummaryManager,
+        default_remote_destination,
+        parse_ratios_from_summary,
     )
     from talks_reducer.gui.theme import (
         DARK_THEME,
@@ -91,11 +91,7 @@ except ImportError:  # pragma: no cover - handled at runtime
         run_defaults_command,
     )
     from talks_reducer.models import ProcessingOptions
-    from talks_reducer.pipeline import (
-        ProcessingAborted,
-        _input_to_output_filename,
-        speed_up_video,
-    )
+    from talks_reducer.pipeline import ProcessingAborted, speed_up_video
     from talks_reducer.progress import ProgressHandle
     from talks_reducer.version_utils import resolve_version
 
@@ -104,175 +100,6 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - runtime dependency
     DND_FILES = None  # type: ignore[assignment]
     TkinterDnD = None  # type: ignore[assignment]
-
-
-def _default_remote_destination(
-    input_file: Path,
-    *,
-    small: bool,
-    small_480: bool = False,
-    add_codec_suffix: bool = False,
-    video_codec: str = "h264",
-    silent_speed: float | None = None,
-    sounded_speed: float | None = None,
-) -> Path:
-    """Return the default remote output path for *input_file*."""
-
-    normalized_codec = str(video_codec or "h264").strip().lower()
-    target_height = 480 if small_480 else None
-
-    return _input_to_output_filename(
-        input_file,
-        small,
-        target_height,
-        video_codec=normalized_codec,
-        add_codec_suffix=add_codec_suffix,
-        silent_speed=silent_speed,
-        sounded_speed=sounded_speed,
-    )
-
-
-def _parse_ratios_from_summary(summary: str) -> Tuple[Optional[float], Optional[float]]:
-    """Extract time and size ratios from a Markdown *summary* string."""
-
-    time_ratio: Optional[float] = None
-    size_ratio: Optional[float] = None
-
-    for line in summary.splitlines():
-        if "**Duration:**" in line:
-            match = re.search(r"—\s*([0-9]+(?:\.[0-9]+)?)% of the original", line)
-            if match:
-                try:
-                    time_ratio = float(match.group(1)) / 100
-                except ValueError:
-                    time_ratio = None
-        elif "**Size:**" in line:
-            match = re.search(r"\*\*Size:\*\*\s*([0-9]+(?:\.[0-9]+)?)%", line)
-            if match:
-                try:
-                    size_ratio = float(match.group(1)) / 100
-                except ValueError:
-                    size_ratio = None
-
-    return time_ratio, size_ratio
-
-
-def _parse_source_duration_seconds(message: str) -> tuple[bool, Optional[float]]:
-    """Return whether *message* includes source duration metadata."""
-
-    metadata_match = re.search(
-        r"source metadata: duration:\s*([\d.]+)s",
-        message,
-        re.IGNORECASE,
-    )
-    if not metadata_match:
-        return False, None
-
-    try:
-        return True, float(metadata_match.group(1))
-    except ValueError:
-        return True, None
-
-
-def _parse_encode_total_frames(message: str) -> tuple[bool, Optional[int]]:
-    """Extract final encode frame totals from *message* when present."""
-
-    frame_total_match = re.search(
-        r"Final encode target frames(?: \(fallback\))?:\s*(\d+)", message
-    )
-    if not frame_total_match:
-        return False, None
-
-    try:
-        return True, int(frame_total_match.group(1))
-    except ValueError:
-        return True, None
-
-
-def _is_encode_total_frames_unknown(normalized_message: str) -> bool:
-    """Return ``True`` if *normalized_message* marks encode frame totals unknown."""
-
-    return (
-        "final encode target frames" in normalized_message
-        and "unknown" in normalized_message
-    )
-
-
-def _parse_current_frame(message: str) -> tuple[bool, Optional[int]]:
-    """Extract the current encode frame from *message* when available."""
-
-    frame_match = re.search(r"frame=\s*(\d+)", message)
-    if not frame_match:
-        return False, None
-
-    try:
-        return True, int(frame_match.group(1))
-    except ValueError:
-        return True, None
-
-
-def _parse_encode_target_duration(message: str) -> tuple[bool, Optional[float]]:
-    """Extract encode target duration from *message* if reported."""
-
-    encode_duration_match = re.search(
-        r"Final encode target duration(?: \(fallback\))?:\s*([\d.]+)s",
-        message,
-    )
-    if not encode_duration_match:
-        return False, None
-
-    try:
-        return True, float(encode_duration_match.group(1))
-    except ValueError:
-        return True, None
-
-
-def _is_encode_target_duration_unknown(normalized_message: str) -> bool:
-    """Return ``True`` if encode target duration is reported as unknown."""
-
-    return (
-        "final encode target duration" in normalized_message
-        and "unknown" in normalized_message
-    )
-
-
-def _parse_video_duration_seconds(message: str) -> tuple[bool, Optional[float]]:
-    """Parse the input video duration from *message* when FFmpeg prints it."""
-
-    duration_match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)", message)
-    if not duration_match:
-        return False, None
-
-    try:
-        hours = int(duration_match.group(1))
-        minutes = int(duration_match.group(2))
-        seconds = float(duration_match.group(3))
-    except ValueError:
-        return True, None
-
-    total_seconds = hours * 3600 + minutes * 60 + seconds
-    return True, total_seconds
-
-
-def _parse_ffmpeg_progress(message: str) -> tuple[bool, Optional[tuple[int, str]]]:
-    """Parse FFmpeg progress information from *message* if available."""
-
-    time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.\d+", message)
-    speed_match = re.search(r"speed=\s*([\d.]+)x", message)
-
-    if not (time_match and speed_match):
-        return False, None
-
-    try:
-        hours = int(time_match.group(1))
-        minutes = int(time_match.group(2))
-        seconds = int(time_match.group(3))
-    except ValueError:
-        return True, None
-
-    current_seconds = hours * 3600 + minutes * 60 + seconds
-    speed_str = speed_match.group(1)
-    return True, (current_seconds, speed_str)
 
 
 class TalksReducerGUI:
@@ -346,7 +173,7 @@ class TalksReducerGUI:
         self._stop_requested = False
         self._ping_worker_stop_requested = False
         self._current_remote_mode = False
-        
+
         # Update checker state
         self._update_check_thread: Optional[threading.Thread] = None
         self._download_thread: Optional[threading.Thread] = None
@@ -358,6 +185,12 @@ class TalksReducerGUI:
         self.input_files: List[str] = []
 
         self._dnd_available = TkinterDnD is not None and DND_FILES is not None
+        self.DND_FILES = DND_FILES
+
+        self.inputs = InputController(self)
+        self.remote_controller = RemoteController(self)
+        self.summary_manager = SummaryManager(self)
+        self.preference_controller = PreferenceController(self)
 
         self.simple_mode_var = tk.BooleanVar(
             value=self.preferences.get("simple_mode", True)
@@ -612,10 +445,10 @@ class TalksReducerGUI:
             self.remote_mode_button.configure(state=state)
 
     def _normalize_server_url(self, server_url: str) -> str:
-        return normalize_server_url(server_url)
+        return self.remote_controller.normalize_server_url(server_url)
 
     def _format_server_host(self, server_url: str) -> str:
-        return format_server_host(server_url)
+        return self.remote_controller.format_server_host(server_url)
 
     def _check_remote_server(
         self,
@@ -636,8 +469,7 @@ class TalksReducerGUI:
         max_attempts: int = 5,
         delay: float = 1.0,
     ) -> bool:
-        return check_remote_server_for_gui(
-            self,
+        return self.remote_controller.check_remote_server(
             server_url,
             success_status=success_status,
             waiting_status=waiting_status,
@@ -656,7 +488,7 @@ class TalksReducerGUI:
         )
 
     def _ping_server(self, server_url: str, *, timeout: float = 5.0) -> bool:
-        return ping_server(server_url, timeout=timeout)
+        return self.remote_controller.ping_server(server_url, timeout=timeout)
 
     def _start_discovery(self) -> None:
         discovery_helpers.start_discovery(self)
@@ -674,49 +506,40 @@ class TalksReducerGUI:
         discovery_helpers.show_discovery_results(self, urls)
 
     def _toggle_simple_mode(self) -> None:
-        self.preferences.update("simple_mode", self.simple_mode_var.get())
-        self._apply_simple_mode()
+        self.preference_controller.toggle_simple_mode()
 
     def _apply_simple_mode(self, *, initial: bool = False) -> None:
         layout_helpers.apply_simple_mode(self, initial=initial)
 
     def _apply_window_size(self, *, simple: bool) -> None:
-        layout_helpers.apply_window_size(self, simple=simple)
+        self.preference_controller.apply_window_size(simple=simple)
 
     def _toggle_advanced(self, *, initial: bool = False) -> None:
-        if not initial:
-            self.advanced_visible.set(not self.advanced_visible.get())
-        visible = self.advanced_visible.get()
-        if visible:
-            self.advanced_frame.grid()
-            self.advanced_button.configure(text="Hide advanced")
-        else:
-            self.advanced_frame.grid_remove()
-            self.advanced_button.configure(text="Advanced")
+        self.preference_controller.toggle_advanced(initial=initial)
 
     def _check_for_updates(self) -> None:
         """Check for updates from GitHub releases."""
         if not sys.platform == "win32":
             return
-        
+
         if not hasattr(self, "check_updates_button"):
             return
-        
+
         # Disable button during check
         self.check_updates_button.configure(state=self.tk.DISABLED, text="Checking...")
         self._clear_update_status()
         self._set_update_status("Checking for updates...")
-        
+
         def check_worker() -> None:
             try:
                 latest_version, error = update_checker.fetch_latest_version()
-                
+
                 if error:
                     self._schedule_on_ui_thread(
                         lambda: self._on_update_check_complete(None, error)
                     )
                     return
-                
+
                 current_version = resolve_version()
                 if current_version == "unknown":
                     self._schedule_on_ui_thread(
@@ -725,10 +548,12 @@ class TalksReducerGUI:
                         )
                     )
                     return
-                
+
                 # Compare versions
-                is_newer = update_checker.compare_versions(current_version, latest_version)
-                
+                is_newer = update_checker.compare_versions(
+                    current_version, latest_version
+                )
+
                 if is_newer:
                     installer_url = update_checker.get_installer_url(latest_version)
                     portable_url = update_checker.get_portable_url(latest_version)
@@ -741,12 +566,12 @@ class TalksReducerGUI:
                     self._schedule_on_ui_thread(
                         lambda: self._on_update_check_complete(None, "up_to_date")
                     )
-                    
+
             except Exception as exc:
                 self._schedule_on_ui_thread(
                     lambda: self._on_update_check_complete(None, f"Error: {str(exc)}")
                 )
-        
+
         self._update_check_thread = threading.Thread(target=check_worker, daemon=True)
         self._update_check_thread.start()
 
@@ -760,9 +585,9 @@ class TalksReducerGUI:
         """Handle update check completion."""
         if not hasattr(self, "check_updates_button"):
             return
-        
+
         self.check_updates_button.configure(state=self.tk.NORMAL)
-        
+
         if error:
             if error == "up_to_date":
                 self._clear_update_status()
@@ -773,18 +598,18 @@ class TalksReducerGUI:
                 self._set_update_status(f"Update check failed: {error}")
                 self.check_updates_button.configure(text="Check updates")
             return
-        
+
         if latest_version:
             self._latest_version = latest_version
             self._installer_url = installer_url
             self._portable_url = portable_url
-            
+
             # Change button to download
             self.check_updates_button.configure(
                 text=f"Download {latest_version}",
                 command=self._download_and_install_update,
             )
-            
+
             # Show status and links
             self._clear_update_status()
             status_text = f"New version {latest_version} is available!"
@@ -798,21 +623,22 @@ class TalksReducerGUI:
         """Download and install the update."""
         if not self._installer_url or not self._latest_version:
             return
-        
+
         if not hasattr(self, "check_updates_button"):
             return
-        
+
         # Disable button during download
         self.check_updates_button.configure(state=self.tk.DISABLED)
         self._clear_update_status()
         self._set_update_status("Downloading installer...")
-        
+
         def download_worker() -> None:
             def update_status_label(percent: int) -> None:
                 if hasattr(self, "update_status_label"):
                     self._set_update_status(f"Downloading installer... {percent}%")
-            
+
             try:
+
                 def progress_callback(downloaded: int, total: int) -> None:
                     if total > 0:
                         percent = int((downloaded / total) * 100)
@@ -821,28 +647,30 @@ class TalksReducerGUI:
                                 text=f"Downloading... {percent}%"
                             )
                         )
-                        self._schedule_on_ui_thread(lambda p=percent: update_status_label(p))
-                
+                        self._schedule_on_ui_thread(
+                            lambda p=percent: update_status_label(p)
+                        )
+
                 file_path, error = update_checker.download_file(
                     self._installer_url, progress_callback
                 )
-                
+
                 if error:
                     self._schedule_on_ui_thread(
                         lambda: self._on_download_complete(None, error)
                     )
                     return
-                
+
                 if file_path:
                     self._schedule_on_ui_thread(
                         lambda: self._on_download_complete(file_path, None)
                     )
-                    
+
             except Exception as exc:
                 self._schedule_on_ui_thread(
                     lambda: self._on_download_complete(None, f"Error: {str(exc)}")
                 )
-        
+
         self._download_thread = threading.Thread(target=download_worker, daemon=True)
         self._download_thread.start()
 
@@ -852,7 +680,7 @@ class TalksReducerGUI:
         """Handle download completion."""
         if not hasattr(self, "check_updates_button"):
             return
-        
+
         if error:
             self.check_updates_button.configure(state=self.tk.NORMAL)
             self._clear_update_status()
@@ -862,7 +690,7 @@ class TalksReducerGUI:
                     text=f"Download {self._latest_version}",
                 )
             return
-        
+
         if file_path and file_path.exists():
             # Launch installer
             try:
@@ -870,13 +698,15 @@ class TalksReducerGUI:
                     os.startfile(str(file_path))
                 else:
                     subprocess.Popen([str(file_path)])
-                
+
                 self._clear_update_status()
                 self._set_update_status(
                     "Installer launched. Please follow the installation wizard."
                 )
                 self.check_updates_button.configure(
-                    state=self.tk.NORMAL, text="Check updates", command=self._check_for_updates
+                    state=self.tk.NORMAL,
+                    text="Check updates",
+                    command=self._check_for_updates,
                 )
                 # Reset state
                 self._latest_version = None
@@ -908,7 +738,7 @@ class TalksReducerGUI:
         """Set text and add clickable links to the update status area."""
         if not hasattr(self, "update_status_label"):
             return
-        
+
         # Clear previous link labels
         if hasattr(self, "_update_link_labels"):
             for link_label in self._update_link_labels:
@@ -916,19 +746,19 @@ class TalksReducerGUI:
             self._update_link_labels = []
         else:
             self._update_link_labels = []
-        
+
         # Clear status label
         self.update_status_label.config(text=text)
-        
+
         # Get accent color from current theme (same as Link.TButton)
         mode = self._resolve_theme_mode()
         palette = LIGHT_THEME if mode == "light" else DARK_THEME
         accent_color = palette["accent"]
-        
+
         # Create link labels in the button_frame
         button_frame = self.update_status_label.master
         current_column = 3  # Start after status label (column 2)
-        
+
         for i, (link_text, url) in enumerate(links):
             # Add separator if not first link
             if i > 0:
@@ -936,7 +766,7 @@ class TalksReducerGUI:
                 separator.grid(row=0, column=current_column, sticky="w", padx=(4, 0))
                 current_column += 1
                 self._update_link_labels.append(separator)
-            
+
             # Create clickable link label with same style as Link.TButton
             link_label = self.ttk.Label(
                 button_frame,
@@ -946,124 +776,57 @@ class TalksReducerGUI:
                 font=("TkDefaultFont", 8, "underline"),
             )
             link_label.grid(row=0, column=current_column, sticky="w", padx=(4, 0))
-            
+
             # Bind click event
             def on_link_click(event: Any, link_url: str = url) -> None:
                 if link_url:
                     webbrowser.open(link_url)
-            
+
             link_label.bind("<Button-1>", on_link_click)
             self._update_link_labels.append(link_label)
             current_column += 1
 
     def _on_theme_change(self, *_: object) -> None:
-        self.preferences.update("theme", self.theme_var.get())
-        self._refresh_theme()
+        self.preference_controller.on_theme_change(*_)
 
     def _on_small_video_change(self, *_: object) -> None:
-        self.preferences.update("small_video", bool(self.small_var.get()))
-        self._update_small_variant_state()
+        self.preference_controller.on_small_video_change(*_)
 
     def _on_small_480_change(self, *_: object) -> None:
-        self.preferences.update("small_video_480", bool(self.small_480_var.get()))
+        self.preference_controller.on_small_480_change(*_)
 
     def _update_small_variant_state(self) -> None:
-        if not hasattr(self, "small_480_check"):
-            return
-        state = self.tk.NORMAL if self.small_var.get() else self.tk.DISABLED
-        self.small_480_check.configure(state=state)
+        self.preference_controller.update_small_variant_state()
 
     def _on_open_after_convert_change(self, *_: object) -> None:
-        self.preferences.update(
-            "open_after_convert", bool(self.open_after_convert_var.get())
-        )
+        self.preference_controller.on_open_after_convert_change(*_)
 
     def _on_video_codec_change(self, *_: object) -> None:
-        value = self.video_codec_var.get().strip().lower()
-        if value not in {"h264", "hevc", "av1"}:
-            value = "h264"
-            self.video_codec_var.set(value)
-        self.preferences.update("video_codec", value)
+        self.preference_controller.on_video_codec_change(*_)
 
     def _on_add_codec_suffix_change(self, *_: object) -> None:
-        self.preferences.update(
-            "add_codec_suffix", bool(self.add_codec_suffix_var.get())
-        )
+        self.preference_controller.on_add_codec_suffix_change(*_)
 
     def _on_optimize_change(self, *_: object) -> None:
-        self.preferences.update("optimize", bool(self.optimize_var.get()))
+        self.preference_controller.on_optimize_change(*_)
 
     def _on_use_global_ffmpeg_change(self, *_: object) -> None:
-        self.preferences.update(
-            "use_global_ffmpeg", bool(self.use_global_ffmpeg_var.get())
-        )
+        self.preference_controller.on_use_global_ffmpeg_change(*_)
 
     def _on_processing_mode_change(self, *_: object) -> None:
-        value = self.processing_mode_var.get()
-        if value not in {"local", "remote"}:
-            self.processing_mode_var.set("local")
-            return
-        self.preferences.update("processing_mode", value)
-        self._update_processing_mode_state()
-
-        if self.processing_mode_var.get() == "remote":
-            server_url = self.server_url_var.get().strip()
-            if not server_url:
-                return
-
-            def ping_remote_mode() -> None:
-                self._check_remote_server(
-                    server_url,
-                    success_status="Idle",
-                    waiting_status="Error",
-                    failure_status="Error",
-                    failure_message="Server {host} is unreachable. Switching to local mode.",
-                    switch_to_local_on_failure=True,
-                    alert_on_failure=True,
-                    warning_message="Server {host} is unreachable. Switching to local mode.",
-                )
-
-            threading.Thread(target=ping_remote_mode, daemon=True).start()
+        self.preference_controller.on_processing_mode_change(*_)
 
     def _on_server_url_change(self, *_: object) -> None:
-        value = self.server_url_var.get().strip()
-        self.preferences.update("server_url", value)
-        self._update_processing_mode_state()
+        self.preference_controller.on_server_url_change(*_)
 
     def _resolve_theme_mode(self) -> str:
-        preference = self.theme_var.get().lower()
-        if preference not in {"light", "dark"}:
-            return detect_system_theme(
-                os.environ,
-                sys.platform,
-                read_windows_theme_registry,
-                run_defaults_command,
-            )
-        return preference
+        return self.preference_controller.resolve_theme_mode()
 
     def _refresh_theme(self) -> None:
-        mode = self._resolve_theme_mode()
-        palette = LIGHT_THEME if mode == "light" else DARK_THEME
-        apply_theme(
-            self.style,
-            palette,
-            {
-                "root": self.root,
-                "drop_zone": getattr(self, "drop_zone", None),
-                "log_text": getattr(self, "log_text", None),
-                "status_label": getattr(self, "status_label", None),
-                "sliders": getattr(self, "_sliders", []),
-                "tk": self.tk,
-                "apply_status_style": self._apply_status_style,
-                "status_state": self._status_state,
-            },
-        )
+        self.preference_controller.refresh_theme()
 
     def _configure_drop_targets(self, widget) -> None:
-        if not self._dnd_available:
-            return
-        widget.drop_target_register(DND_FILES)  # type: ignore[arg-type]
-        widget.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
+        self.inputs.configure_drop_targets(widget)
 
     def _populate_initial_inputs(
         self, inputs: Sequence[str], *, auto_run: bool = False
@@ -1086,70 +849,31 @@ class TalksReducerGUI:
 
     # -------------------------------------------------------------- actions --
     def _ask_for_input_files(self) -> tuple[str, ...]:
-        """Prompt the user to select input files for processing."""
-
-        return self.filedialog.askopenfilenames(
-            title="Select input files",
-            filetypes=[
-                ("Video files", "*.mp4 *.mkv *.mov *.avi *.m4v"),
-                ("All", "*.*"),
-            ],
-        )
+        return self.inputs.ask_for_input_files()
 
     def _add_files(self) -> None:
-        files = self._ask_for_input_files()
-        self._extend_inputs(files)
+        self.inputs.add_files()
 
     def _add_directory(self) -> None:
-        directory = self.filedialog.askdirectory(title="Select input folder")
-        if directory:
-            self._extend_inputs([directory])
+        self.inputs.add_directory()
 
     def _extend_inputs(self, paths: Iterable[str], *, auto_run: bool = False) -> None:
-        added = False
-        for path in paths:
-            if path and path not in self.input_files:
-                self.input_files.append(path)
-                added = True
-        if auto_run and added and self.run_after_drop_var.get():
-            self._start_run()
+        self.inputs.extend_inputs(paths, auto_run=auto_run)
 
     def _clear_input_files(self) -> None:
         """Clear all queued input files."""
-        self.input_files.clear()
+        self.inputs.clear_input_files()
 
     def _on_drop(self, event: object) -> None:
-        data = getattr(event, "data", "")
-        if not data:
-            return
-        paths = self.root.tk.splitlist(data)
-        cleaned = [path.strip("{}") for path in paths]
-        # Clear existing files before adding dropped files
-        self.input_files.clear()
-        self._extend_inputs(cleaned, auto_run=True)
+        self.inputs.on_drop(event)
 
     def _on_drop_zone_click(self, event: object) -> str | None:
-        """Open a file selection dialog when the drop zone is activated."""
-
-        files = self._ask_for_input_files()
-        if not files:
-            return "break"
-        self._clear_input_files()
-        self._extend_inputs(files, auto_run=True)
-        return "break"
+        return self.inputs.on_drop_zone_click(event)
 
     def _browse_path(
         self, variable, label: str
     ) -> None:  # type: (tk.StringVar, str) -> None
-        if "folder" in label.lower():
-            result = self.filedialog.askdirectory()
-        else:
-            initial = variable.get() or os.getcwd()
-            result = self.filedialog.asksaveasfilename(
-                initialfile=os.path.basename(initial)
-            )
-        if result:
-            variable.set(result)
+        self.inputs.browse_path(variable, label)
 
     def _stop_processing(self) -> None:
         """Stop the currently running processing by terminating FFmpeg."""
@@ -1246,14 +970,13 @@ class TalksReducerGUI:
     ) -> bool:
         """Send *files* to the configured server for processing."""
 
-        return process_files_via_server(
-            self,
+        return self.remote_controller.process_files_via_server(
             files,
             args,
             server_url,
             open_after_convert=open_after_convert,
-            default_remote_destination=_default_remote_destination,
-            parse_summary=_parse_ratios_from_summary,
+            default_remote_destination=default_remote_destination,
+            parse_summary=parse_ratios_from_summary,
         )
 
     def _parse_float(self, value: str, label: str) -> float:
@@ -1294,197 +1017,13 @@ class TalksReducerGUI:
             self._append_log(f"Could not open file manager for {target}")
 
     def _append_log(self, message: str) -> None:
-        self._update_status_from_message(message)
-
-        def updater() -> None:
-            self.log_text.configure(state=self.tk.NORMAL)
-            self.log_text.insert(self.tk.END, message + "\n")
-            self.log_text.see(self.tk.END)
-            self.log_text.configure(state=self.tk.DISABLED)
-
-        self.log_text.after(0, updater)
+        self.summary_manager.append_log(message)
 
     def _update_status_from_message(self, message: str) -> None:
-        normalized = message.strip().lower()
-
-        metadata_found, source_duration = _parse_source_duration_seconds(message)
-        if metadata_found:
-            self._source_duration_seconds = source_duration
-
-        if self._handle_status_transitions(normalized):
-            return
-
-        frame_total_found, frame_total = _parse_encode_total_frames(message)
-        if frame_total_found:
-            self._encode_total_frames = frame_total
-            return
-
-        if _is_encode_total_frames_unknown(normalized):
-            self._encode_total_frames = None
-            return
-
-        frame_found, current_frame = _parse_current_frame(message)
-        if frame_found:
-            if current_frame is None:
-                return
-
-            if self._encode_current_frame == current_frame:
-                return
-
-            self._encode_current_frame = current_frame
-            if self._encode_total_frames and self._encode_total_frames > 0:
-                self._complete_audio_phase()
-                frame_ratio = min(current_frame / self._encode_total_frames, 1.0)
-                progress_target = self.AUDIO_PROGRESS_WEIGHT + frame_ratio * (
-                    100.0 - self.AUDIO_PROGRESS_WEIGHT
-                )
-                current_value = float(self.progress_var.get())
-                percentage = min(100.0, max(current_value, progress_target))
-                self._set_progress(percentage)
-            else:
-                self._complete_audio_phase()
-                self._set_status("processing", f"{current_frame} frames encoded")
-
-        duration_found, encode_duration = _parse_encode_target_duration(message)
-        if duration_found:
-            self._encode_target_duration_seconds = encode_duration
-
-        if _is_encode_target_duration_unknown(normalized):
-            self._encode_target_duration_seconds = None
-
-        video_duration_found, video_duration = _parse_video_duration_seconds(message)
-        if video_duration_found and video_duration is not None:
-            self._video_duration_seconds = video_duration
-
-        progress_found, progress_info = _parse_ffmpeg_progress(message)
-        if progress_found and progress_info is not None:
-            current_seconds, speed_str = progress_info
-            time_str = self._format_progress_time(current_seconds)
-
-            self._last_progress_seconds = current_seconds
-
-            total_seconds = (
-                self._encode_target_duration_seconds or self._video_duration_seconds
-            )
-            if total_seconds:
-                total_str = self._format_progress_time(total_seconds)
-                time_display = f"{time_str} / {total_str}"
-            else:
-                time_display = time_str
-
-            status_msg = f"{time_display}, {speed_str}x"
-
-            if (
-                (
-                    not self._encode_total_frames
-                    or self._encode_total_frames <= 0
-                    or self._encode_current_frame is None
-                )
-                and total_seconds
-                and total_seconds > 0
-            ):
-                self._complete_audio_phase()
-                time_ratio = min(current_seconds / total_seconds, 1.0)
-                progress_target = self.AUDIO_PROGRESS_WEIGHT + time_ratio * (
-                    100.0 - self.AUDIO_PROGRESS_WEIGHT
-                )
-                current_value = float(self.progress_var.get())
-                percentage = min(100.0, max(current_value, progress_target))
-                self._set_progress(percentage)
-
-            self._set_status("processing", status_msg)
+        self.summary_manager.update_status_from_message(message)
 
     def _handle_status_transitions(self, normalized_message: str) -> bool:
-        """Handle high-level status transitions for *normalized_message*."""
-
-        if "all jobs finished successfully" in normalized_message:
-            status_components: List[str] = []
-            if self._run_start_time is not None:
-                finish_time = time.monotonic()
-                runtime_seconds = max(0.0, finish_time - self._run_start_time)
-                duration_str = self._format_progress_time(runtime_seconds)
-                status_components.append(f"{duration_str}")
-            else:
-                finished_seconds = next(
-                    (
-                        value
-                        for value in (
-                            self._last_progress_seconds,
-                            self._encode_target_duration_seconds,
-                            self._video_duration_seconds,
-                        )
-                        if value is not None
-                    ),
-                    None,
-                )
-
-                if finished_seconds is not None:
-                    duration_str = self._format_progress_time(finished_seconds)
-                    status_components.append(f"{duration_str}")
-                else:
-                    status_components.append("Finished")
-
-            if self._last_time_ratio is not None and self._last_size_ratio is not None:
-                status_components.append(
-                    f"time: {self._last_time_ratio:.0%}, size: {self._last_size_ratio:.0%}"
-                )
-
-            status_msg = ", ".join(status_components)
-
-            self._reset_audio_progress_state(clear_source=True)
-            self._set_status("success", status_msg)
-            self._set_progress(100)
-            self._run_start_time = None
-            self._video_duration_seconds = None
-            self._encode_target_duration_seconds = None
-            self._encode_total_frames = None
-            self._encode_current_frame = None
-            self._last_progress_seconds = None
-            return True
-
-        if normalized_message.startswith("extracting audio"):
-            self._reset_audio_progress_state(clear_source=False)
-            self._set_status("processing", "Extracting audio...")
-            self._set_progress(0)
-            self._video_duration_seconds = None
-            self._encode_target_duration_seconds = None
-            self._encode_total_frames = None
-            self._encode_current_frame = None
-            self._last_progress_seconds = None
-            self._start_audio_progress()
-            return False
-
-        if normalized_message.startswith("uploading"):
-            self._set_status("processing", "Uploading...")
-            return False
-
-        if normalized_message.startswith("starting processing"):
-            self._reset_audio_progress_state(clear_source=True)
-            self._set_status("processing", "Processing")
-            self._set_progress(0)
-            self._video_duration_seconds = None
-            self._encode_target_duration_seconds = None
-            self._encode_total_frames = None
-            self._encode_current_frame = None
-            self._last_progress_seconds = None
-            return False
-
-        if normalized_message.startswith("processing"):
-            is_new_job = bool(re.match(r"processing \d+/\d+:", normalized_message))
-            should_reset = self._status_state.lower() != "processing" or is_new_job
-            if should_reset:
-                self._set_progress(0)
-                self._video_duration_seconds = None
-                self._encode_target_duration_seconds = None
-                self._encode_total_frames = None
-                self._encode_current_frame = None
-                self._last_progress_seconds = None
-            if is_new_job:
-                self._reset_audio_progress_state(clear_source=True)
-            self._set_status("processing", "Processing")
-            return False
-
-        return False
+        return self.summary_manager.handle_status_transitions(normalized_message)
 
     def _compute_audio_progress_interval(self) -> int:
         duration = self._source_duration_seconds or self._video_duration_seconds
@@ -1638,21 +1177,7 @@ class TalksReducerGUI:
         self.root.after(0, apply)
 
     def _format_progress_time(self, total_seconds: float) -> str:
-        """Format a duration in seconds as h:mm:ss or m:ss for status display."""
-
-        try:
-            rounded_seconds = max(0, int(round(total_seconds)))
-        except (TypeError, ValueError):
-            return "0:00"
-
-        hours, remainder = divmod(rounded_seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-
-        if hours > 0:
-            return f"{hours}:{minutes:02d}:{seconds:02d}"
-
-        total_minutes = rounded_seconds // 60
-        return f"{total_minutes}:{seconds:02d}"
+        return self.summary_manager.format_progress_time(total_seconds)
 
     def _calculate_gradient_color(self, percentage: float, darken: float = 1.0) -> str:
         """Calculate color gradient from red (0%) to green (100%).
@@ -1762,6 +1287,6 @@ class TalksReducerGUI:
 
 __all__ = [
     "TalksReducerGUI",
-    "_default_remote_destination",
-    "_parse_ratios_from_summary",
+    "default_remote_destination",
+    "parse_ratios_from_summary",
 ]

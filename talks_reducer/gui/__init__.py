@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from .app import (
-    TalksReducerGUI,
-    _default_remote_destination,
-    _parse_ratios_from_summary,
-)
+from .app import TalksReducerGUI
 from .progress import _GuiProgressHandle, _TkProgressReporter
+from .summaries import default_remote_destination, parse_ratios_from_summary
 from .startup import _check_tkinter_available, main
 
 __all__ = [
@@ -15,7 +12,7 @@ __all__ = [
     "_GuiProgressHandle",
     "_TkProgressReporter",
     "_check_tkinter_available",
-    "_default_remote_destination",
-    "_parse_ratios_from_summary",
+    "default_remote_destination",
+    "parse_ratios_from_summary",
     "main",
 ]
