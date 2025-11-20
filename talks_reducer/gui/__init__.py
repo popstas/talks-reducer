@@ -9,12 +9,15 @@ from .app import (
 )
 from .progress import _GuiProgressHandle, _TkProgressReporter
 from .startup import _check_tkinter_available, main
+from .summaries import default_remote_destination, parse_ratios_from_summary
 
 __all__ = [
     "TalksReducerGUI",
     "_GuiProgressHandle",
     "_TkProgressReporter",
     "_check_tkinter_available",
+    "default_remote_destination",
+    "parse_ratios_from_summary",
     "_default_remote_destination",
     "_parse_ratios_from_summary",
     "main",
