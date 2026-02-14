@@ -331,6 +331,41 @@ def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
     )
 
 
+def _force_kill_process(process: subprocess.Popen) -> None:
+    """Terminate an FFmpeg process forcefully, including its process group."""
+
+    import signal
+    import time
+
+    if process.poll() is not None:
+        return
+
+    try:
+        if sys.platform != "win32":
+            # Kill the entire process group on Unix
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        else:
+            process.terminate()
+    except (OSError, ProcessLookupError):
+        pass
+
+    # Wait up to 2 seconds for graceful exit, then SIGKILL
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            if sys.platform != "win32":
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            else:
+                process.kill()
+        except (OSError, ProcessLookupError):
+            pass
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+
+
 def run_timed_ffmpeg_command(
     command: str,
     *,
@@ -339,11 +374,13 @@ def run_timed_ffmpeg_command(
     total: Optional[int] = None,
     unit: str = "frames",
     process_callback: Optional[callable] = None,
+    stop_requested: Optional[callable] = None,
 ) -> None:
     """Execute an FFmpeg command while streaming progress information.
 
     Args:
         process_callback: Optional callback that receives the subprocess.Popen object
+        stop_requested: Optional callable returning True when processing should abort
     """
 
     import shlex
@@ -360,6 +397,11 @@ def run_timed_ffmpeg_command(
         # CREATE_NO_WINDOW = 0x08000000
         creationflags = 0x08000000
 
+    # Use a new session on Unix so we can kill the whole process group
+    popen_kwargs: dict = {}
+    if sys.platform != "win32":
+        popen_kwargs["start_new_session"] = True
+
     try:
         process = subprocess.Popen(
             args,
@@ -369,6 +411,7 @@ def run_timed_ffmpeg_command(
             bufsize=1,
             errors="replace",
             creationflags=creationflags,
+            **popen_kwargs,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         print(f"Error starting FFmpeg: {exc}", file=sys.stderr)
@@ -382,6 +425,11 @@ def run_timed_ffmpeg_command(
     task_manager = progress_reporter.task(desc=desc, total=total, unit=unit)
     with task_manager as progress:
         while True:
+            # Check stop flag before blocking on readline
+            if stop_requested is not None and stop_requested():
+                _force_kill_process(process)
+                raise subprocess.CalledProcessError(-15, args)
+
             line = process.stderr.readline()
             if not line and process.poll() is not None:
                 break

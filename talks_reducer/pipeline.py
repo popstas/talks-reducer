@@ -207,6 +207,9 @@ def speed_up_video(
         ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if cuda_available else []
     )
     process_callback = getattr(reporter, "process_callback", None)
+    stop_cb: Callable[[], bool] | None = None
+    if hasattr(reporter, "stop_requested") and callable(reporter.stop_requested):
+        stop_cb = reporter.stop_requested
     estimated_total_frames = frame_count
     if estimated_total_frames <= 0 and original_duration > 0 and frame_rate > 0:
         estimated_total_frames = int(math.ceil(original_duration * frame_rate))
@@ -246,6 +249,7 @@ def speed_up_video(
             unit="frames",
             desc="Extracting audio:",
             process_callback=process_callback,
+            stop_requested=stop_cb,
         )
 
         wav_sample_rate, audio_data = wavfile.read(os.fspath(audio_wav))
@@ -421,6 +425,7 @@ def speed_up_video(
             unit="frames",
             desc="Generating final:",
             process_callback=process_callback,
+            stop_requested=stop_cb,
         )
     except subprocess.CalledProcessError:
         if fallback_command_str:
@@ -454,6 +459,7 @@ def speed_up_video(
                 unit="frames",
                 desc="Generating final (fallback):",
                 process_callback=process_callback,
+                stop_requested=stop_cb,
             )
         else:
             raise

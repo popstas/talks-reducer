@@ -925,8 +925,6 @@ class TalksReducerGUI:
         else:
             self._append_log("No active FFmpeg process to stop.")
 
-        self._hide_stop_button()
-
     def _hide_stop_button(self) -> None:
         """Hide Stop button."""
         self.stop_button.grid_remove()
