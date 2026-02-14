@@ -841,6 +841,14 @@ class TalksReducerGUI:
     def _refresh_theme(self) -> None:
         self.preference_controller.refresh_theme()
 
+    def read_windows_theme_registry(self, key_path: str, value_name: str) -> int:
+        """Read *value_name* from the registry key at *key_path*."""
+        return read_windows_theme_registry(key_path, value_name)
+
+    def run_defaults_command(self, args: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        """Execute the macOS ``defaults`` command used to detect theme."""
+        return run_defaults_command(args)
+
     def _configure_drop_targets(self, widget) -> None:
         self.inputs.configure_drop_targets(widget)
 

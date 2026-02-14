@@ -39,6 +39,7 @@ class _TkProgressReporter(SignalProgressReporter):
         *,
         stop_callback: Optional[Callable[[], bool]] = None,
     ) -> None:
+        super().__init__()
         self._log_callback = log_callback
         self.process_callback = process_callback
         self._stop_callback = stop_callback
