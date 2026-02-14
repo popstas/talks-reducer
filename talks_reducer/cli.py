@@ -319,9 +319,30 @@ class CliApplication:
             time_ratio = getattr(result, "time_ratio", None)
             size_ratio = getattr(result, "size_ratio", None)
             if time_ratio is not None:
-                summary_parts.append(f"{time_ratio * 100:.0f}% time")
+                time_str = f"time: {time_ratio * 100:.0f}%"
+                output_duration = getattr(result, "output_duration", None)
+                if output_duration:
+                    mins, secs = divmod(int(round(output_duration)), 60)
+                    time_str += f" ({mins}:{secs:02d})"
+                summary_parts.append(time_str)
             if size_ratio is not None:
-                summary_parts.append(f"{size_ratio * 100:.0f}% size")
+                size_str = f"size: {size_ratio * 100:.0f}%"
+                if result.output_file.exists():
+                    size_bytes = result.output_file.stat().st_size
+                    value = float(size_bytes)
+                    for unit in ("B", "KB", "MB", "GB"):
+                        if abs(value) < 1024:
+                            size_label = (
+                                f"{value:.0f}{unit}"
+                                if unit == "B"
+                                else f"{value:.1f}{unit}"
+                            )
+                            break
+                        value /= 1024
+                    else:
+                        size_label = f"{value:.1f}TB"
+                    size_str += f" ({size_label})"
+                summary_parts.append(size_str)
             if summary_parts:
                 reporter.log("Result: " + ", ".join(summary_parts))
 

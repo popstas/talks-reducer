@@ -170,6 +170,8 @@ class TalksReducerGUI:
         self._last_output: Optional[Path] = None
         self._last_time_ratio: Optional[float] = None
         self._last_size_ratio: Optional[float] = None
+        self._last_output_duration: Optional[float] = None
+        self._last_output_size: Optional[int] = None
         self._last_progress_seconds: Optional[int] = None
         self._run_start_time: Optional[float] = None
         self._status_state = "Idle"
@@ -384,6 +386,12 @@ class TalksReducerGUI:
                     self._last_output = result.output_file
                     self._last_time_ratio = result.time_ratio
                     self._last_size_ratio = result.size_ratio
+                    self._last_output_duration = result.output_duration
+                    self._last_output_size = (
+                        result.output_file.stat().st_size
+                        if result.output_file.exists()
+                        else None
+                    )
 
                     # Create completion message with ratios if available
                     completion_msg = f"Completed: {result.output_file}"

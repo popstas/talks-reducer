@@ -182,6 +182,16 @@ def parse_ffmpeg_progress(message: str) -> tuple[bool, Optional[tuple[int, str]]
     return True, (current_seconds, speed_str)
 
 
+def format_file_size(size_bytes: int) -> str:
+    """Return a compact human-readable file size string."""
+    value = float(size_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if abs(value) < 1024:
+            return f"{value:.0f}{unit}" if unit == "B" else f"{value:.1f}{unit}"
+        value /= 1024
+    return f"{value:.1f}TB"
+
+
 class SummaryManager:
     """Parse log messages and keep the GUI status and log text updated."""
 
@@ -324,9 +334,15 @@ class SummaryManager:
                 self.gui._last_time_ratio is not None
                 and self.gui._last_size_ratio is not None
             ):
-                status_components.append(
-                    f"time: {self.gui._last_time_ratio:.0%}, size: {self.gui._last_size_ratio:.0%}"
-                )
+                time_part = f"time: {self.gui._last_time_ratio:.0%}"
+                if self.gui._last_output_duration is not None:
+                    time_part += f" ({self.format_progress_time(self.gui._last_output_duration)})"
+
+                size_part = f"size: {self.gui._last_size_ratio:.0%}"
+                if self.gui._last_output_size is not None:
+                    size_part += f" ({format_file_size(self.gui._last_output_size)})"
+
+                status_components.append(f"{time_part}, {size_part}")
 
             status_msg = ", ".join(status_components)
 
