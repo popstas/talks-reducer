@@ -761,8 +761,9 @@ def test_run_timed_ffmpeg_command_reports_progress(monkeypatch):
         process_callback=process_callback,
     )
 
-    assert "frame=   10" in reporter.logs[0]
+    assert not any("frame=" in log for log in reporter.logs)
     assert any("warning" in log for log in reporter.logs)
+    assert any("encoded successfully" in log for log in reporter.logs)
     assert reporter.tasks[0].current == 10
     assert reporter.tasks[0].finished
     assert callbacks and isinstance(callbacks[0], FakeProcess)

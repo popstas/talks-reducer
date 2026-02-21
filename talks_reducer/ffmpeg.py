@@ -457,7 +457,7 @@ def run_timed_ffmpeg_command(
             # Send FFmpeg output to reporter for GUI display (filtered)
             if any(
                 keyword in line.lower()
-                for keyword in ["error", "warning", "encoded successfully", "frame="]
+                for keyword in ["error", "warning", "encoded successfully"]
             ):
                 progress_reporter.log(line.strip())
 
