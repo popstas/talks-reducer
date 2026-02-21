@@ -448,9 +448,6 @@ def process_video(
     log_text = "\n".join(collected_logs)
     summary = _format_summary(final_result)
 
-    if progress is not None:
-        progress(1.0, desc="Complete")
-
     yield (
         str(final_result.output_file),
         log_text,
