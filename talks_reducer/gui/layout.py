@@ -35,6 +35,36 @@ BASIC_PRESETS: dict[str, dict[str, float]] = {
 
 BASIC_PRESET_TOLERANCE = 1e-9
 
+PRESET_LABELS: dict[str, str] = {
+    "compress_only": "No speedup",
+    "defaults": "×5 (default)",
+    "silence_x10": "×10",
+}
+
+
+def get_current_preset(gui: "TalksReducerGUI") -> str:
+    """Return the preset key matching current speed var values, or 'custom'."""
+    vals = {
+        "silent_speed": gui.silent_speed_var.get(),
+        "sounded_speed": gui.sounded_speed_var.get(),
+        "silent_threshold": gui.silent_threshold_var.get(),
+    }
+    for key, preset in BASIC_PRESETS.items():
+        if all(abs(vals[k] - v) < BASIC_PRESET_TOLERANCE for k, v in preset.items()):
+            return key
+    return "custom"
+
+
+def _apply_simple_preset(gui: "TalksReducerGUI") -> None:
+    """Apply the preset selected in the simple-mode speedup dropdown."""
+    label = gui.simple_preset_var.get()
+    if label == "custom":
+        return
+    for key, display in PRESET_LABELS.items():
+        if display == label:
+            apply_basic_preset(gui, key)
+            break
+
 
 def build_layout(gui: "TalksReducerGUI") -> None:
     """Construct the main layout for the GUI."""
@@ -102,6 +132,24 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         command=gui._toggle_simple_mode,
     )
     gui.simple_mode_check.grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+    # Speedup preset dropdown (visible in simple mode only)
+    speedup_label = gui.ttk.Label(checkbox_frame, text="Speedup:")
+    speedup_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
+
+    preset_values = [PRESET_LABELS[k] for k in BASIC_PRESETS] + ["custom"]
+    speedup_combo = gui.ttk.Combobox(
+        checkbox_frame,
+        textvariable=gui.simple_preset_var,
+        values=preset_values,
+        state="readonly",
+        width=14,
+    )
+    speedup_combo.grid(row=2, column=1, columnspan=2, sticky="w", padx=(4, 0), pady=(4, 0))
+    speedup_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_preset(gui))
+
+    gui.simple_speedup_label = speedup_label
+    gui.simple_speedup_combo = speedup_combo
 
     gui.advanced_visible = gui.tk.BooleanVar(value=False)
 
@@ -771,6 +819,9 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.button_frame.grid_remove()
         gui.advanced_frame.grid_remove()
         gui.run_after_drop_var.set(True)
+        if hasattr(gui, "simple_speedup_label"):
+            gui.simple_speedup_label.grid()
+            gui.simple_speedup_combo.grid()
         apply_window_size(gui, simple=True)
     else:
         gui.basic_options_frame.grid()
@@ -779,6 +830,9 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.button_frame.grid()
         if gui.advanced_visible.get():
             gui.advanced_frame.grid()
+        if hasattr(gui, "simple_speedup_label"):
+            gui.simple_speedup_label.grid_remove()
+            gui.simple_speedup_combo.grid_remove()
         apply_window_size(gui, simple=False)
 
     if initial and simple:

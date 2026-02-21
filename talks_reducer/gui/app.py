@@ -213,6 +213,7 @@ class TalksReducerGUI:
         self.simple_mode_var = tk.BooleanVar(
             value=self.preferences.get("simple_mode", True)
         )
+        self.simple_preset_var = tk.StringVar(value="")
         self.run_after_drop_var = tk.BooleanVar(value=True)
         self.small_var = tk.BooleanVar(value=self.preferences.get("small_video", True))
         self.small_480_var = tk.BooleanVar(
@@ -266,6 +267,10 @@ class TalksReducerGUI:
         self._sliders: list[tk.Scale] = []
 
         self._build_layout()
+        self._sync_simple_preset()
+        self.silent_speed_var.trace_add("write", self._sync_simple_preset)
+        self.sounded_speed_var.trace_add("write", self._sync_simple_preset)
+        self.silent_threshold_var.trace_add("write", self._sync_simple_preset)
         self._update_small_variant_state()
         self._apply_simple_mode(initial=True)
         self._apply_status_style(self._status_state)
@@ -528,6 +533,14 @@ class TalksReducerGUI:
 
     def _show_discovery_results(self, urls: List[str]) -> None:
         discovery_helpers.show_discovery_results(self, urls)
+
+    def _sync_simple_preset(self, *_: object) -> None:
+        """Update the simple-mode speedup dropdown to reflect current speed vars."""
+        key = layout_helpers.get_current_preset(self)
+        if key == "custom":
+            self.simple_preset_var.set("custom")
+        else:
+            self.simple_preset_var.set(layout_helpers.PRESET_LABELS[key])
 
     def _toggle_simple_mode(self) -> None:
         self.preference_controller.toggle_simple_mode()
