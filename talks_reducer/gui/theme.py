@@ -102,6 +102,16 @@ def apply_theme(
     root = widgets.get("root")
     if root is not None:
         root.configure(bg=palette["background"])
+        root.option_add("*TCombobox*Listbox*Background", palette["background"])
+        root.option_add("*TCombobox*Listbox*Foreground", palette["foreground"])
+        root.option_add(
+            "*TCombobox*Listbox*selectBackground",
+            palette.get("accent", palette["foreground"]),
+        )
+        root.option_add(
+            "*TCombobox*Listbox*selectForeground",
+            palette.get("selection_foreground", "#ffffff"),
+        )
 
     style.theme_use("clam")
     style.configure(
@@ -204,13 +214,25 @@ def apply_theme(
     )
     style.configure(
         "TEntry",
-        fieldbackground=palette["surface"],
+        fieldbackground=palette["background"],
         foreground=palette["foreground"],
     )
     style.configure(
         "TCombobox",
-        fieldbackground=palette["surface"],
+        fieldbackground=palette["background"],
         foreground=palette["foreground"],
+        arrowcolor=palette["foreground"],
+    )
+    style.map(
+        "TCombobox",
+        fieldbackground=[
+            ("readonly", palette["background"]),
+            ("readonly", "focus", palette["background"]),
+        ],
+        foreground=[
+            ("readonly", palette["foreground"]),
+            ("readonly", "focus", palette["foreground"]),
+        ],
     )
 
     style.configure(

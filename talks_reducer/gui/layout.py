@@ -148,37 +148,41 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.simple_mode_check.grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
-    # Speedup preset dropdown (visible in simple mode only)
-    speedup_label = gui.ttk.Label(checkbox_frame, text="Speedup:")
-    speedup_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
-
+    # Speedup preset and video codec dropdowns (visible in simple mode only), 2 columns
+    speedup_frame = gui.ttk.Frame(checkbox_frame)
+    speedup_label = gui.ttk.Label(speedup_frame, text="Speedup:")
+    speedup_label.pack(side=gui.tk.LEFT, padx=(0, 2))
     preset_values = [PRESET_LABELS[k] for k in BASIC_PRESETS] + ["custom"]
     speedup_combo = gui.ttk.Combobox(
-        checkbox_frame,
+        speedup_frame,
         textvariable=gui.simple_preset_var,
         values=preset_values,
         state="readonly",
         width=14,
     )
-    speedup_combo.grid(row=2, column=1, columnspan=2, sticky="w", padx=(4, 0), pady=(4, 0))
+    speedup_combo.pack(side=gui.tk.LEFT)
     speedup_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_preset(gui))
+    speedup_frame.grid(row=2, column=0, sticky="w", pady=(4, 0))
 
-    gui.simple_speedup_label = speedup_label
-    gui.simple_speedup_combo = speedup_combo
-
-    # Video codec dropdown (visible in simple mode only)
-    codec_label = gui.ttk.Label(checkbox_frame, text="Video codec:")
-    codec_label.grid(row=3, column=0, sticky="w", pady=(4, 0))
+    codec_frame = gui.ttk.Frame(checkbox_frame)
+    codec_label = gui.ttk.Label(codec_frame, text="Video codec:")
+    codec_label.pack(side=gui.tk.LEFT, padx=(0, 2))
     codec_values = list(CODEC_LABELS.values())
     simple_codec_combo = gui.ttk.Combobox(
-        checkbox_frame,
+        codec_frame,
         textvariable=gui.simple_codec_var,
         values=codec_values,
         state="readonly",
         width=14,
     )
-    simple_codec_combo.grid(row=3, column=1, columnspan=2, sticky="w", padx=(4, 0), pady=(4, 0))
+    simple_codec_combo.pack(side=gui.tk.LEFT)
     simple_codec_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_codec(gui))
+    codec_frame.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
+
+    gui.simple_speedup_frame = speedup_frame
+    gui.simple_speedup_label = speedup_label
+    gui.simple_speedup_combo = speedup_combo
+    gui.simple_codec_frame = codec_frame
     gui.simple_codec_label = codec_label
     gui.simple_codec_combo = simple_codec_combo
 
@@ -850,12 +854,10 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.button_frame.grid_remove()
         gui.advanced_frame.grid_remove()
         gui.run_after_drop_var.set(True)
-        if hasattr(gui, "simple_speedup_label"):
-            gui.simple_speedup_label.grid()
-            gui.simple_speedup_combo.grid()
-        if hasattr(gui, "simple_codec_label"):
-            gui.simple_codec_label.grid()
-            gui.simple_codec_combo.grid()
+        if hasattr(gui, "simple_speedup_frame"):
+            gui.simple_speedup_frame.grid()
+        if hasattr(gui, "simple_codec_frame"):
+            gui.simple_codec_frame.grid()
         apply_window_size(gui, simple=True)
     else:
         gui.basic_options_frame.grid()
@@ -864,12 +866,10 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.button_frame.grid()
         if gui.advanced_visible.get():
             gui.advanced_frame.grid()
-        if hasattr(gui, "simple_speedup_label"):
-            gui.simple_speedup_label.grid_remove()
-            gui.simple_speedup_combo.grid_remove()
-        if hasattr(gui, "simple_codec_label"):
-            gui.simple_codec_label.grid_remove()
-            gui.simple_codec_combo.grid_remove()
+        if hasattr(gui, "simple_speedup_frame"):
+            gui.simple_speedup_frame.grid_remove()
+        if hasattr(gui, "simple_codec_frame"):
+            gui.simple_codec_frame.grid_remove()
         apply_window_size(gui, simple=False)
 
     if initial and simple:
