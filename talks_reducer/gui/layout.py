@@ -113,42 +113,15 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.drop_zone.bind("<Return>", gui._on_drop_zone_click)
     gui.drop_zone.bind("<space>", gui._on_drop_zone_click)
 
-    # Options frame
-    gui.options_frame = gui.ttk.Frame(main, padding=gui.PADDING)
+    # Options frame (compact padding for simple mode at 390px width)
+    gui.options_frame = gui.ttk.Frame(main, padding=6)
     gui.options_frame.grid(row=2, column=0, pady=(0, 0), sticky="ew")
     gui.options_frame.columnconfigure(0, weight=1)
 
     checkbox_frame = gui.ttk.Frame(gui.options_frame)
     checkbox_frame.grid(row=0, column=0, columnspan=2, sticky="w")
 
-    gui.ttk.Checkbutton(
-        checkbox_frame,
-        text="Small video",
-        variable=gui.small_var,
-    ).grid(row=0, column=0, sticky="w")
-
-    gui.small_480_check = gui.ttk.Checkbutton(
-        checkbox_frame,
-        text="480p",
-        variable=gui.small_480_var,
-    )
-    gui.small_480_check.grid(row=0, column=1, sticky="w", padx=(12, 0))
-
-    gui.ttk.Checkbutton(
-        checkbox_frame,
-        text="Open after convert",
-        variable=gui.open_after_convert_var,
-    ).grid(row=0, column=2, sticky="w", padx=(12, 0))
-
-    gui.simple_mode_check = gui.ttk.Checkbutton(
-        checkbox_frame,
-        text="Simple mode",
-        variable=gui.simple_mode_var,
-        command=gui._toggle_simple_mode,
-    )
-    gui.simple_mode_check.grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
-
-    # Speedup preset and video codec dropdowns (visible in simple mode only), 2 columns
+    # Speedup preset and video codec dropdowns (visible in simple mode only)
     speedup_frame = gui.ttk.Frame(checkbox_frame)
     speedup_label = gui.ttk.Label(speedup_frame, text="Speedup:")
     speedup_label.pack(side=gui.tk.LEFT, padx=(0, 2))
@@ -162,7 +135,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     speedup_combo.pack(side=gui.tk.LEFT)
     speedup_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_preset(gui))
-    speedup_frame.grid(row=2, column=0, sticky="w", pady=(4, 0))
+    speedup_frame.grid(row=0, column=0, sticky="w")
 
     codec_frame = gui.ttk.Frame(checkbox_frame)
     codec_label = gui.ttk.Label(codec_frame, text="Video codec:")
@@ -177,7 +150,34 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     simple_codec_combo.pack(side=gui.tk.LEFT)
     simple_codec_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_codec(gui))
-    codec_frame.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
+    codec_frame.grid(row=0, column=1, sticky="w", padx=(8, 0))
+
+    checkbox_row1 = gui.ttk.Frame(checkbox_frame)
+    checkbox_row1.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
+    gui.ttk.Checkbutton(
+        checkbox_row1,
+        text="Small video",
+        variable=gui.small_var,
+    ).pack(side=gui.tk.LEFT)
+    gui.small_480_check = gui.ttk.Checkbutton(
+        checkbox_row1,
+        text="480p",
+        variable=gui.small_480_var,
+    )
+    gui.small_480_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+    gui.ttk.Checkbutton(
+        checkbox_row1,
+        text="Open output",
+        variable=gui.open_after_convert_var,
+    ).pack(side=gui.tk.LEFT, padx=(65, 0))
+
+    gui.simple_mode_check = gui.ttk.Checkbutton(
+        checkbox_frame,
+        text="Simple mode",
+        variable=gui.simple_mode_var,
+        command=gui._toggle_simple_mode,
+    )
+    gui.simple_mode_check.grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
     gui.simple_speedup_frame = speedup_frame
     gui.simple_speedup_label = speedup_label

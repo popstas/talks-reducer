@@ -162,7 +162,7 @@ class TalksReducerGUI:
         self._apply_window_icon()
 
         self._full_size = (1200, 900)
-        self._simple_size = (363, 270)
+        self._simple_size = (390, 270)
         # self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
         self.style = self.ttk.Style(self.root)
 
