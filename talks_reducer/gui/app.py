@@ -853,7 +853,9 @@ class TalksReducerGUI:
         """Read *value_name* from the registry key at *key_path*."""
         return read_windows_theme_registry(key_path, value_name)
 
-    def run_defaults_command(self, args: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    def run_defaults_command(
+        self, args: Sequence[str]
+    ) -> subprocess.CompletedProcess[str]:
         """Execute the macOS ``defaults`` command used to detect theme."""
         return run_defaults_command(args)
 
