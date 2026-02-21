@@ -214,6 +214,7 @@ class TalksReducerGUI:
             value=self.preferences.get("simple_mode", True)
         )
         self.simple_preset_var = tk.StringVar(value="")
+        self.simple_codec_var = tk.StringVar(value="")
         self.run_after_drop_var = tk.BooleanVar(value=True)
         self.small_var = tk.BooleanVar(value=self.preferences.get("small_video", True))
         self.small_480_var = tk.BooleanVar(
@@ -271,6 +272,8 @@ class TalksReducerGUI:
         self.silent_speed_var.trace_add("write", self._sync_simple_preset)
         self.sounded_speed_var.trace_add("write", self._sync_simple_preset)
         self.silent_threshold_var.trace_add("write", self._sync_simple_preset)
+        self._sync_simple_codec()
+        self.video_codec_var.trace_add("write", self._sync_simple_codec)
         self._update_small_variant_state()
         self._apply_simple_mode(initial=True)
         self._apply_status_style(self._status_state)
@@ -541,6 +544,11 @@ class TalksReducerGUI:
             self.simple_preset_var.set("custom")
         else:
             self.simple_preset_var.set(layout_helpers.PRESET_LABELS[key])
+
+    def _sync_simple_codec(self, *_: object) -> None:
+        """Update the simple-mode codec dropdown to reflect the current video codec var."""
+        key = self.video_codec_var.get()
+        self.simple_codec_var.set(layout_helpers.CODEC_LABELS.get(key, key))
 
     def _toggle_simple_mode(self) -> None:
         self.preference_controller.toggle_simple_mode()

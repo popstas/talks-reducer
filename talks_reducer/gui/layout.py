@@ -41,6 +41,12 @@ PRESET_LABELS: dict[str, str] = {
     "silence_x10": "×10",
 }
 
+CODEC_LABELS: dict[str, str] = {
+    "h264": "H.264",
+    "hevc": "H.265",
+    "av1": "AV1",
+}
+
 
 def get_current_preset(gui: "TalksReducerGUI") -> str:
     """Return the preset key matching current speed var values, or 'custom'."""
@@ -63,6 +69,15 @@ def _apply_simple_preset(gui: "TalksReducerGUI") -> None:
     for key, display in PRESET_LABELS.items():
         if display == label:
             apply_basic_preset(gui, key)
+            break
+
+
+def _apply_simple_codec(gui: "TalksReducerGUI") -> None:
+    """Apply the codec selected in the simple-mode codec dropdown."""
+    label = gui.simple_codec_var.get()
+    for key, display in CODEC_LABELS.items():
+        if display == label:
+            gui.video_codec_var.set(key)
             break
 
 
@@ -150,6 +165,22 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     gui.simple_speedup_label = speedup_label
     gui.simple_speedup_combo = speedup_combo
+
+    # Video codec dropdown (visible in simple mode only)
+    codec_label = gui.ttk.Label(checkbox_frame, text="Video codec:")
+    codec_label.grid(row=3, column=0, sticky="w", pady=(4, 0))
+    codec_values = list(CODEC_LABELS.values())
+    simple_codec_combo = gui.ttk.Combobox(
+        checkbox_frame,
+        textvariable=gui.simple_codec_var,
+        values=codec_values,
+        state="readonly",
+        width=14,
+    )
+    simple_codec_combo.grid(row=3, column=1, columnspan=2, sticky="w", padx=(4, 0), pady=(4, 0))
+    simple_codec_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_codec(gui))
+    gui.simple_codec_label = codec_label
+    gui.simple_codec_combo = simple_codec_combo
 
     gui.advanced_visible = gui.tk.BooleanVar(value=False)
 
@@ -822,6 +853,9 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
         if hasattr(gui, "simple_speedup_label"):
             gui.simple_speedup_label.grid()
             gui.simple_speedup_combo.grid()
+        if hasattr(gui, "simple_codec_label"):
+            gui.simple_codec_label.grid()
+            gui.simple_codec_combo.grid()
         apply_window_size(gui, simple=True)
     else:
         gui.basic_options_frame.grid()
@@ -833,6 +867,9 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
         if hasattr(gui, "simple_speedup_label"):
             gui.simple_speedup_label.grid_remove()
             gui.simple_speedup_combo.grid_remove()
+        if hasattr(gui, "simple_codec_label"):
+            gui.simple_codec_label.grid_remove()
+            gui.simple_codec_combo.grid_remove()
         apply_window_size(gui, simple=False)
 
     if initial and simple:

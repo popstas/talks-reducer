@@ -247,6 +247,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         open_after_convert_var=BooleanVarStub(value=False),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
+        simple_codec_var=StringVarStub(value=""),
         preferences=preferences,
         processing_mode_var=StringVarStub(value="local"),
         server_url_var=StringVarStub(value=""),
@@ -358,6 +359,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         open_after_convert_var=BooleanVarStub(value=False),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
+        simple_codec_var=StringVarStub(value=""),
         preferences=SimpleNamespace(
             get_float=lambda key, default: default,
             get=lambda key, default: default,
