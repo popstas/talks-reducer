@@ -323,7 +323,7 @@ class _ServerTrayApplication:
     def _await_server_start(self, icon: Optional[Any]) -> None:
         """Wait for the server to signal readiness or trigger shutdown on failure."""
 
-        if self._server_ready_event.wait(timeout=30):
+        if self._server_ready_event.wait(timeout=90):
             try:
                 if self._open_browser_on_start and not self._stop_event.is_set():
                     self._handle_open_webui()

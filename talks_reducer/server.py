@@ -497,9 +497,9 @@ def build_interface() -> gr.Blocks:
 
         codec_dropdown = gr.Dropdown(
             choices=[
-                ("hevc", "h.265 (25% smaller)"),
-                ("h264", "h.264 (10% faster)"),
-                ("av1", "av1 (no advantages)"),
+                ("h.265 (25% smaller)", "hevc"),
+                ("h.264 (10% faster)", "h264"),
+                ("av1 (no advantages)", "av1"),
             ],
             value="hevc",
             label="Video codec",
