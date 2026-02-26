@@ -366,6 +366,14 @@ def _force_kill_process(process: subprocess.Popen) -> None:
             pass
 
 
+class FFmpegStallTimeout(RuntimeError):
+    """Raised when FFmpeg produces no output for too long."""
+
+
+#: Default number of seconds to wait before declaring FFmpeg stalled.
+DEFAULT_STALL_TIMEOUT = 600  # 10 minutes
+
+
 def run_timed_ffmpeg_command(
     command: str,
     *,
@@ -375,15 +383,21 @@ def run_timed_ffmpeg_command(
     unit: str = "frames",
     process_callback: Optional[callable] = None,
     stop_requested: Optional[callable] = None,
+    stall_timeout: float = DEFAULT_STALL_TIMEOUT,
 ) -> None:
     """Execute an FFmpeg command while streaming progress information.
 
     Args:
         process_callback: Optional callback that receives the subprocess.Popen object
         stop_requested: Optional callable returning True when processing should abort
+        stall_timeout: Seconds to wait for new output before aborting. Set to 0 to
+            disable the watchdog.
     """
 
+    import queue
     import shlex
+    import threading
+    import time
 
     try:
         args = shlex.split(command)
@@ -421,21 +435,59 @@ def run_timed_ffmpeg_command(
     if process_callback:
         process_callback(process)
 
+    # Feed stderr lines into a queue so the main loop can poll with a timeout
+    # instead of blocking indefinitely on readline().
+    line_queue: queue.Queue[Optional[str]] = queue.Queue()
+
+    def _reader() -> None:
+        try:
+            for ln in iter(process.stderr.readline, ""):
+                line_queue.put(ln)
+        finally:
+            line_queue.put(None)  # sentinel: EOF
+
+    reader_thread = threading.Thread(target=_reader, daemon=True)
+    reader_thread.start()
+
     progress_reporter = reporter or TqdmProgressReporter()
     task_manager = progress_reporter.task(desc=desc, total=total, unit=unit)
     with task_manager as progress:
+        last_output_time = time.monotonic()
+
         while True:
-            # Check stop flag before blocking on readline
+            # Check stop flag
             if stop_requested is not None and stop_requested():
                 _force_kill_process(process)
                 raise subprocess.CalledProcessError(-15, args)
 
-            line = process.stderr.readline()
-            if not line and process.poll() is not None:
+            # Poll the queue with a short timeout so we can re-check the
+            # stop flag and the stall watchdog regularly.
+            try:
+                line = line_queue.get(timeout=1.0)
+            except queue.Empty:
+                # No output yet — check if the stall timeout has elapsed.
+                if (
+                    stall_timeout > 0
+                    and time.monotonic() - last_output_time >= stall_timeout
+                ):
+                    minutes = int(stall_timeout // 60)
+                    msg = (
+                        f"FFmpeg produced no output for {minutes} minutes, " "aborting"
+                    )
+                    progress_reporter.log(msg)
+                    print(f"\n{msg}", file=sys.stderr)
+                    _force_kill_process(process)
+                    raise FFmpegStallTimeout(msg)
+                continue
+
+            if line is None:
+                # EOF sentinel — reader thread finished
                 break
 
-            if not line:
+            if not line.strip():
                 continue
+
+            last_output_time = time.monotonic()
 
             # Filter out excessive progress output, only show important lines
             if any(
@@ -761,6 +813,8 @@ def build_video_commands(
 
 __all__ = [
     "FFmpegNotFoundError",
+    "FFmpegStallTimeout",
+    "DEFAULT_STALL_TIMEOUT",
     "find_ffmpeg",
     "find_ffprobe",
     "get_ffmpeg_path",

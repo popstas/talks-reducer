@@ -769,3 +769,79 @@ def test_run_timed_ffmpeg_command_reports_progress(monkeypatch):
     assert callbacks and isinstance(callbacks[0], FakeProcess)
     assert "stderr" in captured_kwargs["kwargs"]
     assert "frame=" in fake_stderr.getvalue()
+
+
+class StallingStream:
+    """A fake stderr stream that produces one line then blocks forever."""
+
+    def __init__(self) -> None:
+        import threading
+
+        self._calls = 0
+        self._unblock = threading.Event()
+
+    def readline(self) -> str:
+        self._calls += 1
+        if self._calls == 1:
+            return "frame=   1 fps=30.0\n"
+        # Block until the process is killed (unblock event set)
+        self._unblock.wait()
+        return ""
+
+    def read(self) -> str:
+        return ""
+
+
+class StallingProcess:
+    def __init__(self) -> None:
+        self.stderr = StallingStream()
+        self.stdout = io.StringIO("")
+        self.returncode = None
+        self._killed = False
+
+    def poll(self) -> Optional[int]:
+        if self._killed:
+            return -9
+        return None  # always running
+
+    def wait(self, timeout=None) -> None:
+        self._killed = True
+        self.stderr._unblock.set()
+        self.returncode = -9
+
+    def terminate(self) -> None:
+        self._killed = True
+        self.stderr._unblock.set()
+        self.returncode = -9
+
+    def kill(self) -> None:
+        self._killed = True
+        self.stderr._unblock.set()
+        self.returncode = -9
+
+    @property
+    def pid(self):
+        return 99999
+
+
+def test_run_timed_ffmpeg_command_stall_timeout(monkeypatch):
+    """FFmpegStallTimeout is raised when no output arrives within the deadline."""
+    reporter = DummyProgressReporter()
+
+    proc = StallingProcess()
+
+    def fake_popen(args, **kwargs):
+        return proc
+
+    monkeypatch.setattr(ffmpeg.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(ffmpeg.sys, "stderr", io.StringIO())
+    monkeypatch.setattr(ffmpeg, "_force_kill_process", lambda p: p.kill())
+
+    with pytest.raises(ffmpeg.FFmpegStallTimeout, match="no output"):
+        ffmpeg.run_timed_ffmpeg_command(
+            "ffmpeg -i input.mp4",
+            reporter=reporter,
+            stall_timeout=2,  # 2 seconds for a fast test
+        )
+
+    assert any("no output" in log for log in reporter.logs)
