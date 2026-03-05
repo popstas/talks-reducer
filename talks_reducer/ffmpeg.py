@@ -453,6 +453,7 @@ def run_timed_ffmpeg_command(
     task_manager = progress_reporter.task(desc=desc, total=total, unit=unit)
     with task_manager as progress:
         last_output_time = time.monotonic()
+        last_logged_percent = -1
 
         while True:
             # Check stop flag
@@ -519,6 +520,12 @@ def run_timed_ffmpeg_command(
                     new_frame = int(match.group(1))
                     progress.ensure_total(new_frame)
                     progress.advance(new_frame - progress.current)
+                    if total is not None and total > 0:
+                        percent = min(int(new_frame * 100 / total), 100)
+                        milestone = (percent // 10) * 10
+                        if milestone > last_logged_percent and milestone < 100:
+                            progress_reporter.log(f"{desc} {milestone}%")
+                            last_logged_percent = milestone
                 except (ValueError, IndexError):
                     pass
 
