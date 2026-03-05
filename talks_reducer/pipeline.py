@@ -452,7 +452,7 @@ def speed_up_video(
                         fps=frame_rate,
                     )
                 )
-            reporter.log("\nExecuting FFmpeg fallback command:")
+            reporter.log("starting processing with FFmpeg fallback command:")
             reporter.log(fallback_command_str)
             dependencies.run_timed_ffmpeg_command(
                 fallback_command_str,
