@@ -10,11 +10,24 @@ from ..progress import CallbackProgressHandle, ProgressHandle, SignalProgressRep
 class _GuiProgressHandle(CallbackProgressHandle):
     """Simple progress handle that records totals but only logs milestones."""
 
-    def __init__(self, log_callback: Callable[[str], None], desc: str) -> None:
+    def __init__(
+        self,
+        log_callback: Callable[[str], None],
+        desc: str,
+        *,
+        total: Optional[int] = None,
+        progress_callback: Optional[Callable[[float], None]] = None,
+        audio_weight: float = 5.0,
+    ) -> None:
         self._log_callback = log_callback
+        self._progress_callback = progress_callback
+        self._audio_weight = audio_weight
+        self._last_reported_percent = -1
         super().__init__(
             desc=desc,
+            total=total,
             on_start=self._on_start,
+            on_update=self._on_update if progress_callback else None,
             on_finish=self._on_finish,
         )
 
@@ -22,6 +35,19 @@ class _GuiProgressHandle(CallbackProgressHandle):
         del total
         if desc:
             self._log_callback(f"{desc} started")
+
+    def _on_update(self, current: int, total: Optional[int], desc: str) -> None:
+        del desc
+        if self._progress_callback is None or not total or total <= 0:
+            return
+        percent = min(int(current * 100 / total), 100)
+        if percent == self._last_reported_percent:
+            return
+        self._last_reported_percent = percent
+        bar_value = self._audio_weight + (percent / 100.0) * (
+            100.0 - self._audio_weight
+        )
+        self._progress_callback(bar_value)
 
     def _on_finish(self, current: int, total: Optional[int], desc: str) -> None:
         del current, total
@@ -38,11 +64,13 @@ class _TkProgressReporter(SignalProgressReporter):
         process_callback: Optional[Callable] = None,
         *,
         stop_callback: Optional[Callable[[], bool]] = None,
+        progress_callback: Optional[Callable[[float], None]] = None,
     ) -> None:
         super().__init__()
         self._log_callback = log_callback
         self.process_callback = process_callback
         self._stop_callback = stop_callback
+        self._progress_callback = progress_callback
 
     def log(self, message: str) -> None:
         self._log_callback(message)
@@ -51,8 +79,13 @@ class _TkProgressReporter(SignalProgressReporter):
     def task(
         self, *, desc: str = "", total: Optional[int] = None, unit: str = ""
     ) -> _GuiProgressHandle:
-        del total, unit
-        return _GuiProgressHandle(self._log_callback, desc)
+        del unit
+        return _GuiProgressHandle(
+            self._log_callback,
+            desc,
+            total=total,
+            progress_callback=self._progress_callback,
+        )
 
     def stop_requested(self) -> bool:
         """Return ``True`` when the GUI has asked to cancel processing."""

@@ -386,6 +386,7 @@ class TalksReducerGUI:
                     self._append_log,
                     process_callback=set_process,
                     stop_callback=lambda: self._stop_requested,
+                    progress_callback=self._set_progress,
                 )
                 for index, file in enumerate(files, start=1):
                     self._append_log(f"Processing: {os.path.basename(file)}")
