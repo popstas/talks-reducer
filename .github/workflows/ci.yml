@@ -209,7 +209,7 @@ jobs:
 
           # Download GitHub source tarball for CLI formula
           SOURCE_URL="https://github.com/popstas/talks-reducer/archive/refs/tags/${TAG}.tar.gz"
-          curl -sL "$SOURCE_URL" -o source.tar.gz
+          curl -sfL "$SOURCE_URL" -o source.tar.gz
           SOURCE_SHA=$(sha256sum source.tar.gz | awk '{print $1}')
 
           # Update Cask (version without v prefix, sha256 from macOS artifact)
@@ -218,7 +218,7 @@ jobs:
 
           # Update Formula (url with full tag, sha256 from source tarball)
           sed -i "s|url \"https://github.com/popstas/talks-reducer/archive.*\"|url \"${SOURCE_URL}\"|" tap/Formula/talks-reducer.rb
-          sed -i "s/sha256 \".*\"/sha256 \"${SOURCE_SHA}\"/" tap/Formula/talks-reducer.rb
+          sed -i "0,/sha256 \".*\"/s/sha256 \".*\"/sha256 \"${SOURCE_SHA}\"/" tap/Formula/talks-reducer.rb
 
       - name: Commit and push tap update
         run: |
