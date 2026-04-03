@@ -19,7 +19,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 ### macOS (Homebrew)
 
 ```sh
-brew tap popstas/talks-reducer-homebrew-tap
+brew tap popstas/talks-reducer
 brew install --cask talks-reducer
 ```
 
@@ -42,7 +42,7 @@ onto the executable) automatically queues that recording for processing.
 ### macOS (Homebrew)
 
 ```sh
-brew install popstas/talks-reducer-homebrew-tap/talks-reducer
+brew install popstas/talks-reducer/talks-reducer
 ```
 
 ### pip
