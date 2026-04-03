@@ -74,19 +74,19 @@
 - [x] Verify the tap repo gets updated correctly
 
 ### Task 5: Verify acceptance criteria
-- [ ] `brew tap popstas/talks-reducer-homebrew-tap` works
-- [ ] `brew install --cask talks-reducer` installs the GUI app
-- [ ] `brew install talks-reducer` installs the CLI
-- [ ] App launches from `/Applications/talks-reducer.app`
-- [ ] CLI `talks-reducer --help` works
-- [ ] `brew upgrade` picks up new versions after a release
-- [ ] Run full test suite in talks-reducer repo
-- [ ] Run linter - all issues must be fixed
+- [x] `brew tap popstas/talks-reducer-homebrew-tap` works
+- [x] `brew install --cask talks-reducer` installs the GUI app
+- [x] `brew install talks-reducer` installs the CLI
+- [x] App launches from `/Applications/talks-reducer.app`
+- [x] CLI `talks-reducer --help` works
+- [x] `brew upgrade` picks up new versions after a release
+- [x] Run full test suite in talks-reducer repo
+- [x] Run linter - all issues must be fixed
 
 ### Task 6: [Final] Update documentation
-- [ ] Update README.md with Homebrew installation instructions
-- [ ] Add installation section: `brew tap popstas/talks-reducer-homebrew-tap && brew install --cask talks-reducer`
-- [ ] Document CLI install: `brew install popstas/talks-reducer-homebrew-tap/talks-reducer`
+- [x] Update README.md with Homebrew installation instructions
+- [x] Add installation section: `brew tap popstas/talks-reducer-homebrew-tap && brew install --cask talks-reducer`
+- [x] Document CLI install: `brew install popstas/talks-reducer-homebrew-tap/talks-reducer`
 
 ## Technical Details
 

@@ -15,6 +15,16 @@ project was renamed from **jumpcutter** to emphasize its focus on conference tal
 See [CHANGELOG.md](CHANGELOG.md).
 
 ## Install GUI (Windows, macOS)
+
+### macOS (Homebrew)
+
+```sh
+brew tap popstas/talks-reducer-homebrew-tap
+brew install --cask talks-reducer
+```
+
+### Manual download
+
 Go to the [releases page](https://github.com/popstas/talks-reducer/releases) and download the appropriate artifact:
 
 - **Windows** — `talks-reducer-windows-0.4.0.zip`
@@ -28,6 +38,15 @@ and passing a video file path (for example via *Open with…* or drag-and-drop
 onto the executable) automatically queues that recording for processing.
 
 ## Install CLI (Linux, Windows, macOS)
+
+### macOS (Homebrew)
+
+```sh
+brew install popstas/talks-reducer-homebrew-tap/talks-reducer
+```
+
+### pip
+
 ```
 pip install talks-reducer
 ```
