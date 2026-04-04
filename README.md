@@ -39,13 +39,7 @@ onto the executable) automatically queues that recording for processing.
 
 ## Install CLI (Linux, Windows, macOS)
 
-### macOS (Homebrew)
-
-```sh
-brew install popstas/talks-reducer/talks-reducer
-```
-
-### pip
+### pipx / pip
 
 ```
 pip install talks-reducer

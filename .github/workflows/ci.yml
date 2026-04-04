@@ -200,25 +200,14 @@ jobs:
           name: talks-reducer-macos-latest
           path: macos-dist
 
-      - name: Compute SHAs and update tap
+      - name: Compute SHA and update Cask
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          # Cask version omits the leading "v"
           VERSION="${TAG#v}"
           MAC_SHA=$(sha256sum macos-dist/talks-reducer-macos.app-*.zip | awk '{print $1}')
 
-          # Download GitHub source tarball for CLI formula
-          SOURCE_URL="https://github.com/popstas/talks-reducer/archive/refs/tags/${TAG}.tar.gz"
-          curl -sfL "$SOURCE_URL" -o source.tar.gz
-          SOURCE_SHA=$(sha256sum source.tar.gz | awk '{print $1}')
-
-          # Update Cask (version without v prefix, sha256 from macOS artifact)
           sed -i "s/version \".*\"/version \"${VERSION}\"/" tap/Casks/talks-reducer.rb
           sed -i "s/sha256 \".*\"/sha256 \"${MAC_SHA}\"/" tap/Casks/talks-reducer.rb
-
-          # Update Formula (url with full tag, sha256 from source tarball)
-          sed -i "s|url \"https://github.com/popstas/talks-reducer/archive.*\"|url \"${SOURCE_URL}\"|" tap/Formula/talks-reducer.rb
-          sed -i "0,/sha256 \".*\"/s/sha256 \".*\"/sha256 \"${SOURCE_SHA}\"/" tap/Formula/talks-reducer.rb
 
       - name: Commit and push tap update
         run: |
