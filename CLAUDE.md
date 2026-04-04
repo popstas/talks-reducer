@@ -54,6 +54,7 @@ launches.
 - `default.nix` — reproducible environment definition for Nix users.
 - `CONTRIBUTION.md` — development workflow, formatting expectations, and release checklist.
 - `AGENTS.md` — maintainer tips and coding conventions for this repository.
+- `.github/workflows/ci.yml` — CI pipeline: tests, builds, releases, and automatic Homebrew tap updates on tagged releases.
 
 ## Highlights
 
