@@ -468,8 +468,7 @@ def build_interface() -> gr.Blocks:
     )
 
     with gr.Blocks(title=f"Talks Reducer Web UI{version_suffix}") as demo:
-        gr.Markdown(
-            f"""
+        gr.Markdown(f"""
             ## Talks Reducer Web UI{version_suffix}
             Drop a video into the zone below or click to browse. **Small video** is enabled
             by default to apply the 720p/128k preset before processing starts—clear it to
@@ -480,8 +479,7 @@ def build_interface() -> gr.Blocks:
             bundled build lacks.
 
             Video will be rendered on server **{server_identity}**.
-            """.strip()
-        )
+            """.strip())
 
         with gr.Column():
             file_input = gr.File(
@@ -510,6 +508,12 @@ def build_interface() -> gr.Blocks:
             if global_ffmpeg_available
             else "Global FFmpeg not detected; the bundled build will be used."
         )
+        add_codec_suffix_checkbox = gr.Checkbox(
+            label="Append codec to filename",
+            value=False,
+            info="Append the selected codec (e.g. _h264) to the output filename.",
+        )
+
         use_global_ffmpeg_checkbox = gr.Checkbox(
             label="Use global FFmpeg",
             value=False,
@@ -553,6 +557,7 @@ def build_interface() -> gr.Blocks:
                 small_480_checkbox,
                 optimize_checkbox,
                 codec_dropdown,
+                add_codec_suffix_checkbox,
                 use_global_ffmpeg_checkbox,
                 silent_threshold_input,
                 sounded_speed_input,

@@ -619,6 +619,56 @@ def test_process_video_validates_input_arguments(tmp_path: Path) -> None:
         list(server.process_video(str(missing_path), small_video=False))
 
 
+def test_build_interface_inputs_align_with_process_video_signature() -> None:
+    """Guard against positional mismatch between the Gradio inputs list and
+    ``process_video``'s signature. A missing component would shift every
+    subsequent argument by one slot and cause values to be validated against
+    the wrong component's constraints (e.g. silent_threshold=0.01 rejected by
+    sounded_speed slider with minimum=0.5)."""
+
+    import inspect
+
+    sig = inspect.signature(server.process_video)
+    expected_params = [
+        name
+        for name, param in sig.parameters.items()
+        if param.kind
+        in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+        and name != "progress"
+    ]
+
+    demo = server.build_interface()
+    process_fns = [
+        fn for fn in demo.fns.values() if getattr(fn, "name", "") == "process_video"
+    ]
+    assert process_fns, "process_video handler not registered on demo"
+    handler = process_fns[0]
+    registered_inputs = list(handler.inputs or [])
+
+    assert len(registered_inputs) == len(expected_params), (
+        f"Gradio inputs list has {len(registered_inputs)} components but "
+        f"process_video expects {len(expected_params)} positional parameters "
+        f"({expected_params})."
+    )
+
+    sounded_speed_index = expected_params.index("sounded_speed")
+    sounded_slider = registered_inputs[sounded_speed_index]
+    assert getattr(sounded_slider, "label", None) == "Sounded speed", (
+        "Positional mismatch: the component at the sounded_speed slot does "
+        "not have the expected 'Sounded speed' label."
+    )
+
+    silent_threshold_index = expected_params.index("silent_threshold")
+    silent_slider = registered_inputs[silent_threshold_index]
+    assert getattr(silent_slider, "label", None) == "Silent threshold", (
+        "Positional mismatch: the component at the silent_threshold slot "
+        "does not have the expected 'Silent threshold' label."
+    )
+
+
 def test_favicon_filenames_prefer_available_png() -> None:
     """Ensure the web UI favicon search prefers bundled PNG assets."""
 
