@@ -55,7 +55,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--temp_folder",
         type=str,
         default=str(default_temp_folder()),
-        help="The file path of the temporary working folder.",
+        help="Base directory for temporary working folders. Each run creates a unique subdirectory inside it and removes that subdirectory when finished, so parallel invocations do not collide.",
     )
     parser.add_argument(
         "-t",

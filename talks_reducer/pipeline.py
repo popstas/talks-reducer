@@ -6,6 +6,7 @@ import math
 import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict
@@ -156,10 +157,9 @@ def speed_up_video(
 
     cuda_available = dependencies.check_cuda_available(ffmpeg_path)
 
-    temp_path = Path(options.temp_folder)
-    if temp_path.exists():
-        dependencies.delete_path(temp_path)
-    dependencies.create_path(temp_path)
+    base_temp_path = Path(options.temp_folder)
+    dependencies.create_path(base_temp_path)
+    job_temp_path = Path(tempfile.mkdtemp(prefix="job_", dir=os.fspath(base_temp_path)))
 
     metadata = _extract_video_metadata(input_path, options.frame_rate)
     frame_rate = metadata["frame_rate"]
@@ -222,7 +222,7 @@ def speed_up_video(
     if has_audio:
         # Process with audio-based speed modification
         audio_bitrate = "128k" if options.optimize else "160k"
-        audio_wav = temp_path / "audio.wav"
+        audio_wav = job_temp_path / "audio.wav"
         extraction_sample_rate = options.sample_rate
 
         extract_command = dependencies.build_extract_audio_command(
@@ -234,7 +234,7 @@ def speed_up_video(
             ffmpeg_path=ffmpeg_path,
         )
 
-        _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+        _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
         reporter.log("Extracting audio...")
 
         if estimated_total_frames > 0:
@@ -262,7 +262,7 @@ def speed_up_video(
         samples_per_frame = wav_sample_rate / frame_rate
         audio_frame_count = int(math.ceil(audio_sample_count / samples_per_frame))
 
-        _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+        _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
         has_loud_audio = chunk_utils.detect_loud_frames(
             audio_data,
@@ -276,7 +276,7 @@ def speed_up_video(
 
         reporter.log(f"Processing {len(chunks)} chunks...")
 
-        _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+        _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
         new_speeds = [options.silent_speed, options.sounded_speed]
         output_audio_data, updated_chunks = audio_utils.process_audio_chunks(
@@ -288,7 +288,7 @@ def speed_up_video(
             max_audio_volume,
         )
 
-        audio_new_path = temp_path / "audioNew.wav"
+        audio_new_path = job_temp_path / "audioNew.wav"
         # Use the sample rate that was actually used for processing
         output_sample_rate = extraction_sample_rate
         wavfile.write(
@@ -297,10 +297,10 @@ def speed_up_video(
             _prepare_output_audio(output_audio_data),
         )
 
-        _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+        _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
         expression = chunk_utils.get_tree_expression(updated_chunks)
-        filter_graph_path = temp_path / "filterGraph.txt"
+        filter_graph_path = job_temp_path / "filterGraph.txt"
         with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
             filter_parts = []
             if options.small:
@@ -340,7 +340,7 @@ def speed_up_video(
                 )
         # Only create filter script if we have filters to apply
         if filter_parts:
-            filter_graph_path = temp_path / "filterGraph.txt"
+            filter_graph_path = job_temp_path / "filterGraph.txt"
             with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
                 filter_graph_file.write(",".join(filter_parts))
         else:
@@ -382,14 +382,14 @@ def speed_up_video(
     reporter.log(command_str)
 
     if has_audio and audio_new_path and not audio_new_path.exists():
-        dependencies.delete_path(temp_path)
+        dependencies.delete_path(job_temp_path)
         raise FileNotFoundError("Audio intermediate file was not generated")
 
     if filter_graph_path and not filter_graph_path.exists():
-        dependencies.delete_path(temp_path)
+        dependencies.delete_path(job_temp_path)
         raise FileNotFoundError("Filter graph file was not generated")
 
-    _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+    _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
     try:
         if has_audio and updated_chunks:
@@ -429,7 +429,9 @@ def speed_up_video(
         )
     except subprocess.CalledProcessError:
         if fallback_command_str:
-            _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+            _raise_if_stopped(
+                reporter, temp_path=job_temp_path, dependencies=dependencies
+            )
 
             if use_cuda_encoder:
                 reporter.log("CUDA encoding failed, retrying with CPU encoder...")
@@ -466,7 +468,7 @@ def speed_up_video(
         else:
             raise
     finally:
-        dependencies.delete_path(temp_path)
+        dependencies.delete_path(job_temp_path)
 
     output_metadata = _extract_video_metadata(output_path, frame_rate)
     output_duration = output_metadata.get("duration", 0.0)
