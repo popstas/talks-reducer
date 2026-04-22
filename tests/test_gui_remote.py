@@ -249,7 +249,8 @@ def test_process_files_via_server_handles_missing_client_module(tmp_path: Path) 
     assert gui.error_dialogs == [
         (
             "Server unavailable",
-            "Remote processing requires the gradio_client package.",
+            "Remote processing requires the gradio_client package.\n\n"
+            "gradio_client not installed",
         )
     ]
     assert gui.status_history[-1] == ("Error", None)

@@ -247,11 +247,11 @@ def process_files_via_server(
         service_module = load_service_client()
     except ModuleNotFoundError as exc:
         gui._append_log(f"Server client unavailable: {exc}")
+        error_message = (
+            "Remote processing requires the gradio_client package.\n\n" f"{exc}"
+        )
         gui._schedule_on_ui_thread(
-            lambda: gui.messagebox.showerror(
-                "Server unavailable",
-                "Remote processing requires the gradio_client package.",
-            )
+            lambda: gui.messagebox.showerror("Server unavailable", error_message)
         )
         gui._schedule_on_ui_thread(lambda: gui._set_status("Error"))
         return False
