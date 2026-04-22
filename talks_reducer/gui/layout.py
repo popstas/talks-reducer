@@ -113,7 +113,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.drop_zone.bind("<Return>", gui._on_drop_zone_click)
     gui.drop_zone.bind("<space>", gui._on_drop_zone_click)
 
-    # Options frame (compact padding for simple mode at 390px width)
+    # Options frame (compact padding for simple mode at 470px width)
     gui.options_frame = gui.ttk.Frame(main, padding=6)
     gui.options_frame.grid(row=2, column=0, pady=(0, 0), sticky="ew")
     gui.options_frame.columnconfigure(0, weight=1)
