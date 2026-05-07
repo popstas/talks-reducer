@@ -64,7 +64,7 @@ from talks_reducer import pipeline
             "hevc",
             None,
             None,
-            Path("video_speedup"),
+            Path("video_speedup.mp4"),
         ),
         (
             Path("video"),
@@ -74,7 +74,7 @@ from talks_reducer import pipeline
             "h264",
             None,
             None,
-            Path("video_speedup_small_480_h264"),
+            Path("video_speedup_small_480_h264.mp4"),
         ),
         (
             Path("clip.mov"),
@@ -84,7 +84,7 @@ from talks_reducer import pipeline
             "AV1",
             None,
             None,
-            Path("clip_speedup_av1.mov"),
+            Path("clip_speedup_av1.mp4"),
         ),
         (
             Path("plain.mp4"),

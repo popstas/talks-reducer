@@ -26,7 +26,7 @@ def test_default_remote_destination_without_suffix(tmp_path):
 
     result = app._default_remote_destination(input_path, small=True)
 
-    assert result.name == "archive_speedup_small"
+    assert result.name == "archive_speedup_small.mp4"
 
 
 def test_default_remote_destination_with_small_480(tmp_path):
@@ -35,7 +35,7 @@ def test_default_remote_destination_with_small_480(tmp_path):
 
     result = app._default_remote_destination(input_path, small=True, small_480=True)
 
-    assert result.name == "clip_speedup_small_480.mov"
+    assert result.name == "clip_speedup_small_480.mp4"
 
 
 def test_default_remote_destination_with_codec_suffix(tmp_path):

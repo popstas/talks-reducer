@@ -547,12 +547,8 @@ def _input_to_output_filename(
         suffix_tokens.append(normalized_codec)
 
     suffix = f"_{'_'.join(suffix_tokens)}" if suffix_tokens else ""
-    new_name = (
-        filename.name[:dot_index] + suffix + filename.name[dot_index:]
-        if dot_index != -1
-        else filename.name + suffix
-    )
-    return filename.with_name(new_name)
+    stem = filename.name[:dot_index] if dot_index != -1 else filename.name
+    return filename.with_name(stem + suffix + ".mp4")
 
 
 def _create_path(path: Path) -> None:
