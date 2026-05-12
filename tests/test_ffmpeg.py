@@ -395,6 +395,9 @@ def test_build_video_commands_keep_input_audio(monkeypatch):
 
 def test_build_video_commands_small_cuda(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: False
+    )
 
     command, fallback, use_cuda = ffmpeg.build_video_commands(
         "input.mp4",
