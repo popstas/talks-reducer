@@ -102,3 +102,6 @@ TEMP/
 *_speedup*
 data/
 post.md
+.ralphex/
+.venv/
+server_output.mp4

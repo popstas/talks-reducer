@@ -96,6 +96,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -124,9 +126,19 @@ jobs:
           name: talks-reducer-dist
           path: dist/
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v1
+      - name: Generate release notes
+        id: release_notes
+        uses: orhun/git-cliff-action@v4
         with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.release_notes.outputs.content }}
           files: |
             dist/*
             gui-dist/*.zip

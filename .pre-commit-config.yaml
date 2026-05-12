@@ -8,3 +8,10 @@ repos:
     hooks:
       - id: isort
         additional_dependencies: ["toml"]
+  - repo: local
+    hooks:
+      - id: generate-changelog
+        name: Generate changelog
+        entry: git-cliff -o CHANGELOG.md
+        language: system
+        pass_filenames: false
