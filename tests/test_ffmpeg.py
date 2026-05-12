@@ -369,6 +369,30 @@ def test_build_extract_audio_command(monkeypatch):
     assert command == expected
 
 
+def test_build_video_commands_keep_input_audio(monkeypatch):
+    """Passing ``keep_input_audio`` re-muxes the input's audio via stream copy."""
+
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command, fallback, use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        None,
+        None,
+        "output.mp4",
+        cuda_available=False,
+        optimize=True,
+        small=False,
+        frame_rate=30.0,
+        keep_input_audio=True,
+    )
+
+    assert "-map 0:v:0 -map 0:a?" in command
+    assert "-c:a copy" in command
+    assert "-an" not in command
+    assert "-c:a aac" not in command
+    assert command.count('-i "') == 1
+
+
 def test_build_video_commands_small_cuda(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
 

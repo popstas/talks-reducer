@@ -705,6 +705,100 @@ def _stub_pipeline_externals(monkeypatch, options):
     )
 
 
+def test_speed_up_video_skips_audio_when_speeds_neutral(monkeypatch, tmp_path):
+    """When both speeds are 1.0, the audio processing branch is bypassed."""
+
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"input")
+
+    options = ProcessingOptions(
+        input_file=input_path,
+        temp_folder=tmp_path / "temp",
+        output_file=tmp_path / "output.mp4",
+        silent_speed=1.0,
+        sounded_speed=1.0,
+    )
+
+    monkeypatch.setattr(
+        "talks_reducer.pipeline._extract_video_metadata",
+        lambda _input, _frame_rate: {
+            "frame_rate": 30.0,
+            "duration": 2.0,
+            "frame_count": 60,
+            "width": 1920.0,
+            "height": 1080.0,
+        },
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.has_audio_stream", lambda _path: True
+    )
+
+    def fail_call(name):
+        def _stub(*_args, **_kwargs):
+            raise AssertionError(f"{name} must not be called when both speeds are 1.0")
+
+        return _stub
+
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.wavfile.read", fail_call("wavfile.read")
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.wavfile.write", fail_call("wavfile.write")
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.get_max_volume",
+        fail_call("get_max_volume"),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.process_audio_chunks",
+        fail_call("process_audio_chunks"),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.detect_loud_frames",
+        fail_call("detect_loud_frames"),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.build_chunks",
+        fail_call("build_chunks"),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.get_tree_expression",
+        fail_call("get_tree_expression"),
+    )
+
+    captured_video_kwargs: dict = {}
+
+    def fake_build_video_commands(*args, **kwargs):
+        captured_video_kwargs.update(kwargs)
+        return ("render", None, False)
+
+    def fake_run(command, *args, **kwargs):
+        if command == "render":
+            options.output_file.write_bytes(b"fake")
+
+    extract_calls: List[str] = []
+
+    def fake_build_extract(*args, **kwargs):
+        extract_calls.append("called")
+        return "extract"
+
+    dependencies = PipelineDependencies(
+        get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
+        check_cuda_available=lambda _path: False,
+        build_extract_audio_command=fake_build_extract,
+        build_video_commands=fake_build_video_commands,
+        run_timed_ffmpeg_command=fake_run,
+    )
+
+    reporter = DummyReporter()
+    result = speed_up_video(options, reporter=reporter, dependencies=dependencies)
+
+    assert extract_calls == []
+    assert captured_video_kwargs.get("keep_input_audio") is True
+    assert result.chunk_count == 0
+    assert any("skipping audio processing" in msg for msg in reporter.messages)
+
+
 def test_speed_up_video_preserves_base_temp_folder(monkeypatch, tmp_path):
     """The configured temp folder is a base directory shared across runs.
 

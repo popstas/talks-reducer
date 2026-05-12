@@ -112,6 +112,44 @@ def _raise_if_stopped(
     raise ProcessingAborted("Processing aborted by user request.")
 
 
+def _build_scale_only_filter_graph(
+    *,
+    job_temp_path: Path,
+    options: ProcessingOptions,
+    original_height: int,
+    reporter: ProgressReporter,
+) -> Path | None:
+    """Write a filter graph that only rescales (when ``--small`` is requested).
+
+    Used when no speed-based ``setpts`` filter is needed — either because the
+    input has no audio stream, or because both speeds are 1.0. Returns the
+    path to the filter script, or ``None`` if no filters are required.
+    """
+
+    filter_parts: list[str] = []
+    if options.small:
+        target_height = options.small_target_height or 720
+        if target_height <= 0:
+            target_height = 720
+        if original_height > 0 and original_height >= target_height:
+            filter_parts.append(f"scale=-2:{target_height}")
+            reporter.log(
+                f"Scaling down from {int(original_height)}p to {target_height}p"
+            )
+        else:
+            reporter.log(
+                f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
+            )
+
+    if not filter_parts:
+        return None
+
+    filter_graph_path = job_temp_path / "filterGraph.txt"
+    with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
+        filter_graph_file.write(",".join(filter_parts))
+    return filter_graph_path
+
+
 def speed_up_video(
     options: ProcessingOptions,
     reporter: ProgressReporter | None = None,
@@ -203,6 +241,10 @@ def speed_up_video(
             "No audio stream found. Video will be re-encoded without speed modification."
         )
 
+    neutral_speeds = math.isclose(
+        options.silent_speed, 1.0, rel_tol=1e-9, abs_tol=1e-9
+    ) and math.isclose(options.sounded_speed, 1.0, rel_tol=1e-9, abs_tol=1e-9)
+
     hwaccel = (
         ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if cuda_available else []
     )
@@ -219,7 +261,7 @@ def speed_up_video(
     updated_chunks: list[list[int]] = []
     max_audio_volume = 0.0
 
-    if has_audio:
+    if has_audio and not neutral_speeds:
         # Process with audio-based speed modification
         audio_bitrate = "128k" if options.optimize else "160k"
         audio_wav = job_temp_path / "audio.wav"
@@ -322,30 +364,18 @@ def speed_up_video(
             filter_parts.append(f"setpts={escaped_expression}")
             filter_graph_file.write(",".join(filter_parts))
     else:
-        # No audio - just re-encode video without speed modification
-        filter_parts = []
-        if options.small:
-            target_height = options.small_target_height or 720
-            if target_height <= 0:
-                target_height = 720
-            # Only scale down if the original height is greater than or equal to target
-            if original_height > 0 and original_height >= target_height:
-                filter_parts.append(f"scale=-2:{target_height}")
-                reporter.log(
-                    f"Scaling down from {int(original_height)}p to {target_height}p"
-                )
-            else:
-                reporter.log(
-                    f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
-                )
-        # Only create filter script if we have filters to apply
-        if filter_parts:
-            filter_graph_path = job_temp_path / "filterGraph.txt"
-            with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
-                filter_graph_file.write(",".join(filter_parts))
-        else:
-            filter_graph_path = None
+        if has_audio and neutral_speeds:
+            reporter.log(
+                "Speeds are 1.0 — skipping audio processing, passing original audio through."
+            )
+        filter_graph_path = _build_scale_only_filter_graph(
+            job_temp_path=job_temp_path,
+            options=options,
+            original_height=original_height,
+            reporter=reporter,
+        )
 
+    keep_input_audio = has_audio and neutral_speeds
     command_str, fallback_command_str, use_cuda_encoder = (
         dependencies.build_video_commands(
             os.fspath(input_path),
@@ -359,6 +389,7 @@ def speed_up_video(
             frame_rate=frame_rate,
             keyframe_interval_seconds=options.keyframe_interval_seconds,
             video_codec=options.video_codec,
+            keep_input_audio=keep_input_audio,
         )
     )
     reporter.log(

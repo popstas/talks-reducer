@@ -528,9 +528,7 @@ def run_timed_ffmpeg_command(
                             progress_reporter.log(f"{desc} {milestone}%")
                             last_logged_percent = milestone
                     elif time.monotonic() - last_milestone_time >= 30:
-                        progress_reporter.log(
-                            f"{desc} {new_frame} frames"
-                        )
+                        progress_reporter.log(f"{desc} {new_frame} frames")
                         last_milestone_time = time.monotonic()
                 except (ValueError, IndexError):
                     pass
@@ -588,16 +586,21 @@ def build_video_commands(
     frame_rate: Optional[float] = None,
     keyframe_interval_seconds: float = 30.0,
     video_codec: str = "hevc",
+    keep_input_audio: bool = False,
 ) -> Tuple[str, Optional[str], bool]:
     """Create the FFmpeg command strings used to render the final video output.
 
     Args:
         input_file: Path to the input video file.
-        audio_file: Optional path to the processed audio file. If None, video will be encoded without audio.
+        audio_file: Optional path to the processed audio file. If None and
+            ``keep_input_audio`` is False, the video is encoded without audio.
         filter_script: Optional path to the filter script file. If None, video will be re-encoded without speed modification.
         output_file: Path to the output video file.
         frame_rate: Optional source frame rate used to size GOP/keyframe spacing for
             the small preset when generating hardware/software encoder commands.
+        keep_input_audio: When True and ``audio_file`` is None, map the audio
+            track from the input file directly into the output using stream
+            copy (``-c:a copy``) instead of disabling audio.
     """
 
     ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
@@ -615,6 +618,8 @@ def build_video_commands(
     output_parts: List[str] = []
     if audio_file:
         output_parts.append("-map 0:v:0 -map 1:a")
+    elif keep_input_audio:
+        output_parts.append("-map 0:v:0 -map 0:a?")
     else:
         output_parts.append("-map 0:v:0")
 
@@ -790,6 +795,8 @@ def build_video_commands(
     audio_parts: List[str] = []
     if audio_file:
         audio_parts.append("-c:a aac")
+    elif keep_input_audio:
+        audio_parts.append("-c:a copy")
     else:
         audio_parts.append("-an")  # No audio
 
