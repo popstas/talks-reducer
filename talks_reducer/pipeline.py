@@ -117,13 +117,17 @@ def _build_scale_only_filter_graph(
     job_temp_path: Path,
     options: ProcessingOptions,
     original_height: int,
+    frame_rate: float,
     reporter: ProgressReporter,
 ) -> Path | None:
     """Write a filter graph that only rescales (when ``--small`` is requested).
 
     Used when no speed-based ``setpts`` filter is needed — either because the
-    input has no audio stream, or because both speeds are 1.0. Returns the
-    path to the filter script, or ``None`` if no filters are required.
+    input has no audio stream, or because both speeds are 1.0. The graph also
+    pins the output to ``frame_rate`` so sources with a misleading nominal
+    ``r_frame_rate`` (e.g. ``120/1`` for ~30 fps content) don't cause ffmpeg to
+    duplicate frames into the encoder. Returns the path to the filter script,
+    or ``None`` if no filters are required.
     """
 
     filter_parts: list[str] = []
@@ -140,6 +144,9 @@ def _build_scale_only_filter_graph(
             reporter.log(
                 f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
             )
+
+    if frame_rate and frame_rate > 0:
+        filter_parts.append(f"fps={frame_rate}")
 
     if not filter_parts:
         return None
@@ -372,6 +379,7 @@ def speed_up_video(
             job_temp_path=job_temp_path,
             options=options,
             original_height=original_height,
+            frame_rate=frame_rate,
             reporter=reporter,
         )
 
