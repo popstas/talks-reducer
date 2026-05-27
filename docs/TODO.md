@@ -1,0 +1,3 @@
+- server: show upload progress on client and server while uploading to remote
+- remote mode: no progressbar after "Audio processing", only "Generating final: x%" in log
+- audio processing calculates not precise. break audio processing progress bar update when video processing started
