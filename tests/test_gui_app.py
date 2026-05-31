@@ -487,3 +487,26 @@ def test_apply_status_style_ignores_unknown_status():
     app.TalksReducerGUI._apply_status_style(gui, "something else entirely")
 
     assert gui.status_label.calls == []
+
+
+def test_advance_audio_progress_does_not_move_bar_backwards():
+    """The synthetic 0-5% timer must not drag the bar back once real progress
+    from the extraction or audio-processing reporter has advanced past it."""
+
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.AUDIO_PROGRESS_STEPS = app.TalksReducerGUI.AUDIO_PROGRESS_STEPS
+    gui.AUDIO_PROGRESS_WEIGHT = app.TalksReducerGUI.AUDIO_PROGRESS_WEIGHT
+    gui.DEFAULT_AUDIO_INTERVAL_MS = app.TalksReducerGUI.DEFAULT_AUDIO_INTERVAL_MS
+    gui._audio_progress_job = None
+    gui._audio_progress_steps_completed = 0
+    gui._audio_progress_interval_ms = 100
+    # Real audio-processing progress has already pushed the bar to 25%.
+    gui.progress_var = SimpleNamespace(get=lambda: 25.0)
+    gui._set_progress = MagicMock()
+    gui._set_status = MagicMock()
+    gui.root = SimpleNamespace(after=lambda *_args, **_kwargs: "job")
+
+    app.TalksReducerGUI._advance_audio_progress(gui)
+
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(25.0)

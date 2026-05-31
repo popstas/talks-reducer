@@ -321,7 +321,12 @@ def process_files_via_server(
             status_text = f"{label} {percent}%".strip() if label else f"{percent}%"
         else:
             status_text = label
-        gui._schedule_on_ui_thread(lambda value=bar_value: gui._set_progress(value))
+
+        def _apply_progress(value: float = bar_value) -> None:
+            current_value = float(gui.progress_var.get())
+            gui._set_progress(min(100.0, max(current_value, value)))
+
+        gui._schedule_on_ui_thread(_apply_progress)
         gui._schedule_on_ui_thread(
             lambda text=status_text: gui._set_status("processing", text)
         )

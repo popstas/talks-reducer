@@ -1115,7 +1115,11 @@ class TalksReducerGUI:
             self._audio_progress_steps_completed / self.AUDIO_PROGRESS_STEPS * 100
         )
         percentage = (audio_percentage / 100.0) * self.AUDIO_PROGRESS_WEIGHT
-        self._set_progress(percentage)
+        # The synthetic timer only fills the 0-5% band. Clamp against the
+        # current value so it never drags the bar backwards once real
+        # extraction or audio-processing progress has advanced past it.
+        current_value = float(self.progress_var.get())
+        self._set_progress(min(100.0, max(current_value, percentage)))
         self._set_status("processing", f"Audio processing: {audio_percentage:.1f}%")
 
         if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
