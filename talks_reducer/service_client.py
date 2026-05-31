@@ -123,10 +123,21 @@ def send_video(
     )
     submit_kwargs: dict[str, Any] = {"api_name": "/process_video"}
 
+    upload_total: Optional[int] = None
+    if progress_callback is not None:
+        try:
+            upload_total = input_path.stat().st_size
+        except OSError:  # pragma: no cover - defensive
+            upload_total = None
+        progress_callback("Uploading:", 0, upload_total, "bytes")
+
     if job_factory is not None:
         job = job_factory(client, submit_args, submit_kwargs)
     else:
         job = client.submit(*submit_args, **submit_kwargs)
+
+    if progress_callback is not None:
+        progress_callback("Uploading:", upload_total, upload_total, "bytes")
 
     streaming_job = StreamingJob(job)
 
@@ -258,10 +269,14 @@ def _emit_progress_update(
 
     total = _coerce_int(length)
     current = _coerce_int(index)
-    if current is None and isinstance(progress, (int, float)) and total:
-        current = int(progress / total)
+    if current is None and isinstance(progress, (int, float)):
+        progress_value = float(progress)
+        if total and 0.0 <= progress_value <= 1.0:
+            current = int(round(progress_value * total))
+        else:
+            current = int(progress_value)
 
-    callback(desc or "Processing", progress, total, str(unit_name or ""))
+    callback(desc or "Processing", current, total, str(unit_name or ""))
 
 
 async def _pump_job_updates(

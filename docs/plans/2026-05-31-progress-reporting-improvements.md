@@ -61,12 +61,12 @@ The original request named `data/TODO.md`, but the progress log records the user
 - Modify: `tests/test_service_client.py`
 - Modify: `tests/test_cli.py` if CLI output expectations change
 
-- [ ] Add tests for `_emit_progress_update` covering `progress_data` with `index`, raw count progress, and fractional progress.
-- [ ] Fix `_emit_progress_update` so it forwards the normalized current value, not the raw progress field.
-- [ ] Add tests showing `send_video()` emits an `Uploading:` progress event before the remote job starts and a completed `Uploading:` event once submission has completed.
-- [ ] Implement upload progress reporting through the existing `progress_callback` signature: `desc="Uploading:"`, current bytes, total bytes, `unit="bytes"`.
-- [ ] Keep upload progress optional so existing callers without `progress_callback` behave exactly as before.
-- [ ] Run `pytest tests/test_service_client.py tests/test_cli.py` and confirm it passes before Task 2.
+- [x] Add tests for `_emit_progress_update` covering `progress_data` with `index`, raw count progress, and fractional progress.
+- [x] Fix `_emit_progress_update` so it forwards the normalized current value, not the raw progress field.
+- [x] Add tests showing `send_video()` emits an `Uploading:` progress event before the remote job starts and a completed `Uploading:` event once submission has completed.
+- [x] Implement upload progress reporting through the existing `progress_callback` signature: `desc="Uploading:"`, current bytes, total bytes, `unit="bytes"`.
+- [x] Keep upload progress optional so existing callers without `progress_callback` behave exactly as before.
+- [x] Run `pytest tests/test_service_client.py tests/test_cli.py` and confirm it passes before Task 2.
 
 ### Task 2: Report real audio-processing progress from the pipeline
 
