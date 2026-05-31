@@ -76,12 +76,12 @@ The original request named `data/TODO.md`, but the progress log records the user
 - Modify: `tests/test_audio.py`
 - Modify: `tests/test_pipeline_service.py`
 
-- [ ] Add a failing test for `process_audio_chunks()` proving an optional progress callback is called as chunks are processed.
-- [ ] Extend `process_audio_chunks()` with an optional progress callback that receives incremental processed source-sample counts.
-- [ ] Add a failing pipeline service test proving `speed_up_video()` opens a reporter task with `desc="Audio processing:"` and advances it during `process_audio_chunks()`.
-- [ ] Wrap `process_audio_chunks()` in `pipeline.py` with `reporter.task(desc="Audio processing:", total=<source sample total>, unit="samples")`.
-- [ ] Ensure zero-length chunks do not produce negative progress and empty inputs still complete cleanly.
-- [ ] Run `pytest tests/test_audio.py tests/test_pipeline_service.py` and confirm it passes before Task 3.
+- [x] Add a failing test for `process_audio_chunks()` proving an optional progress callback is called as chunks are processed.
+- [x] Extend `process_audio_chunks()` with an optional progress callback that receives incremental processed source-sample counts.
+- [x] Add a failing pipeline service test proving `speed_up_video()` opens a reporter task with `desc="Audio processing:"` and advances it during `process_audio_chunks()`.
+- [x] Wrap `process_audio_chunks()` in `pipeline.py` with `reporter.task(desc="Audio processing:", total=<source sample total>, unit="samples")`.
+- [x] Ensure zero-length chunks do not produce negative progress and empty inputs still complete cleanly.
+- [x] Run `pytest tests/test_audio.py tests/test_pipeline_service.py` and confirm it passes before Task 3.
 
 ### Task 3: Map streamed progress into stable desktop GUI percentages
 
