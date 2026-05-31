@@ -147,11 +147,13 @@ progress, showing the scanned/total host count as `scanned / total`. A new
 to the configured server—the **Remote** option becomes available as soon as a
 URL is supplied. Leave the toggle on **Local** to keep rendering on this
 machine even if a server is saved; switch to **Remote** to hand jobs off while
-the GUI downloads the finished files automatically. When streaming from a remote
-server the desktop progress bar advances through stable ranges as the job moves
-between stages—upload (0–5%), audio extraction (5–20%), audio processing
-(20–35%), and final encoding (35–100%)—so it keeps moving after audio processing
-instead of stalling until the encode finishes. While you're there, enable
+the GUI downloads the finished files automatically. Whether you render locally
+or stream from a remote server, the desktop progress bar advances through stable
+ranges as the job moves between stages—upload (0–5%), audio extraction (5–20%),
+audio processing (20–35%), and final encoding (35–100%)—so it keeps moving after
+audio processing instead of stalling until the encode finishes. The bar only ever
+moves forward within a file, so a GPU→CPU encoder fallback no longer snaps it
+backward. While you're there, enable
 **Use global FFmpeg** whenever your PATH provides newer GPU encoders—the toggle disables itself when no system binary is available—and adjust
 **Keyframe interval (s)** under **Advanced** to balance scroll smoothness and
 output size without touching the CLI.
