@@ -135,11 +135,11 @@ The original request named `data/TODO.md`, but the progress log records the user
 - Modify: `README.md`
 - Modify: `docs/TODO.md`
 
-- [ ] Update `README.md` remote progress documentation to describe upload, audio-processing, and final-encode progress in CLI, desktop remote mode, and server/browser workflows.
-- [ ] Remove or update the completed entries in `docs/TODO.md` if that is the repository convention for completed TODO work.
-- [ ] Run `black talks_reducer tests`.
-- [ ] Run `isort talks_reducer tests`.
-- [ ] Run `pytest tests/test_service_client.py tests/test_server.py tests/test_audio.py tests/test_pipeline_service.py tests/test_gui_progress.py tests/test_gui_remote.py tests/test_gui_app.py tests/test_cli.py` and confirm it passes before Task 7.
+- [x] Update `README.md` remote progress documentation to describe upload, audio-processing, and final-encode progress in CLI, desktop remote mode, and server/browser workflows.
+- [x] Remove or update the completed entries in `docs/TODO.md` if that is the repository convention for completed TODO work.
+- [x] Run `black talks_reducer tests`.
+- [x] Run `isort talks_reducer tests`.
+- [x] Run `pytest tests/test_service_client.py tests/test_server.py tests/test_audio.py tests/test_pipeline_service.py tests/test_gui_progress.py tests/test_gui_remote.py tests/test_gui_app.py tests/test_cli.py` and confirm it passes before Task 7.
 
 ### Task 7: Verify acceptance criteria
 

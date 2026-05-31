@@ -79,7 +79,13 @@ smaller output file. The advanced GUI slider defaults to 30 seconds and lets you
 pick anywhere between snappy one-second GOPs and ultra-light 60-second spacing.
 
 Want to see progress as the remote server works? Add `--server-stream` so the
-CLI prints live progress bars and log lines while you wait for the download.
+CLI prints live progress bars and log lines while you wait for the download. The
+stream walks through every stage of the job: an `Uploading:` bar while the file
+is sent to the server, an `Extracting audio:` bar once the upload is received, an
+`Audio processing:` bar driven by the real phase-vocoder work (instead of a
+synthetic estimate), and a `Generating final:` bar for the encode. Progress keeps
+advancing after audio processing finishes rather than stalling until the encode
+completes.
 
 ### Speech detection
 
@@ -141,7 +147,11 @@ progress, showing the scanned/total host count as `scanned / total`. A new
 to the configured server—the **Remote** option becomes available as soon as a
 URL is supplied. Leave the toggle on **Local** to keep rendering on this
 machine even if a server is saved; switch to **Remote** to hand jobs off while
-the GUI downloads the finished files automatically. While you're there, enable
+the GUI downloads the finished files automatically. When streaming from a remote
+server the desktop progress bar advances through stable ranges as the job moves
+between stages—upload (0–5%), audio extraction (5–20%), audio processing
+(20–35%), and final encoding (35–100%)—so it keeps moving after audio processing
+instead of stalling until the encode finishes. While you're there, enable
 **Use global FFmpeg** whenever your PATH provides newer GPU encoders—the toggle disables itself when no system binary is available—and adjust
 **Keyframe interval (s)** under **Advanced** to balance scroll smoothness and
 output size without touching the CLI.
@@ -151,7 +161,7 @@ output size without touching the CLI.
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
 2. Drag a video onto the **Video file** drop zone or click to browse and select one from disk.
 3. **Optimized encoding** stays enabled to apply the tuned codec arguments, and **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear the checkboxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the default h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) compression profiles, and enable **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the bundled build omits before you submit. Disable **Optimized encoding** or pass `--no-optimize` when you want the fastest CUDA-oriented preset.
-4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives.
+4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives. As soon as the upload finishes the server logs an `Upload received:` line with the filename and size, then streams the `Extracting audio:`, `Audio processing:`, and `Generating final:` stages back to the browser so you can watch real progress for each phase.
 5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally.
 
 Need to change where the server listens? Run `talks-reducer server --host 0.0.0.0 --port 7860` (or any other port) to bind to a
