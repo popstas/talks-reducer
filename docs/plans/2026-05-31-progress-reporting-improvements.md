@@ -110,12 +110,12 @@ The original request named `data/TODO.md`, but the progress log records the user
 - Modify: `talks_reducer/gui/app.py` if helper exports are needed
 - Modify: `tests/test_gui_app.py`
 
-- [ ] Add parser tests for log lines such as `Generating final: 30%`, `Generating final (fallback): 30%`, and `Audio processing: 45%`.
-- [ ] Implement a small parser for task-percent log messages in `gui/summaries.py`.
-- [ ] Update `SummaryManager` so final encode target messages and final progress messages call `_complete_audio_phase()`.
-- [ ] Update `SummaryManager` so log-only percent milestones also update the progress bar using the same stage mapper from Task 3.
-- [ ] Keep the existing synthetic audio timer only as a fallback, and cancel it as soon as real audio-processing or final-encode progress arrives.
-- [ ] Run `pytest tests/test_gui_app.py tests/test_gui_progress.py` and confirm it passes before Task 5.
+- [x] Add parser tests for log lines such as `Generating final: 30%`, `Generating final (fallback): 30%`, and `Audio processing: 45%`.
+- [x] Implement a small parser for task-percent log messages in `gui/summaries.py`.
+- [x] Update `SummaryManager` so final encode target messages and final progress messages call `_complete_audio_phase()`.
+- [x] Update `SummaryManager` so log-only percent milestones also update the progress bar using the same stage mapper from Task 3.
+- [x] Keep the existing synthetic audio timer only as a fallback, and cancel it as soon as real audio-processing or final-encode progress arrives.
+- [x] Run `pytest tests/test_gui_app.py tests/test_gui_progress.py` and confirm it passes before Task 5.
 
 ### Task 5: Surface server upload receipt and browser/server progress context
 

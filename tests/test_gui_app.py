@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import math
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
-from talks_reducer.gui import app
+from talks_reducer.gui import app, summaries
 from talks_reducer.gui.theme import STATUS_COLORS
 
 
@@ -294,6 +295,110 @@ def test_is_encode_target_duration_unknown_detects_indicator():
     normalized = "status: final encode target duration unknown"
 
     assert app._is_encode_target_duration_unknown(normalized) is True
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_label", "expected_percent"),
+    [
+        ("Generating final: 30%", "Generating final:", 30.0),
+        ("Generating final (fallback): 30%", "Generating final (fallback):", 30.0),
+        ("Audio processing: 45%", "Audio processing:", 45.0),
+        ("Uploading: 50%", "Uploading:", 50.0),
+        ("Extracting audio: 12.5%", "Extracting audio:", 12.5),
+    ],
+)
+def test_parse_task_percent_extracts_values(message, expected_label, expected_percent):
+    found, result = app._parse_task_percent(message)
+
+    assert found is True
+    assert result == (expected_label, expected_percent)
+
+
+def test_parse_task_percent_matches_tqdm_style_bar():
+    message = "Generating final:  30%|███       | 100/330 [00:05<00:11]"
+
+    found, result = app._parse_task_percent(message)
+
+    assert found is True
+    assert result == ("Generating final:", 30.0)
+
+
+def test_parse_task_percent_missing_returns_false():
+    found, result = app._parse_task_percent("source metadata: duration: 12.5s")
+
+    assert found is False
+    assert result is None
+
+
+def test_parse_task_percent_ignores_summary_size_line():
+    found, result = app._parse_task_percent("**Size:** 17.25%")
+
+    assert found is False
+    assert result is None
+
+
+def _make_summary_gui(progress_value: float = 0.0) -> SimpleNamespace:
+    """Build a stub GUI that records progress-related calls for SummaryManager."""
+
+    gui = SimpleNamespace()
+    gui._source_duration_seconds = None
+    gui._encode_total_frames = None
+    gui._encode_current_frame = None
+    gui._encode_target_duration_seconds = None
+    gui._video_duration_seconds = None
+    gui._last_progress_seconds = None
+    gui._status_state = "processing"
+    gui.AUDIO_PROGRESS_WEIGHT = 5.0
+    gui.progress_var = SimpleNamespace(get=lambda: progress_value)
+    gui._set_progress = MagicMock()
+    gui._set_status = MagicMock()
+    gui._complete_audio_phase = MagicMock()
+    gui._cancel_audio_progress = MagicMock()
+    gui._start_audio_progress = MagicMock()
+    gui._reset_audio_progress_state = MagicMock()
+    return gui
+
+
+def test_summary_manager_generating_final_percent_advances_progress():
+    gui = _make_summary_gui(progress_value=10.0)
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Generating final: 30%")
+
+    gui._complete_audio_phase.assert_called_once()
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(54.5)
+
+
+def test_summary_manager_audio_processing_percent_cancels_synthetic_timer():
+    gui = _make_summary_gui(progress_value=0.0)
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Audio processing: 45%")
+
+    gui._cancel_audio_progress.assert_called_once()
+    gui._complete_audio_phase.assert_not_called()
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(26.75)
+
+
+def test_summary_manager_task_percent_never_moves_backwards():
+    gui = _make_summary_gui(progress_value=70.0)
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Generating final: 30%")
+
+    assert gui._set_progress.call_args[0][0] == pytest.approx(70.0)
+
+
+def test_summary_manager_final_encode_target_completes_audio_phase():
+    gui = _make_summary_gui()
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Final encode target frames: 4800")
+
+    gui._complete_audio_phase.assert_called_once()
+    assert gui._encode_total_frames == 4800
 
 
 @pytest.mark.parametrize(

@@ -52,6 +52,7 @@ try:
         parse_ffmpeg_progress,
         parse_ratios_from_summary,
         parse_source_duration_seconds,
+        parse_task_percent,
         parse_video_duration_seconds,
     )
     from .theme import (
@@ -95,6 +96,7 @@ except ImportError:  # pragma: no cover - handled at runtime
         parse_ffmpeg_progress,
         parse_ratios_from_summary,
         parse_source_duration_seconds,
+        parse_task_percent,
         parse_video_duration_seconds,
     )
     from talks_reducer.gui.theme import (
@@ -1351,6 +1353,7 @@ __all__ = [
     "_parse_encode_target_duration",
     "_parse_video_duration_seconds",
     "_parse_ffmpeg_progress",
+    "_parse_task_percent",
     "_is_encode_total_frames_unknown",
     "_is_encode_target_duration_unknown",
 ]
@@ -1364,5 +1367,6 @@ _parse_current_frame = parse_current_frame
 _parse_encode_target_duration = parse_encode_target_duration
 _parse_video_duration_seconds = parse_video_duration_seconds
 _parse_ffmpeg_progress = parse_ffmpeg_progress
+_parse_task_percent = parse_task_percent
 _is_encode_total_frames_unknown = is_encode_total_frames_unknown
 _is_encode_target_duration_unknown = is_encode_target_duration_unknown

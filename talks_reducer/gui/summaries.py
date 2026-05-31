@@ -8,9 +8,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from ..pipeline import _input_to_output_filename
+from .progress import map_stage_progress
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from .app import TalksReducerGUI
+
+
+_TASK_PERCENT_PATTERN = re.compile(
+    r"(?P<desc>Uploading|Extracting audio|Audio processing|"
+    r"Generating final(?:\s*\(fallback\))?)\s*:\s*"
+    r"(?P<percent>\d+(?:\.\d+)?)\s*%",
+    re.IGNORECASE,
+)
 
 
 def default_remote_destination(
@@ -182,6 +191,30 @@ def parse_ffmpeg_progress(message: str) -> tuple[bool, Optional[tuple[int, str]]
     return True, (current_seconds, speed_str)
 
 
+def parse_task_percent(message: str) -> tuple[bool, Optional[tuple[str, float]]]:
+    """Parse ``Task: NN%`` milestones streamed from remote pipeline logs.
+
+    Returns ``(True, (task_label, percent))`` for known pipeline stages such as
+    ``"Generating final: 30%"`` or ``"Audio processing: 45%"``. The returned
+    label keeps its trailing colon so it can be passed straight into
+    :func:`map_stage_progress`. Returns ``(False, None)`` when no known task
+    milestone is present and ``(True, None)`` when the percentage cannot be
+    parsed.
+    """
+
+    match = _TASK_PERCENT_PATTERN.search(message)
+    if not match:
+        return False, None
+
+    desc = match.group("desc").strip()
+    try:
+        percent = float(match.group("percent"))
+    except ValueError:
+        return True, None
+
+    return True, (f"{desc}:", percent)
+
+
 def format_file_size(size_bytes: int) -> str:
     """Return a compact human-readable file size string."""
     value = float(size_bytes)
@@ -219,12 +252,19 @@ class SummaryManager:
         if self.handle_status_transitions(normalized):
             return
 
+        task_percent_found, task_percent = parse_task_percent(message)
+        if task_percent_found and task_percent is not None:
+            self._handle_task_percent(*task_percent)
+            return
+
         frame_total_found, frame_total = parse_encode_total_frames(message)
         if frame_total_found:
+            self.gui._complete_audio_phase()
             self.gui._encode_total_frames = frame_total
             return
 
         if is_encode_total_frames_unknown(normalized):
+            self.gui._complete_audio_phase()
             self.gui._encode_total_frames = None
             return
 
@@ -252,9 +292,11 @@ class SummaryManager:
 
         duration_found, encode_duration = parse_encode_target_duration(message)
         if duration_found:
+            self.gui._complete_audio_phase()
             self.gui._encode_target_duration_seconds = encode_duration
 
         if is_encode_target_duration_unknown(normalized):
+            self.gui._complete_audio_phase()
             self.gui._encode_target_duration_seconds = None
 
         video_duration_found, video_duration = parse_video_duration_seconds(message)
@@ -299,6 +341,31 @@ class SummaryManager:
                 self.gui._set_progress(percentage)
 
             self.gui._set_status("processing", status_msg)
+
+    def _handle_task_percent(self, task_label: str, percent: float) -> None:
+        """Advance the progress bar from a streamed ``Task: NN%`` milestone.
+
+        Real audio-processing progress cancels the synthetic audio timer, while
+        final-encode progress completes the audio phase outright. The percentage
+        is mapped through :func:`map_stage_progress` so the bar stays in the same
+        stable bands used by the streamed remote progress callback, and it never
+        moves backwards.
+        """
+
+        normalized_desc = task_label.strip().lower()
+        if normalized_desc.startswith("generating final"):
+            self.gui._complete_audio_phase()
+        elif normalized_desc.startswith("audio processing"):
+            self.gui._cancel_audio_progress()
+
+        bar_value = map_stage_progress(task_label, percent, 100)
+        if bar_value is None:
+            return
+
+        current_value = float(self.gui.progress_var.get())
+        percentage = min(100.0, max(current_value, bar_value))
+        self.gui._set_progress(percentage)
+        self.gui._set_status("processing", f"{task_label} {percent:.0f}%")
 
     def handle_status_transitions(self, normalized_message: str) -> bool:
         """Handle high-level status transitions for *normalized_message*."""
