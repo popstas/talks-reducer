@@ -497,6 +497,24 @@ def test_summary_manager_extracting_audio_starts_at_zero_locally():
     assert gui._set_progress.call_args[0][0] == pytest.approx(0.0)
 
 
+def test_summary_manager_new_job_resets_progress_floor():
+    """A ``Processing N/M:`` line for a new file must clear the monotonic floor.
+
+    Zeroing only the visible bar would leave ``_progress_floor`` at the previous
+    file's completed value, so the next file's lower-mapped progress would be
+    clamped back up. The branch must re-base the floor like the run-start reset.
+    """
+
+    gui = _make_summary_gui(progress_value=100.0)
+    gui._progress_floor = 100.0
+    gui._status_state = "processing"
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Processing 2/3: clip.mp4")
+
+    gui._reset_progress_baseline.assert_called_once()
+
+
 def test_summary_manager_final_encode_target_completes_audio_phase():
     gui = _make_summary_gui()
     manager = summaries.SummaryManager(gui)

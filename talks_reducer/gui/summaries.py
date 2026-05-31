@@ -491,7 +491,13 @@ class SummaryManager:
             is_new_job = bool(re.match(r"processing \d+/\d+:", normalized_message))
             should_reset = self.gui._status_state.lower() != "processing" or is_new_job
             if should_reset:
-                self.gui._set_progress(0)
+                # Re-base the monotonic floor along with the visible bar. Zeroing
+                # only the bar with ``_set_progress(0)`` would leave
+                # ``_progress_floor`` at the previous file's value, so the next
+                # ``_set_progress_monotonic`` call would immediately clamp the bar
+                # back up — matching the reset used by the "starting processing"
+                # branch above.
+                self.gui._reset_progress_baseline()
                 self.gui._video_duration_seconds = None
                 self.gui._encode_target_duration_seconds = None
                 self.gui._encode_total_frames = None
