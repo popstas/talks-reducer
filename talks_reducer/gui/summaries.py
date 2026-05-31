@@ -283,9 +283,12 @@ class SummaryManager:
                 progress_target = self.gui.AUDIO_PROGRESS_WEIGHT + frame_ratio * (
                     100.0 - self.gui.AUDIO_PROGRESS_WEIGHT
                 )
-                current_value = float(self.gui.progress_var.get())
-                percentage = min(100.0, max(current_value, progress_target))
-                self.gui._set_progress(percentage)
+                # Route frame-based encode progress through the monotonic clamp so
+                # ``_progress_floor`` stays the single synchronous source of truth.
+                # Reading ``progress_var`` here would observe a stale Tk value on a
+                # background worker thread and let the task-percent clamp re-pin the
+                # bar after a per-file reset.
+                self.gui._set_progress_monotonic(progress_target)
             else:
                 self.gui._complete_audio_phase()
                 self.gui._set_status("processing", f"{current_frame} frames encoded")
@@ -336,9 +339,11 @@ class SummaryManager:
                 progress_target = self.gui.AUDIO_PROGRESS_WEIGHT + time_ratio * (
                     100.0 - self.gui.AUDIO_PROGRESS_WEIGHT
                 )
-                current_value = float(self.gui.progress_var.get())
-                percentage = min(100.0, max(current_value, progress_target))
-                self.gui._set_progress(percentage)
+                # Route time-based encode progress through the monotonic clamp for
+                # the same reason as the frame-based branch above: keep
+                # ``_progress_floor`` authoritative and never read the stale Tk
+                # ``progress_var`` from the worker thread.
+                self.gui._set_progress_monotonic(progress_target)
 
             self.gui._set_status("processing", status_msg)
 
@@ -350,6 +355,19 @@ class SummaryManager:
         is mapped through :func:`map_stage_progress` so the bar stays in the same
         stable bands used by the streamed remote progress callback, and it never
         moves backwards.
+
+        The mapped value is applied through :meth:`_set_progress_monotonic`,
+        which clamps against the synchronous :attr:`_progress_floor` — the single
+        source of truth for monotonic progress — and raises it before returning.
+        Every channel that advances the bar (structured ``progress.advance``,
+        remote streaming, frame/time encode progress, and the synthetic audio
+        timer) now routes through that clamp, so the floor already reflects the
+        highest value reached. Reading the asynchronously-applied
+        :attr:`progress_var` here would instead observe a stale Tk value on this
+        background worker thread: right after a per-file ``_reset_progress_baseline``
+        the queued reset to ``0`` may not have been applied yet, so the previous
+        file's ``100`` could be read back and re-pin the bar. Clamping solely
+        against ``_progress_floor`` avoids that race.
         """
 
         normalized_desc = task_label.strip().lower()
@@ -362,9 +380,10 @@ class SummaryManager:
         if bar_value is None:
             return
 
-        current_value = float(self.gui.progress_var.get())
-        percentage = min(100.0, max(current_value, bar_value))
-        self.gui._set_progress(percentage)
+        # ``_set_progress_monotonic`` already clamps ``bar_value`` against the
+        # synchronous ``_progress_floor``, so no extra ``progress_var`` read is
+        # needed (and reading it would reintroduce the stale-value race above).
+        self.gui._set_progress_monotonic(bar_value)
         self.gui._set_status("processing", f"{task_label} {percent:.0f}%")
 
     def handle_status_transitions(self, normalized_message: str) -> bool:
@@ -427,7 +446,20 @@ class SummaryManager:
         if normalized_message.startswith("extracting audio"):
             self.gui._reset_audio_progress_state(clear_source=False)
             self.gui._set_status("processing", "Extracting audio...")
-            self.gui._set_progress(0)
+            # Keep the bar monotonic instead of resetting to zero. In remote mode
+            # the streamed ``Uploading:`` band has already advanced the bar (up to
+            # 5%) before the server logs ``Extracting audio...``; resetting to zero
+            # here would regress the bar below completed upload progress until the
+            # ``Extracting audio: NN%`` milestones arrive. Re-applying the
+            # synchronous ``_progress_floor`` through the monotonic clamp keeps the
+            # bar where upload left off. Reading ``progress_var`` instead would
+            # observe a stale Tk value right after a per-file
+            # ``_reset_progress_baseline`` (the queued reset to ``0`` may not have
+            # been applied yet) and re-pin the bar at the previous file's ``100``.
+            # Local runs leave the floor at zero, preserving prior behavior.
+            self.gui._set_progress_monotonic(
+                float(getattr(self.gui, "_progress_floor", 0.0))
+            )
             self.gui._video_duration_seconds = None
             self.gui._encode_target_duration_seconds = None
             self.gui._encode_total_frames = None
@@ -443,7 +475,11 @@ class SummaryManager:
         if normalized_message.startswith("starting processing"):
             self.gui._reset_audio_progress_state(clear_source=True)
             self.gui._set_status("processing", "Processing")
-            self.gui._set_progress(0)
+            # Reset the monotonic floor as well as the visible bar so a previous
+            # local run cannot pin the next run's progress: ``_handle_task_percent``
+            # now clamps against ``_progress_floor``, which a finished local batch
+            # leaves near 100%.
+            self.gui._reset_progress_baseline()
             self.gui._video_duration_seconds = None
             self.gui._encode_target_duration_seconds = None
             self.gui._encode_total_frames = None

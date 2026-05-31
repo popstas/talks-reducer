@@ -44,6 +44,7 @@ class StubGUI:
         self.logs: list[str] = []
         self.progress_values: list[float] = []
         self._progress_value = 0.0
+        self._progress_floor = 0.0
         self.progress_var = SimpleNamespace(
             get=lambda: self._progress_value,
             set=self._set_progress_value,
@@ -77,6 +78,18 @@ class StubGUI:
     def _set_progress(self, percentage: float) -> None:
         self.progress_values.append(percentage)
         self._progress_value = percentage
+
+    def _set_progress_monotonic(self, percentage: float) -> None:
+        # Mirror :meth:`TalksReducerGUI._set_progress_monotonic`: the floor is a
+        # synchronous attribute so back-to-back worker-thread events never read a
+        # stale value, even though the visible bar update is deferred.
+        value = min(100.0, max(self._progress_floor, float(percentage)))
+        self._progress_floor = value
+        self._set_progress(value)
+
+    def _reset_progress_baseline(self) -> None:
+        self._progress_floor = 0.0
+        self._set_progress(0.0)
 
     def _set_progress_value(self, percentage: float) -> None:
         self._progress_value = percentage
@@ -414,6 +427,45 @@ def test_process_files_via_server_progress_never_moves_backwards(
     # Generating final 50% -> 35 + 0.5 * 65 = 67.5, then both lower-mapped
     # updates are clamped to the running maximum.
     assert gui.progress_values == pytest.approx([67.5, 67.5, 67.5])
+
+
+def test_process_files_via_server_resets_progress_between_files(
+    tmp_path: Path,
+) -> None:
+    gui = StubGUI()
+    call_index = {"count": 0}
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            callback = kwargs.get("progress_callback")
+            assert callable(callback)
+            call_index["count"] += 1
+            if call_index["count"] == 1:
+                # First file finishes the final encode at 100%.
+                callback("Generating final:", 100, 100, "frames")
+            else:
+                # The second file's early audio progress maps below 100% and
+                # must not stay pinned at the previous file's completed value.
+                callback("Audio processing:", 100, 100, "samples")
+            return (str(tmp_path / f"out{call_index['count']}.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "first.mp4"), str(tmp_path / "second.mp4")],
+        args={},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    # File 1 -> 100, baseline reset before file 2 -> 0, file 2 audio -> 35.
+    assert gui.progress_values == pytest.approx([100.0, 0.0, 35.0])
 
 
 def test_process_files_via_server_includes_small_480_suffix(tmp_path: Path) -> None:

@@ -322,11 +322,15 @@ def process_files_via_server(
         else:
             status_text = label
 
-        def _apply_progress(value: float = bar_value) -> None:
-            current_value = float(gui.progress_var.get())
-            gui._set_progress(min(100.0, max(current_value, value)))
-
-        gui._schedule_on_ui_thread(_apply_progress)
+        # ``_handle_remote_progress`` runs synchronously on the background worker
+        # thread, just like the local pipeline callback. Delegate to
+        # ``_set_progress_monotonic`` so the monotonic clamp reads and updates the
+        # synchronous ``_progress_floor`` attribute instead of the Tkinter
+        # ``progress_var``. The variable is only written from inside a deferred
+        # ``root.after`` updater, so back-to-back remote events would otherwise all
+        # observe the same stale value and could queue a lower bar value after a
+        # higher one.
+        gui._set_progress_monotonic(bar_value)
         gui._schedule_on_ui_thread(
             lambda text=status_text: gui._set_status("processing", text)
         )
@@ -348,6 +352,15 @@ def process_files_via_server(
     for index, file in enumerate(files, start=1):
         _ensure_not_stopped()
         basename = os.path.basename(file)
+        if index > 1:
+            # Re-base the progress bar so a completed file does not pin the bar
+            # at 100% while the next file uploads and processes. The first file
+            # is already re-based by the "Starting processing…" run-start reset.
+            # Reset the synchronous ``_progress_floor`` too (not just the visible
+            # bar): ``_set_progress_monotonic`` clamps against the floor, which the
+            # previous file left near 100%, so failing to reset it would keep the
+            # next file's lower-mapped progress pinned at the old value.
+            gui._reset_progress_baseline()
         gui._append_log(f"Uploading {index}/{len(files)}: {basename} to {server_url}")
         input_path = Path(file)
 
