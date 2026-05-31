@@ -388,7 +388,7 @@ class TalksReducerGUI:
                     self._append_log,
                     process_callback=set_process,
                     stop_callback=lambda: self._stop_requested,
-                    progress_callback=self._set_progress,
+                    progress_callback=self._set_progress_monotonic,
                 )
                 for index, file in enumerate(files, start=1):
                     self._append_log(f"Processing: {os.path.basename(file)}")
@@ -1311,6 +1311,20 @@ class TalksReducerGUI:
                 self.drop_hint_button.grid_remove()
 
         self.root.after(0, updater)
+
+    def _set_progress_monotonic(self, percentage: float) -> None:
+        """Update the progress bar without ever moving it backwards.
+
+        Streamed pipeline progress is mapped into stable percentage bands, but a
+        stage that restarts at zero — most notably the final encode falling back
+        to the CPU encoder after a GPU failure — re-enters its band at the start
+        and would otherwise drag the bar behind a value an earlier frame already
+        reached. Clamping against the current value keeps the bar monotonic,
+        matching the synthetic audio timer and the remote progress callback.
+        """
+
+        current_value = float(self.progress_var.get())
+        self._set_progress(min(100.0, max(current_value, float(percentage))))
 
     def _set_progress_bar_style(self, status: str) -> None:
         """Update the progress bar color based on status."""

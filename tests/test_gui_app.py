@@ -510,3 +510,28 @@ def test_advance_audio_progress_does_not_move_bar_backwards():
 
     gui._set_progress.assert_called_once()
     assert gui._set_progress.call_args[0][0] == pytest.approx(25.0)
+
+
+def test_set_progress_monotonic_does_not_move_bar_backwards():
+    """A stage restarting at its band start (e.g. the CPU encoder fallback)
+    must not drag the bar behind a value an earlier frame already reached."""
+
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.progress_var = SimpleNamespace(get=lambda: 70.0)
+    gui._set_progress = MagicMock()
+
+    app.TalksReducerGUI._set_progress_monotonic(gui, 35.0)
+
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(70.0)
+
+
+def test_set_progress_monotonic_forwards_higher_value():
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.progress_var = SimpleNamespace(get=lambda: 35.0)
+    gui._set_progress = MagicMock()
+
+    app.TalksReducerGUI._set_progress_monotonic(gui, 80.0)
+
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(80.0)
