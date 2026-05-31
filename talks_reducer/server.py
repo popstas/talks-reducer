@@ -210,6 +210,19 @@ def _format_duration(seconds: float) -> str:
     return " ".join(parts)
 
 
+def _format_file_size(num_bytes: int) -> str:
+    """Return a compact human-readable file size string."""
+
+    size = float(max(0, int(num_bytes)))
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024.0:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} TB"
+
+
 def _format_summary(result: ProcessingResult) -> str:
     """Produce a Markdown summary of the processing result."""
 
@@ -352,6 +365,11 @@ def process_video(
     if not input_path.exists():
         raise gr.Error("The uploaded file is no longer available on the server.")
 
+    upload_size = input_path.stat().st_size
+    upload_received_message = (
+        f"Upload received: {input_path.name} ({_format_file_size(upload_size)})"
+    )
+
     codec_value = (video_codec or "hevc").strip().lower()
     if codec_value not in {"h264", "hevc", "av1"}:
         codec_value = "hevc"
@@ -414,9 +432,16 @@ def process_video(
         start_in_thread=deps.start_in_thread,
     )
 
-    collected_logs: list[str] = []
+    collected_logs: list[str] = [upload_received_message]
     final_result: Optional[ProcessingResult] = None
     error: Optional[gr.Error] = None
+
+    yield (
+        gr.update(),
+        "\n".join(collected_logs),
+        gr.update(),
+        gr.update(),
+    )
 
     for kind, payload in event_stream:
         if kind == "log":

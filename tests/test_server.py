@@ -332,6 +332,64 @@ def test_process_video_streams_events_and_returns_result(tmp_path: Path) -> None
     assert progress_widget.calls[-1] == (1.0, 10, "Encode")
 
 
+def test_process_video_logs_upload_receipt(tmp_path: Path) -> None:
+    """The first streamed update should announce the received upload."""
+
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"0123456789")
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        with reporter.task(desc="Encode", total=10, unit="frames") as task:
+            task.advance(10)
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or options.input_file,
+            frame_rate=24.0,
+            original_duration=120.0,
+            output_duration=30.0,
+            chunk_count=5,
+            used_cuda=False,
+            max_audio_volume=0.6,
+            time_ratio=0.25,
+            size_ratio=0.3,
+        )
+
+    dependencies = server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                progress=None,
+                dependencies=dependencies,
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+
+    first_log = outputs[0][1]
+    assert "Upload received" in first_log
+    assert "clip.mp4" in first_log
+    assert "10 B" in first_log
+
+    final_log = outputs[-1][1]
+    assert "Upload received" in final_log
+
+
+def test_format_file_size_uses_human_readable_units() -> None:
+    assert server._format_file_size(0) == "0 B"
+    assert server._format_file_size(512) == "512 B"
+    assert server._format_file_size(1536) == "1.5 KB"
+    assert server._format_file_size(5 * 1024 * 1024) == "5.0 MB"
+
+
 def test_process_video_honors_small_480_flag(tmp_path: Path) -> None:
     input_file = tmp_path / "clip.mp4"
     input_file.write_bytes(b"data")

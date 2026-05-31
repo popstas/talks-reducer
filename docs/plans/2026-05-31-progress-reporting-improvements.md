@@ -123,11 +123,11 @@ The original request named `data/TODO.md`, but the progress log records the user
 - Modify: `talks_reducer/server.py`
 - Modify: `tests/test_server.py`
 
-- [ ] Add a server test proving `process_video()` logs the received upload filename and file size before processing starts.
-- [ ] Add the upload-received log/status in `process_video()` after the file exists and before workspace/output setup.
-- [ ] Ensure this log appears in streamed remote logs without changing the final output tuple shape.
-- [ ] Confirm Gradio processing progress still emits `Extracting audio:`, `Audio processing:`, and `Generating final:` task events.
-- [ ] Run `pytest tests/test_server.py tests/test_service_client.py` and confirm it passes before Task 6.
+- [x] Add a server test proving `process_video()` logs the received upload filename and file size before processing starts.
+- [x] Add the upload-received log/status in `process_video()` after the file exists and before workspace/output setup.
+- [x] Ensure this log appears in streamed remote logs without changing the final output tuple shape.
+- [x] Confirm Gradio processing progress still emits `Extracting audio:`, `Audio processing:`, and `Generating final:` task events.
+- [x] Run `pytest tests/test_server.py tests/test_service_client.py` and confirm it passes before Task 6.
 
 ### Task 6: Update documentation
 
