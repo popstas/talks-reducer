@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 from ..pipeline import ProcessingAborted
+from .progress import map_stage_progress
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from .app import TalksReducerGUI
@@ -302,6 +303,29 @@ def process_files_via_server(
         ignored_options = ", ".join(sorted(ignored))
         gui._append_log(f"Server mode ignores the following options: {ignored_options}")
 
+    def _handle_remote_progress(
+        desc: str,
+        current: Optional[int],
+        total: Optional[int],
+        unit: str,
+    ) -> None:
+        """Map streamed remote progress onto the GUI bar and status label."""
+
+        del unit
+        bar_value = map_stage_progress(desc, current, total)
+        if bar_value is None:
+            return
+        label = desc.strip() if isinstance(desc, str) else ""
+        if total and total > 0 and current is not None:
+            percent = min(int(current * 100 / total), 100)
+            status_text = f"{label} {percent}%".strip() if label else f"{percent}%"
+        else:
+            status_text = label
+        gui._schedule_on_ui_thread(lambda value=bar_value: gui._set_progress(value))
+        gui._schedule_on_ui_thread(
+            lambda text=status_text: gui._set_status("processing", text)
+        )
+
     small_mode = bool(args.get("small", False))
     small_target_height = args.get("small_target_height")
     try:
@@ -364,6 +388,7 @@ def process_files_via_server(
                 stream_updates=True,
                 log_callback=gui._append_log,
                 should_cancel=lambda: gui._stop_requested,
+                progress_callback=_handle_remote_progress,
             )
             _ensure_not_stopped()
         except ProcessingAborted:

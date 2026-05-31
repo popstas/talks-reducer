@@ -42,6 +42,7 @@ class StubGUI:
     def __init__(self) -> None:
         self._stop_requested = False
         self.logs: list[str] = []
+        self.progress_values: list[float] = []
         self.status_history: list[tuple[str, str | None]] = []
         self.scheduled_callbacks: list[Callable[[], None]] = []
         self.error_dialogs: list[tuple[str, str]] = []
@@ -67,6 +68,9 @@ class StubGUI:
 
     def _set_status(self, status: str, message: str | None = None) -> None:
         self.status_history.append((status, message))
+
+    def _set_progress(self, percentage: float) -> None:
+        self.progress_values.append(percentage)
 
     def _record_error(self, title: str, message: str) -> None:
         self.error_dialogs.append((title, message))
@@ -329,6 +333,42 @@ def test_process_files_via_server_processes_each_file(tmp_path: Path) -> None:
     assert send_calls and send_calls[0]["output_path"] == output_override
     assert gui.open_button.calls[-1] == {"state": "normal"}
     assert gui._clear_called is True
+
+
+def test_process_files_via_server_streams_final_progress(tmp_path: Path) -> None:
+    gui = StubGUI()
+    captured_callback: dict[str, object] = {}
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            callback = kwargs.get("progress_callback")
+            captured_callback["callback"] = callback
+            assert callable(callback)
+            callback("Audio processing:", 100, 100, "samples")
+            callback("Generating final:", 30, 100, "frames")
+            callback("Generating final:", 100, 100, "frames")
+            return (str(tmp_path / "out.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    assert captured_callback["callback"] is not None
+    # Audio processing complete -> 35, final 30% -> 35 + 0.3 * 65 = 54.5, final done -> 100.
+    assert gui.progress_values == pytest.approx([35.0, 54.5, 100.0])
+    assert ("processing", "Generating final: 30%") in gui.status_history
+    assert ("processing", "Audio processing: 100%") in gui.status_history
 
 
 def test_process_files_via_server_includes_small_480_suffix(tmp_path: Path) -> None:

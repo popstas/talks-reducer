@@ -91,17 +91,17 @@ The original request named `data/TODO.md`, but the progress log records the user
 - Modify: `tests/test_gui_progress.py`
 - Modify: `tests/test_gui_remote.py`
 
-- [ ] Add tests for a shared GUI progress mapper that maps task progress into stable ranges:
+- [x] Add tests for a shared GUI progress mapper that maps task progress into stable ranges:
   - `Uploading:` 0-5%
   - `Extracting audio:` 5-20%
   - `Audio processing:` 20-35%
   - `Generating final:` and fallback final encode 35-100%
   - unknown tasks preserve the existing 0-100 behavior
-- [ ] Implement the mapper in `gui/progress.py` and use it from `_GuiProgressHandle`.
-- [ ] Update `process_files_via_server()` to pass a `progress_callback` into `service_module.send_video()`.
-- [ ] In the remote GUI progress callback, schedule `_set_progress()` and `_set_status("processing", ...)` on the UI thread.
-- [ ] Add GUI remote tests proving streamed `Generating final:` progress advances the progress bar after audio processing.
-- [ ] Run `pytest tests/test_gui_progress.py tests/test_gui_remote.py` and confirm it passes before Task 4.
+- [x] Implement the mapper in `gui/progress.py` and use it from `_GuiProgressHandle`.
+- [x] Update `process_files_via_server()` to pass a `progress_callback` into `service_module.send_video()`.
+- [x] In the remote GUI progress callback, schedule `_set_progress()` and `_set_status("processing", ...)` on the UI thread.
+- [x] Add GUI remote tests proving streamed `Generating final:` progress advances the progress bar after audio processing.
+- [x] Run `pytest tests/test_gui_progress.py tests/test_gui_remote.py` and confirm it passes before Task 4.
 
 ### Task 4: Stop stale audio progress and parse log-only progress milestones
 
