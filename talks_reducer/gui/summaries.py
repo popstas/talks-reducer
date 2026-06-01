@@ -198,8 +198,7 @@ def parse_task_percent(message: str) -> tuple[bool, Optional[tuple[str, float]]]
     ``"Generating final: 30%"`` or ``"Audio processing: 45%"``. The returned
     label keeps its trailing colon so it can be passed straight into
     :func:`map_stage_progress`. Returns ``(False, None)`` when no known task
-    milestone is present and ``(True, None)`` when the percentage cannot be
-    parsed.
+    milestone is present.
     """
 
     match = _TASK_PERCENT_PATTERN.search(message)
@@ -207,11 +206,7 @@ def parse_task_percent(message: str) -> tuple[bool, Optional[tuple[str, float]]]
         return False, None
 
     desc = match.group("desc").strip()
-    try:
-        percent = float(match.group("percent"))
-    except ValueError:
-        return True, None
-
+    percent = float(match.group("percent"))
     return True, (f"{desc}:", percent)
 
 
@@ -457,9 +452,7 @@ class SummaryManager:
             # ``_reset_progress_baseline`` (the queued reset to ``0`` may not have
             # been applied yet) and re-pin the bar at the previous file's ``100``.
             # Local runs leave the floor at zero, preserving prior behavior.
-            self.gui._set_progress_monotonic(
-                float(getattr(self.gui, "_progress_floor", 0.0))
-            )
+            self.gui._set_progress_monotonic(float(self.gui._progress_floor))
             self.gui._video_duration_seconds = None
             self.gui._encode_target_duration_seconds = None
             self.gui._encode_total_frames = None

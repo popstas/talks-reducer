@@ -467,15 +467,18 @@ def test_process_video_honors_add_codec_suffix(tmp_path: Path) -> None:
         start_in_thread=False,
     )
 
-    outputs = list(
-        server.process_video(
-            str(input_file),
-            small_video=False,
-            video_codec="h264",
-            add_codec_suffix=True,
-            dependencies=dependencies,
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                video_codec="h264",
+                add_codec_suffix=True,
+                dependencies=dependencies,
+            )
         )
-    )
+    finally:
+        server._cleanup_workspaces()
 
     assert outputs
     final = outputs[-1]
@@ -512,16 +515,19 @@ def test_process_video_without_speedup_forces_codec(tmp_path: Path) -> None:
         start_in_thread=False,
     )
 
-    outputs = list(
-        server.process_video(
-            str(input_file),
-            small_video=False,
-            video_codec="av1",
-            silent_speed=1.0,
-            sounded_speed=1.0,
-            dependencies=dependencies,
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                video_codec="av1",
+                silent_speed=1.0,
+                sounded_speed=1.0,
+                dependencies=dependencies,
+            )
         )
-    )
+    finally:
+        server._cleanup_workspaces()
 
     assert outputs
     final = outputs[-1]
@@ -556,14 +562,17 @@ def test_process_video_honors_use_global_ffmpeg(tmp_path: Path) -> None:
         start_in_thread=False,
     )
 
-    outputs = list(
-        server.process_video(
-            str(input_file),
-            small_video=False,
-            use_global_ffmpeg=True,
-            dependencies=dependencies,
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                use_global_ffmpeg=True,
+                dependencies=dependencies,
+            )
         )
-    )
+    finally:
+        server._cleanup_workspaces()
 
     assert outputs[-1][0] is not None
 
