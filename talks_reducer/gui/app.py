@@ -390,6 +390,7 @@ class TalksReducerGUI:
                     process_callback=set_process,
                     stop_callback=lambda: self._stop_requested,
                     progress_callback=self._set_progress_monotonic,
+                    stage_callback=self._apply_stage_transition,
                 )
                 for index, file in enumerate(files, start=1):
                     self._reset_progress_baseline()
@@ -1182,6 +1183,25 @@ class TalksReducerGUI:
                 self._set_progress_monotonic(self.AUDIO_PROGRESS_WEIGHT)
 
         self._schedule_on_ui_thread(_complete)
+
+    def _apply_stage_transition(self, desc: str) -> None:
+        """Stop the synthetic audio timer when real stage progress arrives.
+
+        The synthetic ``Audio processing:`` timer is only a fallback for when the
+        pipeline cannot report real audio progress. Every structured progress
+        channel — the local pipeline reporter, the remote streaming callback, and
+        the log-parsed ``Task: NN%`` milestones — routes its stage label through
+        this helper so the fallback timer never keeps overwriting the status with
+        synthetic percentages after real progress has begun. Real
+        ``Audio processing:`` progress cancels the timer, while ``Generating
+        final`` progress completes the audio phase outright.
+        """
+
+        normalized = (desc or "").strip().lower()
+        if normalized.startswith("generating final"):
+            self._complete_audio_phase()
+        elif normalized.startswith("audio processing"):
+            self._cancel_audio_progress()
 
     def _get_status_style(self, status: str) -> str | None:
         """Return the foreground color for *status* if a match is known."""

@@ -370,6 +370,27 @@ def _make_summary_gui(progress_value: float = 0.0) -> SimpleNamespace:
     return gui
 
 
+def test_apply_stage_transition_routes_structured_stages():
+    """The shared helper cancels the timer on audio and completes it on final."""
+
+    gui = SimpleNamespace(
+        _complete_audio_phase=MagicMock(),
+        _cancel_audio_progress=MagicMock(),
+    )
+
+    app.TalksReducerGUI._apply_stage_transition(gui, "Audio processing:")
+    gui._cancel_audio_progress.assert_called_once()
+    gui._complete_audio_phase.assert_not_called()
+
+    app.TalksReducerGUI._apply_stage_transition(gui, "Generating final (fallback):")
+    gui._complete_audio_phase.assert_called_once()
+
+    # Unknown stages (e.g. uploading/extracting) leave the timer untouched.
+    app.TalksReducerGUI._apply_stage_transition(gui, "Uploading:")
+    gui._cancel_audio_progress.assert_called_once()
+    gui._complete_audio_phase.assert_called_once()
+
+
 def test_summary_manager_generating_final_percent_advances_progress():
     gui = _make_summary_gui(progress_value=10.0)
     manager = summaries.SummaryManager(gui)

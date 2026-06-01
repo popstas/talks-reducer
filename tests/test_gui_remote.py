@@ -50,6 +50,7 @@ class StubGUI:
             set=self._set_progress_value,
         )
         self.status_history: list[tuple[str, str | None]] = []
+        self.stage_transitions: list[str] = []
         self.scheduled_callbacks: list[Callable[[], None]] = []
         self.error_dialogs: list[tuple[str, str]] = []
         self.warning_dialogs: list[tuple[str, str]] = []
@@ -67,6 +68,9 @@ class StubGUI:
 
     def _append_log(self, message: str) -> None:
         self.logs.append(message)
+
+    def _apply_stage_transition(self, desc: str) -> None:
+        self.stage_transitions.append(desc)
 
     def _schedule_on_ui_thread(self, callback):  # noqa: ANN001
         self.scheduled_callbacks.append(callback)
@@ -391,6 +395,13 @@ def test_process_files_via_server_streams_final_progress(tmp_path: Path) -> None
     assert gui.progress_values == pytest.approx([35.0, 54.5, 100.0])
     assert ("processing", "Generating final: 30%") in gui.status_history
     assert ("processing", "Audio processing: 100%") in gui.status_history
+    # Real streamed audio/final progress must drive the synthetic-timer
+    # transitions so the fallback cannot keep overwriting the status.
+    assert gui.stage_transitions == [
+        "Audio processing:",
+        "Generating final:",
+        "Generating final:",
+    ]
 
 
 def test_process_files_via_server_progress_never_moves_backwards(

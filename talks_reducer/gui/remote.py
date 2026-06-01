@@ -312,6 +312,11 @@ def process_files_via_server(
         """Map streamed remote progress onto the GUI bar and status label."""
 
         del unit
+        # Real streamed audio/final progress makes the synthetic audio fallback
+        # timer redundant: cancel it on ``Audio processing:`` and complete the
+        # audio phase on ``Generating final`` so the timer cannot keep overwriting
+        # the status with synthetic percentages.
+        gui._apply_stage_transition(desc if isinstance(desc, str) else "")
         bar_value = map_stage_progress(desc, current, total)
         if bar_value is None:
             return

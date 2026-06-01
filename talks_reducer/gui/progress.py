@@ -54,9 +54,11 @@ class _GuiProgressHandle(CallbackProgressHandle):
         *,
         total: Optional[int] = None,
         progress_callback: Optional[Callable[[float], None]] = None,
+        stage_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
         self._log_callback = log_callback
         self._progress_callback = progress_callback
+        self._stage_callback = stage_callback
         self._last_reported_value: Optional[float] = None
         super().__init__(
             desc=desc,
@@ -68,6 +70,11 @@ class _GuiProgressHandle(CallbackProgressHandle):
 
     def _on_start(self, desc: str, total: Optional[int]) -> None:
         del total
+        if desc and self._stage_callback is not None:
+            # Notify the GUI as soon as the structured stage opens so the
+            # synthetic audio fallback timer can be cancelled before it overwrites
+            # the status with synthetic percentages.
+            self._stage_callback(desc)
         if desc:
             self._log_callback(f"{desc} started")
 
@@ -96,12 +103,14 @@ class _TkProgressReporter(SignalProgressReporter):
         *,
         stop_callback: Optional[Callable[[], bool]] = None,
         progress_callback: Optional[Callable[[float], None]] = None,
+        stage_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
         super().__init__()
         self._log_callback = log_callback
         self.process_callback = process_callback
         self._stop_callback = stop_callback
         self._progress_callback = progress_callback
+        self._stage_callback = stage_callback
 
     def log(self, message: str) -> None:
         self._log_callback(message)
@@ -116,6 +125,7 @@ class _TkProgressReporter(SignalProgressReporter):
             desc,
             total=total,
             progress_callback=self._progress_callback,
+            stage_callback=self._stage_callback,
         )
 
     def stop_requested(self) -> bool:

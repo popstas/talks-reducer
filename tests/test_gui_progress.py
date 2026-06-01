@@ -56,6 +56,23 @@ def test_gui_progress_handle_uses_stage_mapper() -> None:
     assert values[-1] == pytest.approx(100.0)
 
 
+def test_gui_progress_handle_invokes_stage_callback_on_start() -> None:
+    logs: list[str] = []
+    stages: list[str] = []
+    reporter = _TkProgressReporter(
+        logs.append,
+        progress_callback=lambda _value: None,
+        stage_callback=stages.append,
+    )
+
+    with reporter.task(desc="Audio processing:", total=100) as handle:
+        handle.advance(50)
+
+    # The structured stage opens once, before any progress is reported, so the
+    # GUI can cancel the synthetic audio fallback timer immediately.
+    assert stages == ["Audio processing:"]
+
+
 def test_gui_progress_handle_context_manager_logs_completion(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
