@@ -50,6 +50,7 @@ launches.
   - `audio.py` handles audio validation, volume analysis, and phase vocoder processing.
   - `chunks.py` builds timing metadata and FFmpeg expressions for frame selection.
   - `ffmpeg.py` discovers the FFmpeg binary, checks CUDA availability, and assembles command strings.
+  - `gui/progress.py` defines `STAGE_PROGRESS_RANGES` and `map_stage_progress()`, which map each remote pipeline stage onto fixed GUI percentage bands (`Uploading:` 0–5%, `Extracting audio:` 5–20%, `Audio processing:` 20–35%, `Generating final` 35–100%).
 - `requirements.txt` — Python dependencies for local development.
 - `default.nix` — reproducible environment definition for Nix users.
 - `CONTRIBUTION.md` — development workflow, formatting expectations, and release checklist.
@@ -70,4 +71,10 @@ launches.
 2. Extract audio and calculate loudness to identify silent regions.
 3. Stretch the non-silent segments with `audiotsm` to maintain speech clarity.
 4. Stitch the processed audio and video together with FFmpeg, using NVENC if the GPU encoders are detected.
+
+## GUI Progress Convention
+
+- Update the desktop progress bar through `TalksReducerGUI._set_progress_monotonic()`, which clamps each value against the synchronous `_progress_floor` so the bar never moves backwards (e.g. when the final encode falls back from GPU to CPU and restarts its stage at zero). Call `_reset_progress_baseline()` to re-base the floor for the next file in a batch.
+- Never read `progress_var` from a worker thread to compute the next value: it is applied via a queued `root.after` callback and will be stale. `_progress_floor` is the single source of truth.
+- Every progress channel — structured `progress.advance`, remote streaming, frame/time encode parsing, log-only `Task: NN%` milestones, and the synthetic audio timer — must route through `_set_progress_monotonic()`.
 

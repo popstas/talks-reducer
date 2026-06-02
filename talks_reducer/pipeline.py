@@ -328,14 +328,21 @@ def speed_up_video(
         _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
         new_speeds = [options.silent_speed, options.sounded_speed]
-        output_audio_data, updated_chunks = audio_utils.process_audio_chunks(
-            audio_data,
-            chunks,
-            samples_per_frame,
-            new_speeds,
-            options.audio_fade_envelope_size,
-            max_audio_volume,
-        )
+        audio_sample_total = audio_sample_count if audio_sample_count > 0 else None
+        with reporter.task(
+            desc="Audio processing:",
+            total=audio_sample_total,
+            unit="samples",
+        ) as audio_task:
+            output_audio_data, updated_chunks = audio_utils.process_audio_chunks(
+                audio_data,
+                chunks,
+                samples_per_frame,
+                new_speeds,
+                options.audio_fade_envelope_size,
+                max_audio_volume,
+                progress_callback=audio_task.advance,
+            )
 
         audio_new_path = job_temp_path / "audioNew.wav"
         # Use the sample rate that was actually used for processing
@@ -493,7 +500,7 @@ def speed_up_video(
                         fps=frame_rate,
                     )
                 )
-            reporter.log("starting processing with FFmpeg fallback command:")
+            reporter.log("Executing FFmpeg fallback command:")
             reporter.log(fallback_command_str)
             dependencies.run_timed_ffmpeg_command(
                 fallback_command_str,

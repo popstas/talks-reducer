@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import math
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
-from talks_reducer.gui import app
+from talks_reducer.gui import app, summaries
 from talks_reducer.gui.theme import STATUS_COLORS
 
 
@@ -297,6 +298,255 @@ def test_is_encode_target_duration_unknown_detects_indicator():
 
 
 @pytest.mark.parametrize(
+    ("message", "expected_label", "expected_percent"),
+    [
+        ("Generating final: 30%", "Generating final:", 30.0),
+        ("Generating final (fallback): 30%", "Generating final (fallback):", 30.0),
+        ("Audio processing: 45%", "Audio processing:", 45.0),
+        ("Uploading: 50%", "Uploading:", 50.0),
+        ("Extracting audio: 12.5%", "Extracting audio:", 12.5),
+    ],
+)
+def test_parse_task_percent_extracts_values(message, expected_label, expected_percent):
+    found, result = app._parse_task_percent(message)
+
+    assert found is True
+    assert result == (expected_label, expected_percent)
+
+
+def test_parse_task_percent_matches_tqdm_style_bar():
+    message = "Generating final:  30%|███       | 100/330 [00:05<00:11]"
+
+    found, result = app._parse_task_percent(message)
+
+    assert found is True
+    assert result == ("Generating final:", 30.0)
+
+
+def test_parse_task_percent_missing_returns_false():
+    found, result = app._parse_task_percent("source metadata: duration: 12.5s")
+
+    assert found is False
+    assert result is None
+
+
+def test_parse_task_percent_ignores_summary_size_line():
+    found, result = app._parse_task_percent("**Size:** 17.25%")
+
+    assert found is False
+    assert result is None
+
+
+def _make_summary_gui(progress_value: float = 0.0) -> SimpleNamespace:
+    """Build a stub GUI that records progress-related calls for SummaryManager."""
+
+    gui = SimpleNamespace()
+    gui._source_duration_seconds = None
+    gui._encode_total_frames = None
+    gui._encode_current_frame = None
+    gui._encode_target_duration_seconds = None
+    gui._video_duration_seconds = None
+    gui._last_progress_seconds = None
+    gui._status_state = "processing"
+    gui.AUDIO_PROGRESS_WEIGHT = 5.0
+    gui._progress_floor = 0.0
+    gui.progress_var = SimpleNamespace(get=lambda: progress_value)
+    gui._set_progress = MagicMock()
+    gui._set_status = MagicMock()
+    gui._complete_audio_phase = MagicMock()
+    gui._cancel_audio_progress = MagicMock()
+    gui._start_audio_progress = MagicMock()
+    gui._reset_audio_progress_state = MagicMock()
+    gui._reset_progress_baseline = MagicMock()
+
+    def _set_progress_monotonic(percentage: float) -> None:
+        """Mirror the production monotonic clamp so the floor is written."""
+
+        value = min(100.0, max(gui._progress_floor, float(percentage)))
+        gui._progress_floor = value
+        gui._set_progress(value)
+
+    gui._set_progress_monotonic = _set_progress_monotonic
+    return gui
+
+
+def test_apply_stage_transition_routes_structured_stages():
+    """The shared helper cancels the timer on audio and completes it on final."""
+
+    gui = SimpleNamespace(
+        _complete_audio_phase=MagicMock(),
+        _cancel_audio_progress=MagicMock(),
+    )
+
+    app.TalksReducerGUI._apply_stage_transition(gui, "Audio processing:")
+    gui._cancel_audio_progress.assert_called_once()
+    gui._complete_audio_phase.assert_not_called()
+
+    app.TalksReducerGUI._apply_stage_transition(gui, "Generating final (fallback):")
+    gui._complete_audio_phase.assert_called_once()
+
+    # Unknown stages (e.g. uploading/extracting) leave the timer untouched.
+    app.TalksReducerGUI._apply_stage_transition(gui, "Uploading:")
+    gui._cancel_audio_progress.assert_called_once()
+    gui._complete_audio_phase.assert_called_once()
+
+
+def test_summary_manager_generating_final_percent_advances_progress():
+    gui = _make_summary_gui(progress_value=10.0)
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Generating final: 30%")
+
+    gui._complete_audio_phase.assert_called_once()
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(54.5)
+
+
+def test_summary_manager_audio_processing_percent_cancels_synthetic_timer():
+    gui = _make_summary_gui(progress_value=0.0)
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Audio processing: 45%")
+
+    gui._cancel_audio_progress.assert_called_once()
+    gui._complete_audio_phase.assert_not_called()
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(26.75)
+
+
+def test_summary_manager_task_percent_never_moves_backwards():
+    # Every channel that advances the bar raises ``_progress_floor`` through the
+    # monotonic clamp, so the floor — not the asynchronously-applied
+    # ``progress_var`` — is the source of truth for the bar position.
+    gui = _make_summary_gui(progress_value=0.0)
+    gui._progress_floor = 70.0
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Generating final: 30%")
+
+    assert gui._set_progress.call_args[0][0] == pytest.approx(70.0)
+
+
+def test_summary_manager_task_percent_raises_floor_on_log_only_path():
+    """A log-only final milestone must raise the floor so the audio-phase
+    completion callback cannot snap the bar back down.
+
+    On the log-only fallback path no structured channel raises
+    ``_progress_floor``. ``_handle_task_percent`` queues ``_complete_audio_phase``
+    (which later applies ``AUDIO_PROGRESS_WEIGHT`` through the monotonic clamp)
+    before applying the mapped milestone. Unless the milestone writes the floor,
+    that trailing callback would clamp against the old floor and regress the bar
+    from 54.5% back to 5%.
+    """
+
+    gui = _make_summary_gui(progress_value=5.0)
+    gui._progress_floor = 5.0
+
+    manager = summaries.SummaryManager(gui)
+    manager.update_status_from_message("Generating final: 30%")
+
+    # The floor is raised to the mapped milestone, so a subsequent monotonic
+    # update at AUDIO_PROGRESS_WEIGHT cannot move the bar backwards.
+    assert gui._progress_floor == pytest.approx(54.5)
+    gui._set_progress_monotonic(gui.AUDIO_PROGRESS_WEIGHT)
+    assert gui._set_progress.call_args[0][0] == pytest.approx(54.5)
+
+
+def test_summary_manager_task_percent_clamps_against_progress_floor():
+    """The coarse log milestone must not undercut the exact structured update.
+
+    Locally, ``progress.advance`` raises ``_progress_floor`` synchronously to the
+    exact frame percentage before the rounded ``Generating final: NN%`` log line
+    is parsed, but the structured ``_set_progress`` is applied asynchronously, so
+    ``progress_var`` can still read a stale, lower value. The parser must clamp
+    against the floor so the bar does not regress behind the queued update.
+    """
+
+    gui = _make_summary_gui(progress_value=10.0)
+    # Structured channel already advanced to the exact 47% final-encode value.
+    gui._progress_floor = 65.55
+
+    manager = summaries.SummaryManager(gui)
+
+    # The rounded "40%" milestone maps to 61.0, which is below the floor.
+    manager.update_status_from_message("Generating final: 40%")
+
+    assert gui._set_progress.call_args[0][0] == pytest.approx(65.55)
+
+
+def test_summary_manager_starting_processing_resets_progress_floor():
+    """A new run must clear the floor so a prior local batch cannot pin it."""
+
+    gui = _make_summary_gui(progress_value=100.0)
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Starting processing…")
+
+    gui._reset_progress_baseline.assert_called_once()
+
+
+def test_summary_manager_extracting_audio_preserves_upload_progress():
+    """Remote upload progress must not be reset when extraction begins.
+
+    In remote mode the streamed ``Uploading:`` band advances the bar to ~5%
+    before the server logs ``Extracting audio...``. The upload band is applied
+    through the monotonic clamp, so it has raised ``_progress_floor`` to 5%. That
+    log line must keep the bar where it is rather than dragging it back to zero
+    ahead of the ``Extracting audio: NN%`` milestones.
+    """
+
+    gui = _make_summary_gui(progress_value=0.0)
+    gui._progress_floor = 5.0
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Extracting audio...")
+
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(5.0)
+    gui._start_audio_progress.assert_called_once()
+
+
+def test_summary_manager_extracting_audio_starts_at_zero_locally():
+    """Local runs have no upload band, so extraction still starts at zero."""
+
+    gui = _make_summary_gui(progress_value=0.0)
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Extracting audio...")
+
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(0.0)
+
+
+def test_summary_manager_new_job_resets_progress_floor():
+    """A ``Processing N/M:`` line for a new file must clear the monotonic floor.
+
+    Zeroing only the visible bar would leave ``_progress_floor`` at the previous
+    file's completed value, so the next file's lower-mapped progress would be
+    clamped back up. The branch must re-base the floor like the run-start reset.
+    """
+
+    gui = _make_summary_gui(progress_value=100.0)
+    gui._progress_floor = 100.0
+    gui._status_state = "processing"
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Processing 2/3: clip.mp4")
+
+    gui._reset_progress_baseline.assert_called_once()
+
+
+def test_summary_manager_final_encode_target_completes_audio_phase():
+    gui = _make_summary_gui()
+    manager = summaries.SummaryManager(gui)
+
+    manager.update_status_from_message("Final encode target frames: 4800")
+
+    gui._complete_audio_phase.assert_called_once()
+    assert gui._encode_total_frames == 4800
+
+
+@pytest.mark.parametrize(
     ("percentage", "expected"),
     [
         (-10, "#f87171"),
@@ -382,3 +632,136 @@ def test_apply_status_style_ignores_unknown_status():
     app.TalksReducerGUI._apply_status_style(gui, "something else entirely")
 
     assert gui.status_label.calls == []
+
+
+def test_advance_audio_progress_does_not_move_bar_backwards():
+    """The synthetic 0-5% timer must not drag the bar back once real progress
+    from the extraction or audio-processing reporter has advanced past it."""
+
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.AUDIO_PROGRESS_STEPS = app.TalksReducerGUI.AUDIO_PROGRESS_STEPS
+    gui.AUDIO_PROGRESS_WEIGHT = app.TalksReducerGUI.AUDIO_PROGRESS_WEIGHT
+    gui.DEFAULT_AUDIO_INTERVAL_MS = app.TalksReducerGUI.DEFAULT_AUDIO_INTERVAL_MS
+    gui._audio_progress_job = None
+    gui._audio_progress_steps_completed = 0
+    gui._audio_progress_interval_ms = 100
+    # Real audio-processing progress has already raised ``_progress_floor`` to
+    # 25%, but its queued ``_set_progress`` update has not applied yet, so the
+    # Tk variable still reads a stale ``0``. The timer must clamp against the
+    # synchronous floor, not the stale variable.
+    gui._progress_floor = 25.0
+    gui.progress_var = SimpleNamespace(get=lambda: 0.0)
+    gui._set_progress = MagicMock()
+    gui._set_status = MagicMock()
+    gui.root = SimpleNamespace(after=lambda *_args, **_kwargs: "job")
+
+    app.TalksReducerGUI._advance_audio_progress(gui)
+
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(25.0)
+    assert gui._progress_floor == pytest.approx(25.0)
+
+
+def test_set_progress_monotonic_does_not_move_bar_backwards():
+    """A stage restarting at its band start (e.g. the CPU encoder fallback)
+    must not drag the bar behind a value an earlier frame already reached."""
+
+    gui = object.__new__(app.TalksReducerGUI)
+    gui._progress_floor = 70.0
+    gui._set_progress = MagicMock()
+
+    app.TalksReducerGUI._set_progress_monotonic(gui, 35.0)
+
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(70.0)
+    assert gui._progress_floor == pytest.approx(70.0)
+
+
+def test_set_progress_monotonic_forwards_higher_value():
+    gui = object.__new__(app.TalksReducerGUI)
+    gui._progress_floor = 35.0
+    gui._set_progress = MagicMock()
+
+    app.TalksReducerGUI._set_progress_monotonic(gui, 80.0)
+
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(80.0)
+    assert gui._progress_floor == pytest.approx(80.0)
+
+
+def test_complete_audio_phase_does_not_regress_below_floor():
+    """Completing the audio phase must not snap the bar back to 5%.
+
+    Callers invoke ``_complete_audio_phase`` immediately before queuing a higher
+    final-encode percentage. Because both schedule through ``root.after(0, ...)``
+    in FIFO order, the nested floor bump applies *after* that higher value, so a
+    plain ``_set_progress(AUDIO_PROGRESS_WEIGHT)`` would drag the bar backwards.
+    Clamping against ``_progress_floor`` keeps the real progress instead.
+    """
+
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.AUDIO_PROGRESS_STEPS = app.TalksReducerGUI.AUDIO_PROGRESS_STEPS
+    gui.AUDIO_PROGRESS_WEIGHT = app.TalksReducerGUI.AUDIO_PROGRESS_WEIGHT
+    gui._audio_progress_job = None
+    gui._audio_progress_steps_completed = 0
+    gui._audio_progress_interval_ms = None
+    # The structured progress channel already advanced the floor to the top of
+    # the audio band before the encode milestone triggered completion.
+    gui._progress_floor = 35.0
+    gui.progress_var = SimpleNamespace(get=lambda: 0.0)
+    gui._set_progress = MagicMock()
+    gui.root = SimpleNamespace(after_cancel=lambda *_: None)
+    gui._schedule_on_ui_thread = lambda callback: callback()
+
+    app.TalksReducerGUI._complete_audio_phase(gui)
+
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(35.0)
+    assert gui._progress_floor == pytest.approx(35.0)
+    assert (
+        gui._audio_progress_steps_completed == app.TalksReducerGUI.AUDIO_PROGRESS_STEPS
+    )
+
+
+def test_complete_audio_phase_raises_low_bar_to_audio_weight():
+    """With no real progress yet, completion still lifts the bar to 5%."""
+
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.AUDIO_PROGRESS_STEPS = app.TalksReducerGUI.AUDIO_PROGRESS_STEPS
+    gui.AUDIO_PROGRESS_WEIGHT = app.TalksReducerGUI.AUDIO_PROGRESS_WEIGHT
+    gui._audio_progress_job = None
+    gui._audio_progress_steps_completed = 0
+    gui._audio_progress_interval_ms = None
+    gui._progress_floor = 0.0
+    gui.progress_var = SimpleNamespace(get=lambda: 0.0)
+    gui._set_progress = MagicMock()
+    gui.root = SimpleNamespace(after_cancel=lambda *_: None)
+    gui._schedule_on_ui_thread = lambda callback: callback()
+
+    app.TalksReducerGUI._complete_audio_phase(gui)
+
+    gui._set_progress.assert_called_once()
+    assert gui._set_progress.call_args[0][0] == pytest.approx(
+        app.TalksReducerGUI.AUDIO_PROGRESS_WEIGHT
+    )
+    assert gui._progress_floor == pytest.approx(
+        app.TalksReducerGUI.AUDIO_PROGRESS_WEIGHT
+    )
+
+
+def test_reset_progress_baseline_clears_floor_for_next_file():
+    """Each file in a batch must start from zero so a completed file cannot pin
+    the monotonic clamp at the previous file's final value."""
+
+    gui = object.__new__(app.TalksReducerGUI)
+    gui._progress_floor = 100.0
+    gui._set_progress = MagicMock()
+
+    app.TalksReducerGUI._reset_progress_baseline(gui)
+
+    assert gui._progress_floor == pytest.approx(0.0)
+    gui._set_progress.assert_called_once_with(0.0)
+
+    # After re-basing, a lower mapped value from the next file is honored.
+    app.TalksReducerGUI._set_progress_monotonic(gui, 12.0)
+    assert gui._set_progress.call_args[0][0] == pytest.approx(12.0)

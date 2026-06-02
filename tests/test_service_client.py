@@ -110,6 +110,102 @@ def test_pump_job_updates_emits_logs_and_progress():
     assert progress_events == [("Encode", 4, 8, "frames")]
 
 
+def test_emit_progress_update_uses_normalized_index():
+    """An ``index`` field should win over the raw ``progress`` value."""
+
+    events: list[tuple[str, Optional[int], Optional[int], str]] = []
+    service_client._emit_progress_update(
+        lambda *args: events.append(args),
+        {"desc": "Encode", "length": 8, "index": 4, "progress": 0.5, "unit": "frames"},
+    )
+
+    assert events == [("Encode", 4, 8, "frames")]
+
+
+def test_emit_progress_update_uses_raw_count_progress():
+    """A raw count in ``progress`` should be forwarded as the current value."""
+
+    events: list[tuple[str, Optional[int], Optional[int], str]] = []
+    service_client._emit_progress_update(
+        lambda *args: events.append(args),
+        {"desc": "Encode", "length": 8, "progress": 4, "unit": "frames"},
+    )
+
+    assert events == [("Encode", 4, 8, "frames")]
+
+
+def test_emit_progress_update_uses_fractional_progress():
+    """A fractional ``progress`` value should be scaled by ``length``."""
+
+    events: list[tuple[str, Optional[int], Optional[int], str]] = []
+    service_client._emit_progress_update(
+        lambda *args: events.append(args),
+        {"desc": "Encode", "length": 8, "progress": 0.5, "unit": "frames"},
+    )
+
+    assert events == [("Encode", 4, 8, "frames")]
+
+
+def test_send_video_emits_upload_progress(monkeypatch, tmp_path):
+    """``send_video`` should emit start/complete ``Uploading:`` progress events."""
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"input-bytes")
+    server_file = tmp_path / "server_output.mp4"
+    server_file.write_bytes(b"processed")
+
+    client_instance = DummyClient("http://localhost:9005/")
+    client_instance.job_outputs = [
+        (str(server_file), "log", "summary", str(server_file))
+    ]
+
+    monkeypatch.setattr(service_client, "Client", lambda url: client_instance)
+    monkeypatch.setattr(
+        service_client, "gradio_file", lambda path: SimpleNamespace(path=path)
+    )
+
+    progress_events: list[tuple[str, Optional[int], Optional[int], str]] = []
+    service_client.send_video(
+        input_path=input_file,
+        output_path=tmp_path / "output.mp4",
+        server_url="http://localhost:9005/",
+        progress_callback=lambda *args: progress_events.append(args),
+    )
+
+    upload_total = input_file.stat().st_size
+    assert progress_events[0] == ("Uploading:", 0, upload_total, "bytes")
+    assert ("Uploading:", upload_total, upload_total, "bytes") in progress_events
+
+
+def test_send_video_without_callback_skips_upload_progress(monkeypatch, tmp_path):
+    """Callers without a ``progress_callback`` should behave exactly as before."""
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"input-bytes")
+    server_file = tmp_path / "server_output.mp4"
+    server_file.write_bytes(b"processed")
+
+    client_instance = DummyClient("http://localhost:9005/")
+    client_instance.job_outputs = [
+        (str(server_file), "log", "summary", str(server_file))
+    ]
+
+    monkeypatch.setattr(service_client, "Client", lambda url: client_instance)
+    monkeypatch.setattr(
+        service_client, "gradio_file", lambda path: SimpleNamespace(path=path)
+    )
+
+    destination, summary, log_text = service_client.send_video(
+        input_path=input_file,
+        output_path=tmp_path / "output.mp4",
+        server_url="http://localhost:9005/",
+    )
+
+    assert destination == tmp_path / "output.mp4"
+    assert summary == "summary"
+    assert log_text == "log"
+
+
 def test_send_video_stream_updates_cancel(monkeypatch, tmp_path):
     input_file = tmp_path / "input.mp4"
     input_file.write_bytes(b"input")
@@ -321,7 +417,12 @@ def test_send_video_stream_flag(monkeypatch, tmp_path):
 
     assert stream_calls, "stream helper was not invoked"
     assert streamed_lines == ["first", "second"]
-    assert progress_events == [("Processing", 1, 4, "frames")]
+    upload_total = input_file.stat().st_size
+    assert progress_events == [
+        ("Uploading:", 0, upload_total, "bytes"),
+        ("Uploading:", upload_total, upload_total, "bytes"),
+        ("Processing", 1, 4, "frames"),
+    ]
     assert summary == "summary"
     assert log_text == "first\nsecond"
     assert destination.name == server_file.name

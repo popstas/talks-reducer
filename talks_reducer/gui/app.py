@@ -52,6 +52,7 @@ try:
         parse_ffmpeg_progress,
         parse_ratios_from_summary,
         parse_source_duration_seconds,
+        parse_task_percent,
         parse_video_duration_seconds,
     )
     from .theme import (
@@ -95,6 +96,7 @@ except ImportError:  # pragma: no cover - handled at runtime
         parse_ffmpeg_progress,
         parse_ratios_from_summary,
         parse_source_duration_seconds,
+        parse_task_percent,
         parse_video_duration_seconds,
     )
     from talks_reducer.gui.theme import (
@@ -187,6 +189,7 @@ class TalksReducerGUI:
         self._audio_progress_interval_ms: Optional[int] = None
         self._audio_progress_steps_completed = 0
         self.progress_var = tk.DoubleVar(value=0.0)
+        self._progress_floor: float = 0.0
         self._ffmpeg_process: Optional[subprocess.Popen] = None
         self._stop_requested = False
         self._ping_worker_stop_requested = False
@@ -386,9 +389,11 @@ class TalksReducerGUI:
                     self._append_log,
                     process_callback=set_process,
                     stop_callback=lambda: self._stop_requested,
-                    progress_callback=self._set_progress,
+                    progress_callback=self._set_progress_monotonic,
+                    stage_callback=self._apply_stage_transition,
                 )
                 for index, file in enumerate(files, start=1):
+                    self._reset_progress_baseline()
                     self._append_log(f"Processing: {os.path.basename(file)}")
                     options = self._create_processing_options(Path(file), args)
                     result = speed_up_video(options, reporter=reporter)
@@ -1113,7 +1118,16 @@ class TalksReducerGUI:
             self._audio_progress_steps_completed / self.AUDIO_PROGRESS_STEPS * 100
         )
         percentage = (audio_percentage / 100.0) * self.AUDIO_PROGRESS_WEIGHT
-        self._set_progress(percentage)
+        # The synthetic timer only fills the 0-5% band. Route the bump through
+        # the monotonic clamp so it can never drag the bar backwards once real
+        # extraction or audio-processing progress has advanced past it. Reading
+        # ``progress_var`` directly is unsafe: real progress raises
+        # ``_progress_floor`` synchronously but applies the Tk variable through a
+        # queued ``_set_progress`` callback, so this timer — already scheduled in
+        # the event loop — could observe a stale, lower value (e.g. ``0``) and
+        # queue a bump that lands after the real update, snapping the bar back.
+        # Clamping against ``_progress_floor`` keeps the real progress instead.
+        self._set_progress_monotonic(percentage)
         self._set_status("processing", f"Audio processing: {audio_percentage:.1f}%")
 
         if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
@@ -1155,11 +1169,39 @@ class TalksReducerGUI:
             self._audio_progress_interval_ms = None
             if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
                 self._audio_progress_steps_completed = self.AUDIO_PROGRESS_STEPS
-                current_value = float(self.progress_var.get())
-                if current_value < self.AUDIO_PROGRESS_WEIGHT:
-                    self._set_progress(self.AUDIO_PROGRESS_WEIGHT)
+                # Route the floor bump through the monotonic clamp rather than a
+                # stale ``progress_var`` read. ``_complete`` already runs inside a
+                # ``root.after`` callback, so a plain ``_set_progress`` here would
+                # schedule a *second* nested update that can land after a higher
+                # final-encode value queued earlier in the same batch (callers
+                # invoke ``_complete_audio_phase`` immediately before pushing a
+                # frame/time percentage), snapping the bar backwards — e.g.
+                # 35% -> 5%. Clamping against ``_progress_floor`` — the synchronous
+                # source of truth raised by the structured progress channel — keeps
+                # the audio-phase floor at ``AUDIO_PROGRESS_WEIGHT`` without ever
+                # undercutting real progress.
+                self._set_progress_monotonic(self.AUDIO_PROGRESS_WEIGHT)
 
         self._schedule_on_ui_thread(_complete)
+
+    def _apply_stage_transition(self, desc: str) -> None:
+        """Stop the synthetic audio timer when real stage progress arrives.
+
+        The synthetic ``Audio processing:`` timer is only a fallback for when the
+        pipeline cannot report real audio progress. Every structured progress
+        channel — the local pipeline reporter, the remote streaming callback, and
+        the log-parsed ``Task: NN%`` milestones — routes its stage label through
+        this helper so the fallback timer never keeps overwriting the status with
+        synthetic percentages after real progress has begun. Real
+        ``Audio processing:`` progress cancels the timer, while ``Generating
+        final`` progress completes the audio phase outright.
+        """
+
+        normalized = (desc or "").strip().lower()
+        if normalized.startswith("generating final"):
+            self._complete_audio_phase()
+        elif normalized.startswith("audio processing"):
+            self._cancel_audio_progress()
 
     def _get_status_style(self, status: str) -> str | None:
         """Return the foreground color for *status* if a match is known."""
@@ -1306,6 +1348,38 @@ class TalksReducerGUI:
 
         self.root.after(0, updater)
 
+    def _set_progress_monotonic(self, percentage: float) -> None:
+        """Update the progress bar without ever moving it backwards.
+
+        Streamed pipeline progress is mapped into stable percentage bands, but a
+        stage that restarts at zero — most notably the final encode falling back
+        to the CPU encoder after a GPU failure — re-enters its band at the start
+        and would otherwise drag the bar behind a value an earlier frame already
+        reached. Clamping against a dedicated per-file floor keeps the bar
+        monotonic within a single file while still allowing
+        :meth:`_reset_progress_baseline` to re-base it for the next file in a
+        batch. The floor is tracked synchronously rather than read back from the
+        Tkinter variable so a background worker thread cannot observe a stale
+        value mid-update.
+        """
+
+        value = min(100.0, max(self._progress_floor, float(percentage)))
+        self._progress_floor = value
+        self._set_progress(value)
+
+    def _reset_progress_baseline(self) -> None:
+        """Re-base the monotonic progress bar so the next file starts at zero.
+
+        The monotonic clamp in :meth:`_set_progress_monotonic` must not carry the
+        previous file's completed value into the next file of a batch, otherwise
+        every file after the first would stay pinned at 100%. Resetting the floor
+        and the visible bar lets each file report progress from the start of its
+        own range.
+        """
+
+        self._progress_floor = 0.0
+        self._set_progress(0.0)
+
     def _set_progress_bar_style(self, status: str) -> None:
         """Update the progress bar color based on status."""
 
@@ -1351,6 +1425,7 @@ __all__ = [
     "_parse_encode_target_duration",
     "_parse_video_duration_seconds",
     "_parse_ffmpeg_progress",
+    "_parse_task_percent",
     "_is_encode_total_frames_unknown",
     "_is_encode_target_duration_unknown",
 ]
@@ -1364,5 +1439,6 @@ _parse_current_frame = parse_current_frame
 _parse_encode_target_duration = parse_encode_target_duration
 _parse_video_duration_seconds = parse_video_duration_seconds
 _parse_ffmpeg_progress = parse_ffmpeg_progress
+_parse_task_percent = parse_task_percent
 _is_encode_total_frames_unknown = is_encode_total_frames_unknown
 _is_encode_target_duration_unknown = is_encode_target_duration_unknown

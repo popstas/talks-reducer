@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import subprocess
+from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pytest
@@ -27,6 +28,41 @@ class DummyReporter(NullProgressReporter):
 
     def log(self, message: str) -> None:
         self.messages.append(message)
+
+
+class RecordingReporter(DummyReporter):
+    """Records task openings and progress advances for assertions."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tasks: List[tuple] = []
+        self.advances: List[tuple] = []
+
+    def task(self, *, desc: str = "", total: Optional[int] = None, unit: str = ""):
+        self.tasks.append((desc, total, unit))
+        reporter = self
+
+        class _Handle(AbstractContextManager):
+            def __init__(self) -> None:
+                self.current = 0
+
+            def ensure_total(self, total: int) -> None:
+                pass
+
+            def advance(self, amount: int) -> None:
+                self.current += amount
+                reporter.advances.append((desc, amount))
+
+            def finish(self) -> None:
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+        return _Handle()
 
 
 def test_speed_up_video_returns_result(monkeypatch, tmp_path):
@@ -120,6 +156,89 @@ def test_speed_up_video_returns_result(monkeypatch, tmp_path):
     assert result.size_ratio == 1.0
     assert reporter.messages  # progress logs should be collected
     assert ffmpeg_calls == [options.prefer_global_ffmpeg]
+
+
+def test_speed_up_video_reports_audio_processing_progress(monkeypatch, tmp_path):
+    """The pipeline should open an ``Audio processing:`` task and advance it."""
+
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+
+    options = ProcessingOptions(
+        input_file=input_path,
+        temp_folder=tmp_path / "temp",
+        output_file=tmp_path / "output.mp4",
+    )
+
+    reporter = RecordingReporter()
+
+    monkeypatch.setattr(
+        "talks_reducer.pipeline._extract_video_metadata",
+        lambda _input, _frame_rate: {
+            "frame_rate": 30.0,
+            "duration": 2.0,
+            "width": 1920.0,
+            "height": 1080.0,
+        },
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.has_audio_stream",
+        lambda _path: True,
+    )
+
+    def fake_read(_path):
+        return 48000, np.zeros((30, 1), dtype=np.int16)
+
+    monkeypatch.setattr("talks_reducer.pipeline.wavfile.read", fake_read)
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.wavfile.write",
+        lambda path, sample_rate, data: Path(path).write_bytes(b"audio"),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.get_max_volume", lambda _data: 1.0
+    )
+
+    def fake_process(*args, progress_callback=None, **kwargs):
+        if progress_callback is not None:
+            progress_callback(12)
+            progress_callback(18)
+        return (np.zeros((10, 1)), [[0, 10, 0, 10]])
+
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.process_audio_chunks", fake_process
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.detect_loud_frames",
+        lambda *args, **kwargs: np.array([True] * 10),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.build_chunks",
+        lambda *_args, **_kwargs: ([[0, 10, 0]], np.array([True] * 10)),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.get_tree_expression", lambda _chunks: "X"
+    )
+
+    def fake_run(command, *args, **kwargs):
+        if command == "render":
+            options.output_file.write_bytes(b"fake")
+        return None
+
+    dependencies = PipelineDependencies(
+        get_ffmpeg_path=lambda prefer=False: "ffmpeg",
+        check_cuda_available=lambda _path: False,
+        build_extract_audio_command=lambda *args, **kwargs: "extract",
+        build_video_commands=lambda *args, **kwargs: ("render", None, False),
+        run_timed_ffmpeg_command=fake_run,
+    )
+
+    speed_up_video(options, reporter=reporter, dependencies=dependencies)
+
+    assert ("Audio processing:", 30, "samples") in reporter.tasks
+    assert reporter.advances == [
+        ("Audio processing:", 12),
+        ("Audio processing:", 18),
+    ]
 
 
 def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):

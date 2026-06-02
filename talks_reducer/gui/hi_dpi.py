@@ -12,6 +12,7 @@
     hi_dpi.get_window_dpi(widget) -> int | None
     hi_dpi.get_tk_scaling(root) -> float
 """
+
 from __future__ import annotations
 
 import sys
