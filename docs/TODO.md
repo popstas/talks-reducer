@@ -1,3 +1,4 @@
 - [x] server: show upload progress on client and server while uploading to remote
 - [x] remote mode: no progressbar after "Audio processing", only "Generating final: x%" in log
 - [x] audio processing calculates not precise. break audio processing progress bar update when video processing started
+- [ ] remote upload progress: a single big file currently jumps to 100% at the start of "Uploading 1/1: <file> to <server>". Stream real upload progress to the remote server, then show download progress after remote processing completes.
