@@ -325,6 +325,41 @@ def test_main_exits_when_server_tray_unavailable(
         cli.main(["--server"])
 
 
+def test_main_launches_server_tray_via_subcommand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ``server-tray`` subcommand should dispatch to the tray helper."""
+
+    tray_calls: list[list[str]] = []
+
+    def fake_tray(argv: list[str]) -> bool:
+        tray_calls.append(list(argv))
+        return True
+
+    def fail_build_parser() -> None:
+        raise AssertionError("Parser should not be built when launching the tray")
+
+    monkeypatch.setattr(cli, "_launch_server_tray", fake_tray)
+    monkeypatch.setattr(cli, "_build_parser", fail_build_parser)
+    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
+
+    cli.main(["server-tray", "--with-gui"])
+
+    assert tray_calls == [["--with-gui"]]
+
+
+def test_main_exits_when_server_tray_subcommand_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed tray launch via the subcommand should raise SystemExit."""
+
+    monkeypatch.setattr(cli, "_launch_server_tray", lambda argv: False)
+    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
+
+    with pytest.raises(SystemExit):
+        cli.main(["server-tray"])
+
+
 def test_main_exits_when_server_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     """A missing Gradio server should raise SystemExit to mimic CLI failures."""
 

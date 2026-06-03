@@ -628,6 +628,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             sys.exit(1)
         return
 
+    if argv_list and argv_list[0] in {"server-tray", "serve-tray"}:
+        if not _launch_server_tray(argv_list[1:]):
+            print("Server tray mode is unavailable.", file=sys.stderr)
+            sys.exit(1)
+        return
+
     if argv_list and argv_list[0] in {"server", "serve"}:
         if not _launch_server(argv_list[1:]):
             print("Gradio server mode is unavailable.", file=sys.stderr)
