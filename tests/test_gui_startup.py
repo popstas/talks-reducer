@@ -88,6 +88,24 @@ def test_parse_seeded_launch_accepts_hyphenated_flags(tmp_path) -> None:
     assert settings["silent_speed"] == 5.0
 
 
+def test_parse_seeded_launch_seeds_settings_without_file() -> None:
+    """An args-only launch (settings, no file) seeds the GUI with empty inputs."""
+
+    seeded = startup._parse_seeded_launch(["--small", "--silent-speed", "5"])
+
+    assert seeded is not None
+    input_files, settings = seeded
+    assert input_files == []
+    assert settings["small"] is True
+    assert settings["silent_speed"] == 5.0
+
+
+def test_parse_seeded_launch_returns_none_without_file_or_settings() -> None:
+    """A bare launch with no file and no recognized settings is not a GUI launch."""
+
+    assert startup._parse_seeded_launch([]) is None
+
+
 def test_parse_seeded_launch_maps_host_to_server_url(tmp_path) -> None:
     video = tmp_path / "talk.mp4"
     video.write_bytes(b"data")
@@ -146,6 +164,42 @@ def test_main_seeds_gui_with_args_and_positional_file(
     assert cli_calls == []
     assert created and created[0]["initial_inputs"] == [str(video)]
     assert created[0]["auto_run"] is True
+    assert created[0]["cli_settings"]["small"] is True
+    assert created[0]["cli_settings"]["silent_speed"] == 5.0
+
+
+def test_main_seeds_gui_with_args_only_and_no_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[dict] = []
+
+    class DummyApp:
+        def __init__(self, initial_inputs=None, *, auto_run=False, cli_settings=None):
+            created.append(
+                {
+                    "initial_inputs": list(initial_inputs or []),
+                    "auto_run": auto_run,
+                    "cli_settings": dict(cli_settings or {}),
+                }
+            )
+            self.ran = False
+
+        def run(self) -> None:
+            self.ran = True
+
+    monkeypatch.setattr(startup, "TalksReducerGUI", DummyApp)
+    monkeypatch.setattr(startup.sys, "platform", "win32")
+
+    cli_calls: list[list[str]] = []
+    monkeypatch.setattr(startup, "cli_main", lambda args: cli_calls.append(list(args)))
+
+    result = startup.main(["--small", "--silent-speed", "5"])
+
+    assert result is True
+    assert cli_calls == []
+    assert created and created[0]["initial_inputs"] == []
+    # No file means nothing to process automatically.
+    assert created[0]["auto_run"] is False
     assert created[0]["cli_settings"]["small"] is True
     assert created[0]["cli_settings"]["silent_speed"] == 5.0
 

@@ -119,13 +119,16 @@ Bundled Windows builds include the same behaviour: run
 desktop shortcut without opening the GUI first.
 
 On Windows you can also create a desktop shortcut to `talks-reducer.exe` with
-preset flags (for example `talks-reducer.exe --small --silent_speed 5`) and drop
+preset flags (for example `talks-reducer.exe --small --silent-speed 5`) and drop
 a video file onto it in Explorer. Instead of doing nothing, the GUI opens
 pre-seeded with the dropped file and the shortcut's flags applied to the matching
 controls (Small video, silent speed, codec, output/temp paths, and — via
 `--host` — the remote server URL with Remote mode enabled), then processing
-starts automatically. Only the flags you pass are applied; your stored
-preferences are preserved for everything else.
+starts automatically. Flag names accept either hyphens or underscores
+(`--silent-speed` and `--silent_speed` both work). Launching such a shortcut
+*without* a file (for example by double-clicking it) simply opens the GUI with
+those settings applied so you can drop files in. Only the flags you pass are
+applied; your stored preferences are preserved for everything else.
 
 Pass `--debug` to print verbose logs about the tray icon lifecycle, and
 `--tray-mode pystray-detached` to try pystray's alternate detached runner. If

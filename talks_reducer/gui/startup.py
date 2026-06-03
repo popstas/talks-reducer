@@ -132,6 +132,11 @@ def _build_seed_parser() -> argparse.ArgumentParser:
         if action.dest in {"help", "version"}:
             continue
         action.default = argparse.SUPPRESS
+        # Allow an args-only launch (settings, no file) to parse successfully so
+        # a shortcut such as ``talks-reducer.exe --small --silent-speed 5`` opens
+        # the GUI with those settings instead of erroring on the missing file.
+        if action.dest == "input_file":
+            action.nargs = "*"
     return parser
 
 
@@ -176,9 +181,11 @@ def _parse_seeded_launch(
     Detects the file-association launch pattern where the executable is invoked
     with CLI flags plus one or more existing positional file paths (for example
     a Windows shortcut to ``talks-reducer.exe --small --silent-speed 5`` that
-    receives a dropped video). Returns ``None`` when ``argv`` cannot be parsed or
-    contains no existing positional file, so the caller can fall back to the
-    regular CLI pipeline.
+    receives a dropped video). Also detects an args-only launch (recognized GUI
+    settings with no file at all), so a shortcut that only carries preset flags
+    opens the GUI with those settings applied. Returns ``None`` when ``argv``
+    cannot be parsed, or when a positional path was given but does not exist, so
+    the caller can fall back to the regular CLI pipeline.
     """
 
     parser = _build_seed_parser()
@@ -189,10 +196,18 @@ def _parse_seeded_launch(
 
     input_paths = getattr(parsed, "input_file", None) or []
     input_files = [path for path in input_paths if path and Path(path).exists()]
-    if not input_files:
-        return None
+    if input_files:
+        return input_files, _gui_settings_from_namespace(parsed)
 
-    return input_files, _gui_settings_from_namespace(parsed)
+    # No usable file. Only treat this as a GUI launch when no positional path was
+    # supplied at all and at least one GUI setting was provided; if a path was
+    # given but is missing, fall back to the CLI so it can report the error.
+    if not input_paths:
+        settings = _gui_settings_from_namespace(parsed)
+        if settings:
+            return [], settings
+
+    return None
 
 
 def main(argv: Optional[Sequence[str]] = None) -> bool:
@@ -247,7 +262,9 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
             input_files, cli_settings = seeded
             try:
                 app = TalksReducerGUI(
-                    input_files, auto_run=True, cli_settings=cli_settings
+                    input_files,
+                    auto_run=bool(input_files),
+                    cli_settings=cli_settings,
                 )
                 app.run()
                 return True
