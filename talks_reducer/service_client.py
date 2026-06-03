@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import shutil
 import sys
+import threading
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -19,6 +20,13 @@ try:
     from .pipeline import ProcessingAborted
 except ImportError:  # pragma: no cover - allow running as script
     from talks_reducer.pipeline import ProcessingAborted
+
+
+# Installing the upload/download progress hooks mutates module-global
+# ``httpx`` attributes on ``gradio_client.client``. Serialize the patched
+# regions so concurrent :func:`send_video` calls in one process cannot clobber
+# or misattribute each other's hooks while a transfer is in flight.
+_TRANSFER_PATCH_LOCK = threading.Lock()
 
 
 class _ProgressFileReader:
@@ -141,35 +149,42 @@ def _install_transfer_progress(
             current = min(sent, upload_total) if upload_total else sent
             progress_callback("Uploading:", current, upload_total, "bytes")
 
-        original_post = gradio_client_module.httpx.post
+        with _TRANSFER_PATCH_LOCK:
+            original_post = gradio_client_module.httpx.post
 
-        def post(*args: Any, **kwargs: Any) -> Any:
-            files = kwargs.get("files")
-            if files:
-                kwargs["files"] = _wrap_upload_files(files, _on_bytes)
-            return original_post(*args, **kwargs)
+            def post(*args: Any, **kwargs: Any) -> Any:
+                files = kwargs.get("files")
+                if files:
+                    kwargs["files"] = _wrap_upload_files(files, _on_bytes)
+                return original_post(*args, **kwargs)
 
-        gradio_client_module.httpx.post = post
-        try:
-            return original_upload(file_obj, data_index)
-        finally:
-            gradio_client_module.httpx.post = original_post
-            if upload_total:
-                progress_callback("Uploading:", upload_total, upload_total, "bytes")
+            gradio_client_module.httpx.post = post
+            try:
+                result = original_upload(file_obj, data_index)
+            finally:
+                gradio_client_module.httpx.post = original_post
+
+        # Only report the upload as complete once every byte was sent. Emitting
+        # this from a ``finally`` block would flash 100% even when the transfer
+        # raised mid-stream (e.g. a dropped connection).
+        if upload_total:
+            progress_callback("Uploading:", upload_total, upload_total, "bytes")
+        return result
 
     def download_file(payload: Any) -> Any:
-        original_stream = gradio_client_module.httpx.stream
+        with _TRANSFER_PATCH_LOCK:
+            original_stream = gradio_client_module.httpx.stream
 
-        def stream(*args: Any, **kwargs: Any) -> Any:
-            return _ProgressStreamContext(
-                original_stream(*args, **kwargs), progress_callback
-            )
+            def stream(*args: Any, **kwargs: Any) -> Any:
+                return _ProgressStreamContext(
+                    original_stream(*args, **kwargs), progress_callback
+                )
 
-        gradio_client_module.httpx.stream = stream
-        try:
-            return original_download(payload)
-        finally:
-            gradio_client_module.httpx.stream = original_stream
+            gradio_client_module.httpx.stream = stream
+            try:
+                return original_download(payload)
+            finally:
+                gradio_client_module.httpx.stream = original_stream
 
     endpoint._upload_file = upload_file
     endpoint._download_file = download_file

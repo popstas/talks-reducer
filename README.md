@@ -55,7 +55,7 @@ talks-reducer --host 192.168.1.42 demo.mp4
 ```
 
 Remote jobs respect the same timing controls as the local CLI. Provide
-`--silent-threshold`, `--sounded-speed`, or `--silent-speed` to tweak how the
+`--silent_threshold`, `--sounded_speed`, or `--silent_speed` to tweak how the
 server trims and accelerates segments without falling back to local mode.
 
 Need a different compression target? HEVC (`--video-codec hevc`) is now the
@@ -119,7 +119,7 @@ Bundled Windows builds include the same behaviour: run
 desktop shortcut without opening the GUI first.
 
 On Windows you can also create a desktop shortcut to `talks-reducer.exe` with
-preset flags (for example `talks-reducer.exe --small --silent-speed 5`) and drop
+preset flags (for example `talks-reducer.exe --small --silent_speed 5`) and drop
 a video file onto it in Explorer. Instead of doing nothing, the GUI opens
 pre-seeded with the dropped file and the shortcut's flags applied to the matching
 controls (Small video, silent speed, codec, output/temp paths, and — via

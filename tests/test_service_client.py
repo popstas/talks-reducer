@@ -884,6 +884,50 @@ def test_install_transfer_progress_restores_httpx_on_error(monkeypatch, tmp_path
     assert service_client_module.httpx.stream is sentinel_stream
 
 
+def test_install_transfer_progress_skips_completion_on_upload_error(
+    monkeypatch, tmp_path
+):
+    """A failing upload must not emit a misleading 100% completion event."""
+
+    upload_file = tmp_path / "input.mp4"
+    upload_file.write_bytes(b"0123456789")
+
+    class FakeEndpoint:
+        def _upload_file(self, file_obj, data_index=0):
+            raise RuntimeError("upload boom")
+
+        def _download_file(self, payload):  # pragma: no cover - unused here
+            return payload
+
+    class FakeClient:
+        def __init__(self):
+            self.endpoints = {0: FakeEndpoint()}
+
+        def _infer_fn_index(self, api_name, fn_index):
+            return 0
+
+    import gradio_client.client as service_client_module
+
+    monkeypatch.setattr(service_client_module.httpx, "post", object())
+
+    client = FakeClient()
+    events: list[tuple[str, Optional[int], Optional[int], str]] = []
+
+    installed = service_client._install_transfer_progress(
+        client,
+        "/process_video",
+        upload_file.stat().st_size,
+        lambda *args: events.append(args),
+    )
+    assert installed is True
+
+    with pytest.raises(RuntimeError, match="upload boom"):
+        client.endpoints[0]._upload_file({"path": str(upload_file)})
+
+    completion = ("Uploading:", 10, 10, "bytes")
+    assert completion not in events
+
+
 def test_install_transfer_progress_returns_false_for_stub_client():
     class StubClient:
         pass
