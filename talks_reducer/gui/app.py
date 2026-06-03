@@ -120,6 +120,23 @@ except ModuleNotFoundError:  # pragma: no cover - runtime dependency
     TkinterDnD = None  # type: ignore[assignment]
 
 
+def _format_seed_number(value: object) -> str:
+    """Render a numeric CLI value for a ``StringVar`` without a trailing ``.0``.
+
+    ``--frame_margin`` and ``--sample_rate`` parse as floats, so an integer such
+    as ``48000`` arrives as ``48000.0``; format whole numbers without the decimal
+    suffix to match the default control text.
+    """
+
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return str(value)
+    if number.is_integer():
+        return str(int(number))
+    return str(number)
+
+
 class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
 
@@ -135,6 +152,7 @@ class TalksReducerGUI:
         initial_inputs: Optional[Sequence[str]] = None,
         *,
         auto_run: bool = False,
+        cli_settings: Optional[dict] = None,
     ) -> None:
         self._config_path = determine_config_path()
         self.preferences = GUIPreferences(self._config_path)
@@ -317,6 +335,9 @@ class TalksReducerGUI:
             self._append_log(
                 "Drag and drop requires the tkinterdnd2 package. Install it to enable the drop zone."
             )
+
+        if cli_settings:
+            self._apply_cli_settings(cli_settings)
 
         if initial_inputs:
             self._populate_initial_inputs(initial_inputs, auto_run=auto_run)
@@ -888,6 +909,51 @@ class TalksReducerGUI:
 
     def _configure_drop_targets(self, widget) -> None:
         self.inputs.configure_drop_targets(widget)
+
+    def _apply_cli_settings(self, settings: dict) -> None:
+        """Apply CLI-provided options to the matching GUI controls.
+
+        Used by the file-association launch path so a shortcut such as
+        ``talks-reducer.exe --small --silent-speed 5`` pre-seeds the GUI controls
+        with the requested settings before processing the dropped file.
+        """
+
+        if not settings:
+            return
+
+        if "small" in settings:
+            self.small_var.set(bool(settings["small"]))
+        if "small_480" in settings:
+            self.small_480_var.set(bool(settings["small_480"]))
+        if "silent_speed" in settings:
+            self.silent_speed_var.set(float(settings["silent_speed"]))
+        if "sounded_speed" in settings:
+            self.sounded_speed_var.set(float(settings["sounded_speed"]))
+        if "silent_threshold" in settings:
+            self.silent_threshold_var.set(float(settings["silent_threshold"]))
+        if "frame_spreadage" in settings:
+            self.frame_margin_var.set(_format_seed_number(settings["frame_spreadage"]))
+        if "sample_rate" in settings:
+            self.sample_rate_var.set(_format_seed_number(settings["sample_rate"]))
+        if "keyframe_interval_seconds" in settings:
+            self.keyframe_interval_var.set(float(settings["keyframe_interval_seconds"]))
+        if "video_codec" in settings:
+            codec_value = str(settings["video_codec"]).strip().lower()
+            if codec_value in {"h264", "hevc", "av1"}:
+                self.video_codec_var.set(codec_value)
+        if "add_codec_suffix" in settings:
+            self.add_codec_suffix_var.set(bool(settings["add_codec_suffix"]))
+        if "prefer_global_ffmpeg" in settings:
+            self.use_global_ffmpeg_var.set(bool(settings["prefer_global_ffmpeg"]))
+        if "optimize" in settings:
+            self.optimize_var.set(bool(settings["optimize"]))
+        if "output_file" in settings:
+            self.output_var.set(str(settings["output_file"]))
+        if "temp_folder" in settings:
+            self.temp_var.set(str(settings["temp_folder"]))
+        if "server_url" in settings:
+            self.server_url_var.set(str(settings["server_url"]))
+            self.processing_mode_var.set("remote")
 
     def _populate_initial_inputs(
         self, inputs: Sequence[str], *, auto_run: bool = False

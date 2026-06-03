@@ -9,6 +9,7 @@ from typing import Any, Callable, List, Optional
 
 import pytest
 
+from talks_reducer import server as server_module
 from talks_reducer import server_tray
 
 
@@ -146,16 +147,23 @@ def test_headless_mode_runs_and_opens_browser(
         time_module.sleep(0.05)
 
     assert open_calls == ["http://127.0.0.1:1234/"]
-    assert launch_calls == [
-        {
-            "server_name": "0.0.0.0",
-            "server_port": 1234,
-            "share": False,
-            "inbrowser": False,
-            "prevent_thread_lock": True,
-            "show_error": True,
-        }
-    ]
+    assert len(launch_calls) == 1
+    launch_kwargs = launch_calls[0]
+    app_kwargs = launch_kwargs.pop("app_kwargs", None)
+    assert launch_kwargs == {
+        "server_name": "0.0.0.0",
+        "server_port": 1234,
+        "share": False,
+        "inbrowser": False,
+        "prevent_thread_lock": True,
+        "show_error": True,
+    }
+    # The tray-launched server installs the transfer-progress middleware too.
+    middleware = (app_kwargs or {}).get("middleware", [])
+    assert any(
+        getattr(entry, "cls", None) is server_module.TransferProgressMiddleware
+        for entry in middleware
+    )
 
     app.stop()
     runner.join(timeout=2.0)
@@ -238,6 +246,195 @@ def test_pystray_detached_mode_stops_icon(
     icon = backend.icons[0]
     assert icon.run_detached_called is True
     assert icon.stop_called >= 1
+
+
+def _make_app_for_gui_wiring(
+    monkeypatch: pytest.MonkeyPatch, *, launch_gui: bool
+) -> tuple[server_tray._ServerTrayApplication, List[int]]:
+    """Build a tray app whose server lifecycle is stubbed for synchronous runs."""
+
+    backend = DummyTrayBackend()
+    server = DummyServer(DummyURL("http://0.0.0.0:1234/"))
+    demo = DummyDemo(server, [])
+
+    app = server_tray._ServerTrayApplication(
+        host="0.0.0.0",
+        port=1234,
+        share=False,
+        open_browser=False,
+        tray_mode="headless",
+        tray_backend=backend,
+        build_interface=lambda: demo,
+        open_browser_callback=lambda _url: None,
+        launch_gui=launch_gui,
+    )
+
+    gui_calls: List[int] = []
+    monkeypatch.setattr(app, "_launch_gui", lambda: gui_calls.append(1))
+    # Replace the threaded server lifecycle so ``run`` stays synchronous.
+    monkeypatch.setattr(app, "_launch_server", lambda: None)
+    monkeypatch.setattr(app, "_await_server_start", lambda _icon: None)
+    # Pre-stop so the headless wait loop returns immediately.
+    app._stop_event.set()
+
+    return app, gui_calls
+
+
+def test_launch_gui_on_start_opens_gui_with_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, gui_calls = _make_app_for_gui_wiring(monkeypatch, launch_gui=True)
+
+    app.run()
+
+    assert gui_calls == [1]
+
+
+def test_run_without_launch_gui_does_not_open_gui(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, gui_calls = _make_app_for_gui_wiring(monkeypatch, launch_gui=False)
+
+    app.run()
+
+    assert gui_calls == []
+
+
+def test_main_with_gui_flag_requests_combined_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    class StubApp:
+        def run(self) -> None:  # pragma: no cover - trivial stub
+            pass
+
+        def stop(self) -> None:  # pragma: no cover - trivial stub
+            pass
+
+    def fake_create_tray_app(**kwargs: Any) -> StubApp:
+        captured.update(kwargs)
+        return StubApp()
+
+    monkeypatch.setattr(server_tray, "create_tray_app", fake_create_tray_app)
+    monkeypatch.setattr(server_tray.atexit, "register", lambda *_args, **_kwargs: None)
+
+    server_tray.main(["--with-gui", "--tray-mode", "headless"])
+
+    assert captured["launch_gui"] is True
+    assert captured["tray_mode"] == "headless"
+
+
+def test_main_without_gui_flag_defaults_to_server_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    class StubApp:
+        def run(self) -> None:  # pragma: no cover - trivial stub
+            pass
+
+        def stop(self) -> None:  # pragma: no cover - trivial stub
+            pass
+
+    def fake_create_tray_app(**kwargs: Any) -> StubApp:
+        captured.update(kwargs)
+        return StubApp()
+
+    monkeypatch.setattr(server_tray, "create_tray_app", fake_create_tray_app)
+    monkeypatch.setattr(server_tray.atexit, "register", lambda *_args, **_kwargs: None)
+
+    server_tray.main(["--tray-mode", "headless"])
+
+    assert captured["launch_gui"] is False
+
+
+@pytest.mark.parametrize(
+    ("requested", "platform", "expected"),
+    [
+        ("headless", "darwin", "headless"),
+        ("headless", "linux", "headless"),
+        ("headless", "win32", "headless"),
+        ("pystray", "darwin", "pystray"),
+        ("pystray", "linux", "pystray"),
+        ("pystray", "win32", "pystray"),
+        ("pystray-detached", "linux", "pystray-detached"),
+        ("pystray-detached", "win32", "pystray-detached"),
+        ("pystray-detached", "darwin", "pystray"),
+    ],
+)
+def test_resolve_tray_mode_falls_back_on_macos(
+    requested: str, platform: str, expected: str
+) -> None:
+    assert server_tray.resolve_tray_mode(requested, platform=platform) == expected
+
+
+def test_resolve_tray_mode_defaults_to_current_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server_tray.sys, "platform", "darwin")
+
+    assert server_tray.resolve_tray_mode("pystray-detached") == "pystray"
+
+
+def test_create_tray_app_resolves_detached_mode_on_macos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = DummyTrayBackend()
+    monkeypatch.setattr(server_tray, "pystray", backend)
+    monkeypatch.setattr(server_tray, "PYSTRAY_IMPORT_ERROR", None)
+    monkeypatch.setattr(server_tray.sys, "platform", "darwin")
+
+    app = server_tray.create_tray_app(
+        host="127.0.0.1",
+        port=9005,
+        share=False,
+        open_browser=False,
+        tray_mode="pystray-detached",
+    )
+
+    assert app._tray_mode == "pystray"
+    assert app._tray_backend is backend
+
+
+def test_create_tray_app_keeps_detached_mode_off_macos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = DummyTrayBackend()
+    monkeypatch.setattr(server_tray, "pystray", backend)
+    monkeypatch.setattr(server_tray, "PYSTRAY_IMPORT_ERROR", None)
+    monkeypatch.setattr(server_tray.sys, "platform", "linux")
+
+    app = server_tray.create_tray_app(
+        host="127.0.0.1",
+        port=9005,
+        share=False,
+        open_browser=False,
+        tray_mode="pystray-detached",
+    )
+
+    assert app._tray_mode == "pystray-detached"
+
+
+def test_create_tray_app_headless_skips_pystray_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server_tray, "pystray", None)
+    monkeypatch.setattr(
+        server_tray, "PYSTRAY_IMPORT_ERROR", ModuleNotFoundError("pystray")
+    )
+    monkeypatch.setattr(server_tray.sys, "platform", "darwin")
+
+    app = server_tray.create_tray_app(
+        host="127.0.0.1",
+        port=9005,
+        share=False,
+        open_browser=False,
+        tray_mode="headless",
+    )
+
+    assert app._tray_mode == "headless"
+    assert isinstance(app._tray_backend, server_tray._HeadlessTrayBackend)
 
 
 def test_launch_gui_resets_completed_process(monkeypatch: pytest.MonkeyPatch) -> None:

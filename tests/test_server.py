@@ -881,3 +881,110 @@ def test_normalize_local_url_rewrites_wildcard_host() -> None:
         "http://192.0.2.1:9005/", "192.0.2.1", 9005
     )
     assert unchanged == "http://192.0.2.1:9005/"
+
+
+def _run_asgi(app, scope, messages):
+    """Drive an ASGI *app* with queued receive *messages*; capture sent events."""
+
+    import asyncio
+
+    sent: list[dict] = []
+    queue = list(messages)
+
+    async def receive() -> dict:
+        return queue.pop(0)
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    asyncio.run(app(scope, receive, send))
+    return sent
+
+
+def test_transfer_middleware_logs_upload_progress() -> None:
+    logs: list[str] = []
+
+    async def downstream(scope, receive, send):
+        # Drain the request body the way gradio's upload route would.
+        more = True
+        while more:
+            message = await receive()
+            more = message.get("more_body", False)
+
+    middleware = server.TransferProgressMiddleware(
+        downstream, log=logs.append, step_percent=50
+    )
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/gradio_api/upload",
+        "headers": [(b"content-length", b"10")],
+    }
+    messages = [
+        {"type": "http.request", "body": b"01234", "more_body": True},
+        {"type": "http.request", "body": b"56789", "more_body": False},
+    ]
+
+    _run_asgi(middleware, scope, messages)
+
+    assert any("Receiving upload" in line for line in logs)
+    assert any("100%" in line for line in logs)
+
+
+def test_transfer_middleware_logs_download_progress() -> None:
+    logs: list[str] = []
+
+    async def downstream(scope, receive, send):
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-length", b"8")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"abcd", "more_body": True})
+        await send({"type": "http.response.body", "body": b"efgh", "more_body": False})
+
+    middleware = server.TransferProgressMiddleware(
+        downstream, log=logs.append, step_percent=50
+    )
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/gradio_api/file=/tmp/output.mp4",
+        "headers": [],
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    assert any("Sending download output.mp4" in line for line in logs)
+    assert any("100%" in line for line in logs)
+
+
+def test_transfer_middleware_ignores_other_routes() -> None:
+    logs: list[str] = []
+    seen: list[str] = []
+
+    async def downstream(scope, receive, send):
+        seen.append(scope["path"])
+
+    middleware = server.TransferProgressMiddleware(downstream, log=logs.append)
+
+    scope = {"type": "http", "method": "GET", "path": "/", "headers": []}
+    _run_asgi(middleware, scope, [])
+
+    assert seen == ["/"]
+    assert logs == []
+
+
+def test_build_launch_app_kwargs_registers_middleware() -> None:
+    kwargs = server.build_launch_app_kwargs()
+
+    middleware = kwargs.get("middleware")
+    assert middleware, "expected middleware to be registered"
+    assert any(
+        getattr(entry, "cls", None) is server.TransferProgressMiddleware
+        for entry in middleware
+    )

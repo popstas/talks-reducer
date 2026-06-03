@@ -34,7 +34,7 @@ pip install talks-reducer
 
 **Note:** FFmpeg is now bundled automatically with the package, so you don't need to install it separately.
 
-By default the CLI applies the same tuned encoder settings everywhere: adaptive keyframes, 128 kbps AAC audio, and NVENC fallbacks that previously lived behind `--small`. The `--small` preset now layers on a 720p scale (or 480p with `--480`) for a smaller output, while `--no-optimize` switches to a speed-focused CUDA preset that prioritizes turnaround time over compression efficiency.
+By default the CLI applies the same tuned encoder settings everywhere: adaptive keyframes, 128 kbps AAC audio, and NVENC fallbacks that previously lived behind `--small`. The `--small` preset now layers on a 720p scale (or 480p with `--480`) for a smaller output, while `--no-optimize` switches to a speed-focused CUDA preset that prioritizes turnaround time over compression efficiency. Pass `--720` to force the 720p scale explicitly — handy on a seeded GUI launch, where it unchecks the **Target 480p** box even if your stored preference enabled it.
 
 Example CLI usage:
 
@@ -55,7 +55,7 @@ talks-reducer --host 192.168.1.42 demo.mp4
 ```
 
 Remote jobs respect the same timing controls as the local CLI. Provide
-`--silent-threshold`, `--sounded-speed`, or `--silent-speed` to tweak how the
+`--silent_threshold`, `--sounded_speed`, or `--silent_speed` to tweak how the
 server trims and accelerates segments without falling back to local mode.
 
 Need a different compression target? HEVC (`--video-codec hevc`) is now the
@@ -80,12 +80,14 @@ pick anywhere between snappy one-second GOPs and ultra-light 60-second spacing.
 
 Want to see progress as the remote server works? Add `--server-stream` so the
 CLI prints live progress bars and log lines while you wait for the download. The
-stream walks through every stage of the job: an `Uploading:` bar while the file
-is sent to the server, an `Extracting audio:` bar once the upload is received, an
-`Audio processing:` bar driven by the real phase-vocoder work (instead of a
-synthetic estimate), and a `Generating final:` bar for the encode. Progress keeps
-advancing after audio processing finishes rather than stalling until the encode
-completes.
+stream walks through every stage of the job: an `Uploading:` bar that advances
+incrementally with the bytes sent (instead of jumping straight to 100%) while the
+file is sent to the server, an `Extracting audio:` bar once the upload is
+received, an `Audio processing:` bar driven by the real phase-vocoder work
+(instead of a synthetic estimate), and a `Generating final:` bar for the encode.
+Progress keeps advancing after audio processing finishes rather than stalling
+until the encode completes. Once processing is done a `Downloading:` bar reports
+the finished file being fetched back from the server.
 
 ### Speech detection
 
@@ -116,10 +118,33 @@ Bundled Windows builds include the same behaviour: run
 `talks-reducer.exe --server` to launch the tray-managed server directly from the
 desktop shortcut without opening the GUI first.
 
+On Windows you can also create a desktop shortcut to `talks-reducer.exe` with
+preset flags (for example `talks-reducer.exe --small --silent-speed 5`) and drop
+a video file onto it in Explorer. Instead of doing nothing, the GUI opens
+pre-seeded with the dropped file and the shortcut's flags applied to the matching
+controls (Small video, silent speed, codec, output/temp paths, and — via
+`--host` — the remote server URL with Remote mode enabled), then processing
+starts automatically. Flag names accept either hyphens or underscores
+(`--silent-speed` and `--silent_speed` both work). Launching such a shortcut
+*without* a file (for example by double-clicking it) simply opens the GUI with
+those settings applied so you can drop files in. Only the flags you pass are
+applied; your stored preferences are preserved for everything else.
+
 Pass `--debug` to print verbose logs about the tray icon lifecycle, and
 `--tray-mode pystray-detached` to try pystray's alternate detached runner. If
 the icon backend refuses to appear, fall back to `--tray-mode headless` to keep
-the web server running without a tray process. The tray menu highlights the
+the web server running without a tray process.
+
+On macOS the tray icon must run on the process' main thread because pystray's
+AppKit backend drives the Cocoa run loop there. The default `--tray-mode
+pystray` already does this, so launch the tray with `talks-reducer server-tray`
+(the bundled pip app's `--server` entry point) and the icon appears in the menu
+bar. `--tray-mode pystray-detached` cannot render on macOS—it runs the icon on a
+worker thread—so the launcher automatically downgrades it to the blocking
+`pystray` runner and logs a warning. When you only need the web server (for
+example over SSH or in a headless build), pass `--tray-mode headless` to skip
+the icon entirely and reach the server at its printed URL. The tray menu
+highlights the
 running Talks Reducer version and includes an **Open GUI**
 item (also triggered by double-clicking the icon) that launches the desktop
 Talks Reducer interface alongside an **Open WebUI** entry that opens the Gradio
@@ -133,6 +158,19 @@ The tray command itself never launches the GUI automatically, so use the menu
 item (or relaunch the GUI separately) whenever you want to reopen it. The tray
 no longer opens a browser automatically—pass `--open-browser` if you prefer the
 web page to launch as soon as the server is ready.
+
+Want both the server and the desktop GUI to appear together (handy for the
+macOS pip app)? Add `--with-gui` to start the GUI window alongside the
+tray-managed server in one launch:
+
+```sh
+talks-reducer server-tray --with-gui
+```
+
+The same flag works through the GUI launcher—`python -m talks_reducer.gui
+--server --with-gui` boots the tray-managed server and opens the desktop window
+together. The GUI runs in its own process and is shut down cleanly when the
+server stops.
 
 This opens a local web page featuring a drag-and-drop upload zone, **Small video**, **Target 480p**, and **Optimized encoding** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a live
 progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current
@@ -163,7 +201,7 @@ output size without touching the CLI.
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
 2. Drag a video onto the **Video file** drop zone or click to browse and select one from disk.
 3. **Optimized encoding** stays enabled to apply the tuned codec arguments, and **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear the checkboxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the default h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) compression profiles, and enable **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the bundled build omits before you submit. Disable **Optimized encoding** or pass `--no-optimize` when you want the fastest CUDA-oriented preset.
-4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives. As soon as the upload finishes the server logs an `Upload received:` line with the filename and size, then streams the `Extracting audio:`, `Audio processing:`, and `Generating final:` stages back to the browser so you can watch real progress for each phase.
+4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives. While the file uploads the server console streams `Receiving upload: …%` lines as the bytes arrive, then logs an `Upload received:` line with the filename and size, then streams the `Extracting audio:`, `Audio processing:`, and `Generating final:` stages back to the browser so you can watch real progress for each phase. As the finished file is sent back to the client the console streams matching `Sending download <filename>: …%` lines.
 5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally.
 
 Need to change where the server listens? Run `talks-reducer server --host 0.0.0.0 --port 7860` (or any other port) to bind to a

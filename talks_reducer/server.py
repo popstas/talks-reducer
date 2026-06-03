@@ -118,6 +118,125 @@ class GradioProgressReporter(SignalProgressReporter):
         self._progress_callback(bounded_current, total_value, display_desc)
 
 
+def _format_progress_percent(received: int, total: Optional[int]) -> str:
+    """Return a compact ``n/total (xx%)`` description for transfer logging."""
+
+    if total and total > 0:
+        percent = min(int(received * 100 / total), 100)
+        return f"{_format_file_size(received)}/{_format_file_size(total)} ({percent}%)"
+    return _format_file_size(received)
+
+
+class TransferProgressMiddleware:
+    """ASGI middleware that logs incremental upload/download byte progress.
+
+    Gradio handles file uploads and downloads through its own HTTP routes, so
+    the pipeline never observes those transfers. This middleware watches the raw
+    request/response byte streams for the upload and ``file=`` download routes
+    and logs progress to the server console as the bytes flow, mirroring the
+    client-side ``Uploading``/``Downloading`` progress.
+    """
+
+    def __init__(
+        self,
+        app: Callable,
+        *,
+        log: Optional[Callable[[str], None]] = None,
+        step_percent: int = 20,
+    ) -> None:
+        self.app = app
+        self._log = log or (lambda message: print(message, flush=True))
+        self._step_percent = max(1, int(step_percent))
+
+    def _make_reporter(
+        self, label: str, total: Optional[int]
+    ) -> Callable[[int, bool], None]:
+        last_step = {"value": -1}
+
+        def report(received: int, final: bool) -> None:
+            if total and total > 0:
+                step = int(received * 100 / total) // self._step_percent
+            else:
+                step = received // (8 * 1024 * 1024)
+            if final or step != last_step["value"]:
+                last_step["value"] = step
+                self._log(f"{label}: {_format_progress_percent(received, total)}")
+
+        return report
+
+    @staticmethod
+    def _content_length(raw_headers: object) -> Optional[int]:
+        for key, value in raw_headers or []:
+            if key.lower() == b"content-length":
+                with suppress(TypeError, ValueError):
+                    return int(value.decode("latin-1"))
+        return None
+
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "") or ""
+        method = scope.get("method", "GET")
+        is_upload = method == "POST" and path.rstrip("/").endswith("upload")
+        is_download = method == "GET" and "file=" in path
+
+        if not is_upload and not is_download:
+            await self.app(scope, receive, send)
+            return
+
+        if is_upload:
+            total = self._content_length(scope.get("headers"))
+            report = self._make_reporter("Receiving upload", total)
+            received = 0
+
+            async def wrapped_receive() -> dict:
+                nonlocal received
+                message = await receive()
+                if message.get("type") == "http.request":
+                    body = message.get("body", b"")
+                    if body:
+                        received += len(body)
+                        report(received, not message.get("more_body", False))
+                return message
+
+            await self.app(scope, wrapped_receive, send)
+            return
+
+        sent = {"value": 0}
+        reporter: dict[str, Optional[Callable[[int, bool], None]]] = {"fn": None}
+
+        async def wrapped_send(message: dict) -> None:
+            message_type = message.get("type")
+            if message_type == "http.response.start":
+                total = self._content_length(message.get("headers"))
+                filename = path.split("file=", 1)[-1].rsplit("/", 1)[-1] or "file"
+                reporter["fn"] = self._make_reporter(
+                    f"Sending download {filename}", total
+                )
+            elif message_type == "http.response.body":
+                body = message.get("body", b"")
+                if body:
+                    sent["value"] += len(body)
+                if reporter["fn"] is not None:
+                    reporter["fn"](sent["value"], not message.get("more_body", False))
+            await send(message)
+
+        await self.app(scope, receive, wrapped_send)
+
+
+def build_launch_app_kwargs() -> dict[str, object]:
+    """Return ``app_kwargs`` enabling server-side transfer progress logging."""
+
+    try:
+        from starlette.middleware import Middleware
+    except Exception:  # pragma: no cover - starlette ships with gradio
+        return {}
+
+    return {"middleware": [Middleware(TransferProgressMiddleware)]}
+
+
 _FAVICON_FILENAMES = (
     ("app.ico", "app-256.png", "app.png")
     if sys.platform.startswith("win")
@@ -612,6 +731,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         share=args.share,
         inbrowser=args.open_browser,
         favicon_path=_FAVICON_PATH_STR,
+        app_kwargs=build_launch_app_kwargs(),
     )
 
 
@@ -620,7 +740,9 @@ atexit.register(_cleanup_workspaces)
 
 __all__ = [
     "GradioProgressReporter",
+    "TransferProgressMiddleware",
     "build_interface",
+    "build_launch_app_kwargs",
     "main",
     "process_video",
 ]

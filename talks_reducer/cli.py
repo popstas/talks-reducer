@@ -60,6 +60,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-t",
         "--silent_threshold",
+        "--silent-threshold",
         type=float,
         dest="silent_threshold",
         help="The volume amount that frames' audio needs to surpass to be considered sounded. Defaults to 0.01.",
@@ -67,6 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-S",
         "--sounded_speed",
+        "--sounded-speed",
         type=float,
         dest="sounded_speed",
         help="The speed that sounded (spoken) frames should be played at. Defaults to 1.",
@@ -74,6 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-s",
         "--silent_speed",
+        "--silent-speed",
         type=float,
         dest="silent_speed",
         help="The speed that silent frames should be played at. Defaults to 4.",
@@ -129,6 +132,13 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="small_480",
         action="store_true",
         help="Use with --small to scale video to 480p instead of 720p.",
+    )
+    parser.add_argument(
+        "--720",
+        dest="small_480",
+        action="store_false",
+        default=False,
+        help="Force the 720p small preset, overriding a stored 480p preference (unchecks the GUI 480p box on a seeded launch).",
     )
     parser.add_argument(
         "--no-optimize",
@@ -624,6 +634,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         index = argv_list.index("--server")
         tray_args = argv_list[index + 1 :]
         if not _launch_server_tray(tray_args):
+            print("Server tray mode is unavailable.", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if argv_list and argv_list[0] in {"server-tray", "serve-tray"}:
+        if not _launch_server_tray(argv_list[1:]):
             print("Server tray mode is unavailable.", file=sys.stderr)
             sys.exit(1)
         return

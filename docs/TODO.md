@@ -1,4 +1,4 @@
-- [x] server: show upload progress on client and server while uploading to remote
-- [x] remote mode: no progressbar after "Audio processing", only "Generating final: x%" in log
-- [x] audio processing calculates not precise. break audio processing progress bar update when video processing started
-- [ ] remote upload progress: a single big file currently jumps to 100% at the start of "Uploading 1/1: <file> to <server>". Stream real upload progress to the remote server, then show download progress after remote processing completes.
+- [x] remote upload progress: a single big file currently jumps to 100% at the start of "Uploading 1/1: <file> to <server>". Stream real upload progress to the remote server, then show download progress after remote processing completes.
+- [x] GUI file-association launch: a Windows shortcut to `talks-reducer.exe --small --silent-speed 5` does nothing when an mp4 is dropped onto it in Explorer. When the exe is launched with CLI args plus a dropped/positional file path, open the GUI pre-seeded with that input file and the passed settings (or apply the settings) instead of silently doing nothing.
+- [x] run server + GUI together: `talks-reducer-gui --server` currently launches only the tray-managed server with no desktop window. Allow starting both the server and the desktop GUI together from the macOS pip app (e.g. a combined flag or have `--server` also open the GUI).
+- [x] macOS tray icon: the pystray system-tray icon does not appear on macOS when running `--server`. Make the tray icon work on macOS (or provide a documented working fallback). (Implemented; manual macOS verification pending post-release.)

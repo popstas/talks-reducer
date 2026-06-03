@@ -267,6 +267,81 @@ def test_collect_arguments_includes_add_codec_suffix():
     assert args["prefer_global_ffmpeg"] is False
 
 
+class _RecordingVar:
+    def __init__(self, value=None) -> None:
+        self._value = value
+        self.set_calls: list = []
+
+    def get(self):
+        return self._value
+
+    def set(self, value) -> None:
+        self._value = value
+        self.set_calls.append(value)
+
+
+def _make_settings_gui() -> SimpleNamespace:
+    return SimpleNamespace(
+        small_var=_RecordingVar(False),
+        small_480_var=_RecordingVar(False),
+        silent_speed_var=_RecordingVar(4.0),
+        sounded_speed_var=_RecordingVar(1.0),
+        silent_threshold_var=_RecordingVar(0.01),
+        frame_margin_var=_RecordingVar("2"),
+        sample_rate_var=_RecordingVar("48000"),
+        keyframe_interval_var=_RecordingVar(30.0),
+        video_codec_var=_RecordingVar("h264"),
+        add_codec_suffix_var=_RecordingVar(False),
+        use_global_ffmpeg_var=_RecordingVar(False),
+        optimize_var=_RecordingVar(True),
+        output_var=_RecordingVar(""),
+        temp_var=_RecordingVar(""),
+        server_url_var=_RecordingVar(""),
+        processing_mode_var=_RecordingVar("local"),
+    )
+
+
+def test_apply_cli_settings_updates_controls():
+    gui = _make_settings_gui()
+
+    app.TalksReducerGUI._apply_cli_settings(
+        gui,
+        {
+            "small": True,
+            "silent_speed": 5.0,
+            "video_codec": "av1",
+            "optimize": False,
+        },
+    )
+
+    assert gui.small_var.get() is True
+    assert gui.silent_speed_var.get() == 5.0
+    assert gui.video_codec_var.get() == "av1"
+    assert gui.optimize_var.get() is False
+    # Untouched controls keep their existing values.
+    assert gui.sounded_speed_var.set_calls == []
+
+
+def test_apply_cli_settings_server_url_switches_to_remote():
+    gui = _make_settings_gui()
+
+    app.TalksReducerGUI._apply_cli_settings(
+        gui, {"server_url": "http://localhost:9005"}
+    )
+
+    assert gui.server_url_var.get() == "http://localhost:9005"
+    assert gui.processing_mode_var.get() == "remote"
+
+
+def test_apply_cli_settings_ignores_invalid_codec():
+    gui = _make_settings_gui()
+
+    app.TalksReducerGUI._apply_cli_settings(gui, {"video_codec": "bogus"})
+
+    assert gui.video_codec_var.get() == "h264"
+    assert gui.video_codec_var.set_calls == []
+
+
 def test_parse_video_duration_seconds_extracts_total_seconds():
     message = "Duration: 00:05:10.50"
 
