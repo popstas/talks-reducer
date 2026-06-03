@@ -349,6 +349,94 @@ def test_main_without_gui_flag_defaults_to_server_only(
     assert captured["launch_gui"] is False
 
 
+@pytest.mark.parametrize(
+    ("requested", "platform", "expected"),
+    [
+        ("headless", "darwin", "headless"),
+        ("headless", "linux", "headless"),
+        ("headless", "win32", "headless"),
+        ("pystray", "darwin", "pystray"),
+        ("pystray", "linux", "pystray"),
+        ("pystray", "win32", "pystray"),
+        ("pystray-detached", "linux", "pystray-detached"),
+        ("pystray-detached", "win32", "pystray-detached"),
+        ("pystray-detached", "darwin", "pystray"),
+    ],
+)
+def test_resolve_tray_mode_falls_back_on_macos(
+    requested: str, platform: str, expected: str
+) -> None:
+    assert server_tray.resolve_tray_mode(requested, platform=platform) == expected
+
+
+def test_resolve_tray_mode_defaults_to_current_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server_tray.sys, "platform", "darwin")
+
+    assert server_tray.resolve_tray_mode("pystray-detached") == "pystray"
+
+
+def test_create_tray_app_resolves_detached_mode_on_macos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = DummyTrayBackend()
+    monkeypatch.setattr(server_tray, "pystray", backend)
+    monkeypatch.setattr(server_tray, "PYSTRAY_IMPORT_ERROR", None)
+    monkeypatch.setattr(server_tray.sys, "platform", "darwin")
+
+    app = server_tray.create_tray_app(
+        host="127.0.0.1",
+        port=9005,
+        share=False,
+        open_browser=False,
+        tray_mode="pystray-detached",
+    )
+
+    assert app._tray_mode == "pystray"
+    assert app._tray_backend is backend
+
+
+def test_create_tray_app_keeps_detached_mode_off_macos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = DummyTrayBackend()
+    monkeypatch.setattr(server_tray, "pystray", backend)
+    monkeypatch.setattr(server_tray, "PYSTRAY_IMPORT_ERROR", None)
+    monkeypatch.setattr(server_tray.sys, "platform", "linux")
+
+    app = server_tray.create_tray_app(
+        host="127.0.0.1",
+        port=9005,
+        share=False,
+        open_browser=False,
+        tray_mode="pystray-detached",
+    )
+
+    assert app._tray_mode == "pystray-detached"
+
+
+def test_create_tray_app_headless_skips_pystray_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server_tray, "pystray", None)
+    monkeypatch.setattr(
+        server_tray, "PYSTRAY_IMPORT_ERROR", ModuleNotFoundError("pystray")
+    )
+    monkeypatch.setattr(server_tray.sys, "platform", "darwin")
+
+    app = server_tray.create_tray_app(
+        host="127.0.0.1",
+        port=9005,
+        share=False,
+        open_browser=False,
+        tray_mode="headless",
+    )
+
+    assert app._tray_mode == "headless"
+    assert isinstance(app._tray_backend, server_tray._HeadlessTrayBackend)
+
+
 def test_launch_gui_resets_completed_process(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = DummyTrayBackend()
     server = DummyServer("http://127.0.0.1:9005/")

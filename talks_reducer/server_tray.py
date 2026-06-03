@@ -150,6 +150,32 @@ def _load_icon() -> Image.Image:
     return _generate_fallback_icon()
 
 
+def resolve_tray_mode(requested_mode: str, platform: Optional[str] = None) -> str:
+    """Return the effective tray run mode for the current platform.
+
+    macOS' pystray backend is built on AppKit, whose run loop must execute on
+    the process' main thread. ``run_detached`` starts the icon on a worker
+    thread instead, so the tray icon never renders under ``--tray-mode
+    pystray-detached`` on macOS. Fall back to the blocking ``pystray`` runner
+    there, which ``main`` invokes from the main thread, so the icon appears.
+
+    The *platform* argument defaults to :data:`sys.platform` but can be passed
+    explicitly so the resolution logic is exercisable off-platform in tests.
+    """
+
+    if platform is None:
+        platform = sys.platform
+
+    if requested_mode == "pystray-detached" and platform == "darwin":
+        LOGGER.warning(
+            "Detached tray mode is not supported on macOS; falling back to the "
+            "blocking pystray runner so the icon renders on the main thread."
+        )
+        return "pystray"
+
+    return requested_mode
+
+
 class _HeadlessTrayBackend:
     """Placeholder backend used when the tray icon is disabled."""
 
@@ -485,7 +511,9 @@ def create_tray_app(
 ) -> _ServerTrayApplication:
     """Build a :class:`_ServerTrayApplication` wired to production dependencies."""
 
-    if tray_mode != "headless" and (
+    effective_mode = resolve_tray_mode(tray_mode)
+
+    if effective_mode != "headless" and (
         pystray is None or PYSTRAY_IMPORT_ERROR is not None
     ):
         raise RuntimeError(
@@ -504,7 +532,7 @@ def create_tray_app(
         port=port,
         share=share,
         open_browser=open_browser,
-        tray_mode=tray_mode,
+        tray_mode=effective_mode,
         tray_backend=tray_backend,
         build_interface=build_interface,
         open_browser_callback=webbrowser.open,
@@ -567,7 +595,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         app.stop()
 
 
-__all__ = ["create_tray_app", "main"]
+__all__ = ["create_tray_app", "main", "resolve_tray_mode"]
 
 
 if __name__ == "__main__":  # pragma: no cover - convenience entry point

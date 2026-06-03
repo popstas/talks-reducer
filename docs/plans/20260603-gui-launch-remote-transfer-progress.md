@@ -73,10 +73,10 @@ across platforms.
 
 ### Task 4: Make the macOS system-tray icon work
 
-- [ ] Investigate why the pystray tray icon does not appear on macOS under `--server` and make it render (correct backend/run mode), or provide a documented working fallback.
-- [ ] Ensure the existing `--tray-mode headless` path remains a clean no-icon fallback and document the macOS guidance in `README.md`.
-- [ ] write tests for the tray-mode selection/backend resolution logic that can be exercised off-platform
-- [ ] run project tests - must pass before next task
+- [x] Investigate why the pystray tray icon does not appear on macOS under `--server` and make it render (correct backend/run mode), or provide a documented working fallback.
+- [x] Ensure the existing `--tray-mode headless` path remains a clean no-icon fallback and document the macOS guidance in `README.md`.
+- [x] write tests for the tray-mode selection/backend resolution logic that can be exercised off-platform
+- [x] run project tests - must pass before next task
 
 ### Task 5: Verify acceptance criteria
 

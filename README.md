@@ -119,7 +119,18 @@ desktop shortcut without opening the GUI first.
 Pass `--debug` to print verbose logs about the tray icon lifecycle, and
 `--tray-mode pystray-detached` to try pystray's alternate detached runner. If
 the icon backend refuses to appear, fall back to `--tray-mode headless` to keep
-the web server running without a tray process. The tray menu highlights the
+the web server running without a tray process.
+
+On macOS the tray icon must run on the process' main thread because pystray's
+AppKit backend drives the Cocoa run loop there. The default `--tray-mode
+pystray` already does this, so launch the tray with `talks-reducer server-tray`
+(the bundled pip app's `--server` entry point) and the icon appears in the menu
+bar. `--tray-mode pystray-detached` cannot render on macOS—it runs the icon on a
+worker thread—so the launcher automatically downgrades it to the blocking
+`pystray` runner and logs a warning. When you only need the web server (for
+example over SSH or in a headless build), pass `--tray-mode headless` to skip
+the icon entirely and reach the server at its printed URL. The tray menu
+highlights the
 running Talks Reducer version and includes an **Open GUI**
 item (also triggered by double-clicking the icon) that launches the desktop
 Talks Reducer interface alongside an **Open WebUI** entry that opens the Gradio
