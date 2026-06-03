@@ -88,6 +88,46 @@ def test_parse_seeded_launch_accepts_hyphenated_flags(tmp_path) -> None:
     assert settings["silent_speed"] == 5.0
 
 
+def test_parse_seeded_launch_720_unchecks_480(tmp_path) -> None:
+    """``--720`` seeds ``small_480=False`` so the GUI 480p box is unchecked."""
+
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch(["--small", "--720", str(video)])
+
+    assert seeded is not None
+    _, settings = seeded
+    assert settings["small"] is True
+    assert settings["small_480"] is False
+
+
+def test_parse_seeded_launch_480_checks_480(tmp_path) -> None:
+    """``--480`` still seeds ``small_480=True`` so the GUI 480p box is checked."""
+
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch(["--small", "--480", str(video)])
+
+    assert seeded is not None
+    _, settings = seeded
+    assert settings["small_480"] is True
+
+
+def test_parse_seeded_launch_omits_480_when_unspecified(tmp_path) -> None:
+    """Without ``--480``/``--720`` the 480p setting is left to stored preferences."""
+
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch(["--small", str(video)])
+
+    assert seeded is not None
+    _, settings = seeded
+    assert "small_480" not in settings
+
+
 def test_parse_seeded_launch_seeds_settings_without_file() -> None:
     """An args-only launch (settings, no file) seeds the GUI with empty inputs."""
 

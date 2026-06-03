@@ -134,6 +134,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Use with --small to scale video to 480p instead of 720p.",
     )
     parser.add_argument(
+        "--720",
+        dest="small_480",
+        action="store_false",
+        default=False,
+        help="Force the 720p small preset, overriding a stored 480p preference (unchecks the GUI 480p box on a seeded launch).",
+    )
+    parser.add_argument(
         "--no-optimize",
         dest="optimize",
         action="store_false",

@@ -34,7 +34,7 @@ pip install talks-reducer
 
 **Note:** FFmpeg is now bundled automatically with the package, so you don't need to install it separately.
 
-By default the CLI applies the same tuned encoder settings everywhere: adaptive keyframes, 128 kbps AAC audio, and NVENC fallbacks that previously lived behind `--small`. The `--small` preset now layers on a 720p scale (or 480p with `--480`) for a smaller output, while `--no-optimize` switches to a speed-focused CUDA preset that prioritizes turnaround time over compression efficiency.
+By default the CLI applies the same tuned encoder settings everywhere: adaptive keyframes, 128 kbps AAC audio, and NVENC fallbacks that previously lived behind `--small`. The `--small` preset now layers on a 720p scale (or 480p with `--480`) for a smaller output, while `--no-optimize` switches to a speed-focused CUDA preset that prioritizes turnaround time over compression efficiency. Pass `--720` to force the 720p scale explicitly — handy on a seeded GUI launch, where it unchecks the **Target 480p** box even if your stored preference enabled it.
 
 Example CLI usage:
 
