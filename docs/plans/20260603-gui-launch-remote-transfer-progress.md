@@ -58,10 +58,10 @@ across platforms.
 
 ### Task 2: Launch GUI with positional file and CLI settings (file-association)
 
-- [ ] Update launch routing in `gui/startup.py` so that when the app is started with CLI args plus a positional/dropped file path (e.g. a Windows shortcut to `talks-reducer.exe --small --silent-speed 5` receiving a dropped mp4), it opens the GUI pre-seeded with that input file rather than doing nothing.
-- [ ] Apply the passed CLI settings (e.g. `--small`, `--silent-speed`) to the GUI controls when launching this way.
-- [ ] write tests for argument parsing and the launch-routing decision (args + positional file -> seeded GUI)
-- [ ] run project tests - must pass before next task
+- [x] Update launch routing in `gui/startup.py` so that when the app is started with CLI args plus a positional/dropped file path (e.g. a Windows shortcut to `talks-reducer.exe --small --silent-speed 5` receiving a dropped mp4), it opens the GUI pre-seeded with that input file rather than doing nothing.
+- [x] Apply the passed CLI settings (e.g. `--small`, `--silent-speed`) to the GUI controls when launching this way.
+- [x] write tests for argument parsing and the launch-routing decision (args + positional file -> seeded GUI)
+- [x] run project tests - must pass before next task
 
 ### Task 3: Run server and desktop GUI together from the macOS pip app
 

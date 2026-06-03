@@ -53,6 +53,104 @@ def test_main_delegates_to_cli_when_arguments(monkeypatch: pytest.MonkeyPatch) -
     assert received == [["input.mp4"]]
 
 
+def test_parse_seeded_launch_extracts_file_and_settings(tmp_path) -> None:
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch(
+        ["--small", "--silent_speed", "5", str(video)]
+    )
+
+    assert seeded is not None
+    input_files, settings = seeded
+    assert input_files == [str(video)]
+    assert settings["small"] is True
+    assert settings["silent_speed"] == 5.0
+    # Unspecified options are not seeded so stored preferences are preserved.
+    assert "video_codec" not in settings
+    assert "optimize" not in settings
+
+
+def test_parse_seeded_launch_maps_host_to_server_url(tmp_path) -> None:
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch(["--host", "localhost", str(video)])
+
+    assert seeded is not None
+    _, settings = seeded
+    assert settings["server_url"] == "http://localhost:9005"
+
+
+def test_parse_seeded_launch_returns_none_without_existing_file(tmp_path) -> None:
+    missing = tmp_path / "missing.mp4"
+
+    assert startup._parse_seeded_launch(["--small", str(missing)]) is None
+
+
+def test_parse_seeded_launch_returns_none_for_unknown_flag(tmp_path) -> None:
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    assert startup._parse_seeded_launch(["--definitely-unknown", str(video)]) is None
+
+
+def test_main_seeds_gui_with_args_and_positional_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    created: list[dict] = []
+
+    class DummyApp:
+        def __init__(self, initial_inputs=None, *, auto_run=False, cli_settings=None):
+            created.append(
+                {
+                    "initial_inputs": list(initial_inputs or []),
+                    "auto_run": auto_run,
+                    "cli_settings": dict(cli_settings or {}),
+                }
+            )
+            self.ran = False
+
+        def run(self) -> None:
+            self.ran = True
+
+    monkeypatch.setattr(startup, "TalksReducerGUI", DummyApp)
+    monkeypatch.setattr(startup.sys, "platform", "win32")
+
+    cli_calls: list[list[str]] = []
+    monkeypatch.setattr(startup, "cli_main", lambda args: cli_calls.append(list(args)))
+
+    result = startup.main(["--small", "--silent_speed", "5", str(video)])
+
+    assert result is True
+    assert cli_calls == []
+    assert created and created[0]["initial_inputs"] == [str(video)]
+    assert created[0]["auto_run"] is True
+    assert created[0]["cli_settings"]["small"] is True
+    assert created[0]["cli_settings"]["silent_speed"] == 5.0
+
+
+def test_main_falls_back_to_cli_without_positional_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(*args, **kwargs):  # pragma: no cover - should not be called
+        raise AssertionError("GUI should not launch without an existing file")
+
+    monkeypatch.setattr(startup, "TalksReducerGUI", fail)
+    monkeypatch.setattr(startup.sys, "platform", "win32")
+
+    cli_calls: list[list[str]] = []
+    monkeypatch.setattr(startup, "cli_main", lambda args: cli_calls.append(list(args)))
+
+    result = startup.main(["--help-me", "nope.mp4"])
+
+    assert result is False
+    assert cli_calls == [["--help-me", "nope.mp4"]]
+
+
 def test_main_handles_missing_tkinter(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
