@@ -71,6 +71,23 @@ def test_parse_seeded_launch_extracts_file_and_settings(tmp_path) -> None:
     assert "optimize" not in settings
 
 
+def test_parse_seeded_launch_accepts_hyphenated_flags(tmp_path) -> None:
+    """The documented ``--silent-speed`` shortcut form must seed the GUI too."""
+
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch(
+        ["--small", "--silent-speed", "5", str(video)]
+    )
+
+    assert seeded is not None
+    input_files, settings = seeded
+    assert input_files == [str(video)]
+    assert settings["small"] is True
+    assert settings["silent_speed"] == 5.0
+
+
 def test_parse_seeded_launch_maps_host_to_server_url(tmp_path) -> None:
     video = tmp_path / "talk.mp4"
     video.write_bytes(b"data")

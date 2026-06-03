@@ -306,6 +306,29 @@ def test_stream_job_updates_fallback_to_poll_on_runtime_error(monkeypatch):
     assert captured["job"] is streaming_job
 
 
+def test_stream_job_updates_propagates_cancellation(monkeypatch):
+    """A cancellation raised during async streaming must not restart polling."""
+
+    job = StreamingDummyJob([], [], (None, None, None, None))
+    streaming_job = service_client.StreamingJob(job)
+
+    def fake_asyncio_run(coro, *args, **kwargs):
+        try:
+            coro.close()
+        finally:
+            raise service_client.ProcessingAborted("cancelled")
+
+    monkeypatch.setattr(service_client.asyncio, "run", fake_asyncio_run)
+
+    def fail_poll(*args, **kwargs):  # pragma: no cover - must not run
+        raise AssertionError("polling fallback should not run on cancellation")
+
+    monkeypatch.setattr(service_client, "_poll_job_updates", fail_poll)
+
+    with pytest.raises(service_client.ProcessingAborted):
+        service_client._stream_job_updates(streaming_job, lambda _msg: None)
+
+
 def test_send_video_downloads_file(monkeypatch, tmp_path):
     input_file = tmp_path / "input.mp4"
     input_file.write_bytes(b"input")

@@ -582,6 +582,10 @@ def _stream_job_updates(
                 cancel_callback,
             )
         )
+    except ProcessingAborted:
+        # Cancellation must propagate; it is a ``RuntimeError`` subclass but is
+        # not the "no running event loop" error the polling fallback handles.
+        raise
     except RuntimeError:
         _poll_job_updates(
             job,

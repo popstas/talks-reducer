@@ -60,6 +60,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-t",
         "--silent_threshold",
+        "--silent-threshold",
         type=float,
         dest="silent_threshold",
         help="The volume amount that frames' audio needs to surpass to be considered sounded. Defaults to 0.01.",
@@ -67,6 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-S",
         "--sounded_speed",
+        "--sounded-speed",
         type=float,
         dest="sounded_speed",
         help="The speed that sounded (spoken) frames should be played at. Defaults to 1.",
@@ -74,6 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-s",
         "--silent_speed",
+        "--silent-speed",
         type=float,
         dest="silent_speed",
         help="The speed that silent frames should be played at. Defaults to 4.",
