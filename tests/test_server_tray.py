@@ -248,6 +248,107 @@ def test_pystray_detached_mode_stops_icon(
     assert icon.stop_called >= 1
 
 
+def _make_app_for_gui_wiring(
+    monkeypatch: pytest.MonkeyPatch, *, launch_gui: bool
+) -> tuple[server_tray._ServerTrayApplication, List[int]]:
+    """Build a tray app whose server lifecycle is stubbed for synchronous runs."""
+
+    backend = DummyTrayBackend()
+    server = DummyServer(DummyURL("http://0.0.0.0:1234/"))
+    demo = DummyDemo(server, [])
+
+    app = server_tray._ServerTrayApplication(
+        host="0.0.0.0",
+        port=1234,
+        share=False,
+        open_browser=False,
+        tray_mode="headless",
+        tray_backend=backend,
+        build_interface=lambda: demo,
+        open_browser_callback=lambda _url: None,
+        launch_gui=launch_gui,
+    )
+
+    gui_calls: List[int] = []
+    monkeypatch.setattr(app, "_launch_gui", lambda: gui_calls.append(1))
+    # Replace the threaded server lifecycle so ``run`` stays synchronous.
+    monkeypatch.setattr(app, "_launch_server", lambda: None)
+    monkeypatch.setattr(app, "_await_server_start", lambda _icon: None)
+    # Pre-stop so the headless wait loop returns immediately.
+    app._stop_event.set()
+
+    return app, gui_calls
+
+
+def test_launch_gui_on_start_opens_gui_with_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, gui_calls = _make_app_for_gui_wiring(monkeypatch, launch_gui=True)
+
+    app.run()
+
+    assert gui_calls == [1]
+
+
+def test_run_without_launch_gui_does_not_open_gui(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, gui_calls = _make_app_for_gui_wiring(monkeypatch, launch_gui=False)
+
+    app.run()
+
+    assert gui_calls == []
+
+
+def test_main_with_gui_flag_requests_combined_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    class StubApp:
+        def run(self) -> None:  # pragma: no cover - trivial stub
+            pass
+
+        def stop(self) -> None:  # pragma: no cover - trivial stub
+            pass
+
+    def fake_create_tray_app(**kwargs: Any) -> StubApp:
+        captured.update(kwargs)
+        return StubApp()
+
+    monkeypatch.setattr(server_tray, "create_tray_app", fake_create_tray_app)
+    monkeypatch.setattr(server_tray.atexit, "register", lambda *_args, **_kwargs: None)
+
+    server_tray.main(["--with-gui", "--tray-mode", "headless"])
+
+    assert captured["launch_gui"] is True
+    assert captured["tray_mode"] == "headless"
+
+
+def test_main_without_gui_flag_defaults_to_server_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    class StubApp:
+        def run(self) -> None:  # pragma: no cover - trivial stub
+            pass
+
+        def stop(self) -> None:  # pragma: no cover - trivial stub
+            pass
+
+    def fake_create_tray_app(**kwargs: Any) -> StubApp:
+        captured.update(kwargs)
+        return StubApp()
+
+    monkeypatch.setattr(server_tray, "create_tray_app", fake_create_tray_app)
+    monkeypatch.setattr(server_tray.atexit, "register", lambda *_args, **_kwargs: None)
+
+    server_tray.main(["--tray-mode", "headless"])
+
+    assert captured["launch_gui"] is False
+
+
 def test_launch_gui_resets_completed_process(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = DummyTrayBackend()
     server = DummyServer("http://127.0.0.1:9005/")

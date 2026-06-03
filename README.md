@@ -134,6 +134,19 @@ item (or relaunch the GUI separately) whenever you want to reopen it. The tray
 no longer opens a browser automatically—pass `--open-browser` if you prefer the
 web page to launch as soon as the server is ready.
 
+Want both the server and the desktop GUI to appear together (handy for the
+macOS pip app)? Add `--with-gui` to start the GUI window alongside the
+tray-managed server in one launch:
+
+```sh
+talks-reducer server-tray --with-gui
+```
+
+The same flag works through the GUI launcher—`python -m talks_reducer.gui
+--server --with-gui` boots the tray-managed server and opens the desktop window
+together. The GUI runs in its own process and is shut down cleanly when the
+server stops.
+
 This opens a local web page featuring a drag-and-drop upload zone, **Small video**, **Target 480p**, and **Optimized encoding** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a live
 progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current
 Talks Reducer version so you can confirm which build the server is running. Once the job completes you can inspect the resulting

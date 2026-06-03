@@ -151,6 +151,23 @@ def test_main_falls_back_to_cli_without_positional_file(
     assert cli_calls == [["--help-me", "nope.mp4"]]
 
 
+def test_main_server_forwards_with_gui_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    tray_calls: list[list[str]] = []
+
+    tray_module = SimpleNamespace(main=lambda argv: tray_calls.append(list(argv)))
+
+    monkeypatch.setattr(
+        startup.importlib,
+        "import_module",
+        lambda name: tray_module,
+    )
+
+    result = startup.main(["--server", "--with-gui"])
+
+    assert result is False
+    assert tray_calls == [["--with-gui"]]
+
+
 def test_main_handles_missing_tkinter(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

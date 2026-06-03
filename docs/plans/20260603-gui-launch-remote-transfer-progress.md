@@ -65,11 +65,11 @@ across platforms.
 
 ### Task 3: Run server and desktop GUI together from the macOS pip app
 
-- [ ] Add a way to start both the tray-managed server and the desktop GUI window from the macOS pip app (a combined flag such as `--with-gui`, or have `--server` also open the GUI), instead of `--server` launching only the server with no window.
-- [ ] Wire the launch path so the GUI and server processes/threads start cleanly together and shut down without leaks.
-- [ ] Update `README.md` to document the combined launch option.
-- [ ] write tests for the launch wiring/routing of the combined server+GUI mode
-- [ ] run project tests - must pass before next task
+- [x] Add a way to start both the tray-managed server and the desktop GUI window from the macOS pip app (a combined flag such as `--with-gui`, or have `--server` also open the GUI), instead of `--server` launching only the server with no window.
+- [x] Wire the launch path so the GUI and server processes/threads start cleanly together and shut down without leaks.
+- [x] Update `README.md` to document the combined launch option.
+- [x] write tests for the launch wiring/routing of the combined server+GUI mode
+- [x] run project tests - must pass before next task
 
 ### Task 4: Make the macOS system-tray icon work
 

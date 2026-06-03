@@ -173,11 +173,13 @@ class _ServerTrayApplication:
         tray_backend: Any,
         build_interface: Callable[[], Any],
         open_browser_callback: Callable[[str], Any],
+        launch_gui: bool = False,
     ) -> None:
         self._host = host
         self._port = port
         self._share = share
         self._open_browser_on_start = open_browser
+        self._launch_gui_on_start = launch_gui
         self._tray_mode = tray_mode
         self._tray_backend = tray_backend
         self._build_interface = build_interface
@@ -359,6 +361,10 @@ class _ServerTrayApplication:
             target=self._launch_server, name="talks-reducer-server", daemon=True
         ).start()
 
+        if self._launch_gui_on_start:
+            LOGGER.info("Launching desktop GUI alongside the server")
+            self._launch_gui()
+
         if self._tray_mode == "headless":
             LOGGER.warning(
                 "Tray icon disabled (tray_mode=headless); press Ctrl+C to stop the server."
@@ -475,6 +481,7 @@ def create_tray_app(
     share: bool,
     open_browser: bool,
     tray_mode: str,
+    launch_gui: bool = False,
 ) -> _ServerTrayApplication:
     """Build a :class:`_ServerTrayApplication` wired to production dependencies."""
 
@@ -501,6 +508,7 @@ def create_tray_app(
         tray_backend=tray_backend,
         build_interface=build_interface,
         open_browser_callback=webbrowser.open,
+        launch_gui=launch_gui,
     )
 
 
@@ -518,6 +526,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         help=(
             "Select how the tray runs: foreground pystray (default), detached "
             "pystray worker, or disable the tray entirely."
+        ),
+    )
+    parser.add_argument(
+        "--with-gui",
+        action="store_true",
+        help=(
+            "Also open the desktop GUI window alongside the tray-managed server "
+            "so both start together (useful for the macOS pip app)."
         ),
     )
     parser.add_argument(
@@ -540,6 +556,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         share=args.share,
         open_browser=args.open_browser,
         tray_mode=args.tray_mode,
+        launch_gui=args.with_gui,
     )
 
     atexit.register(app.stop)
