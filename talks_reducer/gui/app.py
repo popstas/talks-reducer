@@ -120,6 +120,23 @@ except ModuleNotFoundError:  # pragma: no cover - runtime dependency
     TkinterDnD = None  # type: ignore[assignment]
 
 
+def _format_seed_number(value: object) -> str:
+    """Render a numeric CLI value for a ``StringVar`` without a trailing ``.0``.
+
+    ``--frame_margin`` and ``--sample_rate`` parse as floats, so an integer such
+    as ``48000`` arrives as ``48000.0``; format whole numbers without the decimal
+    suffix to match the default control text.
+    """
+
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return str(value)
+    if number.is_integer():
+        return str(int(number))
+    return str(number)
+
+
 class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
 
@@ -915,9 +932,9 @@ class TalksReducerGUI:
         if "silent_threshold" in settings:
             self.silent_threshold_var.set(float(settings["silent_threshold"]))
         if "frame_spreadage" in settings:
-            self.frame_margin_var.set(str(settings["frame_spreadage"]))
+            self.frame_margin_var.set(_format_seed_number(settings["frame_spreadage"]))
         if "sample_rate" in settings:
-            self.sample_rate_var.set(str(settings["sample_rate"]))
+            self.sample_rate_var.set(_format_seed_number(settings["sample_rate"]))
         if "keyframe_interval_seconds" in settings:
             self.keyframe_interval_var.set(float(settings["keyframe_interval_seconds"]))
         if "video_codec" in settings:

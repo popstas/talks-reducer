@@ -837,6 +837,53 @@ def test_install_transfer_progress_streams_upload_and_download(monkeypatch, tmp_
     assert service_client_module.httpx.stream is fake_stream
 
 
+def test_install_transfer_progress_restores_httpx_on_error(monkeypatch, tmp_path):
+    """A failing upload/download still restores the patched httpx globals."""
+
+    upload_file = tmp_path / "input.mp4"
+    upload_file.write_bytes(b"0123456789")
+
+    class FakeEndpoint:
+        def _upload_file(self, file_obj, data_index=0):
+            raise RuntimeError("upload boom")
+
+        def _download_file(self, payload):
+            raise RuntimeError("download boom")
+
+    class FakeClient:
+        def __init__(self):
+            self.endpoints = {0: FakeEndpoint()}
+
+        def _infer_fn_index(self, api_name, fn_index):
+            return 0
+
+    import gradio_client.client as service_client_module
+
+    sentinel_post = object()
+    sentinel_stream = object()
+    monkeypatch.setattr(service_client_module.httpx, "post", sentinel_post)
+    monkeypatch.setattr(service_client_module.httpx, "stream", sentinel_stream)
+
+    client = FakeClient()
+    installed = service_client._install_transfer_progress(
+        client, "/process_video", upload_file.stat().st_size, lambda *args: None
+    )
+    assert installed is True
+
+    # Invoking the patched endpoint methods raises, but the ``finally`` blocks
+    # must restore the module-global httpx hooks so a later transfer is not
+    # corrupted by a leaked monkeypatch.
+    endpoint = client.endpoints[0]
+
+    with pytest.raises(RuntimeError, match="upload boom"):
+        endpoint._upload_file({"path": str(upload_file)})
+    assert service_client_module.httpx.post is sentinel_post
+
+    with pytest.raises(RuntimeError, match="download boom"):
+        endpoint._download_file({"path": "/server/input.mp4"})
+    assert service_client_module.httpx.stream is sentinel_stream
+
+
 def test_install_transfer_progress_returns_false_for_stub_client():
     class StubClient:
         pass
