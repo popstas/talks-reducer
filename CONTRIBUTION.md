@@ -47,6 +47,18 @@ processes.
 
 The deploy helper automatically runs the test suite, rebuilds the distribution artifacts, validates them with `twine check`, and uploads the release. Provide `TWINE_REPOSITORY_URL` to target TestPyPI instead of PyPI. Ensure you have valid credentials configured in `~/.pypirc` before running the publish step.
 
+### Publish to PyPI after the GitHub release
+
+Pushing a version tag (`v*`) triggers the CI workflow, which builds the PyInstaller bundles and Inno installer, generates release notes with git-cliff, and creates the **GitHub release** with those binaries attached. CI does **not** publish to PyPI. Once the GitHub release is live, publish the Python package separately so `pip install -U talks-reducer` picks up the new version:
+
+```bash
+python -m build
+twine check dist/*
+twine upload dist/talks_reducer-<version>*
+```
+
+(or run `python scripts/deploy.py`, which performs the same build-check-upload steps). Verify the upload at `https://pypi.org/project/talks-reducer/<version>/` — note the main `/json` endpoint is CDN-cached for a few minutes, so check the version-specific page or the simple index to confirm.
+
 Feel free to open pull requests with enhancements or bug fixes.
 
 ### macOS codesigning and notarization
