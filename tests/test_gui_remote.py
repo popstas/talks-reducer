@@ -558,3 +558,42 @@ def test_process_files_via_server_passes_speed_options(tmp_path: Path) -> None:
     assert captured_kwargs.get("silent_speed") == 1.0
     assert captured_kwargs.get("sounded_speed") == 1.0
     assert captured_kwargs.get("video_codec") == "av1"
+
+
+def test_process_files_via_server_streams_upload_and_download(tmp_path: Path) -> None:
+    gui = StubGUI()
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            callback = kwargs.get("progress_callback")
+            assert callable(callback)
+            # Byte-level upload progress maps into the 0-5% ``Uploading`` band.
+            callback("Uploading:", 0, 100, "bytes")
+            callback("Uploading:", 50, 100, "bytes")
+            callback("Uploading:", 100, 100, "bytes")
+            callback("Generating final:", 100, 100, "frames")
+            # Download progress is reported back to the client after processing.
+            callback("Downloading:", 0, 100, "bytes")
+            callback("Downloading:", 100, 100, "bytes")
+            return (str(tmp_path / "out.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    # Uploading 50% -> 0 + 0.5 * 5 = 2.5, 100% -> 5.0 before the final encode.
+    assert gui.progress_values[:3] == pytest.approx([0.0, 2.5, 5.0])
+    # The upload band and download phase both surface a percentage status.
+    assert ("processing", "Uploading: 50%") in gui.status_history
+    assert ("processing", "Downloading: 100%") in gui.status_history

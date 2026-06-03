@@ -48,13 +48,13 @@ across platforms.
 
 ### Task 1: Stream remote upload progress and add download progress
 
-- [ ] Add a byte-level progress callback to the remote upload path in `service_client.py` so a single large file advances incrementally instead of jumping to 100% at the start of "Uploading 1/1: <file> to <server>".
-- [ ] Route the streamed upload progress through the GUI `Uploading` band and the existing monotonic progress helper so the bar reflects real upload state in remote mode.
-- [ ] Show the incoming upload progress in the server console/log as the file is received, not only on the client.
-- [ ] After remote processing completes, report download progress on the client while the finished file is fetched back from the server.
-- [ ] Show the outgoing download-to-client progress in the server console/log as the finished file is sent back, mirroring the upload-side logging.
-- [ ] write tests for the upload/download progress callbacks and progress mapping
-- [ ] run project tests - must pass before next task
+- [x] Add a byte-level progress callback to the remote upload path in `service_client.py` so a single large file advances incrementally instead of jumping to 100% at the start of "Uploading 1/1: <file> to <server>".
+- [x] Route the streamed upload progress through the GUI `Uploading` band and the existing monotonic progress helper so the bar reflects real upload state in remote mode.
+- [x] Show the incoming upload progress in the server console/log as the file is received, not only on the client.
+- [x] After remote processing completes, report download progress on the client while the finished file is fetched back from the server.
+- [x] Show the outgoing download-to-client progress in the server console/log as the finished file is sent back, mirroring the upload-side logging.
+- [x] write tests for the upload/download progress callbacks and progress mapping
+- [x] run project tests - must pass before next task
 
 ### Task 2: Launch GUI with positional file and CLI settings (file-association)
 

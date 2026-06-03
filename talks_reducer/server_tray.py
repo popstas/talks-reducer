@@ -18,6 +18,7 @@ from PIL import Image
 
 from .icons import iter_icon_candidates
 from .server import build_interface
+from .server import build_launch_app_kwargs as _build_launch_app_kwargs
 from .server_args import build_server_parser
 from .version_utils import resolve_version
 
@@ -213,6 +214,7 @@ class _ServerTrayApplication:
             inbrowser=False,
             prevent_thread_lock=True,
             show_error=True,
+            app_kwargs=_build_launch_app_kwargs(),
         )
 
         self._server_handle = server

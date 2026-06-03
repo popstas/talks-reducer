@@ -21,6 +21,161 @@ except ImportError:  # pragma: no cover - allow running as script
     from talks_reducer.pipeline import ProcessingAborted
 
 
+class _ProgressFileReader:
+    """Proxy a binary file object and report each chunk read to a callback.
+
+    ``httpx`` reads multipart file fields in 64 KiB chunks while it streams the
+    request body to the socket. Wrapping the file object lets us emit byte-level
+    upload progress without re-implementing the gradio upload route.
+    """
+
+    def __init__(self, fileobj: Any, on_bytes: Callable[[int], None]) -> None:
+        self._file = fileobj
+        self._on_bytes = on_bytes
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._file.read(size)
+        if chunk:
+            self._on_bytes(len(chunk))
+        return chunk
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._file, name)
+
+
+def _wrap_upload_files(files: Any, on_bytes: Callable[[int], None]) -> Any:
+    """Return *files* with each readable file object wrapped for progress."""
+
+    items = files.items() if isinstance(files, dict) else files
+    wrapped = []
+    for field, spec in items:
+        if (
+            isinstance(spec, (list, tuple))
+            and len(spec) >= 2
+            and hasattr(spec[1], "read")
+        ):
+            spec = (spec[0], _ProgressFileReader(spec[1], on_bytes), *tuple(spec[2:]))
+        wrapped.append((field, spec))
+    return wrapped
+
+
+class _ProgressResponse:
+    """Wrap an ``httpx`` streaming response to report download progress."""
+
+    def __init__(
+        self,
+        response: Any,
+        progress_callback: Callable[[str, Optional[int], Optional[int], str], None],
+    ) -> None:
+        self._response = response
+        self._progress_callback = progress_callback
+
+    def iter_bytes(self, *args: Any, **kwargs: Any) -> Any:
+        total: Optional[int] = None
+        with suppress(TypeError, ValueError, AttributeError):
+            content_length = self._response.headers.get("content-length")
+            if content_length is not None:
+                total = int(content_length)
+        received = 0
+        self._progress_callback("Downloading:", 0, total, "bytes")
+        for chunk in self._response.iter_bytes(*args, **kwargs):
+            received += len(chunk)
+            self._progress_callback("Downloading:", received, total, "bytes")
+            yield chunk
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._response, name)
+
+
+class _ProgressStreamContext:
+    """Context-manager proxy that yields a :class:`_ProgressResponse`."""
+
+    def __init__(
+        self,
+        context_manager: Any,
+        progress_callback: Callable[[str, Optional[int], Optional[int], str], None],
+    ) -> None:
+        self._context_manager = context_manager
+        self._progress_callback = progress_callback
+
+    def __enter__(self) -> _ProgressResponse:
+        response = self._context_manager.__enter__()
+        return _ProgressResponse(response, self._progress_callback)
+
+    def __exit__(self, *exc_info: Any) -> Any:
+        return self._context_manager.__exit__(*exc_info)
+
+
+def _install_transfer_progress(
+    client: Any,
+    api_name: Optional[str],
+    upload_total: Optional[int],
+    progress_callback: Callable[[str, Optional[int], Optional[int], str], None],
+) -> bool:
+    """Patch the gradio endpoint to stream byte-level upload/download progress.
+
+    Returns ``True`` when the endpoint was patched. Callers that receive
+    ``False`` (for example because a stub client without real endpoints was
+    supplied) should emit the synthetic upload-complete event themselves.
+    """
+
+    try:
+        fn_index = client._infer_fn_index(api_name, None)
+        endpoint = client.endpoints[fn_index]
+    except Exception:  # pragma: no cover - defensive (stub clients, API changes)
+        return False
+
+    original_upload = getattr(endpoint, "_upload_file", None)
+    original_download = getattr(endpoint, "_download_file", None)
+    if not callable(original_upload) or not callable(original_download):
+        return False
+
+    import gradio_client.client as gradio_client_module
+
+    def upload_file(file_obj: Any, data_index: int = 0) -> Any:
+        sent = 0
+
+        def _on_bytes(count: int) -> None:
+            nonlocal sent
+            sent += count
+            current = min(sent, upload_total) if upload_total else sent
+            progress_callback("Uploading:", current, upload_total, "bytes")
+
+        original_post = gradio_client_module.httpx.post
+
+        def post(*args: Any, **kwargs: Any) -> Any:
+            files = kwargs.get("files")
+            if files:
+                kwargs["files"] = _wrap_upload_files(files, _on_bytes)
+            return original_post(*args, **kwargs)
+
+        gradio_client_module.httpx.post = post
+        try:
+            return original_upload(file_obj, data_index)
+        finally:
+            gradio_client_module.httpx.post = original_post
+            if upload_total:
+                progress_callback("Uploading:", upload_total, upload_total, "bytes")
+
+    def download_file(payload: Any) -> Any:
+        original_stream = gradio_client_module.httpx.stream
+
+        def stream(*args: Any, **kwargs: Any) -> Any:
+            return _ProgressStreamContext(
+                original_stream(*args, **kwargs), progress_callback
+            )
+
+        gradio_client_module.httpx.stream = stream
+        try:
+            return original_download(payload)
+        finally:
+            gradio_client_module.httpx.stream = original_stream
+
+    endpoint._upload_file = upload_file
+    endpoint._download_file = download_file
+    return True
+
+
 class StreamingJob:
     """Adapter that provides a consistent interface for streaming jobs."""
 
@@ -124,19 +279,32 @@ def send_video(
     submit_kwargs: dict[str, Any] = {"api_name": "/process_video"}
 
     upload_total: Optional[int] = None
+    transfer_progress_installed = False
     if progress_callback is not None:
         try:
             upload_total = input_path.stat().st_size
         except OSError:  # pragma: no cover - defensive
             upload_total = None
         progress_callback("Uploading:", 0, upload_total, "bytes")
+        # Patch the endpoint so the real upload (which runs lazily inside the
+        # submitted job, not when ``submit`` returns) streams byte-level progress
+        # instead of jumping straight to 100%.
+        transfer_progress_installed = _install_transfer_progress(
+            client,
+            submit_kwargs.get("api_name"),
+            upload_total,
+            progress_callback,
+        )
 
     if job_factory is not None:
         job = job_factory(client, submit_args, submit_kwargs)
     else:
         job = client.submit(*submit_args, **submit_kwargs)
 
-    if progress_callback is not None:
+    if progress_callback is not None and not transfer_progress_installed:
+        # Stub clients without real endpoints (or older gradio APIs) cannot
+        # stream the upload; fall back to reporting it complete so the
+        # ``Uploading`` band still finishes.
         progress_callback("Uploading:", upload_total, upload_total, "bytes")
 
     streaming_job = StreamingJob(job)

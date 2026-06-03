@@ -9,6 +9,7 @@ from typing import Any, Callable, List, Optional
 
 import pytest
 
+from talks_reducer import server as server_module
 from talks_reducer import server_tray
 
 
@@ -146,16 +147,23 @@ def test_headless_mode_runs_and_opens_browser(
         time_module.sleep(0.05)
 
     assert open_calls == ["http://127.0.0.1:1234/"]
-    assert launch_calls == [
-        {
-            "server_name": "0.0.0.0",
-            "server_port": 1234,
-            "share": False,
-            "inbrowser": False,
-            "prevent_thread_lock": True,
-            "show_error": True,
-        }
-    ]
+    assert len(launch_calls) == 1
+    launch_kwargs = launch_calls[0]
+    app_kwargs = launch_kwargs.pop("app_kwargs", None)
+    assert launch_kwargs == {
+        "server_name": "0.0.0.0",
+        "server_port": 1234,
+        "share": False,
+        "inbrowser": False,
+        "prevent_thread_lock": True,
+        "show_error": True,
+    }
+    # The tray-launched server installs the transfer-progress middleware too.
+    middleware = (app_kwargs or {}).get("middleware", [])
+    assert any(
+        getattr(entry, "cls", None) is server_module.TransferProgressMiddleware
+        for entry in middleware
+    )
 
     app.stop()
     runner.join(timeout=2.0)

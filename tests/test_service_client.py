@@ -1,4 +1,5 @@
 import asyncio
+import io
 from types import SimpleNamespace
 from typing import Optional
 
@@ -698,6 +699,153 @@ def test_main_prefer_global_ffmpeg_option(monkeypatch, tmp_path, capsys):
     captured = capsys.readouterr()
     assert "summary" in captured.out
     assert str(destination_file) in captured.out
+
+
+def test_progress_file_reader_reports_each_chunk():
+    """The reader proxies the file and forwards the size of every chunk read."""
+
+    counts: list[int] = []
+    reader = service_client._ProgressFileReader(
+        io.BytesIO(b"abcdefghij"), counts.append
+    )
+
+    assert reader.read(4) == b"abcd"
+    assert reader.read(4) == b"efgh"
+    assert reader.read(4) == b"ij"
+    assert reader.read(4) == b""  # exhausted; no extra event
+
+    assert counts == [4, 4, 2]
+
+
+def test_wrap_upload_files_wraps_only_file_objects():
+    counts: list[int] = []
+    fileobj = io.BytesIO(b"payload")
+    files = [("files", ("clip.mp4", fileobj))]
+
+    wrapped = service_client._wrap_upload_files(files, counts.append)
+
+    field, spec = wrapped[0]
+    assert field == "files"
+    assert spec[0] == "clip.mp4"
+    assert isinstance(spec[1], service_client._ProgressFileReader)
+    assert spec[1].read() == b"payload"
+    assert counts == [7]
+
+
+def test_progress_response_emits_download_events():
+    response = SimpleNamespace(
+        headers={"content-length": "6"},
+        iter_bytes=lambda: iter([b"abc", b"def"]),
+    )
+    events: list[tuple[str, Optional[int], Optional[int], str]] = []
+
+    proxy = service_client._ProgressResponse(
+        response, lambda *args: events.append(args)
+    )
+    chunks = list(proxy.iter_bytes())
+
+    assert chunks == [b"abc", b"def"]
+    assert events == [
+        ("Downloading:", 0, 6, "bytes"),
+        ("Downloading:", 3, 6, "bytes"),
+        ("Downloading:", 6, 6, "bytes"),
+    ]
+
+
+def test_install_transfer_progress_streams_upload_and_download(monkeypatch, tmp_path):
+    """Patched endpoint reports byte-level upload and download progress."""
+
+    upload_file = tmp_path / "input.mp4"
+    upload_file.write_bytes(b"0123456789")
+
+    class FakeEndpoint:
+        def _upload_file(self, file_obj, data_index=0):
+            # Mirror gradio's real upload: open the file and POST it via httpx.
+            with open(file_obj["path"], "rb") as handle:
+                service_client_module.httpx.post(
+                    "http://server/upload",
+                    files=[("files", ("input.mp4", handle))],
+                )
+            return {"path": "/server/input.mp4"}
+
+        def _download_file(self, payload):
+            with service_client_module.httpx.stream(
+                "GET", "http://server/file"
+            ) as response:
+                return b"".join(response.iter_bytes())
+
+    class FakeClient:
+        def __init__(self):
+            self.endpoints = {0: FakeEndpoint()}
+
+        def _infer_fn_index(self, api_name, fn_index):
+            return 0
+
+    import gradio_client.client as service_client_module
+
+    def fake_post(url, *args, files=None, **kwargs):
+        # httpx reads the wrapped file in chunks while streaming the body.
+        for _field, spec in files:
+            handle = spec[1]
+            while handle.read(4):
+                pass
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: ["/x"])
+
+    def fake_stream(method, url, *args, **kwargs):
+        class _CM:
+            def __enter__(self):
+                return SimpleNamespace(
+                    headers={"content-length": "8"},
+                    iter_bytes=lambda *a, **k: iter([b"abcd", b"efgh"]),
+                    raise_for_status=lambda: None,
+                )
+
+            def __exit__(self, *exc):
+                return False
+
+        return _CM()
+
+    monkeypatch.setattr(service_client_module.httpx, "post", fake_post)
+    monkeypatch.setattr(service_client_module.httpx, "stream", fake_stream)
+
+    client = FakeClient()
+    events: list[tuple[str, Optional[int], Optional[int], str]] = []
+
+    installed = service_client._install_transfer_progress(
+        client,
+        "/process_video",
+        upload_file.stat().st_size,
+        lambda *args: events.append(args),
+    )
+
+    assert installed is True
+
+    endpoint = client.endpoints[0]
+    endpoint._upload_file({"path": str(upload_file)})
+
+    upload_events = [event for event in events if event[0] == "Uploading:"]
+    assert ("Uploading:", 4, 10, "bytes") in upload_events
+    assert upload_events[-1] == ("Uploading:", 10, 10, "bytes")
+    # The original httpx.post must be restored after the upload.
+    assert service_client_module.httpx.post is fake_post
+
+    events.clear()
+    endpoint._download_file({"path": "/server/input.mp4"})
+    download_events = [event for event in events if event[0] == "Downloading:"]
+    assert download_events[0] == ("Downloading:", 0, 8, "bytes")
+    assert download_events[-1] == ("Downloading:", 8, 8, "bytes")
+    assert service_client_module.httpx.stream is fake_stream
+
+
+def test_install_transfer_progress_returns_false_for_stub_client():
+    class StubClient:
+        pass
+
+    installed = service_client._install_transfer_progress(
+        StubClient(), "/process_video", 10, lambda *args: None
+    )
+
+    assert installed is False
 
 
 @pytest.fixture
