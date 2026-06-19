@@ -840,3 +840,82 @@ def test_reset_progress_baseline_clears_floor_for_next_file():
     # After re-basing, a lower mapped value from the next file is honored.
     app.TalksReducerGUI._set_progress_monotonic(gui, 12.0)
     assert gui._set_progress.call_args[0][0] == pytest.approx(12.0)
+
+
+def _make_download_wait_gui() -> app.TalksReducerGUI:
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.DOWNLOAD_WAIT_INTERVAL_MS = app.TalksReducerGUI.DOWNLOAD_WAIT_INTERVAL_MS
+    gui.DOWNLOAD_WAIT_STATUS = app.TalksReducerGUI.DOWNLOAD_WAIT_STATUS
+    gui._download_wait_job = None
+    gui._set_status = MagicMock()
+    gui._schedule_on_ui_thread = lambda callback: callback()
+    gui.root = SimpleNamespace(
+        after=MagicMock(return_value="job"),
+        after_cancel=MagicMock(),
+    )
+    return gui
+
+
+def test_begin_download_wait_emits_status_and_schedules_refresh():
+    """Starting the wait emits the status immediately and arms the 5s refresh."""
+
+    gui = _make_download_wait_gui()
+
+    app.TalksReducerGUI._begin_download_wait(gui)
+
+    gui._set_status.assert_called_once_with(
+        "processing", app.TalksReducerGUI.DOWNLOAD_WAIT_STATUS
+    )
+    gui.root.after.assert_called_once_with(
+        app.TalksReducerGUI.DOWNLOAD_WAIT_INTERVAL_MS, gui._emit_download_wait
+    )
+    assert gui._download_wait_job == "job"
+
+
+def test_emit_download_wait_reschedules_itself():
+    """Each refresh re-emits the waiting status and arms the next refresh."""
+
+    gui = _make_download_wait_gui()
+
+    app.TalksReducerGUI._emit_download_wait(gui)
+    app.TalksReducerGUI._emit_download_wait(gui)
+
+    assert gui._set_status.call_count == 2
+    assert gui.root.after.call_count == 2
+    assert gui._download_wait_job == "job"
+
+
+def test_begin_download_wait_cancels_existing_timer_before_restart():
+    """Re-arming cancels any previously scheduled refresh first."""
+
+    gui = _make_download_wait_gui()
+    gui._download_wait_job = "old-job"
+
+    app.TalksReducerGUI._begin_download_wait(gui)
+
+    gui.root.after_cancel.assert_called_once_with("old-job")
+    assert gui._download_wait_job == "job"
+
+
+def test_cancel_download_wait_cancels_active_timer():
+    """Cancelling stops the timer and clears the stored job handle."""
+
+    gui = _make_download_wait_gui()
+    gui._download_wait_job = "job"
+
+    app.TalksReducerGUI._cancel_download_wait(gui)
+
+    gui.root.after_cancel.assert_called_once_with("job")
+    assert gui._download_wait_job is None
+
+
+def test_cancel_download_wait_is_noop_when_idle():
+    """Cancelling with no active timer must not touch the scheduler."""
+
+    gui = _make_download_wait_gui()
+    gui._download_wait_job = None
+
+    app.TalksReducerGUI._cancel_download_wait(gui)
+
+    gui.root.after_cancel.assert_not_called()
+    assert gui._download_wait_job is None

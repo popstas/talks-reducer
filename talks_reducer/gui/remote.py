@@ -312,6 +312,11 @@ def process_files_via_server(
         """Map streamed remote progress onto the GUI bar and status label."""
 
         del unit
+        normalized_desc = desc.strip().lower() if isinstance(desc, str) else ""
+        # The first downloaded bytes close the post-processing gap, so cancel the
+        # "Waiting for download…" heartbeat as soon as a download event arrives.
+        if normalized_desc.startswith("downloading"):
+            gui._cancel_download_wait()
         # Real streamed audio/final progress makes the synthetic audio fallback
         # timer redundant: cancel it on ``Audio processing:`` and complete the
         # audio phase on ``Generating final`` so the timer cannot keep overwriting
@@ -339,6 +344,20 @@ def process_files_via_server(
         gui._schedule_on_ui_thread(
             lambda text=status_text: gui._set_status("processing", text)
         )
+
+        # Once the final-generation stage reports completion the remote pipeline
+        # is done and the only remaining work is the post-processing finalization
+        # and the download. Start the waiting heartbeat after the completion
+        # status is queued so it surfaces during the otherwise-silent gap before
+        # the first ``Downloading:`` event.
+        if (
+            normalized_desc.startswith("generating final")
+            and total
+            and total > 0
+            and current is not None
+            and current >= total
+        ):
+            gui._begin_download_wait()
 
     small_mode = bool(args.get("small", False))
     small_target_height = args.get("small_target_height")
@@ -415,8 +434,12 @@ def process_files_via_server(
             )
             _ensure_not_stopped()
         except ProcessingAborted:
+            # A stop request (or any abort) must not leave the waiting heartbeat
+            # ticking on the UI thread after the job ends.
+            gui._cancel_download_wait()
             raise
         except Exception as exc:  # pragma: no cover - network safeguard
+            gui._cancel_download_wait()
             error_detail = f"{exc.__class__.__name__}: {exc}"
             error_msg = f"Processing failed: {error_detail}"
             gui._append_log(error_msg)
@@ -428,6 +451,10 @@ def process_files_via_server(
             )
             return False
 
+        # The download has finished by the time ``send_video`` returns; make sure
+        # no waiting heartbeat lingers into the next file of a batch even when the
+        # job produced no ``Downloading:`` events to cancel it.
+        gui._cancel_download_wait()
         gui._last_output = Path(destination)
         time_ratio, size_ratio = parse_summary(summary)
         gui._last_time_ratio = time_ratio

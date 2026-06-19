@@ -146,6 +146,8 @@ class TalksReducerGUI:
     AUDIO_PROGRESS_WEIGHT = 5.0
     MIN_AUDIO_INTERVAL_MS = 10
     DEFAULT_AUDIO_INTERVAL_MS = 200
+    DOWNLOAD_WAIT_INTERVAL_MS = 5000
+    DOWNLOAD_WAIT_STATUS = "Waiting for download…"
 
     def __init__(
         self,
@@ -206,6 +208,7 @@ class TalksReducerGUI:
         self._audio_progress_job: Optional[str] = None
         self._audio_progress_interval_ms: Optional[int] = None
         self._audio_progress_steps_completed = 0
+        self._download_wait_job: Optional[str] = None
         self.progress_var = tk.DoubleVar(value=0.0)
         self._progress_floor: float = 0.0
         self._ffmpeg_process: Optional[subprocess.Popen] = None
@@ -1268,6 +1271,48 @@ class TalksReducerGUI:
             self._complete_audio_phase()
         elif normalized.startswith("audio processing"):
             self._cancel_audio_progress()
+
+    def _begin_download_wait(self) -> None:
+        """Show a refreshing "Waiting for download…" status before the download.
+
+        After the remote pipeline finishes generating the final video the server
+        spends several seconds finalizing the file before the download stream
+        begins, emitting no progress events in between. Without a heartbeat the
+        GUI would sit silently at the last processing status for that whole gap.
+        Emit the waiting status immediately and re-emit it on a repeating timer
+        until :meth:`_cancel_download_wait` stops it (on the first downloaded
+        bytes, on error, or on a stop request).
+        """
+
+        def _start() -> None:
+            if self._download_wait_job is not None:
+                self.root.after_cancel(self._download_wait_job)
+                self._download_wait_job = None
+            self._emit_download_wait()
+
+        self._schedule_on_ui_thread(_start)
+
+    def _emit_download_wait(self) -> None:
+        """Emit the waiting status and reschedule the next refresh."""
+
+        self._download_wait_job = None
+        self._set_status("processing", self.DOWNLOAD_WAIT_STATUS)
+        self._download_wait_job = self.root.after(
+            self.DOWNLOAD_WAIT_INTERVAL_MS, self._emit_download_wait
+        )
+
+    def _cancel_download_wait(self) -> None:
+        """Stop the "Waiting for download…" heartbeat timer if it is running."""
+
+        if self._download_wait_job is None:
+            return
+
+        def _cancel() -> None:
+            if self._download_wait_job is not None:
+                self.root.after_cancel(self._download_wait_job)
+                self._download_wait_job = None
+
+        self._schedule_on_ui_thread(_cancel)
 
     def _get_status_style(self, status: str) -> str | None:
         """Return the foreground color for *status* if a match is known."""

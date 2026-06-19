@@ -39,8 +39,13 @@ class _StubButton:
 class StubGUI:
     """Lightweight stand-in for :class:`TalksReducerGUI` used in tests."""
 
+    DOWNLOAD_WAIT_STATUS = "Waiting for download…"
+
     def __init__(self) -> None:
         self._stop_requested = False
+        self._download_wait_active = False
+        self.download_wait_begin_count = 0
+        self.download_wait_cancel_count = 0
         self.logs: list[str] = []
         self.progress_values: list[float] = []
         self._progress_value = 0.0
@@ -94,6 +99,19 @@ class StubGUI:
     def _reset_progress_baseline(self) -> None:
         self._progress_floor = 0.0
         self._set_progress(0.0)
+
+    def _begin_download_wait(self) -> None:
+        # Mirror :meth:`TalksReducerGUI._begin_download_wait`: emit the waiting
+        # status immediately. The real GUI also reschedules a refresh timer; the
+        # stub records the activation flag and call count instead of running a
+        # wall-clock timer.
+        self.download_wait_begin_count += 1
+        self._download_wait_active = True
+        self._set_status("processing", self.DOWNLOAD_WAIT_STATUS)
+
+    def _cancel_download_wait(self) -> None:
+        self.download_wait_cancel_count += 1
+        self._download_wait_active = False
 
     def _set_progress_value(self, percentage: float) -> None:
         self._progress_value = percentage
@@ -638,3 +656,121 @@ def test_process_files_via_server_streams_upload_and_download(tmp_path: Path) ->
     # The upload band and download phase both surface a percentage status.
     assert ("processing", "Uploading: 50%") in gui.status_history
     assert ("processing", "Downloading: 100%") in gui.status_history
+
+
+def test_process_files_via_server_waits_for_download_after_processing(
+    tmp_path: Path,
+) -> None:
+    gui = StubGUI()
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            callback = kwargs.get("progress_callback")
+            assert callable(callback)
+            # Final encode completes, then the server finalizes the file before
+            # the download stream begins.
+            callback("Generating final:", 100, 100, "frames")
+            callback("Downloading:", 0, 100, "bytes")
+            callback("Downloading:", 100, 100, "bytes")
+            return (str(tmp_path / "out.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    statuses = gui.status_history
+    waiting = ("processing", StubGUI.DOWNLOAD_WAIT_STATUS)
+    final = ("processing", "Generating final: 100%")
+    first_download = ("processing", "Downloading: 0%")
+    assert waiting in statuses
+    # The waiting status appears after the last processing event and before the
+    # first download event.
+    assert (
+        statuses.index(final) < statuses.index(waiting) < statuses.index(first_download)
+    )
+    # The heartbeat starts exactly once and is cancelled when the download begins
+    # (and again after ``send_video`` returns), leaving no active timer.
+    assert gui.download_wait_begin_count == 1
+    assert gui.download_wait_cancel_count >= 1
+    assert gui._download_wait_active is False
+
+
+def test_process_files_via_server_does_not_wait_without_final_completion(
+    tmp_path: Path,
+) -> None:
+    gui = StubGUI()
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            callback = kwargs.get("progress_callback")
+            assert callable(callback)
+            # The final encode never reaches 100% in the streamed events, so the
+            # waiting heartbeat must not start.
+            callback("Generating final:", 30, 100, "frames")
+            return (str(tmp_path / "out.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    assert gui.download_wait_begin_count == 0
+    assert ("processing", StubGUI.DOWNLOAD_WAIT_STATUS) not in gui.status_history
+
+
+def test_process_files_via_server_cancels_waiting_on_stop(tmp_path: Path) -> None:
+    from talks_reducer.pipeline import ProcessingAborted
+
+    gui = StubGUI()
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            callback = kwargs.get("progress_callback")
+            assert callable(callback)
+            # The final encode completes and the waiting heartbeat starts, then
+            # the user requests a stop before any download bytes arrive.
+            callback("Generating final:", 100, 100, "frames")
+            gui._stop_requested = True
+            raise ProcessingAborted("Remote processing cancelled by user.")
+
+        return SimpleNamespace(send_video=send_video)
+
+    with pytest.raises(ProcessingAborted):
+        remote_module.process_files_via_server(
+            gui,
+            files=[str(tmp_path / "input.mp4")],
+            args={},
+            server_url="http://example.com",
+            open_after_convert=False,
+            default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
+            parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+            load_service_client=load_client,
+            check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+        )
+
+    # The waiting heartbeat started but was cancelled on the abort path, so no
+    # timer lingers after the stop.
+    assert gui.download_wait_begin_count == 1
+    assert gui.download_wait_cancel_count >= 1
+    assert gui._download_wait_active is False

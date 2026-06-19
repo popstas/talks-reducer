@@ -156,21 +156,42 @@ communication: the GUI cannot read the server's in-memory state directly.
       `test_gui_progress.py`)
 
 ### Task 2: Show "Waiting for download…" during the processing→download gap
-- [ ] In `talks_reducer/gui/remote.py` `_handle_remote_progress` (or the
+- [x] In `talks_reducer/gui/remote.py` `_handle_remote_progress` (or the
       `send_video` flow in `service_client.py`), emit a distinct status when
       remote processing completes and before the first `"Downloading:"` event.
-- [ ] Refresh the waiting status at least every 5s (e.g. a lightweight repeating
+      **Done:** `_handle_remote_progress` now calls `gui._begin_download_wait()`
+      after the `"Generating final:"` stage reports completion (`current >=
+      total`), emitting the `"Waiting for download…"` status after the
+      completion status is queued and before the first `"Downloading:"` event.
+- [x] Refresh the waiting status at least every 5s (e.g. a lightweight repeating
       `root.after`/timer that clears as soon as the first download bytes arrive)
       so the GUI never sits silent for ~10s. Route any bar change through
       `_set_progress_monotonic` per the GUI Progress Convention.
-- [ ] Ensure the waiting status/timer is cancelled on download start, on error,
+      **Done:** added `TalksReducerGUI._begin_download_wait` /
+      `_emit_download_wait` / `_cancel_download_wait`. `_emit_download_wait`
+      re-emits the status and reschedules itself every
+      `DOWNLOAD_WAIT_INTERVAL_MS` (5000 ms) via `root.after`. The heartbeat only
+      changes status text, not the bar.
+- [x] Ensure the waiting status/timer is cancelled on download start, on error,
       and on stop-request (no leaked timers between batch files).
-- [ ] write tests in `tests/test_gui_remote.py`: a `("processing", "Waiting for
+      **Done:** `_handle_remote_progress` cancels on the first `"Downloading:"`
+      event; `process_files_via_server` cancels after each `send_video` returns,
+      in the `ProcessingAborted` (stop) branch, and in the generic error branch.
+- [x] write tests in `tests/test_gui_remote.py`: a `("processing", "Waiting for
       download…")`-style status appears between the last processing event and the
       first download event, and the timer stops once download begins.
-- [ ] write a test for the cancel/stop path (waiting status does not linger after
-      stop or error).
-- [ ] run `pytest` — must pass before Task 3.
+      (`test_process_files_via_server_waits_for_download_after_processing`,
+      `test_process_files_via_server_does_not_wait_without_final_completion`)
+      plus GUI timer unit tests in `tests/test_gui_app.py`
+      (`test_begin_download_wait_emits_status_and_schedules_refresh`,
+      `test_emit_download_wait_reschedules_itself`,
+      `test_begin_download_wait_cancels_existing_timer_before_restart`,
+      `test_cancel_download_wait_cancels_active_timer`,
+      `test_cancel_download_wait_is_noop_when_idle`).
+- [x] write a test for the cancel/stop path (waiting status does not linger after
+      stop or error). (`test_process_files_via_server_cancels_waiting_on_stop`)
+- [x] run `pytest` — must pass before Task 3. (403 passed; `black`/`isort`
+      clean on touched files.)
 
 ### Task 3: Server-side client activity recorder + activity endpoint
 - [ ] Add a bounded in-memory activity recorder (a `collections.deque(maxlen=N)`)
