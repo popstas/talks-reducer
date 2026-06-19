@@ -775,6 +775,136 @@ def test_progress_response_emits_download_events():
     ]
 
 
+def test_monotonic_download_progress_collapses_repeated_cycles():
+    """Repeated download 0→100 cycles collapse to one monotonic sequence."""
+
+    events: list[tuple[str, Optional[int], Optional[int], str]] = []
+    progress = service_client._MonotonicDownloadProgress(
+        lambda *args: events.append(args)
+    )
+
+    # First download response runs a full 0 → 100 cycle.
+    progress("Downloading:", 0, 100, "bytes")
+    progress("Downloading:", 50, 100, "bytes")
+    progress("Downloading:", 100, 100, "bytes")
+    # A second download response (different total) repeats the whole cycle.
+    progress("Downloading:", 0, 200, "bytes")
+    progress("Downloading:", 100, 200, "bytes")
+    progress("Downloading:", 200, 200, "bytes")
+
+    assert events == [
+        ("Downloading:", 0, 100, "bytes"),
+        ("Downloading:", 50, 100, "bytes"),
+        ("Downloading:", 100, 100, "bytes"),
+    ]
+    # Exactly one terminal 100% reaches the callback.
+    terminal = [event for event in events if event[1] == event[2]]
+    assert terminal == [("Downloading:", 100, 100, "bytes")]
+
+
+def test_monotonic_download_progress_passes_through_other_descs():
+    """Upload and processing events bypass the download dedupe untouched."""
+
+    events: list[tuple[str, Optional[int], Optional[int], str]] = []
+    progress = service_client._MonotonicDownloadProgress(
+        lambda *args: events.append(args)
+    )
+
+    progress("Uploading:", 0, 100, "bytes")
+    progress("Uploading:", 100, 100, "bytes")
+    progress("Processing", 1, 4, "frames")
+
+    assert events == [
+        ("Uploading:", 0, 100, "bytes"),
+        ("Uploading:", 100, 100, "bytes"),
+        ("Processing", 1, 4, "frames"),
+    ]
+
+
+def test_monotonic_download_progress_forwards_unknown_total():
+    """Download events without a usable total still reach the callback."""
+
+    events: list[tuple[str, Optional[int], Optional[int], str]] = []
+    progress = service_client._MonotonicDownloadProgress(
+        lambda *args: events.append(args)
+    )
+
+    progress("Downloading:", 3, None, "bytes")
+    progress("Downloading:", 6, None, "bytes")
+
+    assert events == [
+        ("Downloading:", 3, None, "bytes"),
+        ("Downloading:", 6, None, "bytes"),
+    ]
+
+
+def test_install_transfer_progress_dedupes_repeated_downloads(monkeypatch, tmp_path):
+    """Multiple ``_download_file`` calls yield a single monotonic 0→100."""
+
+    upload_file = tmp_path / "input.mp4"
+    upload_file.write_bytes(b"0123456789")
+
+    class FakeEndpoint:
+        def _upload_file(self, file_obj, data_index=0):  # pragma: no cover - unused
+            return {"path": "/server/input.mp4"}
+
+        def _download_file(self, payload):
+            with service_client_module.httpx.stream(
+                "GET", "http://server/file"
+            ) as response:
+                return b"".join(response.iter_bytes())
+
+    class FakeClient:
+        def __init__(self):
+            self.endpoints = {0: FakeEndpoint()}
+
+        def _infer_fn_index(self, api_name, fn_index):
+            return 0
+
+    import gradio_client.client as service_client_module
+
+    def fake_stream(method, url, *args, **kwargs):
+        class _CM:
+            def __enter__(self):
+                return SimpleNamespace(
+                    headers={"content-length": "8"},
+                    iter_bytes=lambda *a, **k: iter([b"abcd", b"efgh"]),
+                    raise_for_status=lambda: None,
+                )
+
+            def __exit__(self, *exc):
+                return False
+
+        return _CM()
+
+    monkeypatch.setattr(service_client_module.httpx, "stream", fake_stream)
+
+    client = FakeClient()
+    events: list[tuple[str, Optional[int], Optional[int], str]] = []
+
+    installed = service_client._install_transfer_progress(
+        client,
+        "/process_video",
+        upload_file.stat().st_size,
+        lambda *args: events.append(args),
+    )
+    assert installed is True
+
+    endpoint = client.endpoints[0]
+    # The client downloads the processed file more than once per job.
+    endpoint._download_file({"path": "/server/a"})
+    endpoint._download_file({"path": "/server/b"})
+
+    download_events = [event for event in events if event[0] == "Downloading:"]
+    assert download_events == [
+        ("Downloading:", 0, 8, "bytes"),
+        ("Downloading:", 4, 8, "bytes"),
+        ("Downloading:", 8, 8, "bytes"),
+    ]
+    terminal = [event for event in download_events if event[1] == event[2]]
+    assert terminal == [("Downloading:", 8, 8, "bytes")]
+
+
 def test_install_transfer_progress_streams_upload_and_download(monkeypatch, tmp_path):
     """Patched endpoint reports byte-level upload and download progress."""
 

@@ -117,24 +117,43 @@ communication: the GUI cannot read the server's in-memory state directly.
 ## Implementation Steps
 
 ### Task 1: Fix download progress reaching 100% only once
-- [ ] In `talks_reducer/service_client.py`, diagnose why `"Downloading:"` reaches
+- [x] In `talks_reducer/service_client.py`, diagnose why `"Downloading:"` reaches
       100% multiple times (multiple download responses / repeated `iter_bytes`
       0-start). Confirm the exact trigger before changing behavior
-      (`superpowers:systematic-debugging`).
-- [ ] Make download progress monotonic to a single 0→100: track cumulative
+      (`superpowers:systematic-debugging`). **Diagnosis:** the gradio client
+      invokes the patched `_download_file` more than once per job — intermediate
+      streamed outputs plus the two file output components (`video_path` at index
+      0 and `download_path` at index 3 of the response tuple) each trigger a
+      download, and every invocation drives a fresh `_ProgressResponse.iter_bytes`
+      0→100 byte cycle through the shared `progress_callback`.
+- [x] Make download progress monotonic to a single 0→100: track cumulative
       received bytes across the whole download (or suppress repeated terminal
       `100%` emissions / extra non-primary file downloads) so only one 0→100
-      sequence reaches the callback.
-- [ ] Ensure the `"Downloading:"` desc maps to a non-decreasing bar value in
+      sequence reaches the callback. **Done:** added
+      `_MonotonicDownloadProgress`, created once per `_install_transfer_progress`
+      so its `_max_fraction` state persists across every `_download_file` call;
+      it forwards only strictly increasing download fractions (one terminal 100%).
+- [x] Ensure the `"Downloading:"` desc maps to a non-decreasing bar value in
       `talks_reducer/gui/progress.py` (decide: keep raw 0–100 but dedupe at the
       source, or add a bounded download band — prefer source dedupe to avoid
       changing existing stage bands; document the choice in this plan).
-- [ ] write tests in `tests/test_service_client.py`: a download that internally
+      **Decision:** kept the raw 0–100 mapping (no change to
+      `STAGE_PROGRESS_RANGES`); deduped at the source in `service_client.py` so
+      the existing upload/extract/audio/final bands are untouched. The GUI bar
+      stays monotonic via `_set_progress_monotonic`.
+- [x] write tests in `tests/test_service_client.py`: a download that internally
       emits 100% more than once (and/or multiple responses) yields a single
       monotonic 0→100 sequence with exactly one final 100% to the callback.
-- [ ] write/extend tests in `tests/test_gui_remote.py` (`StubGUI`) asserting the
+      (`test_monotonic_download_progress_collapses_repeated_cycles`,
+      `test_monotonic_download_progress_passes_through_other_descs`,
+      `test_monotonic_download_progress_forwards_unknown_total`,
+      `test_install_transfer_progress_dedupes_repeated_downloads`)
+- [x] write/extend tests in `tests/test_gui_remote.py` (`StubGUI`) asserting the
       download bar value reaches 100 once and never decreases.
-- [ ] run `pytest` (at least the touched test modules) — must pass before Task 2.
+      (`test_process_files_via_server_download_bar_reaches_100_once`)
+- [x] run `pytest` (at least the touched test modules) — must pass before Task 2.
+      (68 passed across `test_service_client.py`, `test_gui_remote.py`,
+      `test_gui_progress.py`)
 
 ### Task 2: Show "Waiting for download…" during the processing→download gap
 - [ ] In `talks_reducer/gui/remote.py` `_handle_remote_progress` (or the

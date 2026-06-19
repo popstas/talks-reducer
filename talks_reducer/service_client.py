@@ -95,6 +95,55 @@ class _ProgressResponse:
         return getattr(self._response, name)
 
 
+class _MonotonicDownloadProgress:
+    """Collapse repeated download 0→100 cycles into a single monotonic sequence.
+
+    The gradio client downloads file outputs more than once per job — intermediate
+    streamed outputs and the multiple file output components (the response is a
+    ``(video, log, summary, download)`` tuple whose first and last fields are
+    files) each trigger ``_download_file``. Every invocation drives a fresh
+    :class:`_ProgressResponse` through a full 0→100 byte cycle, so the
+    ``"Downloading:"`` desc would otherwise reach 100% several times. Wrapping the
+    real callback forwards only strictly increasing download fractions, so exactly
+    one 0→100 sequence (with a single terminal 100%) reaches the GUI bar.
+
+    Non-``"Downloading:"`` events (upload, processing) pass through untouched.
+    """
+
+    def __init__(
+        self,
+        callback: Callable[[str, Optional[int], Optional[int], str], None],
+    ) -> None:
+        self._callback = callback
+        self._max_fraction = -1.0
+
+    def __call__(
+        self,
+        desc: str,
+        current: Optional[int],
+        total: Optional[int],
+        unit: str,
+    ) -> None:
+        if desc != "Downloading:":
+            self._callback(desc, current, total, unit)
+            return
+
+        if total and total > 0 and current is not None:
+            fraction = max(0.0, min(1.0, current / total))
+        elif current is None:
+            fraction = 0.0
+        else:
+            # Without a known total the GUI bar cannot move, so there is no
+            # percentage to dedupe against. Forward as-is.
+            self._callback(desc, current, total, unit)
+            return
+
+        if fraction <= self._max_fraction:
+            return
+        self._max_fraction = fraction
+        self._callback(desc, current, total, unit)
+
+
 class _ProgressStreamContext:
     """Context-manager proxy that yields a :class:`_ProgressResponse`."""
 
@@ -140,6 +189,10 @@ def _install_transfer_progress(
 
     import gradio_client.client as gradio_client_module
 
+    # Persist the dedupe state across every ``_download_file`` invocation in this
+    # transfer so repeated 0→100 cycles collapse into one monotonic sequence.
+    download_progress = _MonotonicDownloadProgress(progress_callback)
+
     def upload_file(file_obj: Any, data_index: int = 0) -> Any:
         sent = 0
 
@@ -177,7 +230,7 @@ def _install_transfer_progress(
 
             def stream(*args: Any, **kwargs: Any) -> Any:
                 return _ProgressStreamContext(
-                    original_stream(*args, **kwargs), progress_callback
+                    original_stream(*args, **kwargs), download_progress
                 )
 
             gradio_client_module.httpx.stream = stream
