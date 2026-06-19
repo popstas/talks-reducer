@@ -32,6 +32,14 @@ your system file manager as soon as each job finishes.
 - **Advanced** — reveals optional controls for the output path, temp folder,
 timing/audio knobs mirrored from the command line, and an appearance picker
 that can force dark or light mode or follow your operating system.
+- **Server mode (`--server-managed`)** — when the tray launches the GUI it passes
+`--server-managed` and `--server-url <local url>`. The window then shows a
+**Server:** label near **Processing mode** with the LAN-reachable address and a
+**Connected clients** panel that polls the server's `GET /activity` endpoint
+(~5s) and renders recent client requests as `HH:MM:SS  <ip>  <action>`. Both are
+hidden in the standalone GUI. While downloading a remote result the GUI shows a
+refreshing **Waiting for download…** status during the processing→download gap,
+and the download bar advances to 100% only once.
 
 Progress updates stream into the 10-line log panel while the processing runs in
 a background thread. Once every queued job succeeds an **Open last output**

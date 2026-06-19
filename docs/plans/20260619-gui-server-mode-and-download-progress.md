@@ -364,10 +364,19 @@ communication: the GUI cannot read the server's in-memory state directly.
       `test_server.py` modules pass within the 445-test green run.)
 
 ### Task 8: [Final] Update documentation
-- [ ] Update `README.md` for the new server-mode local-URL label and clients
-      activity log, and any new `--server`-related GUI args.
-- [ ] Update `CLAUDE.md`/`AGENTS.md` GUI section if new server-mode UI or progress
-      conventions were introduced.
+- [x] Update `README.md` for the new server-mode local-URL label and clients
+      activity log, and any new `--server`-related GUI args. **Done:** extended
+      the `--with-gui`/tray section to document the `--server-managed` /
+      `--server-url <local url>` context, the **Server:** LAN-URL label near
+      **Processing mode**, the **Connected clients** activity panel polling
+      `GET /activity` (~5s, tolerant of an unreachable server), and the desktop
+      progress paragraph now covers the refreshing **Waiting for download…**
+      status and the single-100% download bar.
+- [x] Update `CLAUDE.md`/`AGENTS.md` GUI section if new server-mode UI or progress
+      conventions were introduced. **Done:** added a matching **Server mode
+      (`--server-managed`)** bullet to the Graphical Interface section of both
+      `CLAUDE.md` and `AGENTS.md` describing the Server label, Connected clients
+      panel, waiting-for-download status, and single-100% download bar.
 
 ## Technical Details
 

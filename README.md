@@ -172,6 +172,24 @@ The same flag works through the GUI launcher—`python -m talks_reducer.gui
 together. The GUI runs in its own process and is shut down cleanly when the
 server stops.
 
+When the desktop window is launched this way, the tray passes it
+`--server-managed` and `--server-url <local url>` so the GUI knows it is running
+alongside a managed server. In this mode the window gains two extra pieces of
+server-operator feedback:
+
+- A **Server:** label next to the **Processing mode** controls shows the
+  LAN-reachable address (for example `Server: http://192.168.1.42:9005`) so you
+  can read off the URL other machines on your network should open. The label is
+  hidden when the GUI runs standalone (without `--server-managed`).
+- A **Connected clients** panel lists recent client activity—each line shows
+  `HH:MM:SS  <client IP>  <action>` for the uploads, downloads, and processing
+  jobs other users send to the server. The GUI polls the server's read-only
+  `GET /activity` endpoint about every 5 seconds and tolerates the server being
+  temporarily unreachable without crashing or spamming the log.
+
+These controls only appear in server-managed mode; the standalone GUI
+(`python -m talks_reducer.gui` with no `--server`) is unchanged.
+
 This opens a local web page featuring a drag-and-drop upload zone, **Small video**, **Target 480p**, and **Optimized encoding** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a live
 progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current
 Talks Reducer version so you can confirm which build the server is running. Once the job completes you can inspect the resulting
@@ -191,7 +209,11 @@ ranges as the job moves between stages—upload (0–5%), audio extraction (5–
 audio processing (20–35%), and final encoding (35–100%)—so it keeps moving after
 audio processing instead of stalling until the encode finishes. The bar only ever
 moves forward within a file, so a GPU→CPU encoder fallback no longer snaps it
-backward. While you're there, enable
+backward. When a remote job finishes encoding, the GUI shows a refreshing
+**Waiting for download…** status during the short gap before the file transfer
+begins, so the window never sits silently at 100% while the server prepares the
+result. The download bar itself now advances to 100% exactly once instead of
+cycling through 100% several times. While you're there, enable
 **Use global FFmpeg** whenever your PATH provides newer GPU encoders—the toggle disables itself when no system binary is available—and adjust
 **Keyframe interval (s)** under **Advanced** to balance scroll smoothness and
 output size without touching the CLI.
