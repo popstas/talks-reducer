@@ -155,7 +155,11 @@ class TalksReducerGUI:
         *,
         auto_run: bool = False,
         cli_settings: Optional[dict] = None,
+        server_managed: bool = False,
+        local_server_url: Optional[str] = None,
     ) -> None:
+        self.server_managed = bool(server_managed)
+        self.local_server_url = local_server_url or None
         self._config_path = determine_config_path()
         self.preferences = GUIPreferences(self._config_path)
 

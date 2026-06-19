@@ -485,7 +485,14 @@ def test_launch_gui_resets_completed_process(monkeypatch: pytest.MonkeyPatch) ->
 
     app._launch_gui()
 
-    assert fake_process.args == [sys.executable, "-m", "talks_reducer.gui"]
+    assert fake_process.args == [
+        sys.executable,
+        "-m",
+        "talks_reducer.gui",
+        "--server-managed",
+        "--server-url",
+        "http://127.0.0.1:9005/",
+    ]
     assert fake_process._done.wait(timeout=1.0)
 
     for _ in range(20):
@@ -498,3 +505,48 @@ def test_launch_gui_resets_completed_process(monkeypatch: pytest.MonkeyPatch) ->
     assert fake_process.terminate_called is False
     assert fake_process.kill_called is False
     assert app._gui_is_running() is False
+
+
+def _make_app(host: Optional[str], port: int) -> server_tray._ServerTrayApplication:
+    backend = DummyTrayBackend()
+    return server_tray._ServerTrayApplication(
+        host=host,
+        port=port,
+        share=False,
+        open_browser=False,
+        tray_mode="pystray",
+        tray_backend=backend,
+        build_interface=lambda: None,
+        open_browser_callback=lambda _url: None,
+    )
+
+
+def test_build_gui_command_uses_guessed_url_before_server_ready() -> None:
+    app = _make_app("0.0.0.0", 9005)
+
+    command = app._build_gui_command()
+
+    assert command == [
+        sys.executable,
+        "-m",
+        "talks_reducer.gui",
+        "--server-managed",
+        "--server-url",
+        "http://127.0.0.1:9005/",
+    ]
+
+
+def test_build_gui_command_prefers_reported_local_url() -> None:
+    app = _make_app("127.0.0.1", 9005)
+    app._local_url = "http://192.168.1.50:9005/"
+
+    command = app._build_gui_command()
+
+    assert command == [
+        sys.executable,
+        "-m",
+        "talks_reducer.gui",
+        "--server-managed",
+        "--server-url",
+        "http://192.168.1.50:9005/",
+    ]

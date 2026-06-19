@@ -229,20 +229,37 @@ communication: the GUI cannot read the server's in-memory state directly.
       on `talks_reducer/server.py` and `tests/test_server.py`.)
 
 ### Task 4: Plumb server-mode context into the GUI subprocess
-- [ ] In `talks_reducer/server_tray.py` `_launch_gui()`, pass the server context
+- [x] In `talks_reducer/server_tray.py` `_launch_gui()`, pass the server context
       to the GUI subprocess (e.g. `--server-managed` flag + `--server-url <local
       url>` arg, or env vars) so the GUI knows it is running under a managed
-      server and where to reach it.
-- [ ] In the GUI entry point (`talks_reducer/gui/__main__`/`app.py` argv parsing),
+      server and where to reach it. **Done:** added
+      `_ServerTrayApplication._build_gui_command`, which appends `--server-managed`
+      plus `--server-url <local url>` (preferring the server's reported
+      `_local_url`, falling back to `_guess_local_url(host, port)`), and
+      `_launch_gui` now spawns that command via `subprocess.Popen`.
+- [x] In the GUI entry point (`talks_reducer/gui/__main__`/`app.py` argv parsing),
       accept and store the server-mode flag + local URL; expose them to the GUI
-      app (e.g. a `server_managed` attribute and `local_server_url`).
-- [ ] Keep standalone GUI launch (no args) and standalone CLI unchanged when the
-      flag/args are absent.
-- [ ] write tests for the argv/env parsing (flag present → server-mode attrs set;
-      absent → defaults/unchanged).
-- [ ] write a test that `_launch_gui` builds the subprocess command including the
+      app (e.g. a `server_managed` attribute and `local_server_url`). **Done:**
+      `gui/startup.py:main` now registers `--server-managed`/`--server-url` on the
+      pre-parser and forwards `server_managed`/`local_server_url` to every
+      `TalksReducerGUI(...)` construction; `TalksReducerGUI.__init__` accepts the
+      two keyword args and stores `self.server_managed` / `self.local_server_url`.
+- [x] Keep standalone GUI launch (no args) and standalone CLI unchanged when the
+      flag/args are absent. **Done:** without `--server-managed` the attrs default
+      to `False`/`None`; a bare `--server-url` (CLI/seeded launch) is re-injected
+      into the remaining argv so the downstream CLI parser still receives it.
+- [x] write tests for the argv/env parsing (flag present → server-mode attrs set;
+      absent → defaults/unchanged). (`test_main_sets_server_managed_context`,
+      `test_main_defaults_to_standalone_without_managed_flag`,
+      `test_main_server_url_without_managed_flag_passes_to_cli` in
+      `tests/test_gui_startup.py`)
+- [x] write a test that `_launch_gui` builds the subprocess command including the
       server-mode args (mock `subprocess.Popen`).
-- [ ] run `pytest` — must pass before Task 5.
+      (`test_build_gui_command_uses_guessed_url_before_server_ready`,
+      `test_build_gui_command_prefers_reported_local_url`, and the updated
+      `test_launch_gui_resets_completed_process` in `tests/test_server_tray.py`)
+- [x] run `pytest` — must pass before Task 5. (415 passed; `black`/`isort` clean
+      on touched files.)
 
 ### Task 5: Display local server URL near "Processing mode"
 - [ ] In `talks_reducer/gui/layout.py` near the "Processing mode" controls
