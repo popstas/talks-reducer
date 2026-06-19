@@ -1101,6 +1101,9 @@ def test_classify_activity_maps_known_requests() -> None:
     assert (
         server._classify_activity("POST", "/gradio_api/call/process_video") == "process"
     )
+    assert server._classify_activity("POST", "/gradio_api/queue/join") == "process"
+    assert server._classify_activity("POST", "/gradio_api/queue/join/") == "process"
+    assert server._classify_activity("GET", "/gradio_api/queue/data") is None
     assert server._classify_activity("GET", "/") is None
     assert server._classify_activity("POST", "/gradio_api/other") is None
 
@@ -1127,6 +1130,32 @@ def test_activity_middleware_records_process() -> None:
     assert len(entries) == 1
     assert entries[0].action == "process"
     assert entries[0].client_ip == "203.0.113.7"
+
+
+def test_activity_middleware_records_queued_process() -> None:
+    """Queued submissions hit ``queue/join`` and must record a ``process``."""
+
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    async def downstream(scope, receive, send):
+        return None
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/gradio_api/queue/join",
+        "headers": [],
+        "client": ("203.0.113.9", 51200),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    assert entries[0].action == "process"
+    assert entries[0].client_ip == "203.0.113.9"
 
 
 def test_activity_middleware_passes_through_non_http() -> None:

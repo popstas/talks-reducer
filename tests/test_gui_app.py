@@ -849,6 +849,7 @@ def _make_download_wait_gui() -> app.TalksReducerGUI:
     gui.DOWNLOAD_WAIT_INTERVAL_MS = app.TalksReducerGUI.DOWNLOAD_WAIT_INTERVAL_MS
     gui.DOWNLOAD_WAIT_STATUS = app.TalksReducerGUI.DOWNLOAD_WAIT_STATUS
     gui._download_wait_job = None
+    gui._download_wait_active = True
     gui._set_status = MagicMock()
     gui._schedule_on_ui_thread = lambda callback: callback()
     gui.root = SimpleNamespace(
@@ -921,6 +922,36 @@ def test_cancel_download_wait_is_noop_when_idle():
 
     gui.root.after_cancel.assert_not_called()
     assert gui._download_wait_job is None
+
+
+def test_cancel_before_queued_start_runs_does_not_arm_stale_timer():
+    """A cancel racing ahead of the queued start must invalidate it.
+
+    Both ``_begin_download_wait`` and ``_cancel_download_wait`` run on the worker
+    thread and only *queue* their UI work. If the cancel (first download bytes or
+    post-``send_video`` cleanup) lands before Tk runs the queued start, the start
+    must not emit the waiting status or arm a heartbeat afterwards.
+    """
+
+    gui = _make_download_wait_gui()
+    gui._download_wait_active = False
+    gui._download_wait_job = None
+
+    queued: list = []
+    gui._schedule_on_ui_thread = queued.append
+
+    # Worker thread: begin queues a start, then a cancel arrives before Tk runs.
+    app.TalksReducerGUI._begin_download_wait(gui)
+    app.TalksReducerGUI._cancel_download_wait(gui)
+
+    # Now flush the queued UI callbacks in order.
+    for callback in queued:
+        callback()
+
+    gui._set_status.assert_not_called()
+    gui.root.after.assert_not_called()
+    assert gui._download_wait_job is None
+    assert gui._download_wait_active is False
 
 
 class _LabelStub:

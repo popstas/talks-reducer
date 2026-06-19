@@ -290,12 +290,21 @@ _ACTIVITY_RECORDER = ActivityRecorder()
 def _classify_activity(method: str, path: str) -> Optional[str]:
     """Map an HTTP request to a human-readable action, or ``None`` to skip."""
 
-    normalized = (path or "").rstrip("/")
+    raw = path or ""
+    normalized = raw.rstrip("/")
     if method == "POST" and normalized.endswith("upload"):
         return "upload"
-    if method == "GET" and "file=" in (path or ""):
+    if method == "GET" and "file=" in raw:
         return "download"
-    if method == "POST" and "process_video" in (path or ""):
+    # The Gradio Python client submits the queued ``process_video`` function by
+    # POSTing to the ``queue/join`` route; the function is identified by
+    # ``fn_index`` in the request body, not in the path, so the path never
+    # contains ``process_video``. This app binds a single queued function, so
+    # every ``queue/join`` POST corresponds to one processing request. Also
+    # match the REST ``/call/process_video`` path used by direct API clients.
+    if method == "POST" and (
+        normalized.endswith("queue/join") or "process_video" in raw
+    ):
         return "process"
     return None
 

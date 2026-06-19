@@ -216,6 +216,7 @@ class TalksReducerGUI:
         self._audio_progress_interval_ms: Optional[int] = None
         self._audio_progress_steps_completed = 0
         self._download_wait_job: Optional[str] = None
+        self._download_wait_active: bool = False
         self._activity_poll_job: Optional[str] = None
         self._closing = False
         self.progress_var = tk.DoubleVar(value=0.0)
@@ -1318,9 +1319,22 @@ class TalksReducerGUI:
         Emit the waiting status immediately and re-emit it on a repeating timer
         until :meth:`_cancel_download_wait` stops it (on the first downloaded
         bytes, on error, or on a stop request).
+
+        ``_download_wait_active`` is the synchronous source of truth for whether
+        a wait is wanted. Both this method and :meth:`_cancel_download_wait` run
+        on the background worker thread, while ``_start``/``_emit_download_wait``
+        run later on the Tk thread. Setting the flag synchronously here (and
+        clearing it synchronously in the cancel) means a cancellation that races
+        ahead of the queued ``_start`` — e.g. the first ``"Downloading:"`` event
+        or the post-``send_video`` cleanup arriving before Tk processes the
+        start — invalidates the pending start instead of arming a stale timer.
         """
 
+        self._download_wait_active = True
+
         def _start() -> None:
+            if not self._download_wait_active:
+                return
             if self._download_wait_job is not None:
                 self.root.after_cancel(self._download_wait_job)
                 self._download_wait_job = None
@@ -1331,6 +1345,8 @@ class TalksReducerGUI:
     def _emit_download_wait(self) -> None:
         """Emit the waiting status and reschedule the next refresh."""
 
+        if not self._download_wait_active:
+            return
         self._download_wait_job = None
         self._set_status("processing", self.DOWNLOAD_WAIT_STATUS)
         self._download_wait_job = self.root.after(
@@ -1338,10 +1354,16 @@ class TalksReducerGUI:
         )
 
     def _cancel_download_wait(self) -> None:
-        """Stop the "Waiting for download…" heartbeat timer if it is running."""
+        """Stop the "Waiting for download…" heartbeat timer if it is running.
 
-        if self._download_wait_job is None:
-            return
+        Clear ``_download_wait_active`` synchronously so a start still queued on
+        the Tk thread (but not yet run) is invalidated, then queue the timer
+        teardown. Always queueing the teardown — even when ``_download_wait_job``
+        is currently ``None`` — is what closes the race: the job handle may still
+        be ``None`` simply because the queued ``_start`` has not run yet.
+        """
+
+        self._download_wait_active = False
 
         def _cancel() -> None:
             if self._download_wait_job is not None:
