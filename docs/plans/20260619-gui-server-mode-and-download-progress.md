@@ -337,12 +337,31 @@ communication: the GUI cannot read the server's in-memory state directly.
       on touched files.)
 
 ### Task 7: Verify acceptance criteria
-- [ ] Verify all four Overview requirements are implemented end to end in code.
-- [ ] Verify edge cases: stop mid-download, batch of multiple files (no leaked
+- [x] Verify all four Overview requirements are implemented end to end in code.
+      **Verified:** (1) download monotonic via `_MonotonicDownloadProgress` /
+      `_install_transfer_progress` (`service_client.py:98,166,194,360`);
+      (2) "Waiting for download…" via `_begin_download_wait` /
+      `_emit_download_wait` / `_cancel_download_wait` + `DOWNLOAD_WAIT_INTERVAL_MS`
+      (`gui/app.py:151,1303,1323,1332`); (3) activity recorder + `/activity`
+      endpoint via `ActivityRecorder` / `ActivityMiddleware` (`server.py:253,303,331`);
+      (4) local server URL + `server_managed` context via
+      `format_local_server_url` / `local_server_url_label`
+      (`gui/layout.py`, `gui/app.py:161,356,514`).
+- [x] Verify edge cases: stop mid-download, batch of multiple files (no leaked
       timers, monotonic bar per file), normal (non-server) mode unaffected.
-- [ ] Run the full test suite (`pytest`) — all green.
-- [ ] Run `black` and `isort` — no changes needed / all applied.
-- [ ] Confirm no regression in existing progress/remote/server tests.
+      **Verified by tests:** `test_process_files_via_server_cancels_waiting_on_stop`,
+      `test_process_files_via_server_download_bar_reaches_100_once`,
+      `test_fetch_activity_tolerates_unreachable_server`,
+      `test_on_close_cancels_timers_and_destroys`,
+      `test_main_defaults_to_standalone_without_managed_flag`,
+      `test_build_layout_hides_activity_log_in_standalone_mode`,
+      `test_build_layout_hides_local_server_url_in_standalone_mode`.
+- [x] Run the full test suite (`pytest`) — all green. (445 passed.)
+- [x] Run `black` and `isort` — no changes needed / all applied. (59 files
+      unchanged for `black`; `isort --check-only` clean.)
+- [x] Confirm no regression in existing progress/remote/server tests. (All
+      `test_gui_progress.py`, `test_gui_remote.py`, `test_service_client.py`,
+      `test_server.py` modules pass within the 445-test green run.)
 
 ### Task 8: [Final] Update documentation
 - [ ] Update `README.md` for the new server-mode local-URL label and clients
