@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import atexit
+import json
 import shutil
 import socket
 import sys
 import tempfile
+import time
+from collections import deque
 from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from queue import SimpleQueue
-from threading import Thread
+from threading import Lock, Thread
 from typing import Callable, Iterator, Optional, Sequence, cast
 
 import gradio as gr
@@ -226,6 +229,167 @@ class TransferProgressMiddleware:
         await self.app(scope, receive, wrapped_send)
 
 
+_ACTIVITY_MAXLEN = 100
+
+
+@dataclass(frozen=True)
+class ActivityEntry:
+    """A single recorded client request against the server."""
+
+    timestamp: float
+    client_ip: str
+    action: str
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a JSON-serialisable representation of the entry."""
+
+        return {
+            "timestamp": self.timestamp,
+            "client_ip": self.client_ip,
+            "action": self.action,
+        }
+
+
+class ActivityRecorder:
+    """Bounded, thread-safe recorder of recent client activity."""
+
+    def __init__(self, maxlen: int = _ACTIVITY_MAXLEN) -> None:
+        self._entries: "deque[ActivityEntry]" = deque(maxlen=max(1, int(maxlen)))
+        self._lock = Lock()
+
+    def record(
+        self, client_ip: str, action: str, *, timestamp: Optional[float] = None
+    ) -> ActivityEntry:
+        """Append an activity entry and return it."""
+
+        entry = ActivityEntry(
+            timestamp=time.time() if timestamp is None else float(timestamp),
+            client_ip=client_ip or "unknown",
+            action=action,
+        )
+        with self._lock:
+            self._entries.append(entry)
+        return entry
+
+    def snapshot(self) -> list[ActivityEntry]:
+        """Return a copy of the recorded entries, oldest first."""
+
+        with self._lock:
+            return list(self._entries)
+
+    def clear(self) -> None:
+        """Remove all recorded entries (primarily for tests)."""
+
+        with self._lock:
+            self._entries.clear()
+
+
+_ACTIVITY_RECORDER = ActivityRecorder()
+
+
+def _classify_activity(method: str, path: str) -> Optional[str]:
+    """Map an HTTP request to a human-readable action, or ``None`` to skip."""
+
+    normalized = (path or "").rstrip("/")
+    if method == "POST" and normalized.endswith("upload"):
+        return "upload"
+    if method == "GET" and "file=" in (path or ""):
+        return "download"
+    if method == "POST" and "process_video" in (path or ""):
+        return "process"
+    return None
+
+
+class ActivityMiddleware:
+    """ASGI middleware recording client activity and serving ``/activity``.
+
+    It records meaningful client requests (upload/download/process) into a
+    bounded :class:`ActivityRecorder` and answers ``GET /activity`` with a small
+    JSON payload describing recent activity plus the server identity. All other
+    requests are passed through untouched, so existing routes are unaffected.
+    """
+
+    def __init__(
+        self,
+        app: Callable,
+        *,
+        recorder: Optional[ActivityRecorder] = None,
+        identity_factory: Optional[Callable[[], str]] = None,
+    ) -> None:
+        self.app = app
+        self._recorder = recorder if recorder is not None else _ACTIVITY_RECORDER
+        self._identity_factory = identity_factory or _describe_server_host
+
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "") or ""
+        method = scope.get("method", "GET")
+
+        if method == "GET" and path.rstrip("/") == "/activity":
+            await self._send_activity(scope, send)
+            return
+
+        action = _classify_activity(method, path)
+        if action is not None:
+            self._recorder.record(self._client_ip(scope), action)
+
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    def _client_ip(scope: dict) -> str:
+        for key, value in scope.get("headers") or []:
+            if key.lower() == b"x-forwarded-for":
+                with suppress(Exception):
+                    forwarded = value.decode("latin-1").split(",")[0].strip()
+                    if forwarded:
+                        return forwarded
+        client = scope.get("client")
+        if isinstance(client, (tuple, list)) and client:
+            return str(client[0])
+        return "unknown"
+
+    def payload(self, scope: Optional[dict] = None) -> dict[str, object]:
+        """Build the JSON payload returned from ``GET /activity``."""
+
+        entries = [entry.as_dict() for entry in self._recorder.snapshot()]
+        identity = self._identity_factory()
+        url = self._server_url(scope)
+        return {
+            "server": {"identity": identity, "url": url},
+            "entries": entries,
+        }
+
+    @staticmethod
+    def _server_url(scope: Optional[dict]) -> Optional[str]:
+        port: Optional[int] = None
+        if scope is not None:
+            server_addr = scope.get("server")
+            if isinstance(server_addr, (tuple, list)) and len(server_addr) >= 2:
+                with suppress(TypeError, ValueError):
+                    port = int(server_addr[1])
+        ip_address = _resolve_host_ip()
+        if not ip_address or port is None:
+            return None
+        return f"http://{ip_address}:{port}/"
+
+    async def _send_activity(self, scope: dict, send: Callable) -> None:
+        body = json.dumps(self.payload(scope)).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("latin-1")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+
 def build_launch_app_kwargs() -> dict[str, object]:
     """Return ``app_kwargs`` enabling server-side transfer progress logging."""
 
@@ -234,7 +398,12 @@ def build_launch_app_kwargs() -> dict[str, object]:
     except Exception:  # pragma: no cover - starlette ships with gradio
         return {}
 
-    return {"middleware": [Middleware(TransferProgressMiddleware)]}
+    return {
+        "middleware": [
+            Middleware(TransferProgressMiddleware),
+            Middleware(ActivityMiddleware),
+        ]
+    }
 
 
 _FAVICON_FILENAMES = (
@@ -265,16 +434,22 @@ def _cleanup_workspaces() -> None:
     _WORKSPACES.clear()
 
 
+def _resolve_host_ip() -> str:
+    """Return the best-effort LAN IP address for the server, or ``""``."""
+
+    hostname = socket.gethostname().strip()
+    with suppress(OSError):
+        resolved_ip = socket.gethostbyname(hostname or "localhost")
+        if resolved_ip:
+            return resolved_ip
+    return ""
+
+
 def _describe_server_host() -> str:
     """Return a human-readable description of the server hostname and IP."""
 
     hostname = socket.gethostname().strip()
-    ip_address = ""
-
-    with suppress(OSError):
-        resolved_ip = socket.gethostbyname(hostname or "localhost")
-        if resolved_ip:
-            ip_address = resolved_ip
+    ip_address = _resolve_host_ip()
 
     if hostname and ip_address and hostname != ip_address:
         return f"{hostname} ({ip_address})"
@@ -739,6 +914,9 @@ atexit.register(_cleanup_workspaces)
 
 
 __all__ = [
+    "ActivityEntry",
+    "ActivityMiddleware",
+    "ActivityRecorder",
     "GradioProgressReporter",
     "TransferProgressMiddleware",
     "build_interface",

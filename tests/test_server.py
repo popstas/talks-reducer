@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from queue import SimpleQueue
@@ -988,3 +989,175 @@ def test_build_launch_app_kwargs_registers_middleware() -> None:
         getattr(entry, "cls", None) is server.TransferProgressMiddleware
         for entry in middleware
     )
+    assert any(
+        getattr(entry, "cls", None) is server.ActivityMiddleware for entry in middleware
+    )
+
+
+def test_activity_recorder_records_and_respects_maxlen() -> None:
+    recorder = server.ActivityRecorder(maxlen=3)
+
+    for index in range(5):
+        recorder.record(f"10.0.0.{index}", "upload", timestamp=float(index))
+
+    entries = recorder.snapshot()
+    assert len(entries) == 3
+    assert [entry.client_ip for entry in entries] == [
+        "10.0.0.2",
+        "10.0.0.3",
+        "10.0.0.4",
+    ]
+    assert all(entry.action == "upload" for entry in entries)
+    assert entries[-1].timestamp == 4.0
+
+
+def test_activity_recorder_clear_empties_entries() -> None:
+    recorder = server.ActivityRecorder(maxlen=5)
+    recorder.record("10.0.0.1", "download")
+
+    recorder.clear()
+
+    assert recorder.snapshot() == []
+
+
+def test_activity_middleware_records_upload_with_client_ip() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+    seen: list[str] = []
+
+    async def downstream(scope, receive, send):
+        seen.append(scope["path"])
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/gradio_api/upload",
+        "headers": [],
+        "client": ("203.0.113.7", 51234),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    assert seen == ["/gradio_api/upload"]
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.client_ip == "203.0.113.7"
+    assert entry.action == "upload"
+    assert isinstance(entry.timestamp, float)
+    assert entry.timestamp > 0
+
+
+def test_activity_middleware_records_download_and_uses_forwarded_for() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    async def downstream(scope, receive, send):
+        return None
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/gradio_api/file=/tmp/output.mp4",
+        "headers": [(b"x-forwarded-for", b"198.51.100.9, 10.0.0.1")],
+        "client": ("10.0.0.1", 6000),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    assert entries[0].client_ip == "198.51.100.9"
+    assert entries[0].action == "download"
+
+
+def test_activity_middleware_ignores_unrelated_routes() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+    seen: list[str] = []
+
+    async def downstream(scope, receive, send):
+        seen.append(scope["path"])
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "client": ("10.0.0.1", 7000),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    assert seen == ["/"]
+    assert recorder.snapshot() == []
+
+
+def test_activity_endpoint_returns_entries_and_identity() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+    recorder.record("203.0.113.7", "upload", timestamp=1.0)
+    recorder.record("203.0.113.8", "download", timestamp=2.0)
+
+    middleware = server.ActivityMiddleware(
+        lambda scope, receive, send: None,
+        recorder=recorder,
+        identity_factory=lambda: "talks-host (192.0.2.5)",
+    )
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/activity",
+        "headers": [],
+        "client": ("203.0.113.9", 8000),
+        "server": ("0.0.0.0", 9005),
+    }
+
+    sent = _run_asgi(middleware, scope, [])
+
+    start = next(msg for msg in sent if msg["type"] == "http.response.start")
+    assert start["status"] == 200
+    assert any(
+        key == b"content-type" and value == b"application/json"
+        for key, value in start["headers"]
+    )
+
+    body = next(msg for msg in sent if msg["type"] == "http.response.body")["body"]
+    payload = json.loads(body.decode("utf-8"))
+
+    assert payload["server"]["identity"] == "talks-host (192.0.2.5)"
+    assert payload["server"]["url"].endswith(":9005/")
+    assert [entry["action"] for entry in payload["entries"]] == ["upload", "download"]
+    assert payload["entries"][0]["client_ip"] == "203.0.113.7"
+    assert payload["entries"][0]["timestamp"] == 1.0
+
+
+def test_activity_endpoint_handles_empty_recorder() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    middleware = server.ActivityMiddleware(
+        lambda scope, receive, send: None,
+        recorder=recorder,
+        identity_factory=lambda: "talks-host",
+    )
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/activity",
+        "headers": [],
+        "client": ("203.0.113.9", 8000),
+    }
+
+    sent = _run_asgi(middleware, scope, [])
+
+    body = next(msg for msg in sent if msg["type"] == "http.response.body")["body"]
+    payload = json.loads(body.decode("utf-8"))
+
+    assert payload["entries"] == []
+    assert payload["server"]["identity"] == "talks-host"
+    # No scope["server"] → URL is omitted rather than guessed incorrectly.
+    assert payload["server"]["url"] is None

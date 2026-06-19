@@ -194,20 +194,39 @@ communication: the GUI cannot read the server's in-memory state directly.
       clean on touched files.)
 
 ### Task 3: Server-side client activity recorder + activity endpoint
-- [ ] Add a bounded in-memory activity recorder (a `collections.deque(maxlen=N)`)
+- [x] Add a bounded in-memory activity recorder (a `collections.deque(maxlen=N)`)
       in `talks_reducer/server.py` capturing `(timestamp, client_ip, action)` for
       incoming requests (use a FastAPI/Starlette middleware mounted on the Gradio
       app, or hook the existing transfer middleware). Keep it process-local and
-      thread-safe.
-- [ ] Add a small read-only JSON endpoint (e.g. `GET /activity`) on the Gradio
+      thread-safe. **Done:** added `ActivityEntry`, `ActivityRecorder`
+      (`deque(maxlen=_ACTIVITY_MAXLEN=100)` guarded by a `threading.Lock`), and a
+      module-level `_ACTIVITY_RECORDER` singleton. `ActivityMiddleware` records
+      meaningful client requests (upload/download/process via `_classify_activity`)
+      and is registered alongside `TransferProgressMiddleware` in
+      `build_launch_app_kwargs`.
+- [x] Add a small read-only JSON endpoint (e.g. `GET /activity`) on the Gradio
       app returning recent entries plus server identity/URL
       (reuse `_describe_server_host` / `_guess_local_url`). Additive only; does not
-      alter existing routes.
-- [ ] write tests in `tests/test_server.py`: middleware records entries with
+      alter existing routes. **Done:** `ActivityMiddleware` intercepts
+      `GET /activity` and returns `{"server": {"identity", "url"}, "entries":
+      [...]}`. Identity reuses `_describe_server_host`; the LAN URL is built from
+      the new `_resolve_host_ip` helper plus the bound port from the ASGI scope
+      (falls back to `null` when unavailable). All other paths pass through
+      untouched.
+- [x] write tests in `tests/test_server.py`: middleware records entries with
       client IP + timestamp + action; deque respects `maxlen`; endpoint returns
       recent entries and identity in the expected JSON shape.
-- [ ] write a test for the empty/no-activity case.
-- [ ] run `pytest` — must pass before Task 4.
+      (`test_activity_recorder_records_and_respects_maxlen`,
+      `test_activity_middleware_records_upload_with_client_ip`,
+      `test_activity_middleware_records_download_and_uses_forwarded_for`,
+      `test_activity_middleware_ignores_unrelated_routes`,
+      `test_activity_endpoint_returns_entries_and_identity`,
+      `test_activity_recorder_clear_empties_entries`, plus the extended
+      `test_build_launch_app_kwargs_registers_middleware`)
+- [x] write a test for the empty/no-activity case.
+      (`test_activity_endpoint_handles_empty_recorder`)
+- [x] run `pytest` — must pass before Task 4. (410 passed; `black`/`isort` clean
+      on `talks_reducer/server.py` and `tests/test_server.py`.)
 
 ### Task 4: Plumb server-mode context into the GUI subprocess
 - [ ] In `talks_reducer/server_tray.py` `_launch_gui()`, pass the server context
