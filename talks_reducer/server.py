@@ -435,12 +435,28 @@ def _cleanup_workspaces() -> None:
 
 
 def _resolve_host_ip() -> str:
-    """Return the best-effort LAN IP address for the server, or ``""``."""
+    """Return the best-effort LAN IP address for the server, or ``""``.
+
+    Prefer the address of the interface used to reach an external host, which is
+    the LAN-facing IP that other machines can connect to. ``connect`` on a UDP
+    socket only fixes the default destination (no packets are sent), so this
+    works offline and never blocks. Fall back to resolving the hostname, and in
+    both cases skip loopback addresses (``127.x``) which ``/etc/hosts`` entries
+    such as ``127.0.1.1`` would otherwise yield and which no other machine can
+    reach.
+    """
+
+    with suppress(OSError):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("8.8.8.8", 80))
+            probed_ip = probe.getsockname()[0]
+            if probed_ip and not probed_ip.startswith("127."):
+                return probed_ip
 
     hostname = socket.gethostname().strip()
     with suppress(OSError):
         resolved_ip = socket.gethostbyname(hostname or "localhost")
-        if resolved_ip:
+        if resolved_ip and not resolved_ip.startswith("127."):
             return resolved_ip
     return ""
 

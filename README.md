@@ -188,7 +188,16 @@ server-operator feedback:
   temporarily unreachable without crashing or spamming the log.
 
 These controls only appear in server-managed mode; the standalone GUI
-(`python -m talks_reducer.gui` with no `--server`) is unchanged.
+(`python -m talks_reducer.gui` without `--server-managed`) is unchanged.
+
+The read-only `GET /activity` endpoint is mounted on **every** server launch
+(not only when a managed GUI is attached). It returns
+`{"server": {"identity", "url"}, "entries": [{"timestamp", "client_ip",
+"action"}]}`, where `action` is `upload`, `download`, or `process` and `url` is
+the LAN-reachable address other machines should open. The recorder keeps the
+last 100 requests in memory (process-local, not persisted). Because the
+endpoint is unauthenticated, anyone who can reach the server port can read which
+client IPs have used it.
 
 This opens a local web page featuring a drag-and-drop upload zone, **Small video**, **Target 480p**, and **Optimized encoding** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a live
 progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current

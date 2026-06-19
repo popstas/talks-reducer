@@ -1091,7 +1091,22 @@ def test_fetch_activity_returns_entries(monkeypatch):
 
     result = app.TalksReducerGUI._fetch_activity(gui, gui.local_server_url)
 
-    assert result == payload["entries"]
+    assert result == payload
+
+
+def test_fetch_activity_normalizes_non_list_entries(monkeypatch):
+    gui = _make_activity_gui()
+    payload = {"server": {"url": "http://1.2.3.4:9005"}, "entries": "oops"}
+
+    monkeypatch.setattr(
+        app.urllib.request,
+        "urlopen",
+        lambda endpoint, timeout=None: _FakeResponse(json.dumps(payload).encode()),
+    )
+
+    result = app.TalksReducerGUI._fetch_activity(gui, gui.local_server_url)
+
+    assert result == {"server": {"url": "http://1.2.3.4:9005"}, "entries": []}
 
 
 def test_fetch_activity_tolerates_unreachable_server(monkeypatch):
@@ -1121,15 +1136,32 @@ def test_finish_activity_poll_renders_and_reschedules():
     gui = _make_activity_gui()
     rendered: list = []
     gui._render_activity = lambda entries: rendered.append(entries)
+    shown: list = []
+    gui._update_local_server_url_display = lambda url: shown.append(url)
 
     entries = [{"timestamp": 1.0, "client_ip": "1.1.1.1", "action": "upload"}]
-    app.TalksReducerGUI._finish_activity_poll(gui, entries)
+    payload = {"server": {"url": "http://192.168.1.9:9005/"}, "entries": entries}
+    app.TalksReducerGUI._finish_activity_poll(gui, payload)
 
     assert rendered == [entries]
+    assert shown == ["http://192.168.1.9:9005/"]
     gui.root.after.assert_called_once_with(
         app.TalksReducerGUI.ACTIVITY_POLL_INTERVAL_MS, gui._poll_activity
     )
     assert gui._activity_poll_job == "job"
+
+
+def test_finish_activity_poll_renders_without_server_url():
+    gui = _make_activity_gui()
+    rendered: list = []
+    gui._render_activity = lambda entries: rendered.append(entries)
+    gui._update_local_server_url_display = MagicMock()
+
+    payload = {"entries": []}
+    app.TalksReducerGUI._finish_activity_poll(gui, payload)
+
+    assert rendered == [[]]
+    gui._update_local_server_url_display.assert_not_called()
 
 
 def test_finish_activity_poll_skips_render_on_error_but_reschedules():

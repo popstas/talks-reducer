@@ -217,6 +217,7 @@ class TalksReducerGUI:
         self._audio_progress_steps_completed = 0
         self._download_wait_job: Optional[str] = None
         self._activity_poll_job: Optional[str] = None
+        self._closing = False
         self.progress_var = tk.DoubleVar(value=0.0)
         self._progress_floor: float = 0.0
         self._ffmpeg_process: Optional[subprocess.Popen] = None
@@ -508,17 +509,24 @@ class TalksReducerGUI:
     def _apply_basic_preset(self, preset: str) -> None:
         layout_helpers.apply_basic_preset(self, preset)
 
-    def _update_local_server_url_display(self) -> None:
-        """Show the LAN-reachable server URL label only in managed server mode."""
+    def _update_local_server_url_display(self, url: Optional[str] = None) -> None:
+        """Show the LAN-reachable server URL label only in managed server mode.
+
+        When *url* is provided (the LAN address reported by the server's
+        ``/activity`` payload) it is shown in preference to the tray-provided
+        loopback URL so the label advertises an address other machines can
+        connect to. The loopback ``local_server_url`` is left untouched because
+        it remains the reliable base for same-machine ``/activity`` polling.
+        """
+
+        display_url = url or self.local_server_url
 
         label = getattr(self, "local_server_url_label", None)
         if label is None:
             return
 
-        if self.server_managed and self.local_server_url:
-            label.configure(
-                text=layout_helpers.format_local_server_url(self.local_server_url)
-            )
+        if self.server_managed and display_url:
+            label.configure(text=layout_helpers.format_local_server_url(display_url))
             label.grid()
         else:
             label.configure(text="")
@@ -1365,26 +1373,33 @@ class TalksReducerGUI:
             return
 
         def worker() -> None:
-            entries = self._fetch_activity(url)
-            self._schedule_on_ui_thread(lambda: self._finish_activity_poll(entries))
+            payload = self._fetch_activity(url)
+            self._schedule_on_ui_thread(lambda: self._finish_activity_poll(payload))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _finish_activity_poll(self, entries: Optional[list]) -> None:
-        """Render fetched *entries* (if any) and schedule the next poll."""
+    def _finish_activity_poll(self, payload: Optional[dict]) -> None:
+        """Render the fetched *payload* (if any) and schedule the next poll."""
 
-        if entries is not None:
-            self._render_activity(entries)
+        if payload is not None:
+            server = payload.get("server")
+            if isinstance(server, dict):
+                server_url = server.get("url")
+                if isinstance(server_url, str) and server_url:
+                    self._update_local_server_url_display(server_url)
+            self._render_activity(payload.get("entries", []))
         if self.server_managed and self.local_server_url:
             self._activity_poll_job = self.root.after(
                 self.ACTIVITY_POLL_INTERVAL_MS, self._poll_activity
             )
 
-    def _fetch_activity(self, url: str) -> Optional[list]:
-        """Return recent activity entries from *url*, or ``None`` on failure.
+    def _fetch_activity(self, url: str) -> Optional[dict]:
+        """Return the ``/activity`` JSON payload from *url*, or ``None`` on failure.
 
         Network and parsing errors are swallowed so an unreachable server simply
-        skips one render without crashing or spamming the log.
+        skips one render without crashing or spamming the log. The payload is the
+        ``{"server": {...}, "entries": [...]}`` mapping; an absent or non-list
+        ``entries`` is normalised to an empty list.
         """
 
         endpoint = url.rstrip("/") + "/activity"
@@ -1395,10 +1410,9 @@ class TalksReducerGUI:
             return None
         if not isinstance(payload, dict):
             return None
-        entries = payload.get("entries")
-        if not isinstance(entries, list):
-            return None
-        return entries
+        if not isinstance(payload.get("entries"), list):
+            payload["entries"] = []
+        return payload
 
     def _render_activity(self, entries: list) -> None:
         """Render activity *entries* into the read-only activity panel."""
@@ -1430,6 +1444,7 @@ class TalksReducerGUI:
     def _on_close(self) -> None:
         """Cancel background timers before destroying the window."""
 
+        self._closing = True
         self._stop_activity_log()
         self._cancel_download_wait()
         self.root.destroy()
@@ -1636,7 +1651,13 @@ class TalksReducerGUI:
         self.root.after(0, updater)
 
     def _schedule_on_ui_thread(self, callback: Callable[[], None]) -> None:
-        self.root.after(0, callback)
+        # A daemon worker (e.g. the activity poller blocked in ``urlopen``) can
+        # return after the window is destroyed; calling ``after`` on a dead Tk
+        # root would raise from the worker thread, so drop the callback instead.
+        if self._closing:
+            return
+        with suppress(Exception):
+            self.root.after(0, callback)
 
     def run(self) -> None:
         """Start the Tkinter event loop."""
