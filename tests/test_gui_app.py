@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import math
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -982,3 +984,252 @@ def test_update_local_server_url_display_noop_without_label():
 
     # Should not raise.
     app.TalksReducerGUI._update_local_server_url_display(gui)
+
+
+class _ActivityTextStub:
+    def __init__(self) -> None:
+        self.configure_calls: list[dict] = []
+        self.deleted: list[tuple] = []
+        self.inserted: list[tuple] = []
+        self.see_calls = 0
+
+    def configure(self, **kwargs) -> None:
+        self.configure_calls.append(kwargs)
+
+    def delete(self, *args) -> None:
+        self.deleted.append(args)
+
+    def insert(self, *args) -> None:
+        self.inserted.append(args)
+
+    def see(self, *args) -> None:
+        self.see_calls += 1
+
+
+def _make_activity_gui(server_managed: bool = True, url: str = "http://1.2.3.4:9005"):
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.ACTIVITY_POLL_INTERVAL_MS = app.TalksReducerGUI.ACTIVITY_POLL_INTERVAL_MS
+    gui.server_managed = server_managed
+    gui.local_server_url = url
+    gui._activity_poll_job = None
+    gui.tk = SimpleNamespace(NORMAL="normal", DISABLED="disabled", END="end")
+    gui._schedule_on_ui_thread = lambda callback: callback()
+    gui.root = SimpleNamespace(
+        after=MagicMock(return_value="job"),
+        after_cancel=MagicMock(),
+    )
+    gui.activity_text = _ActivityTextStub()
+    return gui
+
+
+class _FakeResponse:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def __enter__(self) -> "_FakeResponse":
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        return False
+
+    def read(self) -> bytes:
+        return self._data
+
+
+def test_render_activity_writes_formatted_lines():
+    """Sample entries are rendered as HH:MM:SS  <ip>  <action> lines."""
+
+    gui = _make_activity_gui()
+    timestamp = 1_700_000_000.0
+    clock = time.strftime("%H:%M:%S", time.localtime(timestamp))
+    entries = [
+        {"timestamp": timestamp, "client_ip": "10.0.0.2", "action": "upload"},
+        {"timestamp": timestamp, "client_ip": "10.0.0.3", "action": "download"},
+    ]
+
+    app.TalksReducerGUI._render_activity(gui, entries)
+
+    inserted_text = gui.activity_text.inserted[-1][1]
+    assert inserted_text == (
+        f"{clock}  10.0.0.2  upload\n{clock}  10.0.0.3  download\n"
+    )
+    # The widget is toggled writable then back to read-only.
+    assert {"state": "normal"} in gui.activity_text.configure_calls
+    assert gui.activity_text.configure_calls[-1] == {"state": "disabled"}
+    assert gui.activity_text.deleted == [("1.0", "end")]
+
+
+def test_render_activity_clears_when_empty():
+    gui = _make_activity_gui()
+
+    app.TalksReducerGUI._render_activity(gui, [])
+
+    assert gui.activity_text.deleted == [("1.0", "end")]
+    assert gui.activity_text.inserted == []
+
+
+def test_render_activity_noop_without_widget():
+    gui = _make_activity_gui()
+    gui.activity_text = None
+
+    # Should not raise.
+    app.TalksReducerGUI._render_activity(gui, [{"action": "upload"}])
+
+
+def test_fetch_activity_returns_entries(monkeypatch):
+    gui = _make_activity_gui()
+    payload = {
+        "server": {"identity": "host", "url": "http://1.2.3.4:9005"},
+        "entries": [{"timestamp": 1.0, "client_ip": "9.9.9.9", "action": "upload"}],
+    }
+
+    def fake_urlopen(endpoint, timeout=None):
+        assert endpoint == "http://1.2.3.4:9005/activity"
+        return _FakeResponse(json.dumps(payload).encode("utf-8"))
+
+    monkeypatch.setattr(app.urllib.request, "urlopen", fake_urlopen)
+
+    result = app.TalksReducerGUI._fetch_activity(gui, gui.local_server_url)
+
+    assert result == payload["entries"]
+
+
+def test_fetch_activity_tolerates_unreachable_server(monkeypatch):
+    gui = _make_activity_gui()
+
+    def boom(endpoint, timeout=None):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(app.urllib.request, "urlopen", boom)
+
+    assert app.TalksReducerGUI._fetch_activity(gui, gui.local_server_url) is None
+
+
+def test_fetch_activity_handles_malformed_payload(monkeypatch):
+    gui = _make_activity_gui()
+
+    monkeypatch.setattr(
+        app.urllib.request,
+        "urlopen",
+        lambda endpoint, timeout=None: _FakeResponse(b"[]"),
+    )
+
+    assert app.TalksReducerGUI._fetch_activity(gui, gui.local_server_url) is None
+
+
+def test_finish_activity_poll_renders_and_reschedules():
+    gui = _make_activity_gui()
+    rendered: list = []
+    gui._render_activity = lambda entries: rendered.append(entries)
+
+    entries = [{"timestamp": 1.0, "client_ip": "1.1.1.1", "action": "upload"}]
+    app.TalksReducerGUI._finish_activity_poll(gui, entries)
+
+    assert rendered == [entries]
+    gui.root.after.assert_called_once_with(
+        app.TalksReducerGUI.ACTIVITY_POLL_INTERVAL_MS, gui._poll_activity
+    )
+    assert gui._activity_poll_job == "job"
+
+
+def test_finish_activity_poll_skips_render_on_error_but_reschedules():
+    gui = _make_activity_gui()
+    rendered: list = []
+    gui._render_activity = lambda entries: rendered.append(entries)
+
+    app.TalksReducerGUI._finish_activity_poll(gui, None)
+
+    assert rendered == []
+    gui.root.after.assert_called_once()
+    assert gui._activity_poll_job == "job"
+
+
+def test_finish_activity_poll_stops_when_not_server_managed():
+    gui = _make_activity_gui(server_managed=False)
+    gui._render_activity = MagicMock()
+
+    app.TalksReducerGUI._finish_activity_poll(gui, None)
+
+    gui.root.after.assert_not_called()
+    assert gui._activity_poll_job is None
+
+
+def test_start_activity_log_noop_in_standalone_mode():
+    gui = _make_activity_gui(server_managed=False)
+    gui._poll_activity = MagicMock()
+
+    app.TalksReducerGUI._start_activity_log(gui)
+
+    gui._poll_activity.assert_not_called()
+
+
+def test_start_activity_log_starts_poll_in_server_mode():
+    gui = _make_activity_gui()
+    gui._poll_activity = MagicMock()
+
+    app.TalksReducerGUI._start_activity_log(gui)
+
+    gui._poll_activity.assert_called_once_with()
+
+
+def test_start_activity_log_does_not_restart_active_poll():
+    gui = _make_activity_gui()
+    gui._activity_poll_job = "running"
+    gui._poll_activity = MagicMock()
+
+    app.TalksReducerGUI._start_activity_log(gui)
+
+    gui._poll_activity.assert_not_called()
+
+
+def test_poll_activity_runs_worker_and_finishes(monkeypatch):
+    gui = _make_activity_gui()
+    gui._fetch_activity = MagicMock(return_value=["entry"])
+    finished: list = []
+    gui._finish_activity_poll = lambda entries: finished.append(entries)
+
+    class _ImmediateThread:
+        def __init__(self, target, daemon=None):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(app.threading, "Thread", _ImmediateThread)
+
+    app.TalksReducerGUI._poll_activity(gui)
+
+    gui._fetch_activity.assert_called_once_with(gui.local_server_url)
+    assert finished == [["entry"]]
+
+
+def test_stop_activity_log_cancels_timer():
+    gui = _make_activity_gui()
+    gui._activity_poll_job = "job"
+
+    app.TalksReducerGUI._stop_activity_log(gui)
+
+    gui.root.after_cancel.assert_called_once_with("job")
+    assert gui._activity_poll_job is None
+
+
+def test_stop_activity_log_noop_when_idle():
+    gui = _make_activity_gui()
+    gui._activity_poll_job = None
+
+    app.TalksReducerGUI._stop_activity_log(gui)
+
+    gui.root.after_cancel.assert_not_called()
+
+
+def test_on_close_cancels_timers_and_destroys():
+    gui = _make_activity_gui()
+    gui._stop_activity_log = MagicMock()
+    gui._cancel_download_wait = MagicMock()
+    gui.root = SimpleNamespace(destroy=MagicMock())
+
+    app.TalksReducerGUI._on_close(gui)
+
+    gui._stop_activity_log.assert_called_once_with()
+    gui._cancel_download_wait.assert_called_once_with()
+    gui.root.destroy.assert_called_once_with()

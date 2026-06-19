@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
 from pathlib import Path
 from typing import (
@@ -148,6 +150,7 @@ class TalksReducerGUI:
     DEFAULT_AUDIO_INTERVAL_MS = 200
     DOWNLOAD_WAIT_INTERVAL_MS = 5000
     DOWNLOAD_WAIT_STATUS = "Waiting for download…"
+    ACTIVITY_POLL_INTERVAL_MS = 5000
 
     def __init__(
         self,
@@ -213,6 +216,7 @@ class TalksReducerGUI:
         self._audio_progress_interval_ms: Optional[int] = None
         self._audio_progress_steps_completed = 0
         self._download_wait_job: Optional[str] = None
+        self._activity_poll_job: Optional[str] = None
         self.progress_var = tk.DoubleVar(value=0.0)
         self._progress_floor: float = 0.0
         self._ffmpeg_process: Optional[subprocess.Popen] = None
@@ -348,6 +352,10 @@ class TalksReducerGUI:
 
         if initial_inputs:
             self._populate_initial_inputs(initial_inputs, auto_run=auto_run)
+
+        if self.server_managed:
+            self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+            self._start_activity_log()
 
     def _start_run(self) -> None:
         if self._processing_thread and self._processing_thread.is_alive():
@@ -1333,6 +1341,98 @@ class TalksReducerGUI:
                 self._download_wait_job = None
 
         self._schedule_on_ui_thread(_cancel)
+
+    def _start_activity_log(self) -> None:
+        """Begin polling the managed server's ``/activity`` endpoint.
+
+        The poll loop only runs when the GUI is started under a managed server
+        (``--server-managed``) with a known local URL; in standalone mode this is
+        a no-op so the normal GUI never touches the network.
+        """
+
+        if not (self.server_managed and self.local_server_url):
+            return
+        if self._activity_poll_job is not None:
+            return
+        self._poll_activity()
+
+    def _poll_activity(self) -> None:
+        """Fetch recent activity on a worker thread without blocking the UI."""
+
+        self._activity_poll_job = None
+        url = self.local_server_url
+        if not (self.server_managed and url):
+            return
+
+        def worker() -> None:
+            entries = self._fetch_activity(url)
+            self._schedule_on_ui_thread(lambda: self._finish_activity_poll(entries))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_activity_poll(self, entries: Optional[list]) -> None:
+        """Render fetched *entries* (if any) and schedule the next poll."""
+
+        if entries is not None:
+            self._render_activity(entries)
+        if self.server_managed and self.local_server_url:
+            self._activity_poll_job = self.root.after(
+                self.ACTIVITY_POLL_INTERVAL_MS, self._poll_activity
+            )
+
+    def _fetch_activity(self, url: str) -> Optional[list]:
+        """Return recent activity entries from *url*, or ``None`` on failure.
+
+        Network and parsing errors are swallowed so an unreachable server simply
+        skips one render without crashing or spamming the log.
+        """
+
+        endpoint = url.rstrip("/") + "/activity"
+        try:
+            with urllib.request.urlopen(endpoint, timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        entries = payload.get("entries")
+        if not isinstance(entries, list):
+            return None
+        return entries
+
+    def _render_activity(self, entries: list) -> None:
+        """Render activity *entries* into the read-only activity panel."""
+
+        widget = getattr(self, "activity_text", None)
+        if widget is None:
+            return
+
+        lines = [layout_helpers.format_activity_line(entry) for entry in entries]
+        text = "\n".join(lines)
+        widget.configure(state=self.tk.NORMAL)
+        widget.delete("1.0", self.tk.END)
+        if text:
+            widget.insert(self.tk.END, text + "\n")
+        widget.see(self.tk.END)
+        widget.configure(state=self.tk.DISABLED)
+
+    def _stop_activity_log(self) -> None:
+        """Cancel the activity poll timer if one is scheduled."""
+
+        if self._activity_poll_job is None:
+            return
+        try:
+            self.root.after_cancel(self._activity_poll_job)
+        except Exception:  # pragma: no cover - defensive safeguard
+            pass
+        self._activity_poll_job = None
+
+    def _on_close(self) -> None:
+        """Cancel background timers before destroying the window."""
+
+        self._stop_activity_log()
+        self._cancel_download_wait()
+        self.root.destroy()
 
     def _get_status_style(self, status: str) -> str | None:
         """Return the foreground color for *status* if a match is known."""

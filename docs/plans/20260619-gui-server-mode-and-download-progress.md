@@ -292,19 +292,49 @@ communication: the GUI cannot read the server's in-memory state directly.
       `test_gui_startup.py`; `black`/`isort` clean on touched files.)
 
 ### Task 6: Display connected-clients activity log in the GUI (server mode)
-- [ ] In `talks_reducer/gui/layout.py`, add a read-only scrolling log/text panel
+- [x] In `talks_reducer/gui/layout.py`, add a read-only scrolling log/text panel
       (server mode only) for client activity; wire visibility in
-      `talks_reducer/gui/app.py`.
-- [ ] In server mode, poll the server `/activity` endpoint (Task 3) on an interval
+      `talks_reducer/gui/app.py`. **Done:** `build_layout` now creates
+      `gui.activity_frame` (row 4 of `main`) with a "Connected clients" label and
+      a read-only `gui.activity_text` Text widget plus scrollbar; it is
+      `grid_remove()`-hidden unless `gui.server_managed` is set.
+- [x] In server mode, poll the server `/activity` endpoint (Task 3) on an interval
       (e.g. via `root.after`, ~5s) and render entries as
       `HH:MM:SS  <ip>  <action>` lines; handle the server being unreachable
-      gracefully (no crash, no spam).
-- [ ] Ensure the poller starts only in server mode and is cancelled on close
-      (no leaked timers/threads).
-- [ ] write tests for the activity-line formatting and for the poll-update path
+      gracefully (no crash, no spam). **Done:** added
+      `TalksReducerGUI._poll_activity` (worker thread → `_fetch_activity` →
+      `_finish_activity_poll` on the UI thread, re-armed every
+      `ACTIVITY_POLL_INTERVAL_MS` = 5000 ms). `_fetch_activity` GETs
+      `<url>/activity` via `urllib` with a 5s timeout and returns `None` on any
+      error/malformed payload; `_render_activity` renders lines via the new
+      `layout.format_activity_line()` helper.
+- [x] Ensure the poller starts only in server mode and is cancelled on close
+      (no leaked timers/threads). **Done:** `_start_activity_log` no-ops unless
+      `server_managed` + `local_server_url` are set and refuses to double-start;
+      `__init__` registers `WM_DELETE_WINDOW` → `_on_close`, which calls
+      `_stop_activity_log` (cancels the `root.after` timer) and
+      `_cancel_download_wait` before `root.destroy()`.
+- [x] write tests for the activity-line formatting and for the poll-update path
       (stub the HTTP fetch; feed sample entries → expected rendered lines).
-- [ ] write a test for the unreachable-server path (poller tolerates errors).
-- [ ] run `pytest` — must pass before Task 7.
+      (`test_format_activity_line_renders_clock_ip_action`,
+      `test_format_activity_line_tolerates_missing_fields`,
+      `test_build_layout_shows_activity_log_in_managed_mode`,
+      `test_build_layout_hides_activity_log_in_standalone_mode` in
+      `tests/test_gui_layout.py`; `test_render_activity_writes_formatted_lines`,
+      `test_render_activity_clears_when_empty`,
+      `test_render_activity_noop_without_widget`,
+      `test_fetch_activity_returns_entries`,
+      `test_finish_activity_poll_renders_and_reschedules`,
+      `test_poll_activity_runs_worker_and_finishes`,
+      `test_start_activity_log_*`, `test_stop_activity_log_*`,
+      `test_on_close_cancels_timers_and_destroys` in `tests/test_gui_app.py`)
+- [x] write a test for the unreachable-server path (poller tolerates errors).
+      (`test_fetch_activity_tolerates_unreachable_server`,
+      `test_fetch_activity_handles_malformed_payload`,
+      `test_finish_activity_poll_skips_render_on_error_but_reschedules`,
+      `test_finish_activity_poll_stops_when_not_server_managed`)
+- [x] run `pytest` — must pass before Task 7. (445 passed; `black`/`isort` clean
+      on touched files.)
 
 ### Task 7: Verify acceptance criteria
 - [ ] Verify all four Overview requirements are implemented end to end in code.

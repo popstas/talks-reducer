@@ -257,6 +257,52 @@ def test_format_local_server_url(url, expected):
     assert layout.format_local_server_url(url) == expected
 
 
+def test_format_activity_line_renders_clock_ip_action():
+    import time
+
+    timestamp = 1_700_000_000.0
+    expected_clock = time.strftime("%H:%M:%S", time.localtime(timestamp))
+    entry = {"timestamp": timestamp, "client_ip": "192.168.1.7", "action": "upload"}
+
+    assert (
+        layout.format_activity_line(entry) == f"{expected_clock}  192.168.1.7  upload"
+    )
+
+
+def test_format_activity_line_tolerates_missing_fields():
+    line = layout.format_activity_line({})
+    assert line == "--:--:--  unknown"
+
+
+def test_build_layout_shows_activity_log_in_managed_mode(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    gui = _make_layout_gui(server_managed=True, local_server_url="http://x:9005/")
+
+    layout.build_layout(gui)
+
+    assert isinstance(gui.activity_text, WidgetStub)
+    assert gui.activity_frame.grid_calls
+    assert not gui.activity_frame.grid_remove_calls
+
+
+def test_build_layout_hides_activity_log_in_standalone_mode(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    gui = _make_layout_gui(server_managed=False)
+
+    layout.build_layout(gui)
+
+    assert isinstance(gui.activity_text, WidgetStub)
+    assert gui.activity_frame.grid_remove_calls
+
+
 def test_build_layout_shows_local_server_url_in_managed_mode(monkeypatch):
     monkeypatch.setattr(layout, "add_slider", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())

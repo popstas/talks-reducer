@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import sys
+import time
 from typing import TYPE_CHECKING, Callable
 
 from ..icons import find_icon_path
@@ -28,6 +29,24 @@ def format_local_server_url(url: str | None) -> str:
     if not trimmed:
         return ""
     return f"Server: {trimmed.rstrip('/')}"
+
+
+def format_activity_line(entry: dict) -> str:
+    """Return a single rendered ``HH:MM:SS  <ip>  <action>`` activity line.
+
+    The ``timestamp`` is interpreted as seconds since the epoch and rendered in
+    local time. A missing or invalid timestamp degrades to ``--:--:--`` so the
+    activity log never raises while polling the server.
+    """
+
+    timestamp = entry.get("timestamp")
+    try:
+        clock = time.strftime("%H:%M:%S", time.localtime(float(timestamp)))
+    except (TypeError, ValueError):
+        clock = "--:--:--"
+    client_ip = str(entry.get("client_ip") or "unknown")
+    action = str(entry.get("action") or "")
+    return f"{clock}  {client_ip}  {action}".rstrip()
 
 
 BASIC_PRESETS: dict[str, dict[str, float]] = {
@@ -639,6 +658,29 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     log_scroll.grid(row=0, column=1, sticky="ns")
     gui.log_text.configure(yscrollcommand=log_scroll.set)
+
+    # Connected-clients activity log (server mode only).
+    gui.activity_frame = gui.ttk.Frame(main, padding=gui.PADDING)
+    gui.activity_frame.grid(row=4, column=0, pady=(8, 0), sticky="nsew")
+    gui.activity_frame.columnconfigure(0, weight=1)
+    gui.activity_frame.rowconfigure(1, weight=1)
+
+    gui.ttk.Label(gui.activity_frame, text="Connected clients").grid(
+        row=0, column=0, sticky="w"
+    )
+
+    gui.activity_text = gui.tk.Text(
+        gui.activity_frame, wrap="none", height=6, state=gui.tk.DISABLED
+    )
+    gui.activity_text.grid(row=1, column=0, sticky="nsew")
+    activity_scroll = gui.ttk.Scrollbar(
+        gui.activity_frame, orient=gui.tk.VERTICAL, command=gui.activity_text.yview
+    )
+    activity_scroll.grid(row=1, column=1, sticky="ns")
+    gui.activity_text.configure(yscrollcommand=activity_scroll.set)
+
+    if not bool(getattr(gui, "server_managed", False)):
+        gui.activity_frame.grid_remove()
 
 
 def add_entry(
