@@ -500,6 +500,22 @@ class TalksReducerGUI:
     def _apply_basic_preset(self, preset: str) -> None:
         layout_helpers.apply_basic_preset(self, preset)
 
+    def _update_local_server_url_display(self) -> None:
+        """Show the LAN-reachable server URL label only in managed server mode."""
+
+        label = getattr(self, "local_server_url_label", None)
+        if label is None:
+            return
+
+        if self.server_managed and self.local_server_url:
+            label.configure(
+                text=layout_helpers.format_local_server_url(self.local_server_url)
+            )
+            label.grid()
+        else:
+            label.configure(text="")
+            label.grid_remove()
+
     def _update_processing_mode_state(self) -> None:
         has_url = bool(self.server_url_var.get().strip())
         if not has_url and self.processing_mode_var.get() == "remote":

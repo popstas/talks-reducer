@@ -169,6 +169,132 @@ def make_widget_mock() -> Mock:
     return widget
 
 
+def _make_layout_gui(**overrides) -> SimpleNamespace:
+    """Build a fully-populated stub GUI namespace for ``build_layout`` tests."""
+
+    ttk = SimpleNamespace(
+        Frame=WidgetFactory("Frame"),
+        Checkbutton=WidgetFactory("Checkbutton"),
+        Label=WidgetFactory("Label"),
+        Button=WidgetFactory("Button"),
+        Labelframe=WidgetFactory("Labelframe"),
+        Entry=WidgetFactory("Entry"),
+        Radiobutton=WidgetFactory("Radiobutton"),
+        Progressbar=WidgetFactory("Progressbar"),
+        Scrollbar=WidgetFactory("Scrollbar"),
+        Combobox=WidgetFactory("Combobox"),
+    )
+    tk = SimpleNamespace(
+        Label=WidgetFactory("Label"),
+        Text=WidgetFactory("Text"),
+        StringVar=StringVarStub,
+        DoubleVar=DoubleVarStub,
+        BooleanVar=BooleanVarStub,
+        Scale=WidgetFactory("Scale"),
+        FLAT="flat",
+        LEFT="left",
+        NORMAL="normal",
+        DISABLED="disabled",
+        HORIZONTAL="horizontal",
+        VERTICAL="vertical",
+    )
+
+    gui = SimpleNamespace(
+        root=RootStub(),
+        ttk=ttk,
+        tk=tk,
+        PADDING=8,
+        _configure_drop_targets=Mock(),
+        _on_drop_zone_click=Mock(),
+        _toggle_simple_mode=Mock(),
+        _reset_basic_defaults=Mock(),
+        _apply_basic_preset=Mock(),
+        _start_discovery=Mock(),
+        _refresh_theme=Mock(),
+        _toggle_advanced=Mock(),
+        _update_processing_mode_state=Mock(),
+        _stop_processing=Mock(),
+        _open_last_output=Mock(),
+        _check_for_updates=Mock(),
+        small_var=BooleanVarStub(value=True),
+        small_480_var=BooleanVarStub(value=False),
+        optimize_var=BooleanVarStub(value=True),
+        open_after_convert_var=BooleanVarStub(value=False),
+        simple_mode_var=BooleanVarStub(value=False),
+        simple_preset_var=StringVarStub(value=""),
+        simple_codec_var=StringVarStub(value=""),
+        preferences=SimpleNamespace(
+            get_float=lambda key, default: default,
+            get=lambda key, default: default,
+            update=Mock(),
+        ),
+        processing_mode_var=StringVarStub(value="local"),
+        server_url_var=StringVarStub(value=""),
+        theme_var=StringVarStub(value="os"),
+        status_var=StringVarStub(value="Idle"),
+        progress_var=DoubleVarStub(value=0.0),
+        video_codec_var=StringVarStub(value="hevc"),
+        add_codec_suffix_var=BooleanVarStub(value=False),
+        use_global_ffmpeg_var=BooleanVarStub(value=True),
+        global_ffmpeg_available=True,
+    )
+    for key, value in overrides.items():
+        setattr(gui, key, value)
+    return gui
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        (None, ""),
+        ("", ""),
+        ("   ", ""),
+        ("http://192.168.1.5:9005/", "Server: http://192.168.1.5:9005"),
+        ("http://192.168.1.5:9005", "Server: http://192.168.1.5:9005"),
+    ],
+)
+def test_format_local_server_url(url, expected):
+    assert layout.format_local_server_url(url) == expected
+
+
+def test_build_layout_shows_local_server_url_in_managed_mode(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    gui = _make_layout_gui(
+        server_managed=True,
+        local_server_url="http://192.168.1.5:9005/",
+    )
+
+    layout.build_layout(gui)
+
+    label = gui.local_server_url_label
+    assert isinstance(label, WidgetStub)
+    assert label.kwargs["text"] == "Server: http://192.168.1.5:9005"
+    # Visible in server mode: created with grid() and not removed.
+    assert label.grid_calls
+    assert not label.grid_remove_calls
+
+
+def test_build_layout_hides_local_server_url_in_standalone_mode(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    gui = _make_layout_gui(server_managed=False, local_server_url=None)
+
+    layout.build_layout(gui)
+
+    label = gui.local_server_url_label
+    assert isinstance(label, WidgetStub)
+    assert label.kwargs["text"] == ""
+    # Hidden in standalone mode: grid_remove() called after creation.
+    assert label.grid_remove_calls
+
+
 def test_build_layout_initializes_widgets(monkeypatch):
     add_slider_mock = Mock()
     add_entry_mock = Mock()

@@ -15,6 +15,21 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from .app import TalksReducerGUI
 
 
+def format_local_server_url(url: str | None) -> str:
+    """Return the display text for the local server URL shown in server mode.
+
+    A trailing slash is removed and an empty/whitespace URL yields an empty
+    string so the label can stay hidden when no managed server URL is known.
+    """
+
+    if not url:
+        return ""
+    trimmed = str(url).strip()
+    if not trimmed:
+        return ""
+    return f"Server: {trimmed.rstrip('/')}"
+
+
 BASIC_PRESETS: dict[str, dict[str, float]] = {
     "compress_only": {
         "silent_speed": 1.0,
@@ -332,6 +347,18 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=gui.processing_mode_var,
     )
     gui.remote_mode_button.pack(side=gui.tk.LEFT, padx=(0, 8))
+
+    server_managed = bool(getattr(gui, "server_managed", False))
+    local_server_url = getattr(gui, "local_server_url", None)
+    gui.local_server_url_label = gui.ttk.Label(
+        gui.basic_options_frame,
+        text=format_local_server_url(local_server_url) if server_managed else "",
+    )
+    gui.local_server_url_label.grid(
+        row=4, column=2, sticky="w", padx=(8, 0), pady=(8, 0)
+    )
+    if not (server_managed and local_server_url):
+        gui.local_server_url_label.grid_remove()
 
     gui.ttk.Label(gui.basic_options_frame, text="Server URL").grid(
         row=5, column=0, sticky="w", pady=(8, 0)

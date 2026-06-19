@@ -919,3 +919,66 @@ def test_cancel_download_wait_is_noop_when_idle():
 
     gui.root.after_cancel.assert_not_called()
     assert gui._download_wait_job is None
+
+
+class _LabelStub:
+    def __init__(self) -> None:
+        self.configure_calls: list[dict] = []
+        self.grid_calls = 0
+        self.grid_remove_calls = 0
+
+    def configure(self, **kwargs) -> None:
+        self.configure_calls.append(kwargs)
+
+    def grid(self) -> None:
+        self.grid_calls += 1
+
+    def grid_remove(self) -> None:
+        self.grid_remove_calls += 1
+
+
+def test_update_local_server_url_display_shows_url_in_server_mode():
+    """In managed server mode the label is populated and shown."""
+
+    label = _LabelStub()
+    gui = SimpleNamespace(
+        local_server_url_label=label,
+        server_managed=True,
+        local_server_url="http://192.168.1.5:9005/",
+    )
+
+    app.TalksReducerGUI._update_local_server_url_display(gui)
+
+    assert label.configure_calls[-1] == {"text": "Server: http://192.168.1.5:9005"}
+    assert label.grid_calls == 1
+    assert label.grid_remove_calls == 0
+
+
+def test_update_local_server_url_display_hidden_in_standalone_mode():
+    """Without server context the label is blanked and removed."""
+
+    label = _LabelStub()
+    gui = SimpleNamespace(
+        local_server_url_label=label,
+        server_managed=False,
+        local_server_url=None,
+    )
+
+    app.TalksReducerGUI._update_local_server_url_display(gui)
+
+    assert label.configure_calls[-1] == {"text": ""}
+    assert label.grid_remove_calls == 1
+    assert label.grid_calls == 0
+
+
+def test_update_local_server_url_display_noop_without_label():
+    """The helper tolerates the label widget being absent."""
+
+    gui = SimpleNamespace(
+        local_server_url_label=None,
+        server_managed=True,
+        local_server_url="http://192.168.1.5:9005",
+    )
+
+    # Should not raise.
+    app.TalksReducerGUI._update_local_server_url_display(gui)

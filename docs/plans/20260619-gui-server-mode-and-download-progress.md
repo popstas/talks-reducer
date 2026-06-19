@@ -262,15 +262,34 @@ communication: the GUI cannot read the server's in-memory state directly.
       on touched files.)
 
 ### Task 5: Display local server URL near "Processing mode"
-- [ ] In `talks_reducer/gui/layout.py` near the "Processing mode" controls
+- [x] In `talks_reducer/gui/layout.py` near the "Processing mode" controls
       (`:315`), add a label widget that shows the local server URL; in
       `talks_reducer/gui/app.py` populate it from the server-mode context (Task 4)
-      and show it only in server mode (hidden/blank otherwise).
-- [ ] Format the URL as the LAN-reachable address (prefer the IP from
-      `_describe_server_host`, not loopback) with the port.
-- [ ] write tests asserting the URL label is populated/visible in server mode and
+      and show it only in server mode (hidden/blank otherwise). **Done:**
+      `build_layout` now creates `gui.local_server_url_label` at row 4, column 2
+      (next to the Local/Remote radios), populated via the new module-level
+      `format_local_server_url()` helper when `gui.server_managed` is set and
+      `grid_remove()`-hidden otherwise. `TalksReducerGUI._update_local_server_url_display()`
+      re-applies the text/visibility from `self.server_managed` /
+      `self.local_server_url` for later refreshes.
+- [x] Format the URL as the LAN-reachable address (prefer the IP from
+      `_describe_server_host`, not loopback) with the port. **Done:** the URL is
+      already resolved to the LAN address upstream in Task 4 (tray passes the
+      reported `_local_url` / `_guess_local_url(host, port)` via `--server-url`);
+      `format_local_server_url()` renders it as `Server: http://<ip>:<port>`
+      (trailing slash trimmed) for display.
+- [x] write tests asserting the URL label is populated/visible in server mode and
       empty/hidden in normal mode, and that the formatted URL matches expected.
-- [ ] run `pytest` — must pass before Task 6.
+      (`test_format_local_server_url`,
+      `test_build_layout_shows_local_server_url_in_managed_mode`,
+      `test_build_layout_hides_local_server_url_in_standalone_mode` in
+      `tests/test_gui_layout.py`; `test_update_local_server_url_display_shows_url_in_server_mode`,
+      `test_update_local_server_url_display_hidden_in_standalone_mode`,
+      `test_update_local_server_url_display_noop_without_label` in
+      `tests/test_gui_app.py`)
+- [x] run `pytest` — must pass before Task 6. (147 passed across
+      `test_gui_layout.py`, `test_gui_app.py`, `test_gui_remote.py`,
+      `test_gui_startup.py`; `black`/`isort` clean on touched files.)
 
 ### Task 6: Display connected-clients activity log in the GUI (server mode)
 - [ ] In `talks_reducer/gui/layout.py`, add a read-only scrolling log/text panel
