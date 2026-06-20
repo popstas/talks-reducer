@@ -226,6 +226,53 @@ def _load_service_client() -> object:
     return importlib.import_module("talks_reducer.service_client")
 
 
+class _TransferSpeedTracker:
+    """Compute a smoothed transfer rate (MB/s) from byte-counted progress events.
+
+    Upload and download callbacks fire once per streamed chunk, so the
+    instantaneous chunk-to-chunk rate is far too noisy to display. The tracker
+    averages the bytes transferred over a sliding ``min_interval`` window and
+    reports the rate in megabytes per second (``bytes / 1e6 / seconds``), holding
+    the last computed value steady between window refreshes. Switching transfer
+    phase (a different ``desc``) or a byte count that drops below the window start
+    (a fresh 0→100 cycle) resets the window and suppresses the rate until enough
+    time has elapsed again.
+    """
+
+    def __init__(
+        self,
+        *,
+        min_interval: float = 0.4,
+        clock: Optional[Callable[[], float]] = None,
+    ) -> None:
+        self._min_interval = min_interval
+        self._clock = clock if clock is not None else time.monotonic
+        self._desc: Optional[str] = None
+        self._window_start_time = 0.0
+        self._window_start_bytes = 0
+        self._rate_mb_s: Optional[float] = None
+
+    def update(self, desc: str, current: Optional[int]) -> Optional[float]:
+        """Return the current smoothed rate in MB/s, or ``None`` when unknown."""
+
+        if current is None:
+            return None
+        now = self._clock()
+        if desc != self._desc or current < self._window_start_bytes:
+            self._desc = desc
+            self._window_start_time = now
+            self._window_start_bytes = current
+            self._rate_mb_s = None
+            return None
+        elapsed = now - self._window_start_time
+        if elapsed >= self._min_interval:
+            delta_bytes = current - self._window_start_bytes
+            self._rate_mb_s = max(0.0, delta_bytes / elapsed / 1_000_000)
+            self._window_start_time = now
+            self._window_start_bytes = current
+        return self._rate_mb_s
+
+
 def process_files_via_server(
     gui: "TalksReducerGUI",
     files: List[str],
@@ -303,6 +350,8 @@ def process_files_via_server(
         ignored_options = ", ".join(sorted(ignored))
         gui._append_log(f"Server mode ignores the following options: {ignored_options}")
 
+    speed_tracker = _TransferSpeedTracker()
+
     def _handle_remote_progress(
         desc: str,
         current: Optional[int],
@@ -311,7 +360,6 @@ def process_files_via_server(
     ) -> None:
         """Map streamed remote progress onto the GUI bar and status label."""
 
-        del unit
         normalized_desc = desc.strip().lower() if isinstance(desc, str) else ""
         # The first downloaded bytes close the post-processing gap, so cancel the
         # "Waiting for download…" heartbeat as soon as a download event arrives.
@@ -331,6 +379,14 @@ def process_files_via_server(
             status_text = f"{label} {percent}%".strip() if label else f"{percent}%"
         else:
             status_text = label
+
+        # Append the live transfer rate to byte-counted upload/download events so
+        # the status reads e.g. "Uploading: 55%, 5.5 MB/s". Other stages (audio,
+        # final encode) are measured in samples/frames and carry no byte rate.
+        if unit == "bytes" and normalized_desc.startswith(("uploading", "downloading")):
+            rate = speed_tracker.update(normalized_desc, current)
+            if rate is not None:
+                status_text = f"{status_text}, {rate:.1f} MB/s"
 
         # ``_handle_remote_progress`` runs synchronously on the background worker
         # thread, just like the local pipeline callback. Delegate to

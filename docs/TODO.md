@@ -2,3 +2,4 @@
 - [x] show clients log when GUI running in server mode: display a log/list of connected clients (with timestamps or last activity) in the GUI when running in server mode, so the operator can see who is currently using the server.
 - [x] show local URL when GUI running in server mode: when the GUI is started with `--server`, display a text label near "Processing mode" showing the local server URL (e.g. `http://192.168.x.x:<port>`) so users on the same network can connect easily.
 - [x] fix download progress reaching 100% three times: when downloading the processed file from the remote server, the download progress reaches 100% three separate times. Make the download progress advance to 100% only once.
+- [x] show upload/download speed in MB/s: append the live transfer rate to the remote upload/download status, e.g. `Uploading: 55%, 5.5 MB/s`.

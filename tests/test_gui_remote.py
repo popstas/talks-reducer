@@ -774,3 +774,104 @@ def test_process_files_via_server_cancels_waiting_on_stop(tmp_path: Path) -> Non
     assert gui.download_wait_begin_count == 1
     assert gui.download_wait_cancel_count >= 1
     assert gui._download_wait_active is False
+
+
+def test_transfer_speed_tracker_reports_mb_per_second() -> None:
+    clock = {"t": 0.0}
+    tracker = remote_module._TransferSpeedTracker(
+        min_interval=1.0, clock=lambda: clock["t"]
+    )
+
+    # The first sample only starts the window, so no rate is available yet.
+    assert tracker.update("uploading:", 0) is None
+    # A sample before the window elapses keeps the rate unknown.
+    clock["t"] = 0.5
+    assert tracker.update("uploading:", 2_000_000) is None
+    # Once the interval elapses, report bytes/elapsed/1e6 since the window start.
+    clock["t"] = 1.0
+    assert tracker.update("uploading:", 5_500_000) == pytest.approx(5.5)
+
+
+def test_transfer_speed_tracker_holds_rate_between_windows() -> None:
+    clock = {"t": 0.0}
+    tracker = remote_module._TransferSpeedTracker(
+        min_interval=1.0, clock=lambda: clock["t"]
+    )
+
+    tracker.update("downloading:", 0)
+    clock["t"] = 1.0
+    assert tracker.update("downloading:", 3_000_000) == pytest.approx(3.0)
+    # A sample inside the next window returns the last rate unchanged.
+    clock["t"] = 1.2
+    assert tracker.update("downloading:", 3_500_000) == pytest.approx(3.0)
+
+
+def test_transfer_speed_tracker_resets_on_new_phase() -> None:
+    clock = {"t": 0.0}
+    tracker = remote_module._TransferSpeedTracker(
+        min_interval=1.0, clock=lambda: clock["t"]
+    )
+
+    tracker.update("uploading:", 0)
+    clock["t"] = 1.0
+    assert tracker.update("uploading:", 4_000_000) == pytest.approx(4.0)
+    # Switching to the download phase starts a fresh window.
+    assert tracker.update("downloading:", 10) is None
+    clock["t"] = 2.0
+    assert tracker.update("downloading:", 1_000_010) == pytest.approx(1.0)
+
+
+def test_transfer_speed_tracker_resets_when_bytes_restart() -> None:
+    clock = {"t": 0.0}
+    tracker = remote_module._TransferSpeedTracker(
+        min_interval=1.0, clock=lambda: clock["t"]
+    )
+
+    tracker.update("downloading:", 5_000_000)
+    clock["t"] = 1.0
+    assert tracker.update("downloading:", 9_000_000) == pytest.approx(4.0)
+    # A byte count below the window start signals a fresh 0→100 cycle.
+    assert tracker.update("downloading:", 0) is None
+
+
+def test_process_files_via_server_appends_transfer_speed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gui = StubGUI()
+    # A deterministic monotonic clock (one read per ``_TransferSpeedTracker``
+    # update) so the reported rate is stable across the streamed byte events.
+    ticks = iter([0.0, 1.0, 2.0])
+    monkeypatch.setattr(remote_module.time, "monotonic", lambda: next(ticks))
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            callback = kwargs.get("progress_callback")
+            assert callable(callback)
+            callback("Uploading:", 0, 10_000_000, "bytes")
+            callback("Uploading:", 5_000_000, 10_000_000, "bytes")
+            callback("Uploading:", 10_000_000, 10_000_000, "bytes")
+            return (str(tmp_path / "out.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    speed_statuses = [
+        message
+        for _status, message in gui.status_history
+        if message and "MB/s" in message
+    ]
+    # 5 MB over 1 s -> 5.0 MB/s at 50%, then another 5 MB over 1 s at 100%.
+    assert "Uploading: 50%, 5.0 MB/s" in speed_statuses
+    assert "Uploading: 100%, 5.0 MB/s" in speed_statuses

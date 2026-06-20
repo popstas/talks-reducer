@@ -222,7 +222,9 @@ backward. When a remote job finishes encoding, the GUI shows a refreshing
 **Waiting for download…** status during the short gap before the file transfer
 begins, so the window never sits silently at 100% while the server prepares the
 result. The download bar itself now advances to 100% exactly once instead of
-cycling through 100% several times. While you're there, enable
+cycling through 100% several times. While a remote upload or download is in
+flight the status also shows the live transfer rate next to the percentage, e.g.
+`Uploading: 55%, 5.5 MB/s`. While you're there, enable
 **Use global FFmpeg** whenever your PATH provides newer GPU encoders—the toggle disables itself when no system binary is available—and adjust
 **Keyframe interval (s)** under **Advanced** to balance scroll smoothness and
 output size without touching the CLI.

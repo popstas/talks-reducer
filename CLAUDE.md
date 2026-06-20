@@ -39,7 +39,10 @@ that can force dark or light mode or follow your operating system.
 (~5s) and renders recent client requests as `HH:MM:SS  <ip>  <action>`. Both are
 hidden in the standalone GUI. While downloading a remote result the GUI shows a
 refreshing **Waiting for download…** status during the processing→download gap,
-and the download bar advances to 100% only once.
+and the download bar advances to 100% only once. While a remote upload or
+download is streaming the status appends the live transfer rate (e.g.
+`Uploading: 55%, 5.5 MB/s`), computed by `_TransferSpeedTracker` in
+`gui/remote.py`.
 
 Progress updates stream into the 10-line log panel while the processing runs in
 a background thread. Once every queued job succeeds an **Open last output**
