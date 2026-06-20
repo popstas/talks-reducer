@@ -36,7 +36,12 @@ that can force dark or light mode or follow your operating system.
 `--server-managed` and `--server-url <local url>`. The window then shows a
 **Server:** label near **Processing mode** with the LAN-reachable address and a
 **Connected clients** panel that polls the server's `GET /activity` endpoint
-(~5s) and renders recent client requests as `HH:MM:SS  <ip>  <action>`. Both are
+(~5s) and renders recent client requests as `HH:MM:SS  <ip>  <action>`. The
+LAN-reachable address comes from `_resolve_host_ip()` in `server.py`, which
+prefers a `192.168.x.x` interface address over a VPN tunnel (`10.x`) or
+container bridge (`172.16–31.x`); `_iter_interface_ipv4_addresses` enumerates
+interfaces, using a Linux `SIOCGIFADDR` fallback since the hostname there often
+resolves only to loopback. Both are
 hidden in the standalone GUI. While downloading a remote result the GUI shows a
 refreshing **Waiting for download…** status during the processing→download gap,
 and the download bar advances to 100% only once. While a remote upload or

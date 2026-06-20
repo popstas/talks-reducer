@@ -4,3 +4,4 @@
 - [x] fix download progress reaching 100% three times: when downloading the processed file from the remote server, the download progress reaches 100% three separate times. Make the download progress advance to 100% only once.
 - [x] show upload/download speed in MB/s: append the live transfer rate to the remote upload/download status, e.g. `Uploading: 55%, 5.5 MB/s`.
 - [x] speed up remote download: the processed file was downloaded twice (gr.Video + gr.File), per-8KB progress callbacks flooded the UI thread, making app-level download ~10x slower than the link. Download the file once (`download_files=False` + manual 1 MiB stream), throttle upload/download progress to ~10 Hz, and add a server `--concurrency` knob.
+- [x] prefer 192.168 LAN IP for server URL: when a VPN is active the server advertised its tunnel IP (e.g. `10.8.1.1`). Prefer a `192.168.x.x` interface address (over VPN `10.x` / docker `172.x`) so other machines on the LAN can connect.

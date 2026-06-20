@@ -1209,6 +1209,7 @@ def test_resolve_host_ip_skips_loopback(monkeypatch) -> None:
         def getsockname(self):
             return ("10.20.30.40", 12345)
 
+    monkeypatch.setattr(server, "_preferred_lan_ip", lambda: "")
     monkeypatch.setattr(server.socket, "socket", lambda *a, **k: _Probe())
 
     assert server._resolve_host_ip() == "10.20.30.40"
@@ -1228,11 +1229,49 @@ def test_resolve_host_ip_falls_back_when_probe_loopback(monkeypatch) -> None:
         def getsockname(self):
             return ("127.0.0.1", 12345)
 
+    monkeypatch.setattr(server, "_preferred_lan_ip", lambda: "")
     monkeypatch.setattr(server.socket, "socket", lambda *a, **k: _Probe())
     monkeypatch.setattr(server.socket, "gethostname", lambda: "host")
     monkeypatch.setattr(server.socket, "gethostbyname", lambda name: "127.0.1.1")
 
     assert server._resolve_host_ip() == ""
+
+
+def test_preferred_lan_ip_prefers_192_168_over_vpn_and_docker() -> None:
+    addresses = [
+        "127.0.0.1",
+        "10.8.1.28",  # VPN tunnel
+        "172.18.0.1",  # docker bridge
+        "192.168.1.14",  # LAN
+    ]
+    assert server._preferred_lan_ip(lambda: iter(addresses)) == "192.168.1.14"
+
+
+def test_preferred_lan_ip_returns_empty_without_192_168() -> None:
+    addresses = ["127.0.0.1", "10.8.1.28", "172.18.0.1"]
+    assert server._preferred_lan_ip(lambda: iter(addresses)) == ""
+
+
+def test_resolve_host_ip_prefers_lan_over_probe(monkeypatch) -> None:
+    """A 192.168 interface address wins over the VPN default-route probe."""
+
+    class _Probe:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def connect(self, address):
+            return None
+
+        def getsockname(self):
+            return ("10.8.1.28", 12345)  # VPN tunnel
+
+    monkeypatch.setattr(server, "_preferred_lan_ip", lambda: "192.168.1.14")
+    monkeypatch.setattr(server.socket, "socket", lambda *a, **k: _Probe())
+
+    assert server._resolve_host_ip() == "192.168.1.14"
 
 
 def test_activity_endpoint_returns_entries_and_identity(monkeypatch) -> None:

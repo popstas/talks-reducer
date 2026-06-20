@@ -443,17 +443,94 @@ def _cleanup_workspaces() -> None:
     _WORKSPACES.clear()
 
 
+def _iter_interface_ipv4_addresses() -> Iterator[str]:
+    """Yield IPv4 addresses bound to the local machine's interfaces.
+
+    ``getaddrinfo`` on the hostname surfaces interface addresses on Windows and
+    macOS; on Linux the hostname often resolves only to loopback, so the
+    per-interface ``SIOCGIFADDR`` lookup below recovers addresses such as a LAN
+    ``192.168.x.x`` that no other source exposes.
+    """
+
+    with suppress(OSError):
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, family=socket.AF_INET):
+            with suppress(IndexError, TypeError):
+                address = info[4][0]
+                if address:
+                    yield str(address)
+
+    yield from _iter_posix_interface_ipv4_addresses()
+
+
+def _iter_posix_interface_ipv4_addresses() -> Iterator[str]:
+    """Yield IPv4 addresses by querying each interface via ``SIOCGIFADDR``.
+
+    Linux-only (relies on ``fcntl`` and the Linux ioctl number); other platforms
+    yield nothing and rely on the ``getaddrinfo`` source instead.
+    """
+
+    try:
+        import fcntl
+        import struct
+    except ImportError:  # pragma: no cover - non-POSIX platforms
+        return
+    if not hasattr(socket, "if_nameindex"):  # pragma: no cover - older platforms
+        return
+
+    siocgifaddr = 0x8915  # Linux ioctl request for an interface IPv4 address.
+    interfaces: list = []
+    with suppress(OSError):
+        interfaces = list(socket.if_nameindex())
+
+    for _index, name in interfaces:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            packed = fcntl.ioctl(
+                sock.fileno(),
+                siocgifaddr,
+                struct.pack("256s", name.encode("utf-8")[:15]),
+            )
+            yield socket.inet_ntoa(packed[20:24])
+        except OSError:
+            continue
+        finally:
+            sock.close()
+
+
+def _preferred_lan_ip(
+    interface_addresses: Callable[[], Iterator[str]] = _iter_interface_ipv4_addresses,
+) -> str:
+    """Return a ``192.168.x.x`` interface address when one exists, else ``""``.
+
+    Home and office LANs almost always live in ``192.168.0.0/16``, so this is the
+    address other machines on the network can reach. It is matched explicitly
+    (rather than "any private range") so a VPN tunnel (``10.x``) or a container
+    bridge (``172.16–31.x``) is never advertised as the server URL.
+    """
+
+    for address in interface_addresses():
+        if address and address.startswith("192.168."):
+            return address
+    return ""
+
+
 def _resolve_host_ip() -> str:
     """Return the best-effort LAN IP address for the server, or ``""``.
 
-    Prefer the address of the interface used to reach an external host, which is
-    the LAN-facing IP that other machines can connect to. ``connect`` on a UDP
-    socket only fixes the default destination (no packets are sent), so this
-    works offline and never blocks. Fall back to resolving the hostname, and in
-    both cases skip loopback addresses (``127.x``) which ``/etc/hosts`` entries
-    such as ``127.0.1.1`` would otherwise yield and which no other machine can
-    reach.
+    Prefer a directly-connected ``192.168.x.x`` LAN address when present: with a
+    VPN active the default route (and thus the ``8.8.8.8`` probe below) points at
+    the tunnel, e.g. ``10.x``, which other machines on the local network cannot
+    reach. Otherwise fall back to the interface used to reach an external host
+    (``connect`` on a UDP socket only fixes the default destination, so it works
+    offline and never blocks) and finally the resolved hostname, skipping
+    loopback addresses (``127.x``) that ``/etc/hosts`` entries like ``127.0.1.1``
+    would otherwise yield.
     """
+
+    preferred = _preferred_lan_ip()
+    if preferred:
+        return preferred
 
     with suppress(OSError):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
