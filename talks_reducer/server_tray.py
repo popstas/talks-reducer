@@ -304,6 +304,22 @@ class _ServerTrayApplication:
                     self._gui_process = None
             LOGGER.info("Talks Reducer GUI closed")
 
+    def _build_gui_command(self) -> list[str]:
+        """Return the subprocess command for launching the managed GUI.
+
+        The command carries the server-mode context so the GUI knows it is
+        running under a tray-managed server and where to reach it: a
+        ``--server-managed`` flag plus a ``--server-url`` argument pointing at the
+        server's LAN-reachable URL (falling back to the guessed loopback URL when
+        the server has not reported its own URL yet).
+        """
+
+        command = [sys.executable, "-m", "talks_reducer.gui", "--server-managed"]
+        local_url = self._local_url or _guess_local_url(self._host, self._port)
+        if local_url:
+            command.extend(["--server-url", local_url])
+        return command
+
     def _launch_gui(
         self,
         _icon: Optional[Any] = None,
@@ -319,8 +335,9 @@ class _ServerTrayApplication:
                 return
 
             try:
+                command = self._build_gui_command()
                 LOGGER.info("Launching Talks Reducer GUI via %s", sys.executable)
-                process = subprocess.Popen([sys.executable, "-m", "talks_reducer.gui"])
+                process = subprocess.Popen(command)
             except Exception as exc:  # pragma: no cover - platform specific
                 LOGGER.error("Failed to launch Talks Reducer GUI: %s", exc)
                 self._gui_process = None

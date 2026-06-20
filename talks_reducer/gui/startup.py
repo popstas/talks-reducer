@@ -229,8 +229,34 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
         action="store_true",
         help="Deprecated: the GUI no longer starts the server tray automatically.",
     )
+    parser.add_argument(
+        "--server-managed",
+        action="store_true",
+        help=(
+            "Internal flag set by the server tray to mark the GUI as running "
+            "under a tray-managed server."
+        ),
+    )
+    parser.add_argument(
+        "--server-url",
+        dest="server_url",
+        default=None,
+        help=(
+            "Local server URL passed by the tray when the GUI runs in "
+            "server-managed mode."
+        ),
+    )
 
     parsed_args, remaining = parser.parse_known_args(argv)
+
+    server_managed = bool(parsed_args.server_managed)
+    local_server_url: Optional[str] = parsed_args.server_url
+    if not server_managed and local_server_url is not None:
+        # ``--server-url`` outside managed mode belongs to the CLI/seeded launch;
+        # restore it so the downstream parser still receives it unchanged.
+        remaining = ["--server-url", local_server_url, *remaining]
+        local_server_url = None
+
     if parsed_args.server:
         package_name = __package__ or "talks_reducer"
         module_name = f"{package_name}.server_tray"
@@ -265,6 +291,8 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
                     input_files,
                     auto_run=bool(input_files),
                     cli_settings=cli_settings,
+                    server_managed=server_managed,
+                    local_server_url=local_server_url,
                 )
                 app.run()
                 return True
@@ -320,7 +348,10 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
             return False
 
     try:
-        app = TalksReducerGUI()
+        app = TalksReducerGUI(
+            server_managed=server_managed,
+            local_server_url=local_server_url,
+        )
         app.run()
         return True
     except Exception as e:

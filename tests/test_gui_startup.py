@@ -179,12 +179,22 @@ def test_main_seeds_gui_with_args_and_positional_file(
     created: list[dict] = []
 
     class DummyApp:
-        def __init__(self, initial_inputs=None, *, auto_run=False, cli_settings=None):
+        def __init__(
+            self,
+            initial_inputs=None,
+            *,
+            auto_run=False,
+            cli_settings=None,
+            server_managed=False,
+            local_server_url=None,
+        ):
             created.append(
                 {
                     "initial_inputs": list(initial_inputs or []),
                     "auto_run": auto_run,
                     "cli_settings": dict(cli_settings or {}),
+                    "server_managed": server_managed,
+                    "local_server_url": local_server_url,
                 }
             )
             self.ran = False
@@ -214,12 +224,22 @@ def test_main_seeds_gui_with_args_only_and_no_file(
     created: list[dict] = []
 
     class DummyApp:
-        def __init__(self, initial_inputs=None, *, auto_run=False, cli_settings=None):
+        def __init__(
+            self,
+            initial_inputs=None,
+            *,
+            auto_run=False,
+            cli_settings=None,
+            server_managed=False,
+            local_server_url=None,
+        ):
             created.append(
                 {
                     "initial_inputs": list(initial_inputs or []),
                     "auto_run": auto_run,
                     "cli_settings": dict(cli_settings or {}),
+                    "server_managed": server_managed,
+                    "local_server_url": local_server_url,
                 }
             )
             self.ran = False
@@ -369,3 +389,76 @@ def test_check_tkinter_available_handles_missing_output(
 
     assert available is False
     assert message == "Window creation failed"
+
+
+def _capturing_dummy_app(created: list[dict]):
+    class DummyApp(SimpleNamespace):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.ran = False
+            created.append(kwargs)
+
+        def run(self) -> None:  # pragma: no cover - simple stub
+            self.ran = True
+
+    return DummyApp
+
+
+def test_main_sets_server_managed_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    created: list[dict] = []
+
+    monkeypatch.setattr(startup, "TalksReducerGUI", _capturing_dummy_app(created))
+    monkeypatch.setattr(startup, "_check_tkinter_available", lambda: (True, ""))
+
+    cli_calls: list[list[str]] = []
+    monkeypatch.setattr(startup, "cli_main", lambda args: cli_calls.append(list(args)))
+
+    result = startup.main(
+        ["--server-managed", "--server-url", "http://192.168.1.7:9005/"]
+    )
+
+    assert result is True
+    assert cli_calls == []
+    assert created
+    assert created[0]["server_managed"] is True
+    assert created[0]["local_server_url"] == "http://192.168.1.7:9005/"
+
+
+def test_main_defaults_to_standalone_without_managed_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[dict] = []
+
+    monkeypatch.setattr(startup, "TalksReducerGUI", _capturing_dummy_app(created))
+    monkeypatch.setattr(startup, "_check_tkinter_available", lambda: (True, ""))
+
+    cli_calls: list[list[str]] = []
+    monkeypatch.setattr(startup, "cli_main", lambda args: cli_calls.append(list(args)))
+
+    result = startup.main([])
+
+    assert result is True
+    assert cli_calls == []
+    assert created
+    assert created[0]["server_managed"] is False
+    assert created[0]["local_server_url"] is None
+
+
+def test_main_server_url_without_managed_flag_passes_to_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare ``--server-url`` belongs to the CLI, not managed mode."""
+
+    def fail(*args, **kwargs):  # pragma: no cover - GUI should not launch
+        raise AssertionError("GUI should not launch for a CLI invocation")
+
+    monkeypatch.setattr(startup, "TalksReducerGUI", fail)
+    monkeypatch.setattr(startup.sys, "platform", "linux")
+
+    cli_calls: list[list[str]] = []
+    monkeypatch.setattr(startup, "cli_main", lambda args: cli_calls.append(list(args)))
+
+    result = startup.main(["video.mp4", "--server-url", "http://example:9005/"])
+
+    assert result is False
+    assert cli_calls == [["--server-url", "http://example:9005/", "video.mp4"]]

@@ -26,6 +26,18 @@ def build_server_parser(
         action="store_true",
         help="Create a temporary public Gradio link.",
     )
+    parser.add_argument(
+        "--concurrency",
+        dest="concurrency",
+        type=int,
+        default=1,
+        help=(
+            "Number of jobs the queue may process at once (default: 1). Raising "
+            "this lets multiple clients process concurrently; it does not speed "
+            "up a single client's upload/download (file transfers bypass the "
+            "queue). Each concurrent job runs its own FFmpeg, so keep it small."
+        ),
+    )
 
     browser_group = parser.add_mutually_exclusive_group()
     browser_group.add_argument(

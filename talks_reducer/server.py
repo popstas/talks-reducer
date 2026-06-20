@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import atexit
+import json
 import shutil
 import socket
 import sys
 import tempfile
+import time
+from collections import deque
 from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from queue import SimpleQueue
-from threading import Thread
+from threading import Lock, Thread
 from typing import Callable, Iterator, Optional, Sequence, cast
 
 import gradio as gr
@@ -226,6 +229,176 @@ class TransferProgressMiddleware:
         await self.app(scope, receive, wrapped_send)
 
 
+_ACTIVITY_MAXLEN = 100
+
+
+@dataclass(frozen=True)
+class ActivityEntry:
+    """A single recorded client request against the server."""
+
+    timestamp: float
+    client_ip: str
+    action: str
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a JSON-serialisable representation of the entry."""
+
+        return {
+            "timestamp": self.timestamp,
+            "client_ip": self.client_ip,
+            "action": self.action,
+        }
+
+
+class ActivityRecorder:
+    """Bounded, thread-safe recorder of recent client activity."""
+
+    def __init__(self, maxlen: int = _ACTIVITY_MAXLEN) -> None:
+        self._entries: "deque[ActivityEntry]" = deque(maxlen=max(1, int(maxlen)))
+        self._lock = Lock()
+
+    def record(
+        self, client_ip: str, action: str, *, timestamp: Optional[float] = None
+    ) -> ActivityEntry:
+        """Append an activity entry and return it."""
+
+        entry = ActivityEntry(
+            timestamp=time.time() if timestamp is None else float(timestamp),
+            client_ip=client_ip or "unknown",
+            action=action,
+        )
+        with self._lock:
+            self._entries.append(entry)
+        return entry
+
+    def snapshot(self) -> list[ActivityEntry]:
+        """Return a copy of the recorded entries, oldest first."""
+
+        with self._lock:
+            return list(self._entries)
+
+    def clear(self) -> None:
+        """Remove all recorded entries (primarily for tests)."""
+
+        with self._lock:
+            self._entries.clear()
+
+
+_ACTIVITY_RECORDER = ActivityRecorder()
+
+
+def _classify_activity(method: str, path: str) -> Optional[str]:
+    """Map an HTTP request to a human-readable action, or ``None`` to skip."""
+
+    raw = path or ""
+    normalized = raw.rstrip("/")
+    if method == "POST" and normalized.endswith("upload"):
+        return "upload"
+    if method == "GET" and "file=" in raw:
+        return "download"
+    # The Gradio Python client submits the queued ``process_video`` function by
+    # POSTing to the ``queue/join`` route; the function is identified by
+    # ``fn_index`` in the request body, not in the path, so the path never
+    # contains ``process_video``. This app binds a single queued function, so
+    # every ``queue/join`` POST corresponds to one processing request. Also
+    # match the REST ``/call/process_video`` path used by direct API clients.
+    if method == "POST" and (
+        normalized.endswith("queue/join") or "process_video" in raw
+    ):
+        return "process"
+    return None
+
+
+class ActivityMiddleware:
+    """ASGI middleware recording client activity and serving ``/activity``.
+
+    It records meaningful client requests (upload/download/process) into a
+    bounded :class:`ActivityRecorder` and answers ``GET /activity`` with a small
+    JSON payload describing recent activity plus the server identity. All other
+    requests are passed through untouched, so existing routes are unaffected.
+    """
+
+    def __init__(
+        self,
+        app: Callable,
+        *,
+        recorder: Optional[ActivityRecorder] = None,
+        identity_factory: Optional[Callable[[], str]] = None,
+    ) -> None:
+        self.app = app
+        self._recorder = recorder if recorder is not None else _ACTIVITY_RECORDER
+        self._identity_factory = identity_factory or _describe_server_host
+
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "") or ""
+        method = scope.get("method", "GET")
+
+        if method == "GET" and path.rstrip("/") == "/activity":
+            await self._send_activity(scope, send)
+            return
+
+        action = _classify_activity(method, path)
+        if action is not None:
+            self._recorder.record(self._client_ip(scope), action)
+
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    def _client_ip(scope: dict) -> str:
+        for key, value in scope.get("headers") or []:
+            if key.lower() == b"x-forwarded-for":
+                with suppress(Exception):
+                    forwarded = value.decode("latin-1").split(",")[0].strip()
+                    if forwarded:
+                        return forwarded
+        client = scope.get("client")
+        if isinstance(client, (tuple, list)) and client:
+            return str(client[0])
+        return "unknown"
+
+    def payload(self, scope: Optional[dict] = None) -> dict[str, object]:
+        """Build the JSON payload returned from ``GET /activity``."""
+
+        entries = [entry.as_dict() for entry in self._recorder.snapshot()]
+        identity = self._identity_factory()
+        url = self._server_url(scope)
+        return {
+            "server": {"identity": identity, "url": url},
+            "entries": entries,
+        }
+
+    @staticmethod
+    def _server_url(scope: Optional[dict]) -> Optional[str]:
+        port: Optional[int] = None
+        if scope is not None:
+            server_addr = scope.get("server")
+            if isinstance(server_addr, (tuple, list)) and len(server_addr) >= 2:
+                with suppress(TypeError, ValueError):
+                    port = int(server_addr[1])
+        ip_address = _resolve_host_ip()
+        if not ip_address or port is None:
+            return None
+        return f"http://{ip_address}:{port}/"
+
+    async def _send_activity(self, scope: dict, send: Callable) -> None:
+        body = json.dumps(self.payload(scope)).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("latin-1")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+
 def build_launch_app_kwargs() -> dict[str, object]:
     """Return ``app_kwargs`` enabling server-side transfer progress logging."""
 
@@ -234,7 +407,12 @@ def build_launch_app_kwargs() -> dict[str, object]:
     except Exception:  # pragma: no cover - starlette ships with gradio
         return {}
 
-    return {"middleware": [Middleware(TransferProgressMiddleware)]}
+    return {
+        "middleware": [
+            Middleware(TransferProgressMiddleware),
+            Middleware(ActivityMiddleware),
+        ]
+    }
 
 
 _FAVICON_FILENAMES = (
@@ -265,16 +443,115 @@ def _cleanup_workspaces() -> None:
     _WORKSPACES.clear()
 
 
+def _iter_interface_ipv4_addresses() -> Iterator[str]:
+    """Yield IPv4 addresses bound to the local machine's interfaces.
+
+    ``getaddrinfo`` on the hostname surfaces interface addresses on Windows and
+    macOS; on Linux the hostname often resolves only to loopback, so the
+    per-interface ``SIOCGIFADDR`` lookup below recovers addresses such as a LAN
+    ``192.168.x.x`` that no other source exposes.
+    """
+
+    with suppress(OSError):
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, family=socket.AF_INET):
+            with suppress(IndexError, TypeError):
+                address = info[4][0]
+                if address:
+                    yield str(address)
+
+    yield from _iter_posix_interface_ipv4_addresses()
+
+
+def _iter_posix_interface_ipv4_addresses() -> Iterator[str]:
+    """Yield IPv4 addresses by querying each interface via ``SIOCGIFADDR``.
+
+    Linux-only (relies on ``fcntl`` and the Linux ioctl number); other platforms
+    yield nothing and rely on the ``getaddrinfo`` source instead.
+    """
+
+    try:
+        import fcntl
+        import struct
+    except ImportError:  # pragma: no cover - non-POSIX platforms
+        return
+    if not hasattr(socket, "if_nameindex"):  # pragma: no cover - older platforms
+        return
+
+    siocgifaddr = 0x8915  # Linux ioctl request for an interface IPv4 address.
+    interfaces: list = []
+    with suppress(OSError):
+        interfaces = list(socket.if_nameindex())
+
+    for _index, name in interfaces:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            packed = fcntl.ioctl(
+                sock.fileno(),
+                siocgifaddr,
+                struct.pack("256s", name.encode("utf-8")[:15]),
+            )
+            yield socket.inet_ntoa(packed[20:24])
+        except OSError:
+            continue
+        finally:
+            sock.close()
+
+
+def _preferred_lan_ip(
+    interface_addresses: Callable[[], Iterator[str]] = _iter_interface_ipv4_addresses,
+) -> str:
+    """Return a ``192.168.x.x`` interface address when one exists, else ``""``.
+
+    Home and office LANs almost always live in ``192.168.0.0/16``, so this is the
+    address other machines on the network can reach. It is matched explicitly
+    (rather than "any private range") so a VPN tunnel (``10.x``) or a container
+    bridge (``172.16–31.x``) is never advertised as the server URL.
+    """
+
+    for address in interface_addresses():
+        if address and address.startswith("192.168."):
+            return address
+    return ""
+
+
+def _resolve_host_ip() -> str:
+    """Return the best-effort LAN IP address for the server, or ``""``.
+
+    Prefer a directly-connected ``192.168.x.x`` LAN address when present: with a
+    VPN active the default route (and thus the ``8.8.8.8`` probe below) points at
+    the tunnel, e.g. ``10.x``, which other machines on the local network cannot
+    reach. Otherwise fall back to the interface used to reach an external host
+    (``connect`` on a UDP socket only fixes the default destination, so it works
+    offline and never blocks) and finally the resolved hostname, skipping
+    loopback addresses (``127.x``) that ``/etc/hosts`` entries like ``127.0.1.1``
+    would otherwise yield.
+    """
+
+    preferred = _preferred_lan_ip()
+    if preferred:
+        return preferred
+
+    with suppress(OSError):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("8.8.8.8", 80))
+            probed_ip = probe.getsockname()[0]
+            if probed_ip and not probed_ip.startswith("127."):
+                return probed_ip
+
+    hostname = socket.gethostname().strip()
+    with suppress(OSError):
+        resolved_ip = socket.gethostbyname(hostname or "localhost")
+        if resolved_ip and not resolved_ip.startswith("127."):
+            return resolved_ip
+    return ""
+
+
 def _describe_server_host() -> str:
     """Return a human-readable description of the server hostname and IP."""
 
     hostname = socket.gethostname().strip()
-    ip_address = ""
-
-    with suppress(OSError):
-        resolved_ip = socket.gethostbyname(hostname or "localhost")
-        if resolved_ip:
-            ip_address = resolved_ip
+    ip_address = _resolve_host_ip()
 
     if hostname and ip_address and hostname != ip_address:
         return f"{hostname} ({ip_address})"
@@ -600,8 +877,14 @@ def process_video(
     )
 
 
-def build_interface() -> gr.Blocks:
-    """Construct the Gradio Blocks application for the simple web UI."""
+def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
+    """Construct the Gradio Blocks application for the simple web UI.
+
+    *concurrency_limit* sets how many ``process_video`` jobs the queue runs at
+    once. It only affects concurrent clients' processing — file downloads are
+    served on a direct route outside the queue, so it does not change a single
+    transfer's speed.
+    """
 
     server_identity = _describe_server_host()
     global_ffmpeg_available = is_global_ffmpeg_available()
@@ -712,7 +995,7 @@ def build_interface() -> gr.Blocks:
             api_name="process_video",
         )
 
-    demo.queue(default_concurrency_limit=1)
+    demo.queue(default_concurrency_limit=max(1, concurrency_limit))
     return demo
 
 
@@ -724,7 +1007,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    demo = build_interface()
+    demo = build_interface(concurrency_limit=getattr(args, "concurrency", 1))
     demo.launch(
         server_name=args.host,
         server_port=args.port,
@@ -739,6 +1022,9 @@ atexit.register(_cleanup_workspaces)
 
 
 __all__ = [
+    "ActivityEntry",
+    "ActivityMiddleware",
+    "ActivityRecorder",
     "GradioProgressReporter",
     "TransferProgressMiddleware",
     "build_interface",

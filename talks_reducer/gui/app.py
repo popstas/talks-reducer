@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
+from contextlib import suppress
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -146,6 +149,9 @@ class TalksReducerGUI:
     AUDIO_PROGRESS_WEIGHT = 5.0
     MIN_AUDIO_INTERVAL_MS = 10
     DEFAULT_AUDIO_INTERVAL_MS = 200
+    DOWNLOAD_WAIT_INTERVAL_MS = 5000
+    DOWNLOAD_WAIT_STATUS = "Waiting for download…"
+    ACTIVITY_POLL_INTERVAL_MS = 5000
 
     def __init__(
         self,
@@ -153,7 +159,11 @@ class TalksReducerGUI:
         *,
         auto_run: bool = False,
         cli_settings: Optional[dict] = None,
+        server_managed: bool = False,
+        local_server_url: Optional[str] = None,
     ) -> None:
+        self.server_managed = bool(server_managed)
+        self.local_server_url = local_server_url or None
         self._config_path = determine_config_path()
         self.preferences = GUIPreferences(self._config_path)
 
@@ -206,6 +216,10 @@ class TalksReducerGUI:
         self._audio_progress_job: Optional[str] = None
         self._audio_progress_interval_ms: Optional[int] = None
         self._audio_progress_steps_completed = 0
+        self._download_wait_job: Optional[str] = None
+        self._download_wait_active: bool = False
+        self._activity_poll_job: Optional[str] = None
+        self._closing = False
         self.progress_var = tk.DoubleVar(value=0.0)
         self._progress_floor: float = 0.0
         self._ffmpeg_process: Optional[subprocess.Popen] = None
@@ -341,6 +355,10 @@ class TalksReducerGUI:
 
         if initial_inputs:
             self._populate_initial_inputs(initial_inputs, auto_run=auto_run)
+
+        if self.server_managed:
+            self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+            self._start_activity_log()
 
     def _start_run(self) -> None:
         if self._processing_thread and self._processing_thread.is_alive():
@@ -492,6 +510,29 @@ class TalksReducerGUI:
 
     def _apply_basic_preset(self, preset: str) -> None:
         layout_helpers.apply_basic_preset(self, preset)
+
+    def _update_local_server_url_display(self, url: Optional[str] = None) -> None:
+        """Show the LAN-reachable server URL label only in managed server mode.
+
+        When *url* is provided (the LAN address reported by the server's
+        ``/activity`` payload) it is shown in preference to the tray-provided
+        loopback URL so the label advertises an address other machines can
+        connect to. The loopback ``local_server_url`` is left untouched because
+        it remains the reliable base for same-machine ``/activity`` polling.
+        """
+
+        display_url = url or self.local_server_url
+
+        label = getattr(self, "local_server_url_label", None)
+        if label is None:
+            return
+
+        if self.server_managed and display_url:
+            label.configure(text=layout_helpers.format_local_server_url(display_url))
+            label.grid()
+        else:
+            label.configure(text="")
+            label.grid_remove()
 
     def _update_processing_mode_state(self) -> None:
         has_url = bool(self.server_url_var.get().strip())
@@ -1269,6 +1310,168 @@ class TalksReducerGUI:
         elif normalized.startswith("audio processing"):
             self._cancel_audio_progress()
 
+    def _begin_download_wait(self) -> None:
+        """Show a refreshing "Waiting for download…" status before the download.
+
+        After the remote pipeline finishes generating the final video the server
+        spends several seconds finalizing the file before the download stream
+        begins, emitting no progress events in between. Without a heartbeat the
+        GUI would sit silently at the last processing status for that whole gap.
+        Emit the waiting status immediately and re-emit it on a repeating timer
+        until :meth:`_cancel_download_wait` stops it (on the first downloaded
+        bytes, on error, or on a stop request).
+
+        ``_download_wait_active`` is the synchronous source of truth for whether
+        a wait is wanted. Both this method and :meth:`_cancel_download_wait` run
+        on the background worker thread, while ``_start``/``_emit_download_wait``
+        run later on the Tk thread. Setting the flag synchronously here (and
+        clearing it synchronously in the cancel) means a cancellation that races
+        ahead of the queued ``_start`` — e.g. the first ``"Downloading:"`` event
+        or the post-``send_video`` cleanup arriving before Tk processes the
+        start — invalidates the pending start instead of arming a stale timer.
+        """
+
+        self._download_wait_active = True
+
+        def _start() -> None:
+            if not self._download_wait_active:
+                return
+            if self._download_wait_job is not None:
+                self.root.after_cancel(self._download_wait_job)
+                self._download_wait_job = None
+            self._emit_download_wait()
+
+        self._schedule_on_ui_thread(_start)
+
+    def _emit_download_wait(self) -> None:
+        """Emit the waiting status and reschedule the next refresh."""
+
+        if not self._download_wait_active:
+            return
+        self._download_wait_job = None
+        self._set_status("processing", self.DOWNLOAD_WAIT_STATUS)
+        self._download_wait_job = self.root.after(
+            self.DOWNLOAD_WAIT_INTERVAL_MS, self._emit_download_wait
+        )
+
+    def _cancel_download_wait(self) -> None:
+        """Stop the "Waiting for download…" heartbeat timer if it is running.
+
+        Clear ``_download_wait_active`` synchronously so a start still queued on
+        the Tk thread (but not yet run) is invalidated, then queue the timer
+        teardown. Always queueing the teardown — even when ``_download_wait_job``
+        is currently ``None`` — is what closes the race: the job handle may still
+        be ``None`` simply because the queued ``_start`` has not run yet.
+        """
+
+        self._download_wait_active = False
+
+        def _cancel() -> None:
+            if self._download_wait_job is not None:
+                self.root.after_cancel(self._download_wait_job)
+                self._download_wait_job = None
+
+        self._schedule_on_ui_thread(_cancel)
+
+    def _start_activity_log(self) -> None:
+        """Begin polling the managed server's ``/activity`` endpoint.
+
+        The poll loop only runs when the GUI is started under a managed server
+        (``--server-managed``) with a known local URL; in standalone mode this is
+        a no-op so the normal GUI never touches the network.
+        """
+
+        if not (self.server_managed and self.local_server_url):
+            return
+        if self._activity_poll_job is not None:
+            return
+        self._poll_activity()
+
+    def _poll_activity(self) -> None:
+        """Fetch recent activity on a worker thread without blocking the UI."""
+
+        self._activity_poll_job = None
+        url = self.local_server_url
+        if not (self.server_managed and url):
+            return
+
+        def worker() -> None:
+            payload = self._fetch_activity(url)
+            self._schedule_on_ui_thread(lambda: self._finish_activity_poll(payload))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_activity_poll(self, payload: Optional[dict]) -> None:
+        """Render the fetched *payload* (if any) and schedule the next poll."""
+
+        if payload is not None:
+            server = payload.get("server")
+            if isinstance(server, dict):
+                server_url = server.get("url")
+                if isinstance(server_url, str) and server_url:
+                    self._update_local_server_url_display(server_url)
+            self._render_activity(payload.get("entries", []))
+        if self.server_managed and self.local_server_url:
+            self._activity_poll_job = self.root.after(
+                self.ACTIVITY_POLL_INTERVAL_MS, self._poll_activity
+            )
+
+    def _fetch_activity(self, url: str) -> Optional[dict]:
+        """Return the ``/activity`` JSON payload from *url*, or ``None`` on failure.
+
+        Network and parsing errors are swallowed so an unreachable server simply
+        skips one render without crashing or spamming the log. The payload is the
+        ``{"server": {...}, "entries": [...]}`` mapping; an absent or non-list
+        ``entries`` is normalised to an empty list.
+        """
+
+        endpoint = url.rstrip("/") + "/activity"
+        try:
+            with urllib.request.urlopen(endpoint, timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        if not isinstance(payload.get("entries"), list):
+            payload["entries"] = []
+        return payload
+
+    def _render_activity(self, entries: list) -> None:
+        """Render activity *entries* into the read-only activity panel."""
+
+        widget = getattr(self, "activity_text", None)
+        if widget is None:
+            return
+
+        lines = [layout_helpers.format_activity_line(entry) for entry in entries]
+        text = "\n".join(lines)
+        widget.configure(state=self.tk.NORMAL)
+        widget.delete("1.0", self.tk.END)
+        if text:
+            widget.insert(self.tk.END, text + "\n")
+        widget.see(self.tk.END)
+        widget.configure(state=self.tk.DISABLED)
+
+    def _stop_activity_log(self) -> None:
+        """Cancel the activity poll timer if one is scheduled."""
+
+        if self._activity_poll_job is None:
+            return
+        try:
+            self.root.after_cancel(self._activity_poll_job)
+        except Exception:  # pragma: no cover - defensive safeguard
+            pass
+        self._activity_poll_job = None
+
+    def _on_close(self) -> None:
+        """Cancel background timers before destroying the window."""
+
+        self._closing = True
+        self._stop_activity_log()
+        self._cancel_download_wait()
+        self.root.destroy()
+
     def _get_status_style(self, status: str) -> str | None:
         """Return the foreground color for *status* if a match is known."""
 
@@ -1471,7 +1674,13 @@ class TalksReducerGUI:
         self.root.after(0, updater)
 
     def _schedule_on_ui_thread(self, callback: Callable[[], None]) -> None:
-        self.root.after(0, callback)
+        # A daemon worker (e.g. the activity poller blocked in ``urlopen``) can
+        # return after the window is destroyed; calling ``after`` on a dead Tk
+        # root would raise from the worker thread, so drop the callback instead.
+        if self._closing:
+            return
+        with suppress(Exception):
+            self.root.after(0, callback)
 
     def run(self) -> None:
         """Start the Tkinter event loop."""

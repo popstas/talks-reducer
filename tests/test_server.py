@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from queue import SimpleQueue
@@ -144,7 +145,7 @@ def test_describe_server_host_prefers_hostname_and_ip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(server.socket, "gethostname", lambda: "talks-reducer-host")
-    monkeypatch.setattr(server.socket, "gethostbyname", lambda _host: "192.0.2.15")
+    monkeypatch.setattr(server, "_resolve_host_ip", lambda: "192.0.2.15")
 
     assert server._describe_server_host() == "talks-reducer-host (192.0.2.15)"
 
@@ -153,11 +154,7 @@ def test_describe_server_host_handles_lookup_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(server.socket, "gethostname", lambda: "")
-
-    def _explode(_host: str) -> str:
-        raise OSError("no network")
-
-    monkeypatch.setattr(server.socket, "gethostbyname", _explode)
+    monkeypatch.setattr(server, "_resolve_host_ip", lambda: "")
 
     assert server._describe_server_host() == "unknown"
 
@@ -988,3 +985,360 @@ def test_build_launch_app_kwargs_registers_middleware() -> None:
         getattr(entry, "cls", None) is server.TransferProgressMiddleware
         for entry in middleware
     )
+    assert any(
+        getattr(entry, "cls", None) is server.ActivityMiddleware for entry in middleware
+    )
+
+
+def test_activity_recorder_records_and_respects_maxlen() -> None:
+    recorder = server.ActivityRecorder(maxlen=3)
+
+    for index in range(5):
+        recorder.record(f"10.0.0.{index}", "upload", timestamp=float(index))
+
+    entries = recorder.snapshot()
+    assert len(entries) == 3
+    assert [entry.client_ip for entry in entries] == [
+        "10.0.0.2",
+        "10.0.0.3",
+        "10.0.0.4",
+    ]
+    assert all(entry.action == "upload" for entry in entries)
+    assert entries[-1].timestamp == 4.0
+
+
+def test_activity_recorder_clear_empties_entries() -> None:
+    recorder = server.ActivityRecorder(maxlen=5)
+    recorder.record("10.0.0.1", "download")
+
+    recorder.clear()
+
+    assert recorder.snapshot() == []
+
+
+def test_activity_middleware_records_upload_with_client_ip() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+    seen: list[str] = []
+
+    async def downstream(scope, receive, send):
+        seen.append(scope["path"])
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/gradio_api/upload",
+        "headers": [],
+        "client": ("203.0.113.7", 51234),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    assert seen == ["/gradio_api/upload"]
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.client_ip == "203.0.113.7"
+    assert entry.action == "upload"
+    assert isinstance(entry.timestamp, float)
+    assert entry.timestamp > 0
+
+
+def test_activity_middleware_records_download_and_uses_forwarded_for() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    async def downstream(scope, receive, send):
+        return None
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/gradio_api/file=/tmp/output.mp4",
+        "headers": [(b"x-forwarded-for", b"198.51.100.9, 10.0.0.1")],
+        "client": ("10.0.0.1", 6000),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    assert entries[0].client_ip == "198.51.100.9"
+    assert entries[0].action == "download"
+
+
+def test_activity_middleware_ignores_unrelated_routes() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+    seen: list[str] = []
+
+    async def downstream(scope, receive, send):
+        seen.append(scope["path"])
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "client": ("10.0.0.1", 7000),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    assert seen == ["/"]
+    assert recorder.snapshot() == []
+
+
+def test_classify_activity_maps_known_requests() -> None:
+    assert server._classify_activity("POST", "/gradio_api/upload") == "upload"
+    assert server._classify_activity("POST", "/gradio_api/upload/") == "upload"
+    assert (
+        server._classify_activity("GET", "/gradio_api/file=/tmp/out.mp4") == "download"
+    )
+    assert (
+        server._classify_activity("POST", "/gradio_api/call/process_video") == "process"
+    )
+    assert server._classify_activity("POST", "/gradio_api/queue/join") == "process"
+    assert server._classify_activity("POST", "/gradio_api/queue/join/") == "process"
+    assert server._classify_activity("GET", "/gradio_api/queue/data") is None
+    assert server._classify_activity("GET", "/") is None
+    assert server._classify_activity("POST", "/gradio_api/other") is None
+
+
+def test_activity_middleware_records_process() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    async def downstream(scope, receive, send):
+        return None
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/gradio_api/call/process_video",
+        "headers": [],
+        "client": ("203.0.113.7", 51234),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    assert entries[0].action == "process"
+    assert entries[0].client_ip == "203.0.113.7"
+
+
+def test_activity_middleware_records_queued_process() -> None:
+    """Queued submissions hit ``queue/join`` and must record a ``process``."""
+
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    async def downstream(scope, receive, send):
+        return None
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/gradio_api/queue/join",
+        "headers": [],
+        "client": ("203.0.113.9", 51200),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    assert entries[0].action == "process"
+    assert entries[0].client_ip == "203.0.113.9"
+
+
+def test_activity_middleware_passes_through_non_http() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+    seen: list[str] = []
+
+    async def downstream(scope, receive, send):
+        seen.append(scope["type"])
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    _run_asgi(middleware, {"type": "lifespan"}, [])
+
+    assert seen == ["lifespan"]
+    assert recorder.snapshot() == []
+
+
+def test_activity_middleware_client_ip_unknown_without_client() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    async def downstream(scope, receive, send):
+        return None
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/gradio_api/upload",
+        "headers": [],
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    assert entries[0].client_ip == "unknown"
+
+
+def test_resolve_host_ip_skips_loopback(monkeypatch) -> None:
+    class _Probe:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def connect(self, address):
+            return None
+
+        def getsockname(self):
+            return ("10.20.30.40", 12345)
+
+    monkeypatch.setattr(server, "_preferred_lan_ip", lambda: "")
+    monkeypatch.setattr(server.socket, "socket", lambda *a, **k: _Probe())
+
+    assert server._resolve_host_ip() == "10.20.30.40"
+
+
+def test_resolve_host_ip_falls_back_when_probe_loopback(monkeypatch) -> None:
+    class _Probe:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def connect(self, address):
+            return None
+
+        def getsockname(self):
+            return ("127.0.0.1", 12345)
+
+    monkeypatch.setattr(server, "_preferred_lan_ip", lambda: "")
+    monkeypatch.setattr(server.socket, "socket", lambda *a, **k: _Probe())
+    monkeypatch.setattr(server.socket, "gethostname", lambda: "host")
+    monkeypatch.setattr(server.socket, "gethostbyname", lambda name: "127.0.1.1")
+
+    assert server._resolve_host_ip() == ""
+
+
+def test_preferred_lan_ip_prefers_192_168_over_vpn_and_docker() -> None:
+    addresses = [
+        "127.0.0.1",
+        "10.8.1.28",  # VPN tunnel
+        "172.18.0.1",  # docker bridge
+        "192.168.1.14",  # LAN
+    ]
+    assert server._preferred_lan_ip(lambda: iter(addresses)) == "192.168.1.14"
+
+
+def test_preferred_lan_ip_returns_empty_without_192_168() -> None:
+    addresses = ["127.0.0.1", "10.8.1.28", "172.18.0.1"]
+    assert server._preferred_lan_ip(lambda: iter(addresses)) == ""
+
+
+def test_resolve_host_ip_prefers_lan_over_probe(monkeypatch) -> None:
+    """A 192.168 interface address wins over the VPN default-route probe."""
+
+    class _Probe:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def connect(self, address):
+            return None
+
+        def getsockname(self):
+            return ("10.8.1.28", 12345)  # VPN tunnel
+
+    monkeypatch.setattr(server, "_preferred_lan_ip", lambda: "192.168.1.14")
+    monkeypatch.setattr(server.socket, "socket", lambda *a, **k: _Probe())
+
+    assert server._resolve_host_ip() == "192.168.1.14"
+
+
+def test_activity_endpoint_returns_entries_and_identity(monkeypatch) -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+    recorder.record("203.0.113.7", "upload", timestamp=1.0)
+    recorder.record("203.0.113.8", "download", timestamp=2.0)
+    # Pin the resolved LAN IP so the asserted URL does not depend on the host's
+    # network configuration.
+    monkeypatch.setattr(server, "_resolve_host_ip", lambda: "192.0.2.5")
+
+    middleware = server.ActivityMiddleware(
+        lambda scope, receive, send: None,
+        recorder=recorder,
+        identity_factory=lambda: "talks-host (192.0.2.5)",
+    )
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/activity",
+        "headers": [],
+        "client": ("203.0.113.9", 8000),
+        "server": ("0.0.0.0", 9005),
+    }
+
+    sent = _run_asgi(middleware, scope, [])
+
+    start = next(msg for msg in sent if msg["type"] == "http.response.start")
+    assert start["status"] == 200
+    assert any(
+        key == b"content-type" and value == b"application/json"
+        for key, value in start["headers"]
+    )
+
+    body = next(msg for msg in sent if msg["type"] == "http.response.body")["body"]
+    payload = json.loads(body.decode("utf-8"))
+
+    assert payload["server"]["identity"] == "talks-host (192.0.2.5)"
+    assert payload["server"]["url"] == "http://192.0.2.5:9005/"
+    assert [entry["action"] for entry in payload["entries"]] == ["upload", "download"]
+    assert payload["entries"][0]["client_ip"] == "203.0.113.7"
+    assert payload["entries"][0]["timestamp"] == 1.0
+
+
+def test_activity_endpoint_handles_empty_recorder() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    middleware = server.ActivityMiddleware(
+        lambda scope, receive, send: None,
+        recorder=recorder,
+        identity_factory=lambda: "talks-host",
+    )
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/activity",
+        "headers": [],
+        "client": ("203.0.113.9", 8000),
+    }
+
+    sent = _run_asgi(middleware, scope, [])
+
+    body = next(msg for msg in sent if msg["type"] == "http.response.body")["body"]
+    payload = json.loads(body.decode("utf-8"))
+
+    assert payload["entries"] == []
+    assert payload["server"]["identity"] == "talks-host"
+    # No scope["server"] → URL is omitted rather than guessed incorrectly.
+    assert payload["server"]["url"] is None

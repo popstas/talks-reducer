@@ -39,8 +39,13 @@ class _StubButton:
 class StubGUI:
     """Lightweight stand-in for :class:`TalksReducerGUI` used in tests."""
 
+    DOWNLOAD_WAIT_STATUS = "Waiting for download…"
+
     def __init__(self) -> None:
         self._stop_requested = False
+        self._download_wait_active = False
+        self.download_wait_begin_count = 0
+        self.download_wait_cancel_count = 0
         self.logs: list[str] = []
         self.progress_values: list[float] = []
         self._progress_value = 0.0
@@ -94,6 +99,19 @@ class StubGUI:
     def _reset_progress_baseline(self) -> None:
         self._progress_floor = 0.0
         self._set_progress(0.0)
+
+    def _begin_download_wait(self) -> None:
+        # Mirror :meth:`TalksReducerGUI._begin_download_wait`: emit the waiting
+        # status immediately. The real GUI also reschedules a refresh timer; the
+        # stub records the activation flag and call count instead of running a
+        # wall-clock timer.
+        self.download_wait_begin_count += 1
+        self._download_wait_active = True
+        self._set_status("processing", self.DOWNLOAD_WAIT_STATUS)
+
+    def _cancel_download_wait(self) -> None:
+        self.download_wait_cancel_count += 1
+        self._download_wait_active = False
 
     def _set_progress_value(self, percentage: float) -> None:
         self._progress_value = percentage
@@ -560,6 +578,47 @@ def test_process_files_via_server_passes_speed_options(tmp_path: Path) -> None:
     assert captured_kwargs.get("video_codec") == "av1"
 
 
+def test_process_files_via_server_download_bar_reaches_100_once(
+    tmp_path: Path,
+) -> None:
+    gui = StubGUI()
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            callback = kwargs.get("progress_callback")
+            assert callable(callback)
+            # The service client now delivers a single deduped 0→100 download
+            # sequence; the GUI bar must follow it monotonically to 100 once.
+            callback("Downloading:", 0, 100, "bytes")
+            callback("Downloading:", 50, 100, "bytes")
+            callback("Downloading:", 100, 100, "bytes")
+            return (str(tmp_path / "out.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    # ``Downloading:`` is not a known stage band, so it maps to the raw 0-100 range.
+    assert gui.progress_values == pytest.approx([0.0, 50.0, 100.0])
+    # The bar reaches 100 exactly once and never decreases.
+    assert gui.progress_values.count(100.0) == 1
+    assert all(
+        later >= earlier
+        for earlier, later in zip(gui.progress_values, gui.progress_values[1:])
+    )
+
+
 def test_process_files_via_server_streams_upload_and_download(tmp_path: Path) -> None:
     gui = StubGUI()
 
@@ -597,3 +656,222 @@ def test_process_files_via_server_streams_upload_and_download(tmp_path: Path) ->
     # The upload band and download phase both surface a percentage status.
     assert ("processing", "Uploading: 50%") in gui.status_history
     assert ("processing", "Downloading: 100%") in gui.status_history
+
+
+def test_process_files_via_server_waits_for_download_after_processing(
+    tmp_path: Path,
+) -> None:
+    gui = StubGUI()
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            callback = kwargs.get("progress_callback")
+            assert callable(callback)
+            # Final encode completes, then the server finalizes the file before
+            # the download stream begins.
+            callback("Generating final:", 100, 100, "frames")
+            callback("Downloading:", 0, 100, "bytes")
+            callback("Downloading:", 100, 100, "bytes")
+            return (str(tmp_path / "out.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    statuses = gui.status_history
+    waiting = ("processing", StubGUI.DOWNLOAD_WAIT_STATUS)
+    final = ("processing", "Generating final: 100%")
+    first_download = ("processing", "Downloading: 0%")
+    assert waiting in statuses
+    # The waiting status appears after the last processing event and before the
+    # first download event.
+    assert (
+        statuses.index(final) < statuses.index(waiting) < statuses.index(first_download)
+    )
+    # The heartbeat starts exactly once and is cancelled when the download begins
+    # (and again after ``send_video`` returns), leaving no active timer.
+    assert gui.download_wait_begin_count == 1
+    assert gui.download_wait_cancel_count >= 1
+    assert gui._download_wait_active is False
+
+
+def test_process_files_via_server_does_not_wait_without_final_completion(
+    tmp_path: Path,
+) -> None:
+    gui = StubGUI()
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            callback = kwargs.get("progress_callback")
+            assert callable(callback)
+            # The final encode never reaches 100% in the streamed events, so the
+            # waiting heartbeat must not start.
+            callback("Generating final:", 30, 100, "frames")
+            return (str(tmp_path / "out.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    assert gui.download_wait_begin_count == 0
+    assert ("processing", StubGUI.DOWNLOAD_WAIT_STATUS) not in gui.status_history
+
+
+def test_process_files_via_server_cancels_waiting_on_stop(tmp_path: Path) -> None:
+    from talks_reducer.pipeline import ProcessingAborted
+
+    gui = StubGUI()
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            callback = kwargs.get("progress_callback")
+            assert callable(callback)
+            # The final encode completes and the waiting heartbeat starts, then
+            # the user requests a stop before any download bytes arrive.
+            callback("Generating final:", 100, 100, "frames")
+            gui._stop_requested = True
+            raise ProcessingAborted("Remote processing cancelled by user.")
+
+        return SimpleNamespace(send_video=send_video)
+
+    with pytest.raises(ProcessingAborted):
+        remote_module.process_files_via_server(
+            gui,
+            files=[str(tmp_path / "input.mp4")],
+            args={},
+            server_url="http://example.com",
+            open_after_convert=False,
+            default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
+            parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+            load_service_client=load_client,
+            check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+        )
+
+    # The waiting heartbeat started but was cancelled on the abort path, so no
+    # timer lingers after the stop.
+    assert gui.download_wait_begin_count == 1
+    assert gui.download_wait_cancel_count >= 1
+    assert gui._download_wait_active is False
+
+
+def test_transfer_speed_tracker_reports_mb_per_second() -> None:
+    clock = {"t": 0.0}
+    tracker = remote_module._TransferSpeedTracker(
+        min_interval=1.0, clock=lambda: clock["t"]
+    )
+
+    # The first sample only starts the window, so no rate is available yet.
+    assert tracker.update("uploading:", 0) is None
+    # A sample before the window elapses keeps the rate unknown.
+    clock["t"] = 0.5
+    assert tracker.update("uploading:", 2_000_000) is None
+    # Once the interval elapses, report bytes/elapsed/1e6 since the window start.
+    clock["t"] = 1.0
+    assert tracker.update("uploading:", 5_500_000) == pytest.approx(5.5)
+
+
+def test_transfer_speed_tracker_holds_rate_between_windows() -> None:
+    clock = {"t": 0.0}
+    tracker = remote_module._TransferSpeedTracker(
+        min_interval=1.0, clock=lambda: clock["t"]
+    )
+
+    tracker.update("downloading:", 0)
+    clock["t"] = 1.0
+    assert tracker.update("downloading:", 3_000_000) == pytest.approx(3.0)
+    # A sample inside the next window returns the last rate unchanged.
+    clock["t"] = 1.2
+    assert tracker.update("downloading:", 3_500_000) == pytest.approx(3.0)
+
+
+def test_transfer_speed_tracker_resets_on_new_phase() -> None:
+    clock = {"t": 0.0}
+    tracker = remote_module._TransferSpeedTracker(
+        min_interval=1.0, clock=lambda: clock["t"]
+    )
+
+    tracker.update("uploading:", 0)
+    clock["t"] = 1.0
+    assert tracker.update("uploading:", 4_000_000) == pytest.approx(4.0)
+    # Switching to the download phase starts a fresh window.
+    assert tracker.update("downloading:", 10) is None
+    clock["t"] = 2.0
+    assert tracker.update("downloading:", 1_000_010) == pytest.approx(1.0)
+
+
+def test_transfer_speed_tracker_resets_when_bytes_restart() -> None:
+    clock = {"t": 0.0}
+    tracker = remote_module._TransferSpeedTracker(
+        min_interval=1.0, clock=lambda: clock["t"]
+    )
+
+    tracker.update("downloading:", 5_000_000)
+    clock["t"] = 1.0
+    assert tracker.update("downloading:", 9_000_000) == pytest.approx(4.0)
+    # A byte count below the window start signals a fresh 0→100 cycle.
+    assert tracker.update("downloading:", 0) is None
+
+
+def test_process_files_via_server_appends_transfer_speed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gui = StubGUI()
+    # A deterministic monotonic clock (one read per ``_TransferSpeedTracker``
+    # update) so the reported rate is stable across the streamed byte events.
+    ticks = iter([0.0, 1.0, 2.0])
+    monkeypatch.setattr(remote_module.time, "monotonic", lambda: next(ticks))
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            callback = kwargs.get("progress_callback")
+            assert callable(callback)
+            callback("Uploading:", 0, 10_000_000, "bytes")
+            callback("Uploading:", 5_000_000, 10_000_000, "bytes")
+            callback("Uploading:", 10_000_000, 10_000_000, "bytes")
+            return (str(tmp_path / "out.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small, small_480, **_: path,  # noqa: ARG005
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    speed_statuses = [
+        message
+        for _status, message in gui.status_history
+        if message and "MB/s" in message
+    ]
+    # 5 MB over 1 s -> 5.0 MB/s at 50%, then another 5 MB over 1 s at 100%.
+    assert "Uploading: 50%, 5.0 MB/s" in speed_statuses
+    assert "Uploading: 100%, 5.0 MB/s" in speed_statuses

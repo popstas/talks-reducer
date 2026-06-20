@@ -32,6 +32,31 @@ your system file manager as soon as each job finishes.
 - **Advanced** — reveals optional controls for the output path, temp folder,
 timing/audio knobs mirrored from the command line, and an appearance picker
 that can force dark or light mode or follow your operating system.
+- **Server mode (`--server-managed`)** — when the tray launches the GUI it passes
+`--server-managed` and `--server-url <local url>`. The window then shows a
+**Server:** label near **Processing mode** with the LAN-reachable address and a
+**Connected clients** panel that polls the server's `GET /activity` endpoint
+(~5s) and renders recent client requests as `HH:MM:SS  <ip>  <action>`. The
+LAN-reachable address comes from `_resolve_host_ip()` in `server.py`, which
+prefers a `192.168.x.x` interface address over a VPN tunnel (`10.x`) or
+container bridge (`172.16–31.x`); `_iter_interface_ipv4_addresses` enumerates
+interfaces, using a Linux `SIOCGIFADDR` fallback since the hostname there often
+resolves only to loopback. Both are
+hidden in the standalone GUI. While downloading a remote result the GUI shows a
+refreshing **Waiting for download…** status during the processing→download gap,
+and the download bar advances to 100% only once. While a remote upload or
+download is streaming the status appends the live transfer rate (e.g.
+`Uploading: 55%, 5.5 MB/s`), computed by `_TransferSpeedTracker` in
+`gui/remote.py`.
+
+`service_client.send_video` builds the gradio `Client` with `download_files=False`
+(`_build_client`) and streams the single processed file itself
+(`_download_filedata`, 1 MiB chunks) — gradio would otherwise auto-download the
+same file twice (the `gr.Video` preview and the `gr.File` output). Byte-level
+upload/download progress is coalesced to ~10 Hz via `_ThrottledEmitter` so the
+per-chunk callbacks don't flood the UI thread. The server's queue concurrency is
+configurable via `--concurrency` (`server_args.py` → `build_interface`), but file
+transfers bypass the queue so it only affects concurrent processing.
 
 Progress updates stream into the 10-line log panel while the processing runs in
 a background thread. Once every queued job succeeds an **Open last output**
