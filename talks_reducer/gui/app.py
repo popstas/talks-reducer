@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from contextlib import suppress
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
