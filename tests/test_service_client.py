@@ -1092,6 +1092,200 @@ def test_install_transfer_progress_returns_false_for_stub_client():
     assert installed is False
 
 
+class _FileDataClient:
+    """Stub client mirroring a real gradio client with ``download_files=False``.
+
+    Returns FileData mappings (instead of locally downloaded paths) so the
+    single-download branch of ``send_video`` is exercised.
+    """
+
+    def __init__(self, server_url: str, outputs) -> None:
+        self.server_url = server_url
+        self.download_files = False
+        self.src_prefixed = server_url if server_url.endswith("/") else server_url + "/"
+        self.headers: dict = {}
+        self.cookies: dict = {}
+        self.ssl_verify = True
+        self.httpx_kwargs: dict = {}
+        self.submissions: list = []
+        self._outputs = outputs
+
+    def submit(self, *args, **kwargs):
+        self.submissions.append((args, kwargs))
+        return DummyJob([self._outputs])
+
+
+def _fake_stream_factory(captured: dict, chunks, *, content_length: str = "8"):
+    def fake_stream(method, url, *args, **kwargs):
+        captured["url"] = url
+        captured["count"] = captured.get("count", 0) + 1
+
+        class _CM:
+            def __enter__(self):
+                return SimpleNamespace(
+                    headers={"content-length": content_length},
+                    iter_bytes=lambda *a, **k: iter(list(chunks)),
+                    raise_for_status=lambda: None,
+                )
+
+            def __exit__(self, *exc):
+                return False
+
+        return _CM()
+
+    return fake_stream
+
+
+def test_send_video_downloads_filedata_once(monkeypatch, tmp_path):
+    """With ``download_files=False`` the processed file is streamed exactly once."""
+
+    import gradio_client.client as gradio_client_module
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"input")
+
+    filedata = {"path": "/server/out.mp4", "meta": {"_type": "gradio.FileData"}}
+    outputs = (filedata, "log", "summary", filedata)
+    client_instance = _FileDataClient("http://localhost:9005/", outputs)
+
+    monkeypatch.setattr(
+        service_client, "gradio_file", lambda path: SimpleNamespace(path=path)
+    )
+    captured: dict = {}
+    monkeypatch.setattr(
+        gradio_client_module.httpx,
+        "stream",
+        _fake_stream_factory(captured, [b"abcd", b"efgh"]),
+    )
+
+    progress_events: list = []
+    destination, summary, log_text = service_client.send_video(
+        input_path=input_file,
+        output_path=tmp_path / "output.mp4",
+        server_url="http://localhost:9005/",
+        client_factory=lambda url: client_instance,
+        progress_callback=lambda *args: progress_events.append(args),
+    )
+
+    assert destination == tmp_path / "output.mp4"
+    assert destination.read_bytes() == b"abcdefgh"
+    assert summary == "summary"
+    assert log_text == "log"
+    # Exactly one network download (not the gr.Video + gr.File double-fetch).
+    assert captured["count"] == 1
+    assert captured["url"] == "http://localhost:9005/file=/server/out.mp4"
+    # Throttled progress still guarantees an initial 0% and a terminal 100%.
+    assert ("Downloading:", 0, 8, "bytes") in progress_events
+    assert ("Downloading:", 8, 8, "bytes") in progress_events
+
+
+def test_resolve_filedata_url_prefers_url_then_path():
+    client = SimpleNamespace(src_prefixed="http://host:7/")
+
+    assert (
+        service_client._resolve_filedata_url(client, {"url": "/file=abc"}, "")
+        == "http://host:7/file=abc"
+    )
+    assert (
+        service_client._resolve_filedata_url(client, {"url": "http://x/y"}, "")
+        == "http://x/y"
+    )
+    assert (
+        service_client._resolve_filedata_url(client, {"path": "tmp/out.mp4"}, "")
+        == "http://host:7/file=tmp/out.mp4"
+    )
+    with pytest.raises(RuntimeError):
+        service_client._resolve_filedata_url(client, {}, "")
+
+
+def test_throttled_emitter_coalesces_and_forces():
+    clock = {"t": 0.0}
+    events: list = []
+    emitter = service_client._ThrottledEmitter(
+        lambda *args: events.append(args), min_interval=1.0, clock=lambda: clock["t"]
+    )
+
+    emitter("Uploading:", 0, 100, "bytes")  # first ever -> emits
+    emitter("Uploading:", 10, 100, "bytes")  # within interval -> dropped
+    clock["t"] = 1.0
+    emitter("Uploading:", 50, 100, "bytes")  # interval elapsed -> emits
+    clock["t"] = 1.1
+    emitter("Uploading:", 90, 100, "bytes")  # within interval -> dropped
+    emitter("Uploading:", 100, 100, "bytes", force=True)  # forced -> emits
+
+    assert events == [
+        ("Uploading:", 0, 100, "bytes"),
+        ("Uploading:", 50, 100, "bytes"),
+        ("Uploading:", 100, 100, "bytes"),
+    ]
+
+
+def test_download_filedata_cancels_mid_stream(monkeypatch, tmp_path):
+    import gradio_client.client as gradio_client_module
+
+    monkeypatch.setattr(
+        gradio_client_module.httpx,
+        "stream",
+        _fake_stream_factory({}, [b"aaaa", b"bbbb", b"cccc"], content_length="12"),
+    )
+
+    calls = {"n": 0}
+
+    def cancel_check() -> None:
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise service_client.ProcessingAborted("cancelled")
+
+    client = SimpleNamespace(
+        src_prefixed="http://server/",
+        headers={},
+        cookies={},
+        ssl_verify=True,
+        httpx_kwargs={},
+    )
+
+    with pytest.raises(service_client.ProcessingAborted):
+        service_client._download_filedata(
+            client,
+            {"path": "/x/out.mp4"},
+            tmp_path / "out.mp4",
+            None,
+            cancel_check,
+            "http://server/",
+        )
+
+
+def test_send_video_falls_back_when_download_files_unsupported(monkeypatch, tmp_path):
+    """A factory rejecting ``download_files`` keeps the legacy copy path."""
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"input")
+    server_file = tmp_path / "server_output.mp4"
+    server_file.write_bytes(b"processed")
+
+    def factory(server_url, **kwargs):
+        if kwargs:
+            raise TypeError("download_files is not supported")
+        client = DummyClient(server_url)
+        client.job_outputs = [(str(server_file), "log", "summary", str(server_file))]
+        return client
+
+    monkeypatch.setattr(
+        service_client, "gradio_file", lambda path: SimpleNamespace(path=path)
+    )
+
+    destination, summary, log_text = service_client.send_video(
+        input_path=input_file,
+        output_path=tmp_path / "output.mp4",
+        server_url="http://localhost:9005/",
+        client_factory=factory,
+    )
+
+    assert destination.read_bytes() == server_file.read_bytes()
+    assert summary == "summary"
+    assert log_text == "log"
+
+
 @pytest.fixture
 def cwd_tmp_path(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)

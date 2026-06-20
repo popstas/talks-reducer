@@ -87,7 +87,10 @@ received, an `Audio processing:` bar driven by the real phase-vocoder work
 (instead of a synthetic estimate), and a `Generating final:` bar for the encode.
 Progress keeps advancing after audio processing finishes rather than stalling
 until the encode completes. Once processing is done a `Downloading:` bar reports
-the finished file being fetched back from the server.
+the finished file being fetched back from the server. The client now fetches the
+processed file exactly once (it previously downloaded it twice, since the server
+exposes the same file as both a preview and a download), so downloads finish in
+about half the time.
 
 ### Speech detection
 
@@ -107,6 +110,12 @@ talks-reducer server
 The browser UI mirrors the CLI timing controls with sliders for the silent
 threshold and playback speeds, so you can tune exports without leaving the
 remote workflow.
+
+By default the server processes one job at a time. Pass `--concurrency N` to let
+several clients process simultaneously (each concurrent job runs its own FFmpeg,
+so keep `N` small). Note this only affects concurrent *processing* — file
+uploads and downloads are served outside the queue, so it does not speed up a
+single client's transfer.
 
 Want the server to live in your system tray instead of a terminal window? Use:
 

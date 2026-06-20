@@ -800,8 +800,14 @@ def process_video(
     )
 
 
-def build_interface() -> gr.Blocks:
-    """Construct the Gradio Blocks application for the simple web UI."""
+def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
+    """Construct the Gradio Blocks application for the simple web UI.
+
+    *concurrency_limit* sets how many ``process_video`` jobs the queue runs at
+    once. It only affects concurrent clients' processing — file downloads are
+    served on a direct route outside the queue, so it does not change a single
+    transfer's speed.
+    """
 
     server_identity = _describe_server_host()
     global_ffmpeg_available = is_global_ffmpeg_available()
@@ -912,7 +918,7 @@ def build_interface() -> gr.Blocks:
             api_name="process_video",
         )
 
-    demo.queue(default_concurrency_limit=1)
+    demo.queue(default_concurrency_limit=max(1, concurrency_limit))
     return demo
 
 
@@ -924,7 +930,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    demo = build_interface()
+    demo = build_interface(concurrency_limit=getattr(args, "concurrency", 1))
     demo.launch(
         server_name=args.host,
         server_port=args.port,

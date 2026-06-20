@@ -3,3 +3,4 @@
 - [x] show local URL when GUI running in server mode: when the GUI is started with `--server`, display a text label near "Processing mode" showing the local server URL (e.g. `http://192.168.x.x:<port>`) so users on the same network can connect easily.
 - [x] fix download progress reaching 100% three times: when downloading the processed file from the remote server, the download progress reaches 100% three separate times. Make the download progress advance to 100% only once.
 - [x] show upload/download speed in MB/s: append the live transfer rate to the remote upload/download status, e.g. `Uploading: 55%, 5.5 MB/s`.
+- [x] speed up remote download: the processed file was downloaded twice (gr.Video + gr.File), per-8KB progress callbacks flooded the UI thread, making app-level download ~10x slower than the link. Download the file once (`download_files=False` + manual 1 MiB stream), throttle upload/download progress to ~10 Hz, and add a server `--concurrency` knob.

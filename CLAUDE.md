@@ -44,6 +44,15 @@ download is streaming the status appends the live transfer rate (e.g.
 `Uploading: 55%, 5.5 MB/s`), computed by `_TransferSpeedTracker` in
 `gui/remote.py`.
 
+`service_client.send_video` builds the gradio `Client` with `download_files=False`
+(`_build_client`) and streams the single processed file itself
+(`_download_filedata`, 1 MiB chunks) — gradio would otherwise auto-download the
+same file twice (the `gr.Video` preview and the `gr.File` output). Byte-level
+upload/download progress is coalesced to ~10 Hz via `_ThrottledEmitter` so the
+per-chunk callbacks don't flood the UI thread. The server's queue concurrency is
+configurable via `--concurrency` (`server_args.py` → `build_interface`), but file
+transfers bypass the queue so it only affects concurrent processing.
+
 Progress updates stream into the 10-line log panel while the processing runs in
 a background thread. Once every queued job succeeds an **Open last output**
 button appears so you can jump straight to the exported file in your system
