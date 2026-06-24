@@ -258,6 +258,15 @@ class TalksReducerGUI:
         self.open_after_convert_var = tk.BooleanVar(
             value=self.preferences.get("open_after_convert", True)
         )
+        self.cut_enabled_var = tk.BooleanVar(
+            value=bool(self.preferences.get("cut_enabled", False))
+        )
+        self.cut_start_var = tk.DoubleVar(
+            value=self.preferences.get_float("cut_start", 0.0)
+        )
+        self.cut_end_var = tk.DoubleVar(
+            value=self.preferences.get_float("cut_end", 0.0)
+        )
         stored_codec = str(self.preferences.get("video_codec", "h264")).lower()
         if stored_codec not in {"h264", "hevc", "av1"}:
             stored_codec = "h264"
@@ -287,6 +296,9 @@ class TalksReducerGUI:
         self.open_after_convert_var.trace_add(
             "write", self._on_open_after_convert_change
         )
+        self.cut_enabled_var.trace_add("write", self._on_cut_change)
+        self.cut_start_var.trace_add("write", self._on_cut_change)
+        self.cut_end_var.trace_add("write", self._on_cut_change)
         self.video_codec_var.trace_add("write", self._on_video_codec_change)
         self.add_codec_suffix_var.trace_add("write", self._on_add_codec_suffix_change)
         self.optimize_var.trace_add("write", self._on_optimize_change)
@@ -914,6 +926,9 @@ class TalksReducerGUI:
     def _on_open_after_convert_change(self, *_: object) -> None:
         self.preference_controller.on_open_after_convert_change(*_)
 
+    def _on_cut_change(self, *_: object) -> None:
+        self.preference_controller.on_cut_change(*_)
+
     def _on_video_codec_change(self, *_: object) -> None:
         self.preference_controller.on_video_codec_change(*_)
 
@@ -1124,6 +1139,15 @@ class TalksReducerGUI:
             args["small"] = True
             if self.small_480_var.get():
                 args["small_target_height"] = 480
+        if self.cut_enabled_var.get():
+            cut_start = float(self.cut_start_var.get())
+            cut_end = float(self.cut_end_var.get())
+            if cut_end and cut_end <= cut_start:
+                raise ValueError(
+                    "Cut end must be greater than cut start (or 0 for end of video)."
+                )
+            args["cut_start_seconds"] = round(cut_start, 3)
+            args["cut_end_seconds"] = round(cut_end, 3)
         return args
 
     def _process_files_via_server(

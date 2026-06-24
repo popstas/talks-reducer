@@ -150,6 +150,21 @@ class PreferenceController:
             "open_after_convert", bool(self.gui.open_after_convert_var.get())
         )
 
+    def on_cut_change(self, *_: object) -> None:
+        """Persist the Cut video enable flag and start/end keep-range values."""
+
+        self.gui.preferences.update("cut_enabled", bool(self.gui.cut_enabled_var.get()))
+        try:
+            cut_start = float(self.gui.cut_start_var.get())
+        except (TypeError, ValueError):
+            cut_start = 0.0
+        try:
+            cut_end = float(self.gui.cut_end_var.get())
+        except (TypeError, ValueError):
+            cut_end = 0.0
+        self.gui.preferences.update("cut_start", cut_start)
+        self.gui.preferences.update("cut_end", cut_end)
+
     def on_video_codec_change(self, *_: object) -> None:
         value = self.gui.video_codec_var.get().strip().lower()
         if value not in {"h264", "hevc", "av1"}:

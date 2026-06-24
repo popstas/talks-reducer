@@ -136,16 +136,16 @@
 - [x] run `pytest tests/test_server.py` — must pass before Task 7
 
 ### Task 7: Desktop GUI — state, preferences, arg collection
-- [ ] add `cut_enabled_var` (`BooleanVar`), `cut_start_var`, `cut_end_var` (`DoubleVar`) in
+- [x] add `cut_enabled_var` (`BooleanVar`), `cut_start_var`, `cut_end_var` (`DoubleVar`) in
       `TalksReducerGUI.__init__` (`talks_reducer/gui/app.py`), seeded from preferences with
       `trace_add("write", ...)` callbacks
-- [ ] add a `_on_cut_change` handler persisting the three values via `GUIPreferences.update`
+- [x] add a `_on_cut_change` handler persisting the three values via `GUIPreferences.update`
       (extend `gui/preferences.py` defaults/keys: `cut_enabled`, `cut_start`, `cut_end`)
-- [ ] extend `_collect_arguments()` / `_create_processing_options()` to include
+- [x] extend `_collect_arguments()` / `_create_processing_options()` to include
       `cut_start_seconds`/`cut_end_seconds` **only when `cut_enabled_var` is true**
-- [ ] write tests in `tests/test_gui_app.py`: args include trim when enabled, omit when disabled,
+- [x] write tests in `tests/test_gui_app.py`: args include trim when enabled, omit when disabled,
       and preferences round-trip
-- [ ] run `pytest tests/test_gui_app.py` — must pass before Task 8
+- [x] run `pytest tests/test_gui_app.py` — must pass before Task 8
 
 ### Task 8: Desktop GUI — frame-scrub thumbnail + range sliders
 - [ ] add `build_extract_frame_command(input_file, timestamp, output_image, ffmpeg_path)` to

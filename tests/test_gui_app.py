@@ -233,6 +233,9 @@ def test_collect_arguments_includes_video_codec():
         add_codec_suffix_var=SimpleNamespace(get=lambda: False),
         use_global_ffmpeg_var=SimpleNamespace(get=lambda: True),
         optimize_var=SimpleNamespace(get=lambda: True),
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        cut_start_var=SimpleNamespace(get=lambda: 0.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     gui._parse_float = lambda value, _label: float(value)
@@ -259,6 +262,9 @@ def test_collect_arguments_includes_add_codec_suffix():
         add_codec_suffix_var=SimpleNamespace(get=lambda: True),
         use_global_ffmpeg_var=SimpleNamespace(get=lambda: False),
         optimize_var=SimpleNamespace(get=lambda: True),
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        cut_start_var=SimpleNamespace(get=lambda: 0.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     gui._parse_float = lambda value, _label: float(value)
@@ -267,6 +273,83 @@ def test_collect_arguments_includes_add_codec_suffix():
 
     assert args["add_codec_suffix"] is True
     assert args["prefer_global_ffmpeg"] is False
+
+
+def _make_collect_gui(**overrides) -> SimpleNamespace:
+    defaults = dict(
+        output_var=SimpleNamespace(get=lambda: ""),
+        temp_var=SimpleNamespace(get=lambda: ""),
+        silent_threshold_var=SimpleNamespace(get=lambda: 0.01),
+        sounded_speed_var=SimpleNamespace(get=lambda: 1.0),
+        silent_speed_var=SimpleNamespace(get=lambda: 4.0),
+        frame_margin_var=SimpleNamespace(get=lambda: "2"),
+        sample_rate_var=SimpleNamespace(get=lambda: "48000"),
+        keyframe_interval_var=SimpleNamespace(get=lambda: 30.0),
+        small_var=SimpleNamespace(get=lambda: False),
+        small_480_var=SimpleNamespace(get=lambda: False),
+        video_codec_var=SimpleNamespace(get=lambda: "h264", set=lambda value: None),
+        add_codec_suffix_var=SimpleNamespace(get=lambda: False),
+        use_global_ffmpeg_var=SimpleNamespace(get=lambda: False),
+        optimize_var=SimpleNamespace(get=lambda: True),
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        cut_start_var=SimpleNamespace(get=lambda: 0.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
+        preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
+    )
+    defaults.update(overrides)
+    gui = SimpleNamespace(**defaults)
+    gui._parse_float = lambda value, _label: float(value)
+    return gui
+
+
+def test_collect_arguments_includes_cut_range_when_enabled():
+    gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=lambda: 10.0),
+        cut_end_var=SimpleNamespace(get=lambda: 60.0),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["cut_start_seconds"] == 10.0
+    assert args["cut_end_seconds"] == 60.0
+
+
+def test_collect_arguments_omits_cut_range_when_disabled():
+    gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        cut_start_var=SimpleNamespace(get=lambda: 10.0),
+        cut_end_var=SimpleNamespace(get=lambda: 60.0),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert "cut_start_seconds" not in args
+    assert "cut_end_seconds" not in args
+
+
+def test_collect_arguments_allows_cut_end_zero_for_eof():
+    gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=lambda: 5.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["cut_start_seconds"] == 5.0
+    assert args["cut_end_seconds"] == 0.0
+
+
+def test_collect_arguments_rejects_invalid_cut_range():
+    gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=lambda: 60.0),
+        cut_end_var=SimpleNamespace(get=lambda: 10.0),
+    )
+
+    with pytest.raises(ValueError):
+        app.TalksReducerGUI._collect_arguments(gui)
 
 
 class _RecordingVar:
