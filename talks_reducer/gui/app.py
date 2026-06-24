@@ -724,6 +724,21 @@ class TalksReducerGUI:
                 with suppress(Exception):
                     slider.configure(to=duration)
 
+        # Clamp any stale handle values (e.g. persisted from a longer video)
+        # into the new ``0..duration`` range so the forwarded trim cannot start
+        # or end past EOF, which the pipeline would otherwise silently ignore.
+        # A start handle at or past the new EOF is meaningless, so reset it to
+        # the beginning rather than to ``duration``; otherwise both handles
+        # could collapse onto EOF and produce an empty (``end <= start``) range
+        # that ``_collect_arguments`` rejects on Run.
+        if duration > 0:
+            with suppress(TypeError, ValueError):
+                if float(self.cut_end_var.get()) > duration:
+                    self.cut_end_var.set(round(duration, 1))
+            with suppress(TypeError, ValueError):
+                if float(self.cut_start_var.get()) >= duration:
+                    self.cut_start_var.set(0.0)
+
         # Default the end handle to the full duration the first time we learn it.
         if duration > 0 and float(self.cut_end_var.get()) <= 0:
             self.cut_end_var.set(round(duration, 1))

@@ -414,6 +414,7 @@ def test_update_cut_range_sets_slider_to_duration(monkeypatch):
         input_files=["video.mp4"],
         cut_start_slider=start_slider,
         cut_end_slider=end_slider,
+        cut_start_var=_RecordingVar(0.0),
         cut_end_var=_RecordingVar(0.0),
         _cut_duration=0.0,
     )
@@ -425,6 +426,44 @@ def test_update_cut_range_sets_slider_to_duration(monkeypatch):
     assert end_slider.configure_calls[-1]["to"] == 120.0
     # End handle defaults to the discovered duration on first learn.
     assert gui.cut_end_var.get() == 120.0
+
+
+def test_update_cut_range_clamps_stale_values_to_shorter_duration(monkeypatch):
+    import talks_reducer.ffmpeg as ffmpeg_module
+
+    monkeypatch.setattr(ffmpeg_module, "get_video_duration", lambda path: 60.0)
+
+    gui = SimpleNamespace(
+        input_files=["short.mp4"],
+        cut_start_slider=_RecordingSlider(),
+        cut_end_slider=_RecordingSlider(),
+        # Stale values persisted from a longer video, both past the new EOF.
+        cut_start_var=_RecordingVar(120.0),
+        cut_end_var=_RecordingVar(300.0),
+        _cut_duration=0.0,
+    )
+
+    app.TalksReducerGUI._update_cut_range_for_input(gui)
+
+    assert gui._cut_duration == 60.0
+    # The end handle is clamped to the new EOF, while a start handle past the
+    # new EOF resets to the beginning so the range stays valid (non-empty)
+    # instead of collapsing both handles onto EOF.
+    assert gui.cut_start_var.get() == 0.0
+    assert gui.cut_end_var.get() == 60.0
+
+    # The clamped range must survive ``_collect_arguments`` without tripping the
+    # ``cut_end <= cut_start`` guard, otherwise Run would fail for shorter videos.
+    collect_gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=gui.cut_start_var.get),
+        cut_end_var=SimpleNamespace(get=gui.cut_end_var.get),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(collect_gui)
+
+    assert args["cut_start_seconds"] == 0.0
+    assert args["cut_end_seconds"] == 60.0
 
 
 def test_update_cut_range_no_input_is_noop():

@@ -344,6 +344,8 @@ def process_files_via_server(
         "prefer_global_ffmpeg",
         "add_codec_suffix",
         "optimize",
+        "cut_start_seconds",
+        "cut_end_seconds",
     }
     ignored = [key for key in args if key not in allowed_remote_keys]
     if ignored:
