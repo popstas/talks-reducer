@@ -45,6 +45,17 @@ def test_build_parser_includes_version_and_defaults(
     assert codec_suffix_args.add_codec_suffix is True
 
 
+def test_build_parser_format_help_does_not_crash() -> None:
+    """Help text with literal percent signs must not break argparse formatting."""
+
+    parser = cli._build_parser()
+
+    help_text = parser.format_help()
+
+    assert "25% smaller" in help_text
+    assert "10% faster" in help_text
+
+
 def test_build_parser_parses_cut_timecodes(tmp_path: Path) -> None:
     """The parser should accept --cut-start/--cut-end as seconds or HH:MM:SS."""
 

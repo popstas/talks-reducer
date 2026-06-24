@@ -108,7 +108,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="hevc",
         help=(
             "Select the video encoder used for the final render (default: hevc — "
-            "h.265 for roughly 25% smaller files). Pick h264 (about 10% faster) "
+            "h.265 for roughly 25%% smaller files). Pick h264 (about 10%% faster) "
             "when speed matters or av1 (no advantages) for experimental runs."
         ),
     )

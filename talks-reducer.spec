@@ -25,9 +25,18 @@ if not PROJECT_DIR.exists() and "__file__" in globals():
 
 # Data files bundled with the GUI
 base_datas = [
-    (PROJECT_DIR / "talks_reducer" / "resources" / "icons" / "app-256.png", "talks_reducer/resources/icons"),
-    (PROJECT_DIR / "talks_reducer" / "resources" / "icons" / "app.ico", "talks_reducer/resources/icons"),
-    (PROJECT_DIR / "talks_reducer" / "resources" / "icons" / "app.icns", "talks_reducer/resources/icons"),
+    (
+        PROJECT_DIR / "talks_reducer" / "resources" / "icons" / "app-256.png",
+        "talks_reducer/resources/icons",
+    ),
+    (
+        PROJECT_DIR / "talks_reducer" / "resources" / "icons" / "app.ico",
+        "talks_reducer/resources/icons",
+    ),
+    (
+        PROJECT_DIR / "talks_reducer" / "resources" / "icons" / "app.icns",
+        "talks_reducer/resources/icons",
+    ),
 ]
 
 datas = [(str(src), dest) for src, dest in base_datas if src.exists()]
@@ -187,7 +196,9 @@ def resolve_app_version() -> str:
 
     about_path = PROJECT_DIR / "talks_reducer" / "__about__.py"
     try:
-        spec = importlib.util.spec_from_file_location("talks_reducer.__about__", about_path)
+        spec = importlib.util.spec_from_file_location(
+            "talks_reducer.__about__", about_path
+        )
         if spec and spec.loader:
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
@@ -260,9 +271,15 @@ if sys.platform == "darwin":
         if lib_dir.exists():
             lib_candidates.add(lib_dir)
 
-    dylib_names = ["libtcl8.7.dylib", "libtcl8.6.dylib", "libtk8.7.dylib", "libtk8.6.dylib"]
+    dylib_names = [
+        "libtcl8.7.dylib",
+        "libtcl8.6.dylib",
+        "libtk8.7.dylib",
+        "libtk8.6.dylib",
+    ]
 
     seen_binaries = set()
+
     def _maybe_add_binary(paths: Iterable[pathlib.Path]) -> None:
         for candidate in paths:
             if not candidate.exists():
@@ -283,7 +300,12 @@ if sys.platform == "darwin":
             if key in seen_binaries:
                 continue
 
-            binaries.append((str(candidate), resolved.name))
+            # The second element of a PyInstaller binaries tuple is the
+            # destination *directory*, not a filename. Using "." places the
+            # dylib at the bundle's Frameworks root so that _tkinter.so can
+            # resolve @rpath/libtcl8.6.dylib (and libtk8.6.dylib) to a real
+            # file instead of a folder.
+            binaries.append((str(candidate), "."))
             seen_binaries.add(key)
 
     for lib_dir in lib_candidates:
@@ -314,9 +336,13 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[
-        str(PROJECT_DIR / "talks_reducer" / "pyinstaller_hooks" / "tkinter_env.py"),
-    ] if sys.platform == "darwin" else [],
+    runtime_hooks=(
+        [
+            str(PROJECT_DIR / "talks_reducer" / "pyinstaller_hooks" / "tkinter_env.py"),
+        ]
+        if sys.platform == "darwin"
+        else []
+    ),
     excludes=excludes,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

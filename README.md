@@ -20,8 +20,13 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 ```sh
 brew tap popstas/talks-reducer
+brew trust --cask popstas/talks-reducer/talks-reducer
 brew install --cask talks-reducer
 ```
+
+> Homebrew 6.0.0+ requires `brew trust --cask` to approve a cask from a
+> third-party tap before it can be installed. Without it, the install fails with
+> a "Refusing to load cask from untrusted tap" error.
 
 ### Manual download
 
