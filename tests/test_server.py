@@ -683,6 +683,104 @@ def test_process_video_validates_input_arguments(tmp_path: Path) -> None:
         list(server.process_video(str(missing_path), small_video=False))
 
 
+def _trim_capturing_dependencies(
+    captured: dict,
+) -> "server.ProcessVideoDependencies":
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        captured["cut_start_seconds"] = options.cut_start_seconds
+        captured["cut_end_seconds"] = options.cut_end_seconds
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or options.input_file,
+            frame_rate=24.0,
+            original_duration=120.0,
+            output_duration=30.0,
+            chunk_count=5,
+            used_cuda=False,
+            max_audio_volume=0.6,
+            time_ratio=0.25,
+            size_ratio=0.3,
+        )
+
+    return server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+
+
+def test_process_video_honors_trim_when_enabled(tmp_path: Path) -> None:
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+
+    captured: dict = {}
+    dependencies = _trim_capturing_dependencies(captured)
+
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                cut_enabled=True,
+                cut_start_seconds=10.0,
+                cut_end_seconds=60.0,
+                progress=None,
+                dependencies=dependencies,
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+
+    assert outputs
+    assert captured["cut_start_seconds"] == pytest.approx(10.0)
+    assert captured["cut_end_seconds"] == pytest.approx(60.0)
+
+
+def test_process_video_ignores_trim_when_disabled(tmp_path: Path) -> None:
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+
+    captured: dict = {}
+    dependencies = _trim_capturing_dependencies(captured)
+
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                cut_enabled=False,
+                cut_start_seconds=10.0,
+                cut_end_seconds=60.0,
+                progress=None,
+                dependencies=dependencies,
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+
+    assert outputs
+    assert captured["cut_start_seconds"] == pytest.approx(0.0)
+    assert captured["cut_end_seconds"] == pytest.approx(0.0)
+
+
+def test_build_interface_exposes_cut_video_components() -> None:
+    """The web UI should expose the Cut video checkbox and start/end inputs."""
+
+    demo = server.build_interface()
+    process_fns = [
+        fn for fn in demo.fns.values() if getattr(fn, "name", "") == "process_video"
+    ]
+    assert process_fns, "process_video handler not registered on demo"
+    registered_inputs = list(process_fns[0].inputs or [])
+    labels = [getattr(component, "label", None) for component in registered_inputs]
+
+    assert "Cut video" in labels
+    assert "Cut start (seconds)" in labels
+    assert "Cut end (seconds)" in labels
+
+
 def test_build_interface_inputs_align_with_process_video_signature() -> None:
     """Guard against positional mismatch between the Gradio inputs list and
     ``process_video``'s signature. A missing component would shift every

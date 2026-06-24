@@ -125,15 +125,15 @@
 - [x] run `pytest tests/test_pipeline.py` — must pass before Task 6
 
 ### Task 6: Web UI (gradio) trim controls
-- [ ] add a **"Cut video"** `gr.Checkbox` and `cut_start`/`cut_end` inputs (sliders or
+- [x] add a **"Cut video"** `gr.Checkbox` and `cut_start`/`cut_end` inputs (sliders or
       `gr.Number`, seconds) to `build_interface()` in `talks_reducer/server.py`
-- [ ] add `cut_start_seconds`/`cut_end_seconds` params to `process_video()` and map them into
+- [x] add `cut_start_seconds`/`cut_end_seconds` params to `process_video()` and map them into
       the `ProcessingOptions` it builds (only applied when the checkbox is on)
-- [ ] add the new components to the `inputs=[...]` list feeding `process_video`
-- [ ] write tests in `tests/test_server.py`: `process_video` honours trim args and ignores them
+- [x] add the new components to the `inputs=[...]` list feeding `process_video`
+- [x] write tests in `tests/test_server.py`: `process_video` honours trim args and ignores them
       when the checkbox is off
-- [ ] write tests asserting `build_interface()` exposes the new components
-- [ ] run `pytest tests/test_server.py` — must pass before Task 7
+- [x] write tests asserting `build_interface()` exposes the new components
+- [x] run `pytest tests/test_server.py` — must pass before Task 7
 
 ### Task 7: Desktop GUI — state, preferences, arg collection
 - [ ] add `cut_enabled_var` (`BooleanVar`), `cut_start_var`, `cut_end_var` (`DoubleVar`) in
