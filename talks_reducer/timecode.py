@@ -9,9 +9,20 @@ values and reject malformed input with :class:`ValueError`.
 
 from __future__ import annotations
 
+import math
 from numbers import Real
 
 __all__ = ["parse_timecode", "format_timecode"]
+
+
+def _validate_seconds(seconds: float, value) -> float:
+    """Return ``seconds`` after rejecting negative or non-finite values."""
+
+    if not math.isfinite(seconds):
+        raise ValueError(f"Invalid timecode: {value!r}")
+    if seconds < 0:
+        raise ValueError(f"Timecode cannot be negative: {value!r}")
+    return seconds
 
 
 def parse_timecode(value) -> float:
@@ -27,10 +38,7 @@ def parse_timecode(value) -> float:
         raise ValueError(f"Invalid timecode: {value!r}")
 
     if isinstance(value, Real):
-        seconds = float(value)
-        if seconds < 0:
-            raise ValueError(f"Timecode cannot be negative: {value!r}")
-        return seconds
+        return _validate_seconds(float(value), value)
 
     if not isinstance(value, str):
         raise ValueError(f"Invalid timecode: {value!r}")
@@ -52,15 +60,13 @@ def parse_timecode(value) -> float:
         seconds = 0.0
         for number in numbers:
             seconds = seconds * 60 + number
-        return seconds
+        return _validate_seconds(seconds, value)
 
     try:
         seconds = float(text)
     except ValueError as exc:
         raise ValueError(f"Invalid timecode: {value!r}") from exc
-    if seconds < 0:
-        raise ValueError(f"Timecode cannot be negative: {value!r}")
-    return seconds
+    return _validate_seconds(seconds, value)
 
 
 def format_timecode(seconds) -> str:
