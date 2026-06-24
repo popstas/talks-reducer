@@ -401,6 +401,41 @@ def test_resolve_trim_ignores_start_beyond_duration() -> None:
     assert result == (0.0, 0.0, 10.0, 300)
 
 
+def test_resolve_trim_unknown_duration_uses_requested_range() -> None:
+    """When the source duration is unknown the requested span drives the trim."""
+
+    options = ProcessingOptions(
+        input_file=Path("video.mp4"),
+        cut_start_seconds=2.0,
+        cut_end_seconds=5.0,
+    )
+    reporter = NullProgressReporter()
+
+    cut_start, cut_end, effective_duration, effective_frames = pipeline._resolve_trim(
+        options, 0.0, 0, 30.0, reporter
+    )
+
+    assert cut_start == pytest.approx(2.0)
+    assert cut_end == pytest.approx(5.0)
+    assert effective_duration == pytest.approx(3.0)
+    assert effective_frames == 90
+
+
+def test_resolve_trim_unknown_duration_ignores_empty_range() -> None:
+    """An inverted range is ignored even when the source duration is unknown."""
+
+    options = ProcessingOptions(
+        input_file=Path("video.mp4"),
+        cut_start_seconds=8.0,
+        cut_end_seconds=3.0,
+    )
+    reporter = NullProgressReporter()
+
+    result = pipeline._resolve_trim(options, 0.0, 0, 30.0, reporter)
+
+    assert result == (0.0, 0.0, 0.0, 0)
+
+
 def _run_no_audio_pipeline(tmp_path, monkeypatch, options_kwargs):
     """Drive ``speed_up_video`` through the no-audio branch with mocks.
 
