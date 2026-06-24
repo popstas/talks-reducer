@@ -369,6 +369,105 @@ def test_build_extract_audio_command(monkeypatch):
     assert command == expected
 
 
+def test_build_trim_input_args_full_range():
+    assert ffmpeg.build_trim_input_args(10.0, 60.0) == ["-ss 10", "-t 50"]
+
+
+def test_build_trim_input_args_start_only():
+    assert ffmpeg.build_trim_input_args(10.5, 0.0) == ["-ss 10.5"]
+
+
+def test_build_trim_input_args_no_trim():
+    assert ffmpeg.build_trim_input_args(0.0, 0.0) == []
+
+
+def test_build_trim_input_args_end_only():
+    assert ffmpeg.build_trim_input_args(0.0, 30.0) == ["-t 30"]
+
+
+def test_build_extract_audio_command_with_trim(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command = ffmpeg.build_extract_audio_command(
+        "input.mp4",
+        "output.wav",
+        sample_rate=44100,
+        audio_bitrate="192k",
+        cut_start_seconds=10.0,
+        cut_end_seconds=60.0,
+    )
+
+    assert '-ss 10 -t 50 -i "input.mp4"' in command
+
+
+def test_build_extract_audio_command_start_only_trim(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command = ffmpeg.build_extract_audio_command(
+        "input.mp4",
+        "output.wav",
+        sample_rate=44100,
+        audio_bitrate="192k",
+        cut_start_seconds=10.0,
+        cut_end_seconds=0.0,
+    )
+
+    assert '-ss 10 -i "input.mp4"' in command
+    assert "-t " not in command
+
+
+def test_build_extract_audio_command_no_trim_unchanged(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command = ffmpeg.build_extract_audio_command(
+        "input.mp4",
+        "output.wav",
+        sample_rate=44100,
+        audio_bitrate="192k",
+    )
+
+    assert "-ss " not in command
+    assert "-t " not in command
+
+
+def test_build_video_commands_with_trim(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command, _fallback, _use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        optimize=True,
+        small=True,
+        frame_rate=30.0,
+        cut_start_seconds=10.0,
+        cut_end_seconds=60.0,
+    )
+
+    assert '-ss 10 -t 50 -i "input.mp4"' in command
+    # The processed audio stream is already trimmed; it must not be re-trimmed.
+    assert '-ss 10 -t 50 -i "audio.wav"' not in command
+
+
+def test_build_video_commands_no_trim_unchanged(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command, _fallback, _use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        optimize=True,
+        small=True,
+        frame_rate=30.0,
+    )
+
+    assert "-ss " not in command
+
+
 def test_build_video_commands_keep_input_audio(monkeypatch):
     """Passing ``keep_input_audio`` re-muxes the input's audio via stream copy."""
 

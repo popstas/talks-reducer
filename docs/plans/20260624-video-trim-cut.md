@@ -99,15 +99,15 @@
 - [x] run `pytest tests/test_cli.py` — must pass before Task 4
 
 ### Task 4: Inject trim into ffmpeg commands
-- [ ] extend `build_extract_audio_command()` (`talks_reducer/ffmpeg.py`) with
+- [x] extend `build_extract_audio_command()` (`talks_reducer/ffmpeg.py`) with
       `cut_start_seconds`/`cut_end_seconds` params, emitting input-level `-ss <start>` and
       `-t <end-start>` (use `-t duration`, not `-to`, to avoid the `-ss`+`-to` relativity gotcha)
-- [ ] extend `build_video_commands()` the same way so audio and video are trimmed identically
-- [ ] when `cut_end == 0`, emit only `-ss <start>` (trim to EOF); when both `0`, emit nothing
-- [ ] write tests in `tests/test_ffmpeg.py`: command contains `-ss`/`-t` with correct duration,
+- [x] extend `build_video_commands()` the same way so audio and video are trimmed identically
+- [x] when `cut_end == 0`, emit only `-ss <start>` (trim to EOF); when both `0`, emit nothing
+- [x] write tests in `tests/test_ffmpeg.py`: command contains `-ss`/`-t` with correct duration,
       and is unchanged when no trim is set
-- [ ] write tests for start-only (no `-t`) and full-range cases
-- [ ] run `pytest tests/test_ffmpeg.py` — must pass before Task 5
+- [x] write tests for start-only (no `-t`) and full-range cases
+- [x] run `pytest tests/test_ffmpeg.py` — must pass before Task 5
 
 ### Task 5: Wire trim through the pipeline + fix duration/frame math
 - [ ] pass `options.cut_start_seconds`/`cut_end_seconds` from `speed_up_video()` into both
