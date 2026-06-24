@@ -116,13 +116,16 @@ def _apply_simple_codec(gui: "TalksReducerGUI") -> None:
 
 
 def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> None:
-    """Build the collapsible **Cut video** panel with range sliders + thumbnail.
+    """Build the collapsible **Cut video** panel with range sliders + inputs.
 
-    The panel hosts two linked sliders (start ≤ end, range ``0..duration``) and a
-    label that displays a Pillow-rendered frame thumbnail. It is shown only when
-    ``cut_enabled_var`` is set and is available in both Simple and Advanced
-    layouts. Slider movement is forwarded to ``gui._on_cut_slider_change`` so the
-    application can clamp the handles and refresh the preview.
+    The panel hosts two linked sliders (start ≤ end, range ``0..duration``) and,
+    next to each, a text entry for typing the in/out timecode by hand (supporting
+    millisecond precision via ``HH:MM:SS.mmm``). A tall **Convert** button spans
+    both slider rows so that, when Simple mode is off, the user can review the
+    trim before processing starts instead of converting immediately. The panel is
+    shown only when ``cut_enabled_var`` is set and is available in both Simple and
+    Advanced layouts. Slider movement is forwarded to
+    ``gui._on_cut_slider_change`` so the application can clamp the handles.
     """
 
     panel = gui.ttk.Frame(parent)
@@ -137,15 +140,19 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
         from_=0.0,
         to=0.0,
         orient=gui.tk.HORIZONTAL,
-        resolution=0.1,
+        resolution=0.001,
         showvalue=False,
         command=lambda _value: gui._on_cut_slider_change("start"),
         length=240,
         highlightthickness=0,
     )
     gui.cut_start_slider.grid(row=0, column=1, sticky="ew", padx=(8, 8))
-    gui.cut_start_value_label = gui.ttk.Label(panel, text="00:00:00")
-    gui.cut_start_value_label.grid(row=0, column=2, sticky="e")
+    gui.cut_start_entry = gui.ttk.Entry(
+        panel, textvariable=gui.cut_start_text_var, width=13, justify="center"
+    )
+    gui.cut_start_entry.grid(row=0, column=2, sticky="e")
+    gui.cut_start_entry.bind("<Return>", lambda _e: gui._on_cut_entry_commit("start"))
+    gui.cut_start_entry.bind("<FocusOut>", lambda _e: gui._on_cut_entry_commit("start"))
 
     gui.ttk.Label(panel, text="End").grid(row=1, column=0, sticky="w", pady=(4, 0))
     gui.cut_end_slider = gui.tk.Scale(
@@ -154,18 +161,28 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
         from_=0.0,
         to=0.0,
         orient=gui.tk.HORIZONTAL,
-        resolution=0.1,
+        resolution=0.001,
         showvalue=False,
         command=lambda _value: gui._on_cut_slider_change("end"),
         length=240,
         highlightthickness=0,
     )
     gui.cut_end_slider.grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(4, 0))
-    gui.cut_end_value_label = gui.ttk.Label(panel, text="00:00:00")
-    gui.cut_end_value_label.grid(row=1, column=2, sticky="e", pady=(4, 0))
+    gui.cut_end_entry = gui.ttk.Entry(
+        panel, textvariable=gui.cut_end_text_var, width=13, justify="center"
+    )
+    gui.cut_end_entry.grid(row=1, column=2, sticky="e", pady=(4, 0))
+    gui.cut_end_entry.bind("<Return>", lambda _e: gui._on_cut_entry_commit("end"))
+    gui.cut_end_entry.bind("<FocusOut>", lambda _e: gui._on_cut_entry_commit("end"))
 
-    gui.cut_thumbnail_label = gui.tk.Label(panel, text="")
-    gui.cut_thumbnail_label.grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 0))
+    gui.cut_convert_button = gui.ttk.Button(
+        panel,
+        text="Convert",
+        command=gui._start_run,
+    )
+    gui.cut_convert_button.grid(
+        row=0, column=3, rowspan=2, sticky="nsew", padx=(8, 0), pady=(0, 0)
+    )
 
     sliders = getattr(gui, "_sliders", None)
     if isinstance(sliders, list):
@@ -174,6 +191,7 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
 
     if not gui.cut_enabled_var.get():
         panel.grid_remove()
+    gui._update_cut_convert_button()
 
 
 def build_layout(gui: "TalksReducerGUI") -> None:
@@ -998,6 +1016,11 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.simple_speedup_frame.grid()
         if hasattr(gui, "simple_codec_frame"):
             gui.simple_codec_frame.grid()
+        # Cut video is an Advanced-only feature: hide its checkbox and panel.
+        if hasattr(gui, "cut_check"):
+            gui.cut_check.pack_forget()
+        if hasattr(gui, "cut_panel"):
+            gui.cut_panel.grid_remove()
         apply_window_size(gui, simple=True)
     else:
         gui.basic_options_frame.grid()
@@ -1010,7 +1033,22 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.simple_speedup_frame.grid_remove()
         if hasattr(gui, "simple_codec_frame"):
             gui.simple_codec_frame.grid_remove()
+        # Restore the Advanced-only Cut video checkbox and (if enabled) its panel.
+        if hasattr(gui, "cut_check"):
+            gui.cut_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+        if hasattr(gui, "cut_panel"):
+            if (
+                getattr(gui, "cut_enabled_var", None) is not None
+                and gui.cut_enabled_var.get()
+            ):
+                gui.cut_panel.grid()
+            else:
+                gui.cut_panel.grid_remove()
         apply_window_size(gui, simple=False)
+
+    # The Convert button only belongs to the Advanced (non-Simple) cut workflow.
+    if hasattr(gui, "_update_cut_convert_button"):
+        gui._update_cut_convert_button()
 
     if initial and simple:
         # Ensure the hidden widgets do not retain focus outlines on start.

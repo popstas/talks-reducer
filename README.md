@@ -250,14 +250,15 @@ flight the status also shows the live transfer rate next to the percentage, e.g.
 `Uploading: 55%, 5.5 MB/s`. While you're there, enable
 **Use global FFmpeg** whenever your PATH provides newer GPU encoders—the toggle disables itself when no system binary is available—and adjust
 **Keyframe interval (s)** under **Advanced** to balance scroll smoothness and
-output size without touching the CLI. Tick **Cut video** (available in both
-Simple and Advanced layouts) to reveal two linked start/end range sliders and a
-frame-scrub thumbnail: after you pick a file the slider range is set from the
-video duration, and dragging a handle refreshes a Pillow-rendered still extracted
-at that timestamp so you can frame the keep range before converting. The
-checkbox state and last start/end values persist across launches; clearing it
-omits the trim entirely. When FFmpeg/FFprobe are unavailable the panel still
-appears but hides the preview gracefully.
+output size without touching the CLI. Tick **Cut video** (an **Advanced-only**
+control—it is hidden in Simple mode) to reveal two linked start/end range
+sliders, each paired with an editable time field that accepts manual
+`HH:MM:SS.mmm` input (millisecond precision), plus a tall **Convert** button
+spanning both rows. After you pick a file the slider range is set from the video
+duration, and conversion does not start automatically: adjust the keep range and
+click **Convert** when you are ready. The checkbox state and last start/end
+values persist across launches; clearing it (or switching to Simple mode) omits
+the trim entirely.
 
 ### Uploading and retrieving a processed video
 

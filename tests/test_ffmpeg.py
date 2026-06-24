@@ -434,36 +434,6 @@ def test_build_extract_audio_command_no_trim_unchanged(monkeypatch):
     assert "-t " not in command
 
 
-def test_build_extract_frame_command(monkeypatch):
-    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-
-    command = ffmpeg.build_extract_frame_command(
-        "input.mp4",
-        12.5,
-        "frame.jpg",
-    )
-
-    expected = (
-        '"/usr/bin/ffmpeg" -y -ss 12.5 -i "input.mp4" '
-        '-frames:v 1 "frame.jpg" -hide_banner -loglevel error'
-    )
-    assert command == expected
-
-
-def test_build_extract_frame_command_at_zero(monkeypatch):
-    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-
-    command = ffmpeg.build_extract_frame_command(
-        "input.mp4",
-        0.0,
-        "frame.jpg",
-        ffmpeg_path="/usr/bin/ffmpeg",
-    )
-
-    assert "-ss " not in command
-    assert '-i "input.mp4" -frames:v 1 "frame.jpg"' in command
-
-
 def test_get_video_duration_parses_ffprobe_output(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffprobe_path", lambda: "/usr/bin/ffprobe")
 

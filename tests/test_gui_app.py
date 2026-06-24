@@ -294,6 +294,7 @@ def _make_collect_gui(**overrides) -> SimpleNamespace:
         cut_enabled_var=SimpleNamespace(get=lambda: False),
         cut_start_var=SimpleNamespace(get=lambda: 0.0),
         cut_end_var=SimpleNamespace(get=lambda: 0.0),
+        simple_mode_var=SimpleNamespace(get=lambda: False),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     defaults.update(overrides)
@@ -313,6 +314,21 @@ def test_collect_arguments_includes_cut_range_when_enabled():
 
     assert args["cut_start_seconds"] == 10.0
     assert args["cut_end_seconds"] == 60.0
+
+
+def test_collect_arguments_ignores_cut_in_simple_mode():
+    # Cut is Advanced-only: a persisted enabled flag must not trim in Simple mode.
+    gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=lambda: 10.0),
+        cut_end_var=SimpleNamespace(get=lambda: 60.0),
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert "cut_start_seconds" not in args
+    assert "cut_end_seconds" not in args
 
 
 def test_collect_arguments_omits_cut_range_when_disabled():
@@ -374,33 +390,60 @@ class _RecordingSlider:
         pass
 
 
-def test_on_cut_slider_change_clamps_start_to_end():
+def _make_cut_slider_gui(start: float, end: float) -> SimpleNamespace:
     gui = SimpleNamespace(
-        cut_start_var=_RecordingVar(70.0),
-        cut_end_var=_RecordingVar(60.0),
-        cut_start_value_label=_RecordingLabel(),
-        cut_end_value_label=_RecordingLabel(),
-        _schedule_cut_thumbnail=lambda which: None,
+        cut_start_var=_RecordingVar(start),
+        cut_end_var=_RecordingVar(end),
+        cut_start_text_var=_RecordingVar(""),
+        cut_end_text_var=_RecordingVar(""),
     )
+    gui._refresh_cut_entry_text = (
+        lambda which: app.TalksReducerGUI._refresh_cut_entry_text(gui, which)
+    )
+    gui._on_cut_slider_change = lambda which: app.TalksReducerGUI._on_cut_slider_change(
+        gui, which
+    )
+    return gui
+
+
+def test_on_cut_slider_change_clamps_start_to_end():
+    gui = _make_cut_slider_gui(70.0, 60.0)
 
     app.TalksReducerGUI._on_cut_slider_change(gui, "start")
 
     assert gui.cut_start_var.get() == 60.0
-    assert gui.cut_start_value_label.configure_calls[-1]["text"] == "00:01:00"
+    # The entry mirrors the clamped handle with millisecond precision.
+    assert gui.cut_start_text_var.get() == "00:01:00.000"
 
 
 def test_on_cut_slider_change_clamps_end_to_start():
-    gui = SimpleNamespace(
-        cut_start_var=_RecordingVar(30.0),
-        cut_end_var=_RecordingVar(10.0),
-        cut_start_value_label=_RecordingLabel(),
-        cut_end_value_label=_RecordingLabel(),
-        _schedule_cut_thumbnail=lambda which: None,
-    )
+    gui = _make_cut_slider_gui(30.0, 10.0)
 
     app.TalksReducerGUI._on_cut_slider_change(gui, "end")
 
     assert gui.cut_end_var.get() == 30.0
+
+
+def test_on_cut_entry_commit_parses_milliseconds():
+    gui = _make_cut_slider_gui(0.0, 0.0)
+    gui._cut_duration = 600.0
+    gui.cut_start_text_var.set("00:01:02.500")
+
+    app.TalksReducerGUI._on_cut_entry_commit(gui, "start")
+
+    assert gui.cut_start_var.get() == pytest.approx(62.5)
+
+
+def test_on_cut_entry_commit_rejects_invalid_input():
+    gui = _make_cut_slider_gui(12.0, 0.0)
+    gui._cut_duration = 600.0
+    gui.cut_start_text_var.set("not-a-time")
+
+    app.TalksReducerGUI._on_cut_entry_commit(gui, "start")
+
+    # Malformed input is rejected and the entry restored to the handle value.
+    assert gui.cut_start_var.get() == 12.0
+    assert gui.cut_start_text_var.get() == "00:00:12.000"
 
 
 def test_update_cut_range_sets_slider_to_duration(monkeypatch):
@@ -474,26 +517,36 @@ def test_update_cut_range_no_input_is_noop():
     assert gui._cut_duration == 0.0
 
 
-def test_refresh_cut_thumbnail_hides_preview_without_ffmpeg(monkeypatch):
-    import talks_reducer.ffmpeg as ffmpeg_module
-
-    def raise_not_found(*args, **kwargs):
-        raise ffmpeg_module.FFmpegNotFoundError("no ffmpeg")
-
-    monkeypatch.setattr(ffmpeg_module, "get_ffmpeg_path", raise_not_found)
-
-    label = _RecordingLabel()
+def test_update_cut_convert_button_shows_in_advanced_cut():
+    button = _RecordingSlider()
+    shown: list = []
+    button.grid = lambda: shown.append(True)
+    button.grid_remove = lambda: shown.append(False)
     gui = SimpleNamespace(
-        cut_thumbnail_label=label,
-        input_files=["video.mp4"],
-        cut_start_var=_RecordingVar(5.0),
-        cut_end_var=_RecordingVar(0.0),
+        cut_convert_button=button,
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        simple_mode_var=SimpleNamespace(get=lambda: False),
     )
 
-    app.TalksReducerGUI._refresh_cut_thumbnail(gui, "start")
+    app.TalksReducerGUI._update_cut_convert_button(gui)
 
-    assert label.configure_calls
-    assert label.configure_calls[-1].get("image") == ""
+    assert shown[-1] is True
+
+
+def test_update_cut_convert_button_hidden_in_simple_mode():
+    button = _RecordingSlider()
+    shown: list = []
+    button.grid = lambda: shown.append(True)
+    button.grid_remove = lambda: shown.append(False)
+    gui = SimpleNamespace(
+        cut_convert_button=button,
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+    )
+
+    app.TalksReducerGUI._update_cut_convert_button(gui)
+
+    assert shown[-1] is False
 
 
 def test_on_inputs_updated_refreshes_cut_range_when_enabled():

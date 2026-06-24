@@ -69,8 +69,13 @@ def parse_timecode(value) -> float:
     return _validate_seconds(seconds, value)
 
 
-def format_timecode(seconds) -> str:
-    """Return ``seconds`` formatted as a ``HH:MM:SS`` clock string."""
+def format_timecode(seconds, *, milliseconds: bool = False) -> str:
+    """Return ``seconds`` formatted as a ``HH:MM:SS`` clock string.
+
+    When ``milliseconds`` is true the fractional part is appended as a
+    three-digit ``.mmm`` suffix (``HH:MM:SS.mmm``) so the value can round-trip
+    through :func:`parse_timecode` without losing sub-second precision.
+    """
 
     if isinstance(seconds, bool) or not isinstance(seconds, Real):
         raise ValueError(f"Invalid seconds value: {seconds!r}")
@@ -80,4 +85,10 @@ def format_timecode(seconds) -> str:
     total = int(seconds)
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    clock = f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    if not milliseconds:
+        return clock
+    millis = int(round((float(seconds) - total) * 1000))
+    if millis >= 1000:  # rounding can spill into the next second
+        millis = 999
+    return f"{clock}.{millis:03d}"
