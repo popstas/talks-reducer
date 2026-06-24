@@ -89,14 +89,14 @@
 - [x] run `pytest tests/test_models.py` — must pass before Task 3
 
 ### Task 3: CLI options `--cut-start` / `--cut-end`
-- [ ] add `--cut-start` and `--cut-end` to `_build_parser()` in `talks_reducer/cli.py`
+- [x] add `--cut-start` and `--cut-end` to `_build_parser()` in `talks_reducer/cli.py`
       (type via `parse_timecode`, `dest="cut_start_seconds"` / `cut_end_seconds`, default `0.0`)
-- [ ] wire both into the `option_kwargs` built in `CliApplication.run()` so they reach
+- [x] wire both into the `option_kwargs` built in `CliApplication.run()` so they reach
       `ProcessingOptions`
-- [ ] validate `cut_end == 0 or cut_end > cut_start`, else exit with a clear error message
-- [ ] write tests in `tests/test_cli.py`: parsing seconds and `HH:MM:SS`, values reach options
-- [ ] write tests for invalid range (`--cut-start 30 --cut-end 10`) producing an error
-- [ ] run `pytest tests/test_cli.py` — must pass before Task 4
+- [x] validate `cut_end == 0 or cut_end > cut_start`, else exit with a clear error message
+- [x] write tests in `tests/test_cli.py`: parsing seconds and `HH:MM:SS`, values reach options
+- [x] write tests for invalid range (`--cut-start 30 --cut-end 10`) producing an error
+- [x] run `pytest tests/test_cli.py` — must pass before Task 4
 
 ### Task 4: Inject trim into ffmpeg commands
 - [ ] extend `build_extract_audio_command()` (`talks_reducer/ffmpeg.py`) with
