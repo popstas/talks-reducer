@@ -179,8 +179,17 @@ class TalksReducerGUI:
         self.messagebox = messagebox
         self.ttk = ttk
 
+        self._dnd_runtime_available = False
         if TkinterDnD is not None:
-            self.root = TkinterDnD.Tk()  # type: ignore[call-arg]
+            try:
+                self.root = TkinterDnD.Tk()  # type: ignore[call-arg]
+                self._dnd_runtime_available = True
+            except Exception as exc:  # pragma: no cover - depends on tkdnd build
+                # A mismatched tkdnd library (e.g. a Tcl 9 build under Tcl 8.6)
+                # would otherwise crash the whole GUI. Fall back to a plain Tk
+                # window so the app still launches without drag-and-drop.
+                print(f"[Talks Reducer] Drag and drop disabled: {exc}")
+                self.root = tk.Tk()
         else:
             self.root = tk.Tk()
 
@@ -239,7 +248,7 @@ class TalksReducerGUI:
 
         self.input_files: List[str] = []
 
-        self._dnd_available = TkinterDnD is not None and DND_FILES is not None
+        self._dnd_available = self._dnd_runtime_available and DND_FILES is not None
         self.DND_FILES = DND_FILES
 
         self.inputs = InputController(self)

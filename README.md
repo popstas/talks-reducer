@@ -15,6 +15,21 @@ project was renamed from **jumpcutter** to emphasize its focus on conference tal
 See [CHANGELOG.md](CHANGELOG.md).
 
 ## Install GUI (Windows, macOS)
+
+### macOS (Homebrew)
+
+```sh
+brew tap popstas/talks-reducer
+brew trust --cask popstas/talks-reducer/talks-reducer
+brew install --cask talks-reducer
+```
+
+> Homebrew 6.0.0+ requires `brew trust --cask` to approve a cask from a
+> third-party tap before it can be installed. Without it, the install fails with
+> a "Refusing to load cask from untrusted tap" error.
+
+### Manual download
+
 Go to the [releases page](https://github.com/popstas/talks-reducer/releases) and download the appropriate artifact:
 
 - **Windows** — `talks-reducer-windows-0.4.0.zip`
@@ -28,6 +43,9 @@ and passing a video file path (for example via *Open with…* or drag-and-drop
 onto the executable) automatically queues that recording for processing.
 
 ## Install CLI (Linux, Windows, macOS)
+
+### pipx / pip
+
 ```
 pip install talks-reducer
 ```
