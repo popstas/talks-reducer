@@ -110,19 +110,19 @@
 - [x] run `pytest tests/test_ffmpeg.py` — must pass before Task 5
 
 ### Task 5: Wire trim through the pipeline + fix duration/frame math
-- [ ] pass `options.cut_start_seconds`/`cut_end_seconds` from `speed_up_video()` into both
+- [x] pass `options.cut_start_seconds`/`cut_end_seconds` from `speed_up_video()` into both
       ffmpeg command builders (`talks_reducer/pipeline.py`)
-- [ ] compute an **effective duration** = `(cut_end or original_duration) - cut_start` and use it
+- [x] compute an **effective duration** = `(cut_end or original_duration) - cut_start` and use it
       (instead of full `original_duration`) for progress estimation and final-encode frame/
       duration math (L262–264, L445–499) so the progress bar and "target duration" are correct
-- [ ] adjust `frame_count`/`estimated_total_frames` to the trimmed span (scale by
+- [x] adjust `frame_count`/`estimated_total_frames` to the trimmed span (scale by
       effective/original duration, or recompute from effective duration × frame_rate)
-- [ ] clamp/validate the trim against `original_duration` (cap `cut_end` at EOF; ignore trim that
+- [x] clamp/validate the trim against `original_duration` (cap `cut_end` at EOF; ignore trim that
       would yield ≤ 0 length, logging a warning)
-- [ ] write tests in `tests/test_pipeline.py` (mock ffmpeg/metadata) asserting builders receive
+- [x] write tests in `tests/test_pipeline.py` (mock ffmpeg/metadata) asserting builders receive
       the trim and that effective duration/frame estimates reflect the trimmed span
-- [ ] write tests for the no-trim path (unchanged behaviour) and the cap-at-EOF case
-- [ ] run `pytest tests/test_pipeline.py` — must pass before Task 6
+- [x] write tests for the no-trim path (unchanged behaviour) and the cap-at-EOF case
+- [x] run `pytest tests/test_pipeline.py` — must pass before Task 6
 
 ### Task 6: Web UI (gradio) trim controls
 - [ ] add a **"Cut video"** `gr.Checkbox` and `cut_start`/`cut_end` inputs (sliders or
