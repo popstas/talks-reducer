@@ -81,12 +81,12 @@
 - [x] run `pytest tests/test_timecode.py` — must pass before Task 2
 
 ### Task 2: Add trim fields to ProcessingOptions
-- [ ] add `cut_start_seconds: float = 0.0` and `cut_end_seconds: float = 0.0` to
+- [x] add `cut_start_seconds: float = 0.0` and `cut_end_seconds: float = 0.0` to
       `ProcessingOptions` in `talks_reducer/models.py`
-- [ ] document the keep-range semantics in the class/field docstring (end `0.0` = until EOF)
-- [ ] write tests in `tests/test_models.py` (or existing model test) asserting defaults and that
+- [x] document the keep-range semantics in the class/field docstring (end `0.0` = until EOF)
+- [x] write tests in `tests/test_models.py` (or existing model test) asserting defaults and that
       a constructed options object carries the values
-- [ ] run `pytest tests/test_models.py` — must pass before Task 3
+- [x] run `pytest tests/test_models.py` — must pass before Task 3
 
 ### Task 3: CLI options `--cut-start` / `--cut-end`
 - [ ] add `--cut-start` and `--cut-end` to `_build_parser()` in `talks_reducer/cli.py`
