@@ -778,9 +778,13 @@ class TalksReducerGUI:
                 label.configure(image="", text="")
             return
 
-        output_image = os.path.join(
-            tempfile.gettempdir(), "talks_reducer_cut_preview.jpg"
+        # Use a unique temp file per request so a failed extraction can never
+        # display the stale frame left behind by a previous successful run, and
+        # so concurrent GUI instances do not clobber each other's preview.
+        handle, output_image = tempfile.mkstemp(
+            prefix="talks_reducer_cut_preview_", suffix=".jpg"
         )
+        os.close(handle)
         command = build_extract_frame_command(
             self.input_files[0], timestamp, output_image, ffmpeg_path=ffmpeg_path
         )
@@ -792,12 +796,14 @@ class TalksReducerGUI:
         try:
             import shlex
 
-            subprocess.run(
+            result = subprocess.run(
                 shlex.split(command),
                 capture_output=True,
                 timeout=15,
                 creationflags=creationflags,
             )
+            if result.returncode != 0:
+                raise RuntimeError("frame extraction failed")
             image = Image.open(output_image)
             image.thumbnail((320, 180))
             photo = ImageTk.PhotoImage(image)
@@ -805,6 +811,9 @@ class TalksReducerGUI:
             with suppress(Exception):
                 label.configure(image="", text="")
             return
+        finally:
+            with suppress(Exception):
+                os.remove(output_image)
 
         # Keep a reference so the image is not garbage-collected.
         self._cut_thumbnail_image = photo
