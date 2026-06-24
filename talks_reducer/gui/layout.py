@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import sys
+import time
 from typing import TYPE_CHECKING, Callable
 
 from ..icons import find_icon_path
@@ -13,6 +14,39 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     import tkinter as tk
 
     from .app import TalksReducerGUI
+
+
+def format_local_server_url(url: str | None) -> str:
+    """Return the display text for the local server URL shown in server mode.
+
+    A trailing slash is removed and an empty/whitespace URL yields an empty
+    string so the label can stay hidden when no managed server URL is known.
+    """
+
+    if not url:
+        return ""
+    trimmed = str(url).strip()
+    if not trimmed:
+        return ""
+    return f"Server: {trimmed.rstrip('/')}"
+
+
+def format_activity_line(entry: dict) -> str:
+    """Return a single rendered ``HH:MM:SS  <ip>  <action>`` activity line.
+
+    The ``timestamp`` is interpreted as seconds since the epoch and rendered in
+    local time. A missing or invalid timestamp degrades to ``--:--:--`` so the
+    activity log never raises while polling the server.
+    """
+
+    timestamp = entry.get("timestamp")
+    try:
+        clock = time.strftime("%H:%M:%S", time.localtime(float(timestamp)))
+    except (TypeError, ValueError):
+        clock = "--:--:--"
+    client_ip = str(entry.get("client_ip") or "unknown")
+    action = str(entry.get("action") or "")
+    return f"{clock}  {client_ip}  {action}".rstrip()
 
 
 BASIC_PRESETS: dict[str, dict[str, float]] = {
@@ -81,6 +115,85 @@ def _apply_simple_codec(gui: "TalksReducerGUI") -> None:
             break
 
 
+def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> None:
+    """Build the collapsible **Cut video** panel with range sliders + inputs.
+
+    The panel hosts two linked sliders (start ≤ end, range ``0..duration``) and,
+    next to each, a text entry for typing the in/out timecode by hand (supporting
+    millisecond precision via ``HH:MM:SS.mmm``). A tall **Convert** button spans
+    both slider rows so that, when Simple mode is off, the user can review the
+    trim before processing starts instead of converting immediately. The panel is
+    shown only when ``cut_enabled_var`` is set and is available in both Simple and
+    Advanced layouts. Slider movement is forwarded to
+    ``gui._on_cut_slider_change`` so the application can clamp the handles.
+    """
+
+    panel = gui.ttk.Frame(parent)
+    panel.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+    panel.columnconfigure(1, weight=1)
+    gui.cut_panel = panel
+
+    gui.ttk.Label(panel, text="Start").grid(row=0, column=0, sticky="w")
+    gui.cut_start_slider = gui.tk.Scale(
+        panel,
+        variable=gui.cut_start_var,
+        from_=0.0,
+        to=0.0,
+        orient=gui.tk.HORIZONTAL,
+        resolution=0.001,
+        showvalue=False,
+        command=lambda _value: gui._on_cut_slider_change("start"),
+        length=240,
+        highlightthickness=0,
+    )
+    gui.cut_start_slider.grid(row=0, column=1, sticky="ew", padx=(8, 8))
+    gui.cut_start_entry = gui.ttk.Entry(
+        panel, textvariable=gui.cut_start_text_var, width=13, justify="center"
+    )
+    gui.cut_start_entry.grid(row=0, column=2, sticky="e")
+    gui.cut_start_entry.bind("<Return>", lambda _e: gui._on_cut_entry_commit("start"))
+    gui.cut_start_entry.bind("<FocusOut>", lambda _e: gui._on_cut_entry_commit("start"))
+
+    gui.ttk.Label(panel, text="End").grid(row=1, column=0, sticky="w", pady=(4, 0))
+    gui.cut_end_slider = gui.tk.Scale(
+        panel,
+        variable=gui.cut_end_var,
+        from_=0.0,
+        to=0.0,
+        orient=gui.tk.HORIZONTAL,
+        resolution=0.001,
+        showvalue=False,
+        command=lambda _value: gui._on_cut_slider_change("end"),
+        length=240,
+        highlightthickness=0,
+    )
+    gui.cut_end_slider.grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(4, 0))
+    gui.cut_end_entry = gui.ttk.Entry(
+        panel, textvariable=gui.cut_end_text_var, width=13, justify="center"
+    )
+    gui.cut_end_entry.grid(row=1, column=2, sticky="e", pady=(4, 0))
+    gui.cut_end_entry.bind("<Return>", lambda _e: gui._on_cut_entry_commit("end"))
+    gui.cut_end_entry.bind("<FocusOut>", lambda _e: gui._on_cut_entry_commit("end"))
+
+    gui.cut_convert_button = gui.ttk.Button(
+        panel,
+        text="Convert",
+        command=gui._start_run,
+    )
+    gui.cut_convert_button.grid(
+        row=0, column=3, rowspan=2, sticky="nsew", padx=(8, 0), pady=(0, 0)
+    )
+
+    sliders = getattr(gui, "_sliders", None)
+    if isinstance(sliders, list):
+        sliders.append(gui.cut_start_slider)
+        sliders.append(gui.cut_end_slider)
+
+    if not gui.cut_enabled_var.get():
+        panel.grid_remove()
+    gui._update_cut_convert_button()
+
+
 def build_layout(gui: "TalksReducerGUI") -> None:
     """Construct the main layout for the GUI."""
 
@@ -113,7 +226,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.drop_zone.bind("<Return>", gui._on_drop_zone_click)
     gui.drop_zone.bind("<space>", gui._on_drop_zone_click)
 
-    # Options frame (compact padding for simple mode at 390px width)
+    # Options frame (compact padding for simple mode at 470px width)
     gui.options_frame = gui.ttk.Frame(main, padding=6)
     gui.options_frame.grid(row=2, column=0, pady=(0, 0), sticky="ew")
     gui.options_frame.columnconfigure(0, weight=1)
@@ -171,13 +284,23 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=gui.open_after_convert_var,
     ).pack(side=gui.tk.LEFT, padx=(65, 0))
 
+    gui.cut_check = gui.ttk.Checkbutton(
+        checkbox_row1,
+        text="Cut video",
+        variable=gui.cut_enabled_var,
+        command=gui._toggle_cut_panel,
+    )
+    gui.cut_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+
+    build_cut_panel(gui, checkbox_frame, row=2)
+
     gui.simple_mode_check = gui.ttk.Checkbutton(
         checkbox_frame,
         text="Simple mode",
         variable=gui.simple_mode_var,
         command=gui._toggle_simple_mode,
     )
-    gui.simple_mode_check.grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 0))
+    gui.simple_mode_check.grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
     gui.simple_speedup_frame = speedup_frame
     gui.simple_speedup_label = speedup_label
@@ -332,6 +455,18 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=gui.processing_mode_var,
     )
     gui.remote_mode_button.pack(side=gui.tk.LEFT, padx=(0, 8))
+
+    server_managed = bool(getattr(gui, "server_managed", False))
+    local_server_url = getattr(gui, "local_server_url", None)
+    gui.local_server_url_label = gui.ttk.Label(
+        gui.basic_options_frame,
+        text=format_local_server_url(local_server_url) if server_managed else "",
+    )
+    gui.local_server_url_label.grid(
+        row=4, column=2, sticky="w", padx=(8, 0), pady=(8, 0)
+    )
+    if not (server_managed and local_server_url):
+        gui.local_server_url_label.grid_remove()
 
     gui.ttk.Label(gui.basic_options_frame, text="Server URL").grid(
         row=5, column=0, sticky="w", pady=(8, 0)
@@ -613,6 +748,29 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     log_scroll.grid(row=0, column=1, sticky="ns")
     gui.log_text.configure(yscrollcommand=log_scroll.set)
 
+    # Connected-clients activity log (server mode only).
+    gui.activity_frame = gui.ttk.Frame(main, padding=gui.PADDING)
+    gui.activity_frame.grid(row=4, column=0, pady=(8, 0), sticky="nsew")
+    gui.activity_frame.columnconfigure(0, weight=1)
+    gui.activity_frame.rowconfigure(1, weight=1)
+
+    gui.ttk.Label(gui.activity_frame, text="Connected clients").grid(
+        row=0, column=0, sticky="w"
+    )
+
+    gui.activity_text = gui.tk.Text(
+        gui.activity_frame, wrap="none", height=6, state=gui.tk.DISABLED
+    )
+    gui.activity_text.grid(row=1, column=0, sticky="nsew")
+    activity_scroll = gui.ttk.Scrollbar(
+        gui.activity_frame, orient=gui.tk.VERTICAL, command=gui.activity_text.yview
+    )
+    activity_scroll.grid(row=1, column=1, sticky="ns")
+    gui.activity_text.configure(yscrollcommand=activity_scroll.set)
+
+    if not bool(getattr(gui, "server_managed", False)):
+        gui.activity_frame.grid_remove()
+
 
 def add_entry(
     gui: "TalksReducerGUI",
@@ -858,6 +1016,11 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.simple_speedup_frame.grid()
         if hasattr(gui, "simple_codec_frame"):
             gui.simple_codec_frame.grid()
+        # Cut video is an Advanced-only feature: hide its checkbox and panel.
+        if hasattr(gui, "cut_check"):
+            gui.cut_check.pack_forget()
+        if hasattr(gui, "cut_panel"):
+            gui.cut_panel.grid_remove()
         apply_window_size(gui, simple=True)
     else:
         gui.basic_options_frame.grid()
@@ -870,7 +1033,22 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.simple_speedup_frame.grid_remove()
         if hasattr(gui, "simple_codec_frame"):
             gui.simple_codec_frame.grid_remove()
+        # Restore the Advanced-only Cut video checkbox and (if enabled) its panel.
+        if hasattr(gui, "cut_check"):
+            gui.cut_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+        if hasattr(gui, "cut_panel"):
+            if (
+                getattr(gui, "cut_enabled_var", None) is not None
+                and gui.cut_enabled_var.get()
+            ):
+                gui.cut_panel.grid()
+            else:
+                gui.cut_panel.grid_remove()
         apply_window_size(gui, simple=False)
+
+    # The Convert button only belongs to the Advanced (non-Simple) cut workflow.
+    if hasattr(gui, "_update_cut_convert_button"):
+        gui._update_cut_convert_button()
 
     if initial and simple:
         # Ensure the hidden widgets do not retain focus outlines on start.

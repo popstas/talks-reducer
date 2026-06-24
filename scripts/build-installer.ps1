@@ -54,35 +54,36 @@ $candidateDirs = @(
 
 $sourceDir = $null
 $executablePath = $null
+$potentialExe = $null
 
-foreach ($candidate in $candidateDirs) {
-    Write-Host "🔍 Checking bundle directory $candidate"
-    if (-not (Test-Path -LiteralPath $candidate -PathType Container)) {
-        Write-Host "   ↳ Directory missing"
+foreach ($bundleDir in $candidateDirs) {
+    Write-Host "Checking bundle directory $bundleDir"
+    if (-not (Test-Path -LiteralPath $bundleDir -PathType Container)) {
+        Write-Host "  Directory missing"
         continue
     }
 
-    $potentialExe = [System.IO.Path]::Combine($candidate, 'talks-reducer.exe')
+    $potentialExe = [System.IO.Path]::Combine($bundleDir, 'talks-reducer.exe')
     if (Test-Path -LiteralPath $potentialExe -PathType Leaf) {
-        Write-Host "   ↳ Found executable at $potentialExe"
-        $sourceDir = $candidate
+        Write-Host "  Found executable at $potentialExe"
+        $sourceDir = $bundleDir
         $executablePath = $potentialExe
         break
     }
 
-    $nestedCandidate = [System.IO.Path]::Combine($candidate, 'talks-reducer')
-    Write-Host "   ↳ Checking nested bundle $nestedCandidate"
+    $nestedCandidate = [System.IO.Path]::Combine($bundleDir, 'talks-reducer')
+    Write-Host "  Checking nested bundle $nestedCandidate"
     if (Test-Path -LiteralPath $nestedCandidate -PathType Container) {
         $potentialExe = [System.IO.Path]::Combine($nestedCandidate, 'talks-reducer.exe')
         if (Test-Path -LiteralPath $potentialExe -PathType Leaf) {
-            Write-Host "      ↳ Found executable at $potentialExe"
+            Write-Host "  Found executable at $potentialExe"
             $sourceDir = $nestedCandidate
             $executablePath = $potentialExe
             break
         }
-        Write-Host "      ↳ Executable not found in nested bundle"
+        Write-Host "  Executable not found in nested bundle"
     } else {
-        Write-Host "   ↳ Nested bundle missing"
+        Write-Host "  Nested bundle missing"
     }
 }
 
@@ -91,8 +92,8 @@ if (-not $sourceDir -or -not $executablePath) {
     throw "PyInstaller output not found. Checked: $searched. Run scripts/build-gui.sh first."
 }
 
-Write-Host "ℹ️  Using PyInstaller executable at $executablePath"
-Write-Host "ℹ️  Source directory resolved to $sourceDir"
+Write-Host "Using PyInstaller executable at $executablePath"
+Write-Host "Source directory resolved to $sourceDir"
 
 $isccPath = $null
 if ($env:ISCC_BIN) {
@@ -106,9 +107,9 @@ if ($env:ISCC_BIN) {
             'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
             'C:\Program Files\Inno Setup 6\ISCC.exe'
         )
-        foreach ($candidate in $fallbacks) {
-            if (Test-Path -Path $candidate -PathType Leaf) {
-                $isccPath = $candidate
+        foreach ($fallback in $fallbacks) {
+            if (Test-Path -Path $fallback -PathType Leaf) {
+                $isccPath = $fallback
                 break
             }
         }
@@ -129,7 +130,7 @@ $outputName = "talks-reducer-$AppVersion-setup.exe"
 $isccExitCode = $null
 Push-Location -LiteralPath $scriptDirectory
 try {
-    Write-Host "ℹ️  Invoking Inno Setup compiler at $isccPath from $scriptDirectory"
+    Write-Host "Invoking Inno Setup compiler at $isccPath from $scriptDirectory"
     & $isccPath "/DAPP_VERSION=$AppVersion" 'talks-reducer-installer.iss'
     $isccExitCode = $LASTEXITCODE
 }
@@ -154,4 +155,4 @@ if (-not (Test-Path -Path $distDir -PathType Container)) {
 $destination = Join-Path $distDir $outputName
 Move-Item -Path $outputPath -Destination $destination -Force
 
-Write-Host "✅ Created dist/$outputName"
+Write-Host "Created dist/$outputName"

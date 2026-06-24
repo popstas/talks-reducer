@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import shutil
 import sys
+import threading
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -19,6 +20,276 @@ try:
     from .pipeline import ProcessingAborted
 except ImportError:  # pragma: no cover - allow running as script
     from talks_reducer.pipeline import ProcessingAborted
+
+
+# Installing the upload/download progress hooks mutates module-global
+# ``httpx`` attributes on ``gradio_client.client``. Serialize the patched
+# regions so concurrent :func:`send_video` calls in one process cannot clobber
+# or misattribute each other's hooks while a transfer is in flight.
+_TRANSFER_PATCH_LOCK = threading.Lock()
+
+
+class _ProgressFileReader:
+    """Proxy a binary file object and report each chunk read to a callback.
+
+    ``httpx`` reads multipart file fields in 64 KiB chunks while it streams the
+    request body to the socket. Wrapping the file object lets us emit byte-level
+    upload progress without re-implementing the gradio upload route.
+    """
+
+    def __init__(self, fileobj: Any, on_bytes: Callable[[int], None]) -> None:
+        self._file = fileobj
+        self._on_bytes = on_bytes
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._file.read(size)
+        if chunk:
+            self._on_bytes(len(chunk))
+        return chunk
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._file, name)
+
+
+class _ThrottledEmitter:
+    """Forward progress events at most once per ``min_interval`` seconds.
+
+    Byte-level upload/download callbacks fire once per network chunk — hundreds
+    to thousands of times per second on a fast LAN — which floods the GUI event
+    loop and adds backpressure to the transfer itself. Coalescing to ~10 Hz keeps
+    the progress bar and speed readout responsive without the per-chunk overhead.
+    Pass ``force=True`` for events that must always be delivered (the initial 0%
+    and the terminal 100%).
+    """
+
+    def __init__(
+        self,
+        callback: Callable[[str, Optional[int], Optional[int], str], None],
+        *,
+        min_interval: float = 0.1,
+        clock: Optional[Callable[[], float]] = None,
+    ) -> None:
+        self._callback = callback
+        self._min_interval = min_interval
+        self._clock = clock if clock is not None else time.monotonic
+        self._last_emit: Optional[float] = None
+
+    def __call__(
+        self,
+        desc: str,
+        current: Optional[int],
+        total: Optional[int],
+        unit: str,
+        *,
+        force: bool = False,
+    ) -> None:
+        now = self._clock()
+        if (
+            force
+            or self._last_emit is None
+            or now - self._last_emit >= self._min_interval
+        ):
+            self._last_emit = now
+            self._callback(desc, current, total, unit)
+
+
+def _wrap_upload_files(files: Any, on_bytes: Callable[[int], None]) -> Any:
+    """Return *files* with each readable file object wrapped for progress."""
+
+    items = files.items() if isinstance(files, dict) else files
+    wrapped = []
+    for field, spec in items:
+        if (
+            isinstance(spec, (list, tuple))
+            and len(spec) >= 2
+            and hasattr(spec[1], "read")
+        ):
+            spec = (spec[0], _ProgressFileReader(spec[1], on_bytes), *tuple(spec[2:]))
+        wrapped.append((field, spec))
+    return wrapped
+
+
+class _ProgressResponse:
+    """Wrap an ``httpx`` streaming response to report download progress."""
+
+    def __init__(
+        self,
+        response: Any,
+        progress_callback: Callable[[str, Optional[int], Optional[int], str], None],
+    ) -> None:
+        self._response = response
+        self._progress_callback = progress_callback
+
+    def iter_bytes(self, *args: Any, **kwargs: Any) -> Any:
+        total: Optional[int] = None
+        with suppress(TypeError, ValueError, AttributeError):
+            content_length = self._response.headers.get("content-length")
+            if content_length is not None:
+                total = int(content_length)
+        received = 0
+        self._progress_callback("Downloading:", 0, total, "bytes")
+        for chunk in self._response.iter_bytes(*args, **kwargs):
+            received += len(chunk)
+            self._progress_callback("Downloading:", received, total, "bytes")
+            yield chunk
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._response, name)
+
+
+class _MonotonicDownloadProgress:
+    """Collapse repeated download 0→100 cycles into a single monotonic sequence.
+
+    The gradio client downloads file outputs more than once per job — intermediate
+    streamed outputs and the multiple file output components (the response is a
+    ``(video, log, summary, download)`` tuple whose first and last fields are
+    files) each trigger ``_download_file``. Every invocation drives a fresh
+    :class:`_ProgressResponse` through a full 0→100 byte cycle, so the
+    ``"Downloading:"`` desc would otherwise reach 100% several times. Wrapping the
+    real callback forwards only strictly increasing download fractions, so exactly
+    one 0→100 sequence (with a single terminal 100%) reaches the GUI bar.
+
+    Non-``"Downloading:"`` events (upload, processing) pass through untouched.
+    """
+
+    def __init__(
+        self,
+        callback: Callable[[str, Optional[int], Optional[int], str], None],
+    ) -> None:
+        self._callback = callback
+        self._max_fraction = -1.0
+
+    def __call__(
+        self,
+        desc: str,
+        current: Optional[int],
+        total: Optional[int],
+        unit: str,
+    ) -> None:
+        if desc != "Downloading:":
+            self._callback(desc, current, total, unit)
+            return
+
+        if total and total > 0 and current is not None:
+            fraction = max(0.0, min(1.0, current / total))
+        elif current is None:
+            fraction = 0.0
+        else:
+            # Without a known total the GUI bar cannot move, so there is no
+            # percentage to dedupe against. Forward as-is.
+            self._callback(desc, current, total, unit)
+            return
+
+        if fraction <= self._max_fraction:
+            return
+        self._max_fraction = fraction
+        self._callback(desc, current, total, unit)
+
+
+class _ProgressStreamContext:
+    """Context-manager proxy that yields a :class:`_ProgressResponse`."""
+
+    def __init__(
+        self,
+        context_manager: Any,
+        progress_callback: Callable[[str, Optional[int], Optional[int], str], None],
+    ) -> None:
+        self._context_manager = context_manager
+        self._progress_callback = progress_callback
+
+    def __enter__(self) -> _ProgressResponse:
+        response = self._context_manager.__enter__()
+        return _ProgressResponse(response, self._progress_callback)
+
+    def __exit__(self, *exc_info: Any) -> Any:
+        return self._context_manager.__exit__(*exc_info)
+
+
+def _install_transfer_progress(
+    client: Any,
+    api_name: Optional[str],
+    upload_total: Optional[int],
+    progress_callback: Callable[[str, Optional[int], Optional[int], str], None],
+) -> bool:
+    """Patch the gradio endpoint to stream byte-level upload/download progress.
+
+    Returns ``True`` when the endpoint was patched. Callers that receive
+    ``False`` (for example because a stub client without real endpoints was
+    supplied) should emit the synthetic upload-complete event themselves.
+    """
+
+    try:
+        fn_index = client._infer_fn_index(api_name, None)
+        endpoint = client.endpoints[fn_index]
+    except Exception:  # pragma: no cover - defensive (stub clients, API changes)
+        return False
+
+    original_upload = getattr(endpoint, "_upload_file", None)
+    original_download = getattr(endpoint, "_download_file", None)
+    if not callable(original_upload) or not callable(original_download):
+        return False
+
+    import gradio_client.client as gradio_client_module
+
+    # Persist the dedupe state across every ``_download_file`` invocation in this
+    # transfer so repeated 0→100 cycles collapse into one monotonic sequence.
+    # When ``send_video`` builds the client with ``download_files=False`` gradio
+    # never calls ``_download_file`` (the single download is streamed directly),
+    # so this dedupe only matters for stub/legacy clients that still auto-download.
+    download_progress = _MonotonicDownloadProgress(progress_callback)
+
+    def upload_file(file_obj: Any, data_index: int = 0) -> Any:
+        sent = 0
+        # Coalesce the per-chunk upload events; the guaranteed completion event
+        # below is emitted directly so the ``Uploading`` band still finishes.
+        throttled = _ThrottledEmitter(progress_callback)
+
+        def _on_bytes(count: int) -> None:
+            nonlocal sent
+            sent += count
+            current = min(sent, upload_total) if upload_total else sent
+            throttled("Uploading:", current, upload_total, "bytes")
+
+        with _TRANSFER_PATCH_LOCK:
+            original_post = gradio_client_module.httpx.post
+
+            def post(*args: Any, **kwargs: Any) -> Any:
+                files = kwargs.get("files")
+                if files:
+                    kwargs["files"] = _wrap_upload_files(files, _on_bytes)
+                return original_post(*args, **kwargs)
+
+            gradio_client_module.httpx.post = post
+            try:
+                result = original_upload(file_obj, data_index)
+            finally:
+                gradio_client_module.httpx.post = original_post
+
+        # Only report the upload as complete once every byte was sent. Emitting
+        # this from a ``finally`` block would flash 100% even when the transfer
+        # raised mid-stream (e.g. a dropped connection).
+        if upload_total:
+            progress_callback("Uploading:", upload_total, upload_total, "bytes")
+        return result
+
+    def download_file(payload: Any) -> Any:
+        with _TRANSFER_PATCH_LOCK:
+            original_stream = gradio_client_module.httpx.stream
+
+            def stream(*args: Any, **kwargs: Any) -> Any:
+                return _ProgressStreamContext(
+                    original_stream(*args, **kwargs), download_progress
+                )
+
+            gradio_client_module.httpx.stream = stream
+            try:
+                return original_download(payload)
+            finally:
+                gradio_client_module.httpx.stream = original_stream
+
+    endpoint._upload_file = upload_file
+    endpoint._download_file = download_file
+    return True
 
 
 class StreamingJob:
@@ -70,6 +341,135 @@ class StreamingJob:
             cancel_method()
 
 
+def _build_client(client_builder: Callable[..., Client], server_url: str) -> Client:
+    """Return a gradio client with auto-download disabled when supported.
+
+    Disabling ``download_files`` stops gradio from fetching every file output:
+    the processed video is returned to both a ``gr.Video`` preview and a
+    ``gr.File`` download component, so the default behavior downloads the same
+    file twice. Stub factories and older gradio releases that do not accept the
+    keyword fall back to the legacy positional construction (and keep gradio's
+    own download path).
+    """
+
+    try:
+        return client_builder(server_url, download_files=False)
+    except TypeError:
+        return client_builder(server_url)
+
+
+def _filedata_get(filedata: Any, key: str) -> Any:
+    """Return *key* from a FileData mapping or object, or ``None``."""
+
+    if isinstance(filedata, dict):
+        return filedata.get(key)
+    return getattr(filedata, key, None)
+
+
+def _filedata_name(target: Any) -> str:
+    """Return the destination filename for a download *target*.
+
+    *target* is either a plain path string (stub/legacy clients) or a FileData
+    mapping/object (when gradio auto-download is disabled).
+    """
+
+    if isinstance(target, str):
+        return Path(target).name
+    orig_name = _filedata_get(target, "orig_name")
+    if isinstance(orig_name, str) and orig_name:
+        return Path(orig_name).name
+    path = _filedata_get(target, "path") or _filedata_get(target, "url") or ""
+    return Path(str(path)).name
+
+
+def _resolve_filedata_url(client: Any, filedata: Any, server_url: str) -> str:
+    """Build the server URL to download *filedata*, mirroring gradio_client."""
+
+    base = (
+        getattr(client, "src_prefixed", None)
+        or getattr(client, "src", None)
+        or server_url
+        or ""
+    )
+    if base and not base.endswith("/"):
+        base = base + "/"
+
+    url = _filedata_get(filedata, "url")
+    if url:
+        if not str(url).startswith(("http://", "https://")):
+            url = base + str(url).lstrip("/")
+        return str(url)
+
+    path = _filedata_get(filedata, "path")
+    if path:
+        return base + "file=" + str(path)
+
+    raise RuntimeError("Server did not return a processed file")
+
+
+def _download_filedata(
+    client: Any,
+    filedata: Any,
+    destination: Path,
+    progress_callback: Optional[
+        Callable[[str, Optional[int], Optional[int], str], None]
+    ],
+    cancel_check: Optional[Callable[[], None]],
+    server_url: str,
+    *,
+    chunk_size: int = 1024 * 1024,
+) -> Path:
+    """Stream the single processed file to *destination* with throttled progress.
+
+    Issues exactly one ``httpx`` GET (so the gr.Video/gr.File pair is fetched
+    once, not twice) using a 1 MiB chunk size and ~10 Hz progress events instead
+    of gradio's per-8 KB callback storm.
+    """
+
+    import gradio_client.client as gradio_client_module
+
+    url = _resolve_filedata_url(client, filedata, server_url)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    emitter = (
+        _ThrottledEmitter(progress_callback) if progress_callback is not None else None
+    )
+
+    with gradio_client_module.httpx.stream(
+        "GET",
+        url,
+        headers=getattr(client, "headers", None),
+        cookies=getattr(client, "cookies", None),
+        verify=getattr(client, "ssl_verify", True),
+        follow_redirects=True,
+        **(getattr(client, "httpx_kwargs", {}) or {}),
+    ) as response:
+        response.raise_for_status()
+        total: Optional[int] = None
+        with suppress(TypeError, ValueError, AttributeError):
+            content_length = response.headers.get("content-length")
+            if content_length is not None:
+                total = int(content_length)
+
+        received = 0
+        if emitter is not None:
+            emitter("Downloading:", 0, total, "bytes", force=True)
+
+        with open(destination, "wb") as handle:
+            for chunk in response.iter_bytes(chunk_size=chunk_size):
+                if cancel_check is not None:
+                    cancel_check()
+                handle.write(chunk)
+                received += len(chunk)
+                if emitter is not None:
+                    is_final = total is not None and received >= total
+                    emitter("Downloading:", received, total, "bytes", force=is_final)
+
+        if emitter is not None:
+            emitter("Downloading:", received, total, "bytes", force=True)
+
+    return destination
+
+
 def send_video(
     input_path: Path,
     output_path: Optional[Path],
@@ -84,6 +484,9 @@ def send_video(
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
     silent_speed: Optional[float] = None,
+    cut_enabled: bool = False,
+    cut_start_seconds: Optional[float] = None,
+    cut_end_seconds: Optional[float] = None,
     log_callback: Optional[Callable[[str], None]] = None,
     stream_updates: bool = False,
     should_cancel: Optional[Callable[[], bool]] = None,
@@ -108,7 +511,7 @@ def send_video(
         raise FileNotFoundError(f"Input file does not exist: {input_path}")
 
     client_builder = client_factory or Client
-    client = client_builder(server_url)
+    client = _build_client(client_builder, server_url)
     submit_args: Tuple[Any, ...] = (
         gradio_file(str(input_path)),
         bool(small),
@@ -120,13 +523,40 @@ def send_video(
         silent_threshold,
         sounded_speed,
         silent_speed,
+        bool(cut_enabled),
+        cut_start_seconds,
+        cut_end_seconds,
     )
     submit_kwargs: dict[str, Any] = {"api_name": "/process_video"}
+
+    upload_total: Optional[int] = None
+    transfer_progress_installed = False
+    if progress_callback is not None:
+        try:
+            upload_total = input_path.stat().st_size
+        except OSError:  # pragma: no cover - defensive
+            upload_total = None
+        progress_callback("Uploading:", 0, upload_total, "bytes")
+        # Patch the endpoint so the real upload (which runs lazily inside the
+        # submitted job, not when ``submit`` returns) streams byte-level progress
+        # instead of jumping straight to 100%.
+        transfer_progress_installed = _install_transfer_progress(
+            client,
+            submit_kwargs.get("api_name"),
+            upload_total,
+            progress_callback,
+        )
 
     if job_factory is not None:
         job = job_factory(client, submit_args, submit_kwargs)
     else:
         job = client.submit(*submit_args, **submit_kwargs)
+
+    if progress_callback is not None and not transfer_progress_installed:
+        # Stub clients without real endpoints (or older gradio APIs) cannot
+        # stream the upload; fall back to reporting it complete so the
+        # ``Uploading`` band still finishes.
+        progress_callback("Uploading:", upload_total, upload_total, "bytes")
 
     streaming_job = StreamingJob(job)
 
@@ -192,25 +622,40 @@ def send_video(
     else:
         log_text = ""
 
-    if not download_path:
-        download_path = video_path
-
-    if not download_path:
+    target = download_path or video_path
+    if not target:
         raise RuntimeError("Server did not return a processed file")
 
     _cancel_if_requested()
 
-    download_source = Path(str(download_path))
+    name = _filedata_name(target)
     if output_path is None:
-        destination = Path.cwd() / download_source.name
+        destination = Path.cwd() / name
     else:
         destination = output_path
         if destination.is_dir():
-            destination = destination / download_source.name
+            destination = destination / name
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if download_source.resolve() != destination.resolve():
-        shutil.copy2(download_source, destination)
+    if isinstance(target, str):
+        # Stub/legacy clients (gradio auto-download still active) hand back a
+        # local path; copy it as before.
+        download_source = Path(target)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if download_source.resolve() != destination.resolve():
+            shutil.copy2(download_source, destination)
+    else:
+        # ``download_files=False`` leaves outputs as FileData; download the one
+        # processed file ourselves instead of letting gradio fetch every file
+        # output (the gr.Video preview and the gr.File download both point at the
+        # same file, which would otherwise transfer the video twice).
+        _download_filedata(
+            client,
+            target,
+            destination,
+            progress_callback,
+            _cancel_if_requested,
+            server_url,
+        )
 
     if not isinstance(summary, str):
         summary = ""
@@ -258,10 +703,14 @@ def _emit_progress_update(
 
     total = _coerce_int(length)
     current = _coerce_int(index)
-    if current is None and isinstance(progress, (int, float)) and total:
-        current = int(progress / total)
+    if current is None and isinstance(progress, (int, float)):
+        progress_value = float(progress)
+        if total and 0.0 <= progress_value <= 1.0:
+            current = int(round(progress_value * total))
+        else:
+            current = int(progress_value)
 
-    callback(desc or "Processing", progress, total, str(unit_name or ""))
+    callback(desc or "Processing", current, total, str(unit_name or ""))
 
 
 async def _pump_job_updates(
@@ -384,6 +833,10 @@ def _stream_job_updates(
                 cancel_callback,
             )
         )
+    except ProcessingAborted:
+        # Cancellation must propagate; it is a ``RuntimeError`` subclass but is
+        # not the "no running event loop" error the polling fallback handles.
+        raise
     except RuntimeError:
         _poll_job_updates(
             job,

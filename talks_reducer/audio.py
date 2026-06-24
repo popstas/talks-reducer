@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import subprocess
 import sys
-from typing import List, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 import numpy as np
 from audiotsm import phasevocoder
@@ -121,8 +121,15 @@ def process_audio_chunks(
     max_audio_volume: float,
     *,
     batch_size: int = 10,
+    progress_callback: Optional[Callable[[int], None]] = None,
 ) -> Tuple[np.ndarray, List[List[int]]]:
-    """Return processed audio and updated chunk timings for the provided chunk list."""
+    """Return processed audio and updated chunk timings for the provided chunk list.
+
+    When ``progress_callback`` is provided it is invoked once per processed chunk
+    with the number of source audio samples that chunk consumed. The reported
+    increment is never negative, so zero-length chunks contribute ``0`` rather
+    than a negative count.
+    """
 
     audio_buffers: List[np.ndarray] = []
     output_pointer = 0
@@ -137,10 +144,13 @@ def process_audio_chunks(
             start = int(chunk[0] * samples_per_frame)
             end = int(chunk[1] * samples_per_frame)
             audio_chunk = audio_data[start:end]
+            source_samples = max(0, end - start)
 
             if audio_chunk.size == 0:
                 channels = audio_data.shape[1] if audio_data.ndim > 1 else 1
                 batch_audio.append(np.zeros((0, channels)))
+                if progress_callback is not None:
+                    progress_callback(source_samples)
                 continue
 
             reader = ArrayReader(np.transpose(audio_chunk))
@@ -160,6 +170,9 @@ def process_audio_chunks(
                 altered_audio_data[-audio_fade_envelope_size:] *= 1 - mask
 
             batch_audio.append(altered_audio_data / normaliser)
+
+            if progress_callback is not None:
+                progress_callback(source_samples)
 
         for index, chunk in enumerate(batch_chunks):
             altered_audio_data = batch_audio[index]

@@ -9,8 +9,9 @@ import platform
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
+from ..cli import _build_parser
 from ..cli import main as cli_main
 from .app import TalksReducerGUI
 
@@ -112,6 +113,103 @@ if __name__ == "__main__":
         return False, f"Error testing tkinter: {e}"
 
 
+def _build_seed_parser() -> argparse.ArgumentParser:
+    """Return a CLI parser whose defaults are suppressed for GUI seeding.
+
+    The standard CLI parser fills every option with a default value, which makes
+    it impossible to tell which flags the user actually passed. Suppressing the
+    defaults means the parsed namespace only contains the options that appeared
+    on the command line, so the GUI applies just the settings the launch
+    requested instead of clobbering stored preferences with parser defaults.
+    """
+
+    parser = _build_parser()
+    # ``set_defaults`` stores values (such as ``optimize=True``) outside the
+    # per-action defaults, so clear them too to keep the parsed namespace limited
+    # to the options the launch actually provided.
+    parser._defaults.clear()
+    for action in parser._actions:
+        if action.dest in {"help", "version"}:
+            continue
+        action.default = argparse.SUPPRESS
+        # Allow an args-only launch (settings, no file) to parse successfully so
+        # a shortcut such as ``talks-reducer.exe --small --silent-speed 5`` opens
+        # the GUI with those settings instead of erroring on the missing file.
+        if action.dest == "input_file":
+            action.nargs = "*"
+    return parser
+
+
+def _gui_settings_from_namespace(parsed: argparse.Namespace) -> Dict[str, object]:
+    """Translate explicitly-provided CLI options into GUI control settings."""
+
+    provided = vars(parsed)
+    settings: Dict[str, object] = {}
+    for key in (
+        "small",
+        "small_480",
+        "silent_speed",
+        "sounded_speed",
+        "silent_threshold",
+        "frame_spreadage",
+        "sample_rate",
+        "keyframe_interval_seconds",
+        "video_codec",
+        "add_codec_suffix",
+        "prefer_global_ffmpeg",
+        "optimize",
+        "output_file",
+        "temp_folder",
+    ):
+        if key in provided:
+            settings[key] = provided[key]
+
+    host = provided.get("host")
+    if host:
+        settings["server_url"] = f"http://{host}:9005"
+    elif provided.get("server_url"):
+        settings["server_url"] = provided["server_url"]
+
+    return settings
+
+
+def _parse_seeded_launch(
+    argv: Sequence[str],
+) -> Optional[Tuple[List[str], Dict[str, object]]]:
+    """Return seeded input files and GUI settings when *argv* carries a file path.
+
+    Detects the file-association launch pattern where the executable is invoked
+    with CLI flags plus one or more existing positional file paths (for example
+    a Windows shortcut to ``talks-reducer.exe --small --silent-speed 5`` that
+    receives a dropped video). Also detects an args-only launch (recognized GUI
+    settings with no file at all), so a shortcut that only carries preset flags
+    opens the GUI with those settings applied. Returns ``None`` when ``argv``
+    cannot be parsed, or when a positional path was given but does not exist, so
+    the caller can fall back to the regular CLI pipeline.
+    """
+
+    parser = _build_seed_parser()
+    try:
+        parsed = parser.parse_args(list(argv))
+    except SystemExit:
+        return None
+
+    input_paths = getattr(parsed, "input_file", None) or []
+    input_files = [path for path in input_paths if path and Path(path).exists()]
+    if input_files:
+        return input_files, _gui_settings_from_namespace(parsed)
+
+    # No usable file. Only treat this as a GUI launch when no positional path was
+    # supplied at all and at least one GUI setting was provided; if a path was
+    # given but is missing, fall back to the CLI so it can report the error.
+    if not input_paths:
+        settings = _gui_settings_from_namespace(parsed)
+        if settings:
+            return [], settings
+
+    return None
+
+
 def main(argv: Optional[Sequence[str]] = None) -> bool:
     """Launch the GUI when run without arguments, otherwise defer to the CLI."""
 
@@ -131,8 +229,34 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
         action="store_true",
         help="Deprecated: the GUI no longer starts the server tray automatically.",
     )
+    parser.add_argument(
+        "--server-managed",
+        action="store_true",
+        help=(
+            "Internal flag set by the server tray to mark the GUI as running "
+            "under a tray-managed server."
+        ),
+    )
+    parser.add_argument(
+        "--server-url",
+        dest="server_url",
+        default=None,
+        help=(
+            "Local server URL passed by the tray when the GUI runs in "
+            "server-managed mode."
+        ),
+    )
 
     parsed_args, remaining = parser.parse_known_args(argv)
+
+    server_managed = bool(parsed_args.server_managed)
+    local_server_url: Optional[str] = parsed_args.server_url
+    if not server_managed and local_server_url is not None:
+        # ``--server-url`` outside managed mode belongs to the CLI/seeded launch;
+        # restore it so the downstream parser still receives it unchanged.
+        remaining = ["--server-url", local_server_url, *remaining]
+        local_server_url = None
+
     if parsed_args.server:
         package_name = __package__ or "talks_reducer"
         module_name = f"{package_name}.server_tray"
@@ -156,14 +280,20 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
         argv = [arg for arg in argv if not arg.startswith("-psn_")]
 
     if argv:
-        launch_gui = False
-        if sys.platform == "win32" and not any(arg.startswith("-") for arg in argv):
-            if any(Path(arg).exists() for arg in argv if arg):
-                launch_gui = True
+        seeded: Optional[Tuple[List[str], Dict[str, object]]] = None
+        if sys.platform == "win32":
+            seeded = _parse_seeded_launch(argv)
 
-        if launch_gui:
+        if seeded is not None:
+            input_files, cli_settings = seeded
             try:
-                app = TalksReducerGUI(argv, auto_run=True)
+                app = TalksReducerGUI(
+                    input_files,
+                    auto_run=bool(input_files),
+                    cli_settings=cli_settings,
+                    server_managed=server_managed,
+                    local_server_url=local_server_url,
+                )
                 app.run()
                 return True
             except Exception:
@@ -218,7 +348,10 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
             return False
 
     try:
-        app = TalksReducerGUI()
+        app = TalksReducerGUI(
+            server_managed=server_managed,
+            local_server_url=local_server_url,
+        )
         app.run()
         return True
     except Exception as e:
@@ -231,4 +364,8 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
         sys.exit(1)
 
 
-__all__ = ["_check_tkinter_available", "main"]
+__all__ = [
+    "_check_tkinter_available",
+    "_parse_seeded_launch",
+    "main",
+]

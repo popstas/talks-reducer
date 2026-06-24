@@ -6,6 +6,7 @@ import math
 import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict
@@ -111,6 +112,129 @@ def _raise_if_stopped(
     raise ProcessingAborted("Processing aborted by user request.")
 
 
+def _build_scale_only_filter_graph(
+    *,
+    job_temp_path: Path,
+    options: ProcessingOptions,
+    original_height: int,
+    frame_rate: float,
+    reporter: ProgressReporter,
+) -> Path | None:
+    """Write a filter graph that only rescales (when ``--small`` is requested).
+
+    Used when no speed-based ``setpts`` filter is needed — either because the
+    input has no audio stream, or because both speeds are 1.0. The graph also
+    pins the output to ``frame_rate`` so sources with a misleading nominal
+    ``r_frame_rate`` (e.g. ``120/1`` for ~30 fps content) don't cause ffmpeg to
+    duplicate frames into the encoder. Returns the path to the filter script,
+    or ``None`` if no filters are required.
+    """
+
+    filter_parts: list[str] = []
+    if options.small:
+        target_height = options.small_target_height or 720
+        if target_height <= 0:
+            target_height = 720
+        if original_height > 0 and original_height >= target_height:
+            filter_parts.append(f"scale=-2:{target_height}")
+            reporter.log(
+                f"Scaling down from {int(original_height)}p to {target_height}p"
+            )
+        else:
+            reporter.log(
+                f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
+            )
+
+    if frame_rate and frame_rate > 0:
+        filter_parts.append(f"fps={frame_rate}")
+
+    if not filter_parts:
+        return None
+
+    filter_graph_path = job_temp_path / "filterGraph.txt"
+    with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
+        filter_graph_file.write(",".join(filter_parts))
+    return filter_graph_path
+
+
+def _resolve_trim(
+    options: ProcessingOptions,
+    original_duration: float,
+    frame_count: int,
+    frame_rate: float,
+    reporter: ProgressReporter,
+) -> tuple[float, float, float, int]:
+    """Resolve the requested keep-range trim against the source metadata.
+
+    Returns ``(cut_start, cut_end, effective_duration, effective_frame_count)``
+    where ``cut_start``/``cut_end`` are the (clamped) values to feed the FFmpeg
+    command builders and the effective duration/frame count describe the trimmed
+    span used for progress and final-encode estimation. When no trim is
+    requested — or the requested range would yield a non-positive span — the
+    original duration/frame count are returned and no trim is applied (a warning
+    is logged for invalid ranges) so behaviour stays byte-for-byte unchanged.
+    """
+
+    cut_start = max(0.0, float(getattr(options, "cut_start_seconds", 0.0) or 0.0))
+    cut_end = max(0.0, float(getattr(options, "cut_end_seconds", 0.0) or 0.0))
+
+    if cut_start <= 0 and cut_end <= 0:
+        return 0.0, 0.0, original_duration, frame_count
+
+    if original_duration > 0:
+        if cut_start >= original_duration:
+            reporter.log(
+                "Cut start {start:.2f}s is at or beyond the video duration "
+                "{dur:.2f}s; ignoring trim.".format(
+                    start=cut_start, dur=original_duration
+                )
+            )
+            return 0.0, 0.0, original_duration, frame_count
+
+        effective_end = cut_end if cut_end > 0 else original_duration
+        if effective_end > original_duration:
+            reporter.log(
+                "Cut end {end:.2f}s exceeds the video duration {dur:.2f}s; "
+                "capping at end of file.".format(end=cut_end, dur=original_duration)
+            )
+            effective_end = original_duration
+            cut_end = original_duration
+
+        if effective_end <= cut_start:
+            reporter.log(
+                "Cut range [{start:.2f}s, {end:.2f}s] is empty; ignoring trim.".format(
+                    start=cut_start, end=effective_end
+                )
+            )
+            return 0.0, 0.0, original_duration, frame_count
+
+        effective_duration = effective_end - cut_start
+    else:
+        if cut_end > 0 and cut_end <= cut_start:
+            reporter.log(
+                "Cut range [{start:.2f}s, {end:.2f}s] is empty; ignoring trim.".format(
+                    start=cut_start, end=cut_end
+                )
+            )
+            return 0.0, 0.0, original_duration, frame_count
+        effective_duration = (cut_end - cut_start) if cut_end > 0 else original_duration
+
+    if frame_rate > 0 and effective_duration > 0:
+        effective_frame_count = int(math.ceil(effective_duration * frame_rate))
+    else:
+        effective_frame_count = frame_count
+
+    reporter.log(
+        "Trimming to keep-range [{start:.2f}s, {end}] (effective duration "
+        "{dur:.2f}s).".format(
+            start=cut_start,
+            end=("{:.2f}s".format(cut_end) if cut_end > 0 else "end of file"),
+            dur=effective_duration,
+        )
+    )
+    return cut_start, cut_end, effective_duration, effective_frame_count
+
+
 def speed_up_video(
     options: ProcessingOptions,
     reporter: ProgressReporter | None = None,
@@ -156,10 +280,9 @@ def speed_up_video(
 
     cuda_available = dependencies.check_cuda_available(ffmpeg_path)
 
-    temp_path = Path(options.temp_folder)
-    if temp_path.exists():
-        dependencies.delete_path(temp_path)
-    dependencies.create_path(temp_path)
+    base_temp_path = Path(options.temp_folder)
+    dependencies.create_path(base_temp_path)
+    job_temp_path = Path(tempfile.mkdtemp(prefix="job_", dir=os.fspath(base_temp_path)))
 
     metadata = _extract_video_metadata(input_path, options.frame_rate)
     frame_rate = metadata["frame_rate"]
@@ -185,6 +308,19 @@ def speed_up_video(
         )
     )
 
+    (
+        cut_start_seconds,
+        cut_end_seconds,
+        effective_duration,
+        effective_frame_count,
+    ) = _resolve_trim(
+        options,
+        original_duration,
+        frame_count,
+        frame_rate,
+        reporter,
+    )
+
     reporter.log("Processing on: {}".format("GPU (CUDA)" if cuda_available else "CPU"))
     if options.optimize:
         reporter.log("Optimized encoding enabled")
@@ -203,6 +339,10 @@ def speed_up_video(
             "No audio stream found. Video will be re-encoded without speed modification."
         )
 
+    neutral_speeds = math.isclose(
+        options.silent_speed, 1.0, rel_tol=1e-9, abs_tol=1e-9
+    ) and math.isclose(options.sounded_speed, 1.0, rel_tol=1e-9, abs_tol=1e-9)
+
     hwaccel = (
         ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if cuda_available else []
     )
@@ -210,19 +350,19 @@ def speed_up_video(
     stop_cb: Callable[[], bool] | None = None
     if hasattr(reporter, "stop_requested") and callable(reporter.stop_requested):
         stop_cb = reporter.stop_requested
-    estimated_total_frames = frame_count
-    if estimated_total_frames <= 0 and original_duration > 0 and frame_rate > 0:
-        estimated_total_frames = int(math.ceil(original_duration * frame_rate))
+    estimated_total_frames = effective_frame_count
+    if estimated_total_frames <= 0 and effective_duration > 0 and frame_rate > 0:
+        estimated_total_frames = int(math.ceil(effective_duration * frame_rate))
 
     audio_new_path: Path | None = None
     filter_graph_path: Path | None = None
     updated_chunks: list[list[int]] = []
     max_audio_volume = 0.0
 
-    if has_audio:
+    if has_audio and not neutral_speeds:
         # Process with audio-based speed modification
         audio_bitrate = "128k" if options.optimize else "160k"
-        audio_wav = temp_path / "audio.wav"
+        audio_wav = job_temp_path / "audio.wav"
         extraction_sample_rate = options.sample_rate
 
         extract_command = dependencies.build_extract_audio_command(
@@ -232,9 +372,11 @@ def speed_up_video(
             audio_bitrate,
             hwaccel,
             ffmpeg_path=ffmpeg_path,
+            cut_start_seconds=cut_start_seconds,
+            cut_end_seconds=cut_end_seconds,
         )
 
-        _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+        _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
         reporter.log("Extracting audio...")
 
         if estimated_total_frames > 0:
@@ -262,7 +404,7 @@ def speed_up_video(
         samples_per_frame = wav_sample_rate / frame_rate
         audio_frame_count = int(math.ceil(audio_sample_count / samples_per_frame))
 
-        _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+        _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
         has_loud_audio = chunk_utils.detect_loud_frames(
             audio_data,
@@ -276,19 +418,26 @@ def speed_up_video(
 
         reporter.log(f"Processing {len(chunks)} chunks...")
 
-        _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+        _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
         new_speeds = [options.silent_speed, options.sounded_speed]
-        output_audio_data, updated_chunks = audio_utils.process_audio_chunks(
-            audio_data,
-            chunks,
-            samples_per_frame,
-            new_speeds,
-            options.audio_fade_envelope_size,
-            max_audio_volume,
-        )
+        audio_sample_total = audio_sample_count if audio_sample_count > 0 else None
+        with reporter.task(
+            desc="Audio processing:",
+            total=audio_sample_total,
+            unit="samples",
+        ) as audio_task:
+            output_audio_data, updated_chunks = audio_utils.process_audio_chunks(
+                audio_data,
+                chunks,
+                samples_per_frame,
+                new_speeds,
+                options.audio_fade_envelope_size,
+                max_audio_volume,
+                progress_callback=audio_task.advance,
+            )
 
-        audio_new_path = temp_path / "audioNew.wav"
+        audio_new_path = job_temp_path / "audioNew.wav"
         # Use the sample rate that was actually used for processing
         output_sample_rate = extraction_sample_rate
         wavfile.write(
@@ -297,10 +446,10 @@ def speed_up_video(
             _prepare_output_audio(output_audio_data),
         )
 
-        _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+        _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
         expression = chunk_utils.get_tree_expression(updated_chunks)
-        filter_graph_path = temp_path / "filterGraph.txt"
+        filter_graph_path = job_temp_path / "filterGraph.txt"
         with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
             filter_parts = []
             if options.small:
@@ -322,30 +471,19 @@ def speed_up_video(
             filter_parts.append(f"setpts={escaped_expression}")
             filter_graph_file.write(",".join(filter_parts))
     else:
-        # No audio - just re-encode video without speed modification
-        filter_parts = []
-        if options.small:
-            target_height = options.small_target_height or 720
-            if target_height <= 0:
-                target_height = 720
-            # Only scale down if the original height is greater than or equal to target
-            if original_height > 0 and original_height >= target_height:
-                filter_parts.append(f"scale=-2:{target_height}")
-                reporter.log(
-                    f"Scaling down from {int(original_height)}p to {target_height}p"
-                )
-            else:
-                reporter.log(
-                    f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
-                )
-        # Only create filter script if we have filters to apply
-        if filter_parts:
-            filter_graph_path = temp_path / "filterGraph.txt"
-            with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
-                filter_graph_file.write(",".join(filter_parts))
-        else:
-            filter_graph_path = None
+        if has_audio and neutral_speeds:
+            reporter.log(
+                "Speeds are 1.0 — skipping audio processing, passing original audio through."
+            )
+        filter_graph_path = _build_scale_only_filter_graph(
+            job_temp_path=job_temp_path,
+            options=options,
+            original_height=original_height,
+            frame_rate=frame_rate,
+            reporter=reporter,
+        )
 
+    keep_input_audio = has_audio and neutral_speeds
     command_str, fallback_command_str, use_cuda_encoder = (
         dependencies.build_video_commands(
             os.fspath(input_path),
@@ -359,6 +497,9 @@ def speed_up_video(
             frame_rate=frame_rate,
             keyframe_interval_seconds=options.keyframe_interval_seconds,
             video_codec=options.video_codec,
+            keep_input_audio=keep_input_audio,
+            cut_start_seconds=cut_start_seconds,
+            cut_end_seconds=cut_end_seconds,
         )
     )
     reporter.log(
@@ -382,23 +523,25 @@ def speed_up_video(
     reporter.log(command_str)
 
     if has_audio and audio_new_path and not audio_new_path.exists():
-        dependencies.delete_path(temp_path)
+        dependencies.delete_path(job_temp_path)
         raise FileNotFoundError("Audio intermediate file was not generated")
 
     if filter_graph_path and not filter_graph_path.exists():
-        dependencies.delete_path(temp_path)
+        dependencies.delete_path(job_temp_path)
         raise FileNotFoundError("Filter graph file was not generated")
 
-    _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+    _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
     try:
         if has_audio and updated_chunks:
             final_total_frames = updated_chunks[-1][3] if updated_chunks else 0
         else:
-            # No audio - use original frame count
-            final_total_frames = frame_count if frame_count > 0 else 0
-            if final_total_frames <= 0 and original_duration > 0 and frame_rate > 0:
-                final_total_frames = int(math.ceil(original_duration * frame_rate))
+            # No audio - use the (possibly trimmed) effective frame count
+            final_total_frames = (
+                effective_frame_count if effective_frame_count > 0 else 0
+            )
+            if final_total_frames <= 0 and effective_duration > 0 and frame_rate > 0:
+                final_total_frames = int(math.ceil(effective_duration * frame_rate))
 
         if final_total_frames > 0:
             reporter.log(f"Final encode target frames: {final_total_frames}")
@@ -429,7 +572,9 @@ def speed_up_video(
         )
     except subprocess.CalledProcessError:
         if fallback_command_str:
-            _raise_if_stopped(reporter, temp_path=temp_path, dependencies=dependencies)
+            _raise_if_stopped(
+                reporter, temp_path=job_temp_path, dependencies=dependencies
+            )
 
             if use_cuda_encoder:
                 reporter.log("CUDA encoding failed, retrying with CPU encoder...")
@@ -452,7 +597,7 @@ def speed_up_video(
                         fps=frame_rate,
                     )
                 )
-            reporter.log("starting processing with FFmpeg fallback command:")
+            reporter.log("Executing FFmpeg fallback command:")
             reporter.log(fallback_command_str)
             dependencies.run_timed_ffmpeg_command(
                 fallback_command_str,
@@ -466,7 +611,7 @@ def speed_up_video(
         else:
             raise
     finally:
-        dependencies.delete_path(temp_path)
+        dependencies.delete_path(job_temp_path)
 
     output_metadata = _extract_video_metadata(output_path, frame_rate)
     output_duration = output_metadata.get("duration", 0.0)
@@ -545,12 +690,8 @@ def _input_to_output_filename(
         suffix_tokens.append(normalized_codec)
 
     suffix = f"_{'_'.join(suffix_tokens)}" if suffix_tokens else ""
-    new_name = (
-        filename.name[:dot_index] + suffix + filename.name[dot_index:]
-        if dot_index != -1
-        else filename.name + suffix
-    )
-    return filename.with_name(new_name)
+    stem = filename.name[:dot_index] if dot_index != -1 else filename.name
+    return filename.with_name(stem + suffix + ".mp4")
 
 
 def _create_path(path: Path) -> None:

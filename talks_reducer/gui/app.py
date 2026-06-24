@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
+from contextlib import suppress
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -33,6 +36,7 @@ try:
     from ..models import ProcessingOptions
     from ..pipeline import ProcessingAborted, speed_up_video
     from ..progress import ProgressHandle
+    from ..timecode import format_timecode, parse_timecode
     from ..version_utils import resolve_version
     from . import discovery as discovery_helpers
     from . import layout as layout_helpers
@@ -52,6 +56,7 @@ try:
         parse_ffmpeg_progress,
         parse_ratios_from_summary,
         parse_source_duration_seconds,
+        parse_task_percent,
         parse_video_duration_seconds,
     )
     from .theme import (
@@ -95,6 +100,7 @@ except ImportError:  # pragma: no cover - handled at runtime
         parse_ffmpeg_progress,
         parse_ratios_from_summary,
         parse_source_duration_seconds,
+        parse_task_percent,
         parse_video_duration_seconds,
     )
     from talks_reducer.gui.theme import (
@@ -109,6 +115,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.models import ProcessingOptions
     from talks_reducer.pipeline import ProcessingAborted, speed_up_video
     from talks_reducer.progress import ProgressHandle
+    from talks_reducer.timecode import format_timecode, parse_timecode
     from talks_reducer.version_utils import resolve_version
 
 try:
@@ -116,6 +123,23 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - runtime dependency
     DND_FILES = None  # type: ignore[assignment]
     TkinterDnD = None  # type: ignore[assignment]
+
+
+def _format_seed_number(value: object) -> str:
+    """Render a numeric CLI value for a ``StringVar`` without a trailing ``.0``.
+
+    ``--frame_margin`` and ``--sample_rate`` parse as floats, so an integer such
+    as ``48000`` arrives as ``48000.0``; format whole numbers without the decimal
+    suffix to match the default control text.
+    """
+
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return str(value)
+    if number.is_integer():
+        return str(int(number))
+    return str(number)
 
 
 class TalksReducerGUI:
@@ -127,13 +151,21 @@ class TalksReducerGUI:
     AUDIO_PROGRESS_WEIGHT = 5.0
     MIN_AUDIO_INTERVAL_MS = 10
     DEFAULT_AUDIO_INTERVAL_MS = 200
+    DOWNLOAD_WAIT_INTERVAL_MS = 5000
+    DOWNLOAD_WAIT_STATUS = "Waiting for download…"
+    ACTIVITY_POLL_INTERVAL_MS = 5000
 
     def __init__(
         self,
         initial_inputs: Optional[Sequence[str]] = None,
         *,
         auto_run: bool = False,
+        cli_settings: Optional[dict] = None,
+        server_managed: bool = False,
+        local_server_url: Optional[str] = None,
     ) -> None:
+        self.server_managed = bool(server_managed)
+        self.local_server_url = local_server_url or None
         self._config_path = determine_config_path()
         self.preferences = GUIPreferences(self._config_path)
 
@@ -162,7 +194,7 @@ class TalksReducerGUI:
         self._apply_window_icon()
 
         self._full_size = (1200, 900)
-        self._simple_size = (390, 270)
+        self._simple_size = (470, 300)
         # self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
         self.style = self.ttk.Style(self.root)
 
@@ -186,7 +218,12 @@ class TalksReducerGUI:
         self._audio_progress_job: Optional[str] = None
         self._audio_progress_interval_ms: Optional[int] = None
         self._audio_progress_steps_completed = 0
+        self._download_wait_job: Optional[str] = None
+        self._download_wait_active: bool = False
+        self._activity_poll_job: Optional[str] = None
+        self._closing = False
         self.progress_var = tk.DoubleVar(value=0.0)
+        self._progress_floor: float = 0.0
         self._ffmpeg_process: Optional[subprocess.Popen] = None
         self._stop_requested = False
         self._ping_worker_stop_requested = False
@@ -223,6 +260,22 @@ class TalksReducerGUI:
         self.open_after_convert_var = tk.BooleanVar(
             value=self.preferences.get("open_after_convert", True)
         )
+        self.cut_enabled_var = tk.BooleanVar(
+            value=bool(self.preferences.get("cut_enabled", False))
+        )
+        self.cut_start_var = tk.DoubleVar(
+            value=self.preferences.get_float("cut_start", 0.0)
+        )
+        self.cut_end_var = tk.DoubleVar(
+            value=self.preferences.get_float("cut_end", 0.0)
+        )
+        # Editable text mirrors of the cut handles for manual timecode entry.
+        self.cut_start_text_var = tk.StringVar(
+            value=format_timecode(self.cut_start_var.get(), milliseconds=True)
+        )
+        self.cut_end_text_var = tk.StringVar(
+            value=format_timecode(self.cut_end_var.get(), milliseconds=True)
+        )
         stored_codec = str(self.preferences.get("video_codec", "h264")).lower()
         if stored_codec not in {"h264", "hevc", "av1"}:
             stored_codec = "h264"
@@ -252,6 +305,9 @@ class TalksReducerGUI:
         self.open_after_convert_var.trace_add(
             "write", self._on_open_after_convert_change
         )
+        self.cut_enabled_var.trace_add("write", self._on_cut_change)
+        self.cut_start_var.trace_add("write", self._on_cut_change)
+        self.cut_end_var.trace_add("write", self._on_cut_change)
         self.video_codec_var.trace_add("write", self._on_video_codec_change)
         self.add_codec_suffix_var.trace_add("write", self._on_add_codec_suffix_change)
         self.optimize_var.trace_add("write", self._on_optimize_change)
@@ -266,6 +322,7 @@ class TalksReducerGUI:
         self._basic_variables: dict[str, tk.DoubleVar] = {}
         self._slider_updaters: dict[str, Callable[[str], None]] = {}
         self._sliders: list[tk.Scale] = []
+        self._cut_duration: float = 0.0
 
         self._build_layout()
         self._sync_simple_preset()
@@ -315,8 +372,15 @@ class TalksReducerGUI:
                 "Drag and drop requires the tkinterdnd2 package. Install it to enable the drop zone."
             )
 
+        if cli_settings:
+            self._apply_cli_settings(cli_settings)
+
         if initial_inputs:
             self._populate_initial_inputs(initial_inputs, auto_run=auto_run)
+
+        if self.server_managed:
+            self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+            self._start_activity_log()
 
     def _start_run(self) -> None:
         if self._processing_thread and self._processing_thread.is_alive():
@@ -386,9 +450,11 @@ class TalksReducerGUI:
                     self._append_log,
                     process_callback=set_process,
                     stop_callback=lambda: self._stop_requested,
-                    progress_callback=self._set_progress,
+                    progress_callback=self._set_progress_monotonic,
+                    stage_callback=self._apply_stage_transition,
                 )
                 for index, file in enumerate(files, start=1):
+                    self._reset_progress_baseline()
                     self._append_log(f"Processing: {os.path.basename(file)}")
                     options = self._create_processing_options(Path(file), args)
                     result = speed_up_video(options, reporter=reporter)
@@ -466,6 +532,29 @@ class TalksReducerGUI:
 
     def _apply_basic_preset(self, preset: str) -> None:
         layout_helpers.apply_basic_preset(self, preset)
+
+    def _update_local_server_url_display(self, url: Optional[str] = None) -> None:
+        """Show the LAN-reachable server URL label only in managed server mode.
+
+        When *url* is provided (the LAN address reported by the server's
+        ``/activity`` payload) it is shown in preference to the tray-provided
+        loopback URL so the label advertises an address other machines can
+        connect to. The loopback ``local_server_url`` is left untouched because
+        it remains the reliable base for same-machine ``/activity`` polling.
+        """
+
+        display_url = url or self.local_server_url
+
+        label = getattr(self, "local_server_url_label", None)
+        if label is None:
+            return
+
+        if self.server_managed and display_url:
+            label.configure(text=layout_helpers.format_local_server_url(display_url))
+            label.grid()
+        else:
+            label.configure(text="")
+            label.grid_remove()
 
     def _update_processing_mode_state(self) -> None:
         has_url = bool(self.server_url_var.get().strip())
@@ -562,6 +651,159 @@ class TalksReducerGUI:
 
     def _toggle_advanced(self, *, initial: bool = False) -> None:
         self.preference_controller.toggle_advanced(initial=initial)
+
+    def _on_inputs_updated(self) -> None:
+        """Refresh the Cut video range/preview when the input queue changes."""
+
+        if not getattr(self, "cut_enabled_var", None):
+            return
+        if self.cut_enabled_var.get():
+            self._update_cut_range_for_input()
+            self._on_cut_slider_change("start")
+
+    def _toggle_cut_panel(self) -> None:
+        """Show or hide the Cut video panel based on ``cut_enabled_var``."""
+
+        panel = getattr(self, "cut_panel", None)
+        if panel is None:
+            return
+        if self.cut_enabled_var.get():
+            panel.grid()
+            self._update_cut_range_for_input()
+            self._on_cut_slider_change("end")
+        else:
+            panel.grid_remove()
+        self._update_cut_convert_button()
+
+    def _on_cut_slider_change(self, which: str) -> None:
+        """Clamp the start/end handles and mirror them into the text entries.
+
+        ``start`` is never allowed past ``end`` (when an end is set) and ``end``
+        never below ``start``; the entry fields mirror the handles as
+        ``HH:MM:SS.mmm`` so the value can be edited by hand.
+        """
+
+        try:
+            start = float(self.cut_start_var.get())
+            end = float(self.cut_end_var.get())
+        except (TypeError, ValueError):
+            return
+
+        if which == "start" and end > 0 and start > end:
+            start = end
+            self.cut_start_var.set(start)
+        elif which == "end" and end > 0 and end < start:
+            end = start
+            self.cut_end_var.set(end)
+
+        self._refresh_cut_entry_text("start")
+        self._refresh_cut_entry_text("end")
+
+    def _refresh_cut_entry_text(self, which: str) -> None:
+        """Update a cut entry's text from its slider value unless it has focus."""
+
+        if which == "start":
+            text_var = getattr(self, "cut_start_text_var", None)
+            entry = getattr(self, "cut_start_entry", None)
+            value = float(self.cut_start_var.get())
+        else:
+            text_var = getattr(self, "cut_end_text_var", None)
+            entry = getattr(self, "cut_end_entry", None)
+            value = float(self.cut_end_var.get())
+        if text_var is None:
+            return
+        # Avoid clobbering text the user is actively typing into the entry.
+        if entry is not None:
+            with suppress(Exception):
+                if entry.focus_get() is entry:
+                    return
+        text_var.set(format_timecode(value, milliseconds=True))
+
+    def _on_cut_entry_commit(self, which: str) -> None:
+        """Parse a manually-typed timecode into the matching slider handle."""
+
+        text_var = (
+            self.cut_start_text_var if which == "start" else self.cut_end_text_var
+        )
+        raw = text_var.get().strip()
+        try:
+            seconds = parse_timecode(raw)
+        except (ValueError, TypeError):
+            # Reject malformed input by restoring the current handle value.
+            self._refresh_cut_entry_text(which)
+            return
+
+        duration = getattr(self, "_cut_duration", 0.0)
+        if duration > 0:
+            seconds = min(seconds, duration)
+        seconds = round(seconds, 3)
+
+        if which == "start":
+            self.cut_start_var.set(seconds)
+        else:
+            self.cut_end_var.set(seconds)
+        self._on_cut_slider_change(which)
+
+    def _update_cut_convert_button(self) -> None:
+        """Show the **Convert** button only for the Advanced cut workflow.
+
+        When Cut video is enabled and Simple mode is off the conversion must wait
+        for an explicit click, so the button is revealed; otherwise it is hidden
+        (Simple mode auto-converts and the Advanced Run button covers the rest).
+        """
+
+        button = getattr(self, "cut_convert_button", None)
+        if button is None:
+            return
+        show = self.cut_enabled_var.get() and not self.simple_mode_var.get()
+        if show:
+            button.grid()
+        else:
+            button.grid_remove()
+
+    def _update_cut_range_for_input(self) -> None:
+        """Set the slider range from the duration of the first queued input."""
+
+        if not self.input_files:
+            return
+        try:
+            from ..ffmpeg import get_video_duration
+        except Exception:  # pragma: no cover - defensive import guard
+            return
+
+        duration = 0.0
+        try:
+            duration = float(get_video_duration(self.input_files[0]))
+        except Exception:
+            duration = 0.0
+
+        self._cut_duration = duration
+        for slider in (
+            getattr(self, "cut_start_slider", None),
+            getattr(self, "cut_end_slider", None),
+        ):
+            if slider is not None:
+                with suppress(Exception):
+                    slider.configure(to=duration)
+
+        # Clamp any stale handle values (e.g. persisted from a longer video)
+        # into the new ``0..duration`` range so the forwarded trim cannot start
+        # or end past EOF, which the pipeline would otherwise silently ignore.
+        # A start handle at or past the new EOF is meaningless, so reset it to
+        # the beginning rather than to ``duration``; otherwise both handles
+        # could collapse onto EOF and produce an empty (``end <= start``) range
+        # that ``_collect_arguments`` rejects on Run.
+        if duration > 0:
+            with suppress(TypeError, ValueError):
+                if float(self.cut_end_var.get()) > duration:
+                    self.cut_end_var.set(round(duration, 1))
+            with suppress(TypeError, ValueError):
+                if float(self.cut_start_var.get()) >= duration:
+                    self.cut_start_var.set(0.0)
+
+        # Default the end handle to the full duration the first time we learn it.
+        if duration > 0 and float(self.cut_end_var.get()) <= 0:
+            self.cut_end_var.set(round(duration, 1))
 
     def _check_for_updates(self) -> None:
         """Check for updates from GitHub releases."""
@@ -847,6 +1089,9 @@ class TalksReducerGUI:
     def _on_open_after_convert_change(self, *_: object) -> None:
         self.preference_controller.on_open_after_convert_change(*_)
 
+    def _on_cut_change(self, *_: object) -> None:
+        self.preference_controller.on_cut_change(*_)
+
     def _on_video_codec_change(self, *_: object) -> None:
         self.preference_controller.on_video_codec_change(*_)
 
@@ -883,6 +1128,51 @@ class TalksReducerGUI:
 
     def _configure_drop_targets(self, widget) -> None:
         self.inputs.configure_drop_targets(widget)
+
+    def _apply_cli_settings(self, settings: dict) -> None:
+        """Apply CLI-provided options to the matching GUI controls.
+
+        Used by the file-association launch path so a shortcut such as
+        ``talks-reducer.exe --small --silent-speed 5`` pre-seeds the GUI controls
+        with the requested settings before processing the dropped file.
+        """
+
+        if not settings:
+            return
+
+        if "small" in settings:
+            self.small_var.set(bool(settings["small"]))
+        if "small_480" in settings:
+            self.small_480_var.set(bool(settings["small_480"]))
+        if "silent_speed" in settings:
+            self.silent_speed_var.set(float(settings["silent_speed"]))
+        if "sounded_speed" in settings:
+            self.sounded_speed_var.set(float(settings["sounded_speed"]))
+        if "silent_threshold" in settings:
+            self.silent_threshold_var.set(float(settings["silent_threshold"]))
+        if "frame_spreadage" in settings:
+            self.frame_margin_var.set(_format_seed_number(settings["frame_spreadage"]))
+        if "sample_rate" in settings:
+            self.sample_rate_var.set(_format_seed_number(settings["sample_rate"]))
+        if "keyframe_interval_seconds" in settings:
+            self.keyframe_interval_var.set(float(settings["keyframe_interval_seconds"]))
+        if "video_codec" in settings:
+            codec_value = str(settings["video_codec"]).strip().lower()
+            if codec_value in {"h264", "hevc", "av1"}:
+                self.video_codec_var.set(codec_value)
+        if "add_codec_suffix" in settings:
+            self.add_codec_suffix_var.set(bool(settings["add_codec_suffix"]))
+        if "prefer_global_ffmpeg" in settings:
+            self.use_global_ffmpeg_var.set(bool(settings["prefer_global_ffmpeg"]))
+        if "optimize" in settings:
+            self.optimize_var.set(bool(settings["optimize"]))
+        if "output_file" in settings:
+            self.output_var.set(str(settings["output_file"]))
+        if "temp_folder" in settings:
+            self.temp_var.set(str(settings["temp_folder"]))
+        if "server_url" in settings:
+            self.server_url_var.set(str(settings["server_url"]))
+            self.processing_mode_var.set("remote")
 
     def _populate_initial_inputs(
         self, inputs: Sequence[str], *, auto_run: bool = False
@@ -1012,6 +1302,17 @@ class TalksReducerGUI:
             args["small"] = True
             if self.small_480_var.get():
                 args["small_target_height"] = 480
+        # Cut video is an Advanced-only feature; Simple mode never trims even if
+        # the flag persisted from a previous Advanced session.
+        if self.cut_enabled_var.get() and not self.simple_mode_var.get():
+            cut_start = float(self.cut_start_var.get())
+            cut_end = float(self.cut_end_var.get())
+            if cut_end and cut_end <= cut_start:
+                raise ValueError(
+                    "Cut end must be greater than cut start (or 0 for end of video)."
+                )
+            args["cut_start_seconds"] = round(cut_start, 3)
+            args["cut_end_seconds"] = round(cut_end, 3)
         return args
 
     def _process_files_via_server(
@@ -1113,7 +1414,16 @@ class TalksReducerGUI:
             self._audio_progress_steps_completed / self.AUDIO_PROGRESS_STEPS * 100
         )
         percentage = (audio_percentage / 100.0) * self.AUDIO_PROGRESS_WEIGHT
-        self._set_progress(percentage)
+        # The synthetic timer only fills the 0-5% band. Route the bump through
+        # the monotonic clamp so it can never drag the bar backwards once real
+        # extraction or audio-processing progress has advanced past it. Reading
+        # ``progress_var`` directly is unsafe: real progress raises
+        # ``_progress_floor`` synchronously but applies the Tk variable through a
+        # queued ``_set_progress`` callback, so this timer — already scheduled in
+        # the event loop — could observe a stale, lower value (e.g. ``0``) and
+        # queue a bump that lands after the real update, snapping the bar back.
+        # Clamping against ``_progress_floor`` keeps the real progress instead.
+        self._set_progress_monotonic(percentage)
         self._set_status("processing", f"Audio processing: {audio_percentage:.1f}%")
 
         if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
@@ -1155,11 +1465,201 @@ class TalksReducerGUI:
             self._audio_progress_interval_ms = None
             if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
                 self._audio_progress_steps_completed = self.AUDIO_PROGRESS_STEPS
-                current_value = float(self.progress_var.get())
-                if current_value < self.AUDIO_PROGRESS_WEIGHT:
-                    self._set_progress(self.AUDIO_PROGRESS_WEIGHT)
+                # Route the floor bump through the monotonic clamp rather than a
+                # stale ``progress_var`` read. ``_complete`` already runs inside a
+                # ``root.after`` callback, so a plain ``_set_progress`` here would
+                # schedule a *second* nested update that can land after a higher
+                # final-encode value queued earlier in the same batch (callers
+                # invoke ``_complete_audio_phase`` immediately before pushing a
+                # frame/time percentage), snapping the bar backwards — e.g.
+                # 35% -> 5%. Clamping against ``_progress_floor`` — the synchronous
+                # source of truth raised by the structured progress channel — keeps
+                # the audio-phase floor at ``AUDIO_PROGRESS_WEIGHT`` without ever
+                # undercutting real progress.
+                self._set_progress_monotonic(self.AUDIO_PROGRESS_WEIGHT)
 
         self._schedule_on_ui_thread(_complete)
+
+    def _apply_stage_transition(self, desc: str) -> None:
+        """Stop the synthetic audio timer when real stage progress arrives.
+
+        The synthetic ``Audio processing:`` timer is only a fallback for when the
+        pipeline cannot report real audio progress. Every structured progress
+        channel — the local pipeline reporter, the remote streaming callback, and
+        the log-parsed ``Task: NN%`` milestones — routes its stage label through
+        this helper so the fallback timer never keeps overwriting the status with
+        synthetic percentages after real progress has begun. Real
+        ``Audio processing:`` progress cancels the timer, while ``Generating
+        final`` progress completes the audio phase outright.
+        """
+
+        normalized = (desc or "").strip().lower()
+        if normalized.startswith("generating final"):
+            self._complete_audio_phase()
+        elif normalized.startswith("audio processing"):
+            self._cancel_audio_progress()
+
+    def _begin_download_wait(self) -> None:
+        """Show a refreshing "Waiting for download…" status before the download.
+
+        After the remote pipeline finishes generating the final video the server
+        spends several seconds finalizing the file before the download stream
+        begins, emitting no progress events in between. Without a heartbeat the
+        GUI would sit silently at the last processing status for that whole gap.
+        Emit the waiting status immediately and re-emit it on a repeating timer
+        until :meth:`_cancel_download_wait` stops it (on the first downloaded
+        bytes, on error, or on a stop request).
+
+        ``_download_wait_active`` is the synchronous source of truth for whether
+        a wait is wanted. Both this method and :meth:`_cancel_download_wait` run
+        on the background worker thread, while ``_start``/``_emit_download_wait``
+        run later on the Tk thread. Setting the flag synchronously here (and
+        clearing it synchronously in the cancel) means a cancellation that races
+        ahead of the queued ``_start`` — e.g. the first ``"Downloading:"`` event
+        or the post-``send_video`` cleanup arriving before Tk processes the
+        start — invalidates the pending start instead of arming a stale timer.
+        """
+
+        self._download_wait_active = True
+
+        def _start() -> None:
+            if not self._download_wait_active:
+                return
+            if self._download_wait_job is not None:
+                self.root.after_cancel(self._download_wait_job)
+                self._download_wait_job = None
+            self._emit_download_wait()
+
+        self._schedule_on_ui_thread(_start)
+
+    def _emit_download_wait(self) -> None:
+        """Emit the waiting status and reschedule the next refresh."""
+
+        if not self._download_wait_active:
+            return
+        self._download_wait_job = None
+        self._set_status("processing", self.DOWNLOAD_WAIT_STATUS)
+        self._download_wait_job = self.root.after(
+            self.DOWNLOAD_WAIT_INTERVAL_MS, self._emit_download_wait
+        )
+
+    def _cancel_download_wait(self) -> None:
+        """Stop the "Waiting for download…" heartbeat timer if it is running.
+
+        Clear ``_download_wait_active`` synchronously so a start still queued on
+        the Tk thread (but not yet run) is invalidated, then queue the timer
+        teardown. Always queueing the teardown — even when ``_download_wait_job``
+        is currently ``None`` — is what closes the race: the job handle may still
+        be ``None`` simply because the queued ``_start`` has not run yet.
+        """
+
+        self._download_wait_active = False
+
+        def _cancel() -> None:
+            if self._download_wait_job is not None:
+                self.root.after_cancel(self._download_wait_job)
+                self._download_wait_job = None
+
+        self._schedule_on_ui_thread(_cancel)
+
+    def _start_activity_log(self) -> None:
+        """Begin polling the managed server's ``/activity`` endpoint.
+
+        The poll loop only runs when the GUI is started under a managed server
+        (``--server-managed``) with a known local URL; in standalone mode this is
+        a no-op so the normal GUI never touches the network.
+        """
+
+        if not (self.server_managed and self.local_server_url):
+            return
+        if self._activity_poll_job is not None:
+            return
+        self._poll_activity()
+
+    def _poll_activity(self) -> None:
+        """Fetch recent activity on a worker thread without blocking the UI."""
+
+        self._activity_poll_job = None
+        url = self.local_server_url
+        if not (self.server_managed and url):
+            return
+
+        def worker() -> None:
+            payload = self._fetch_activity(url)
+            self._schedule_on_ui_thread(lambda: self._finish_activity_poll(payload))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_activity_poll(self, payload: Optional[dict]) -> None:
+        """Render the fetched *payload* (if any) and schedule the next poll."""
+
+        if payload is not None:
+            server = payload.get("server")
+            if isinstance(server, dict):
+                server_url = server.get("url")
+                if isinstance(server_url, str) and server_url:
+                    self._update_local_server_url_display(server_url)
+            self._render_activity(payload.get("entries", []))
+        if self.server_managed and self.local_server_url:
+            self._activity_poll_job = self.root.after(
+                self.ACTIVITY_POLL_INTERVAL_MS, self._poll_activity
+            )
+
+    def _fetch_activity(self, url: str) -> Optional[dict]:
+        """Return the ``/activity`` JSON payload from *url*, or ``None`` on failure.
+
+        Network and parsing errors are swallowed so an unreachable server simply
+        skips one render without crashing or spamming the log. The payload is the
+        ``{"server": {...}, "entries": [...]}`` mapping; an absent or non-list
+        ``entries`` is normalised to an empty list.
+        """
+
+        endpoint = url.rstrip("/") + "/activity"
+        try:
+            with urllib.request.urlopen(endpoint, timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        if not isinstance(payload.get("entries"), list):
+            payload["entries"] = []
+        return payload
+
+    def _render_activity(self, entries: list) -> None:
+        """Render activity *entries* into the read-only activity panel."""
+
+        widget = getattr(self, "activity_text", None)
+        if widget is None:
+            return
+
+        lines = [layout_helpers.format_activity_line(entry) for entry in entries]
+        text = "\n".join(lines)
+        widget.configure(state=self.tk.NORMAL)
+        widget.delete("1.0", self.tk.END)
+        if text:
+            widget.insert(self.tk.END, text + "\n")
+        widget.see(self.tk.END)
+        widget.configure(state=self.tk.DISABLED)
+
+    def _stop_activity_log(self) -> None:
+        """Cancel the activity poll timer if one is scheduled."""
+
+        if self._activity_poll_job is None:
+            return
+        try:
+            self.root.after_cancel(self._activity_poll_job)
+        except Exception:  # pragma: no cover - defensive safeguard
+            pass
+        self._activity_poll_job = None
+
+    def _on_close(self) -> None:
+        """Cancel background timers before destroying the window."""
+
+        self._closing = True
+        self._stop_activity_log()
+        self._cancel_download_wait()
+        self.root.destroy()
 
     def _get_status_style(self, status: str) -> str | None:
         """Return the foreground color for *status* if a match is known."""
@@ -1306,6 +1806,38 @@ class TalksReducerGUI:
 
         self.root.after(0, updater)
 
+    def _set_progress_monotonic(self, percentage: float) -> None:
+        """Update the progress bar without ever moving it backwards.
+
+        Streamed pipeline progress is mapped into stable percentage bands, but a
+        stage that restarts at zero — most notably the final encode falling back
+        to the CPU encoder after a GPU failure — re-enters its band at the start
+        and would otherwise drag the bar behind a value an earlier frame already
+        reached. Clamping against a dedicated per-file floor keeps the bar
+        monotonic within a single file while still allowing
+        :meth:`_reset_progress_baseline` to re-base it for the next file in a
+        batch. The floor is tracked synchronously rather than read back from the
+        Tkinter variable so a background worker thread cannot observe a stale
+        value mid-update.
+        """
+
+        value = min(100.0, max(self._progress_floor, float(percentage)))
+        self._progress_floor = value
+        self._set_progress(value)
+
+    def _reset_progress_baseline(self) -> None:
+        """Re-base the monotonic progress bar so the next file starts at zero.
+
+        The monotonic clamp in :meth:`_set_progress_monotonic` must not carry the
+        previous file's completed value into the next file of a batch, otherwise
+        every file after the first would stay pinned at 100%. Resetting the floor
+        and the visible bar lets each file report progress from the start of its
+        own range.
+        """
+
+        self._progress_floor = 0.0
+        self._set_progress(0.0)
+
     def _set_progress_bar_style(self, status: str) -> None:
         """Update the progress bar color based on status."""
 
@@ -1331,7 +1863,13 @@ class TalksReducerGUI:
         self.root.after(0, updater)
 
     def _schedule_on_ui_thread(self, callback: Callable[[], None]) -> None:
-        self.root.after(0, callback)
+        # A daemon worker (e.g. the activity poller blocked in ``urlopen``) can
+        # return after the window is destroyed; calling ``after`` on a dead Tk
+        # root would raise from the worker thread, so drop the callback instead.
+        if self._closing:
+            return
+        with suppress(Exception):
+            self.root.after(0, callback)
 
     def run(self) -> None:
         """Start the Tkinter event loop."""
@@ -1351,6 +1889,7 @@ __all__ = [
     "_parse_encode_target_duration",
     "_parse_video_duration_seconds",
     "_parse_ffmpeg_progress",
+    "_parse_task_percent",
     "_is_encode_total_frames_unknown",
     "_is_encode_target_duration_unknown",
 ]
@@ -1364,5 +1903,6 @@ _parse_current_frame = parse_current_frame
 _parse_encode_target_duration = parse_encode_target_duration
 _parse_video_duration_seconds = parse_video_duration_seconds
 _parse_ffmpeg_progress = parse_ffmpeg_progress
+_parse_task_percent = parse_task_percent
 _is_encode_total_frames_unknown = is_encode_total_frames_unknown
 _is_encode_target_duration_unknown = is_encode_target_duration_unknown

@@ -142,6 +142,63 @@ def test_process_audio_chunks_applies_envelope_and_updates_timings(
     assert updated_chunks == [[0, 2, 0, 2], [2, 3, 2, 3], [3, 3, 3, 3]]
 
 
+def test_process_audio_chunks_reports_incremental_progress(
+    synthetic_audio_samples, prepared_chunks, fake_phase_vocoder
+):
+    """An optional progress callback should fire once per processed chunk."""
+
+    stereo_audio = synthetic_audio_samples["stereo"]
+    chunk_outputs = [
+        np.array(
+            [
+                [1.0, 2.0],
+                [3.0, 4.0],
+                [5.0, 6.0],
+                [7.0, 8.0],
+            ],
+            dtype=np.float32,
+        ),
+        np.array([[2.0, -2.0]], dtype=np.float32),
+    ]
+
+    fake_phase_vocoder(chunk_outputs)
+
+    increments: list[int] = []
+
+    audio.process_audio_chunks(
+        stereo_audio,
+        prepared_chunks,
+        samples_per_frame=2.0,
+        speeds=[1.0, 0.5],
+        audio_fade_envelope_size=2,
+        max_audio_volume=2.0,
+        progress_callback=increments.append,
+    )
+
+    # One increment per chunk: source samples consumed are 4, 2 and 0
+    # (the final zero-length chunk reports 0 rather than a negative count).
+    assert increments == [4, 2, 0]
+    assert all(value >= 0 for value in increments)
+
+
+def test_process_audio_chunks_progress_callback_not_called_for_empty():
+    """Empty inputs should complete cleanly without invoking the callback."""
+
+    increments: list[int] = []
+
+    audio.process_audio_chunks(
+        np.zeros((0,), dtype=np.float32),
+        [],
+        samples_per_frame=1.0,
+        speeds=[],
+        audio_fade_envelope_size=4,
+        max_audio_volume=1.0,
+        progress_callback=increments.append,
+    )
+
+    assert increments == []
+
+
 def test_get_max_volume_for_positive_samples(synthetic_audio_samples):
     """The maximum amplitude should match the highest positive sample value."""
 

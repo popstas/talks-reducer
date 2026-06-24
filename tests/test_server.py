@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from queue import SimpleQueue
@@ -144,7 +145,7 @@ def test_describe_server_host_prefers_hostname_and_ip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(server.socket, "gethostname", lambda: "talks-reducer-host")
-    monkeypatch.setattr(server.socket, "gethostbyname", lambda _host: "192.0.2.15")
+    monkeypatch.setattr(server, "_resolve_host_ip", lambda: "192.0.2.15")
 
     assert server._describe_server_host() == "talks-reducer-host (192.0.2.15)"
 
@@ -153,11 +154,7 @@ def test_describe_server_host_handles_lookup_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(server.socket, "gethostname", lambda: "")
-
-    def _explode(_host: str) -> str:
-        raise OSError("no network")
-
-    monkeypatch.setattr(server.socket, "gethostbyname", _explode)
+    monkeypatch.setattr(server, "_resolve_host_ip", lambda: "")
 
     assert server._describe_server_host() == "unknown"
 
@@ -332,6 +329,64 @@ def test_process_video_streams_events_and_returns_result(tmp_path: Path) -> None
     assert progress_widget.calls[-1] == (1.0, 10, "Encode")
 
 
+def test_process_video_logs_upload_receipt(tmp_path: Path) -> None:
+    """The first streamed update should announce the received upload."""
+
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"0123456789")
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        with reporter.task(desc="Encode", total=10, unit="frames") as task:
+            task.advance(10)
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or options.input_file,
+            frame_rate=24.0,
+            original_duration=120.0,
+            output_duration=30.0,
+            chunk_count=5,
+            used_cuda=False,
+            max_audio_volume=0.6,
+            time_ratio=0.25,
+            size_ratio=0.3,
+        )
+
+    dependencies = server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                progress=None,
+                dependencies=dependencies,
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+
+    first_log = outputs[0][1]
+    assert "Upload received" in first_log
+    assert "clip.mp4" in first_log
+    assert "10 B" in first_log
+
+    final_log = outputs[-1][1]
+    assert "Upload received" in final_log
+
+
+def test_format_file_size_uses_human_readable_units() -> None:
+    assert server._format_file_size(0) == "0 B"
+    assert server._format_file_size(512) == "512 B"
+    assert server._format_file_size(1536) == "1.5 KB"
+    assert server._format_file_size(5 * 1024 * 1024) == "5.0 MB"
+
+
 def test_process_video_honors_small_480_flag(tmp_path: Path) -> None:
     input_file = tmp_path / "clip.mp4"
     input_file.write_bytes(b"data")
@@ -409,15 +464,18 @@ def test_process_video_honors_add_codec_suffix(tmp_path: Path) -> None:
         start_in_thread=False,
     )
 
-    outputs = list(
-        server.process_video(
-            str(input_file),
-            small_video=False,
-            video_codec="h264",
-            add_codec_suffix=True,
-            dependencies=dependencies,
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                video_codec="h264",
+                add_codec_suffix=True,
+                dependencies=dependencies,
+            )
         )
-    )
+    finally:
+        server._cleanup_workspaces()
 
     assert outputs
     final = outputs[-1]
@@ -454,16 +512,19 @@ def test_process_video_without_speedup_forces_codec(tmp_path: Path) -> None:
         start_in_thread=False,
     )
 
-    outputs = list(
-        server.process_video(
-            str(input_file),
-            small_video=False,
-            video_codec="av1",
-            silent_speed=1.0,
-            sounded_speed=1.0,
-            dependencies=dependencies,
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                video_codec="av1",
+                silent_speed=1.0,
+                sounded_speed=1.0,
+                dependencies=dependencies,
+            )
         )
-    )
+    finally:
+        server._cleanup_workspaces()
 
     assert outputs
     final = outputs[-1]
@@ -498,14 +559,17 @@ def test_process_video_honors_use_global_ffmpeg(tmp_path: Path) -> None:
         start_in_thread=False,
     )
 
-    outputs = list(
-        server.process_video(
-            str(input_file),
-            small_video=False,
-            use_global_ffmpeg=True,
-            dependencies=dependencies,
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                use_global_ffmpeg=True,
+                dependencies=dependencies,
+            )
         )
-    )
+    finally:
+        server._cleanup_workspaces()
 
     assert outputs[-1][0] is not None
 
@@ -617,6 +681,154 @@ def test_process_video_validates_input_arguments(tmp_path: Path) -> None:
 
     with pytest.raises(gr.Error, match="no longer available"):
         list(server.process_video(str(missing_path), small_video=False))
+
+
+def _trim_capturing_dependencies(
+    captured: dict,
+) -> "server.ProcessVideoDependencies":
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        captured["cut_start_seconds"] = options.cut_start_seconds
+        captured["cut_end_seconds"] = options.cut_end_seconds
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or options.input_file,
+            frame_rate=24.0,
+            original_duration=120.0,
+            output_duration=30.0,
+            chunk_count=5,
+            used_cuda=False,
+            max_audio_volume=0.6,
+            time_ratio=0.25,
+            size_ratio=0.3,
+        )
+
+    return server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+
+
+def test_process_video_honors_trim_when_enabled(tmp_path: Path) -> None:
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+
+    captured: dict = {}
+    dependencies = _trim_capturing_dependencies(captured)
+
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                cut_enabled=True,
+                cut_start_seconds=10.0,
+                cut_end_seconds=60.0,
+                progress=None,
+                dependencies=dependencies,
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+
+    assert outputs
+    assert captured["cut_start_seconds"] == pytest.approx(10.0)
+    assert captured["cut_end_seconds"] == pytest.approx(60.0)
+
+
+def test_process_video_ignores_trim_when_disabled(tmp_path: Path) -> None:
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+
+    captured: dict = {}
+    dependencies = _trim_capturing_dependencies(captured)
+
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                cut_enabled=False,
+                cut_start_seconds=10.0,
+                cut_end_seconds=60.0,
+                progress=None,
+                dependencies=dependencies,
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+
+    assert outputs
+    assert captured["cut_start_seconds"] == pytest.approx(0.0)
+    assert captured["cut_end_seconds"] == pytest.approx(0.0)
+
+
+def test_build_interface_exposes_cut_video_components() -> None:
+    """The web UI should expose the Cut video checkbox and start/end inputs."""
+
+    demo = server.build_interface()
+    process_fns = [
+        fn for fn in demo.fns.values() if getattr(fn, "name", "") == "process_video"
+    ]
+    assert process_fns, "process_video handler not registered on demo"
+    registered_inputs = list(process_fns[0].inputs or [])
+    labels = [getattr(component, "label", None) for component in registered_inputs]
+
+    assert "Cut video" in labels
+    assert "Cut start (seconds)" in labels
+    assert "Cut end (seconds)" in labels
+
+
+def test_build_interface_inputs_align_with_process_video_signature() -> None:
+    """Guard against positional mismatch between the Gradio inputs list and
+    ``process_video``'s signature. A missing component would shift every
+    subsequent argument by one slot and cause values to be validated against
+    the wrong component's constraints (e.g. silent_threshold=0.01 rejected by
+    sounded_speed slider with minimum=0.5)."""
+
+    import inspect
+
+    sig = inspect.signature(server.process_video)
+    expected_params = [
+        name
+        for name, param in sig.parameters.items()
+        if param.kind
+        in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+        and name != "progress"
+    ]
+
+    demo = server.build_interface()
+    process_fns = [
+        fn for fn in demo.fns.values() if getattr(fn, "name", "") == "process_video"
+    ]
+    assert process_fns, "process_video handler not registered on demo"
+    handler = process_fns[0]
+    registered_inputs = list(handler.inputs or [])
+
+    assert len(registered_inputs) == len(expected_params), (
+        f"Gradio inputs list has {len(registered_inputs)} components but "
+        f"process_video expects {len(expected_params)} positional parameters "
+        f"({expected_params})."
+    )
+
+    sounded_speed_index = expected_params.index("sounded_speed")
+    sounded_slider = registered_inputs[sounded_speed_index]
+    assert getattr(sounded_slider, "label", None) == "Sounded speed", (
+        "Positional mismatch: the component at the sounded_speed slot does "
+        "not have the expected 'Sounded speed' label."
+    )
+
+    silent_threshold_index = expected_params.index("silent_threshold")
+    silent_slider = registered_inputs[silent_threshold_index]
+    assert getattr(silent_slider, "label", None) == "Silent threshold", (
+        "Positional mismatch: the component at the silent_threshold slot "
+        "does not have the expected 'Silent threshold' label."
+    )
 
 
 def test_favicon_filenames_prefer_available_png() -> None:
@@ -764,3 +976,467 @@ def test_normalize_local_url_rewrites_wildcard_host() -> None:
         "http://192.0.2.1:9005/", "192.0.2.1", 9005
     )
     assert unchanged == "http://192.0.2.1:9005/"
+
+
+def _run_asgi(app, scope, messages):
+    """Drive an ASGI *app* with queued receive *messages*; capture sent events."""
+
+    import asyncio
+
+    sent: list[dict] = []
+    queue = list(messages)
+
+    async def receive() -> dict:
+        return queue.pop(0)
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    asyncio.run(app(scope, receive, send))
+    return sent
+
+
+def test_transfer_middleware_logs_upload_progress() -> None:
+    logs: list[str] = []
+
+    async def downstream(scope, receive, send):
+        # Drain the request body the way gradio's upload route would.
+        more = True
+        while more:
+            message = await receive()
+            more = message.get("more_body", False)
+
+    middleware = server.TransferProgressMiddleware(
+        downstream, log=logs.append, step_percent=50
+    )
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/gradio_api/upload",
+        "headers": [(b"content-length", b"10")],
+    }
+    messages = [
+        {"type": "http.request", "body": b"01234", "more_body": True},
+        {"type": "http.request", "body": b"56789", "more_body": False},
+    ]
+
+    _run_asgi(middleware, scope, messages)
+
+    assert any("Receiving upload" in line for line in logs)
+    assert any("100%" in line for line in logs)
+
+
+def test_transfer_middleware_logs_download_progress() -> None:
+    logs: list[str] = []
+
+    async def downstream(scope, receive, send):
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-length", b"8")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"abcd", "more_body": True})
+        await send({"type": "http.response.body", "body": b"efgh", "more_body": False})
+
+    middleware = server.TransferProgressMiddleware(
+        downstream, log=logs.append, step_percent=50
+    )
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/gradio_api/file=/tmp/output.mp4",
+        "headers": [],
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    assert any("Sending download output.mp4" in line for line in logs)
+    assert any("100%" in line for line in logs)
+
+
+def test_transfer_middleware_ignores_other_routes() -> None:
+    logs: list[str] = []
+    seen: list[str] = []
+
+    async def downstream(scope, receive, send):
+        seen.append(scope["path"])
+
+    middleware = server.TransferProgressMiddleware(downstream, log=logs.append)
+
+    scope = {"type": "http", "method": "GET", "path": "/", "headers": []}
+    _run_asgi(middleware, scope, [])
+
+    assert seen == ["/"]
+    assert logs == []
+
+
+def test_build_launch_app_kwargs_registers_middleware() -> None:
+    kwargs = server.build_launch_app_kwargs()
+
+    middleware = kwargs.get("middleware")
+    assert middleware, "expected middleware to be registered"
+    assert any(
+        getattr(entry, "cls", None) is server.TransferProgressMiddleware
+        for entry in middleware
+    )
+    assert any(
+        getattr(entry, "cls", None) is server.ActivityMiddleware for entry in middleware
+    )
+
+
+def test_activity_recorder_records_and_respects_maxlen() -> None:
+    recorder = server.ActivityRecorder(maxlen=3)
+
+    for index in range(5):
+        recorder.record(f"10.0.0.{index}", "upload", timestamp=float(index))
+
+    entries = recorder.snapshot()
+    assert len(entries) == 3
+    assert [entry.client_ip for entry in entries] == [
+        "10.0.0.2",
+        "10.0.0.3",
+        "10.0.0.4",
+    ]
+    assert all(entry.action == "upload" for entry in entries)
+    assert entries[-1].timestamp == 4.0
+
+
+def test_activity_recorder_clear_empties_entries() -> None:
+    recorder = server.ActivityRecorder(maxlen=5)
+    recorder.record("10.0.0.1", "download")
+
+    recorder.clear()
+
+    assert recorder.snapshot() == []
+
+
+def test_activity_middleware_records_upload_with_client_ip() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+    seen: list[str] = []
+
+    async def downstream(scope, receive, send):
+        seen.append(scope["path"])
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/gradio_api/upload",
+        "headers": [],
+        "client": ("203.0.113.7", 51234),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    assert seen == ["/gradio_api/upload"]
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.client_ip == "203.0.113.7"
+    assert entry.action == "upload"
+    assert isinstance(entry.timestamp, float)
+    assert entry.timestamp > 0
+
+
+def test_activity_middleware_records_download_and_uses_forwarded_for() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    async def downstream(scope, receive, send):
+        return None
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/gradio_api/file=/tmp/output.mp4",
+        "headers": [(b"x-forwarded-for", b"198.51.100.9, 10.0.0.1")],
+        "client": ("10.0.0.1", 6000),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    assert entries[0].client_ip == "198.51.100.9"
+    assert entries[0].action == "download"
+
+
+def test_activity_middleware_ignores_unrelated_routes() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+    seen: list[str] = []
+
+    async def downstream(scope, receive, send):
+        seen.append(scope["path"])
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "client": ("10.0.0.1", 7000),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    assert seen == ["/"]
+    assert recorder.snapshot() == []
+
+
+def test_classify_activity_maps_known_requests() -> None:
+    assert server._classify_activity("POST", "/gradio_api/upload") == "upload"
+    assert server._classify_activity("POST", "/gradio_api/upload/") == "upload"
+    assert (
+        server._classify_activity("GET", "/gradio_api/file=/tmp/out.mp4") == "download"
+    )
+    assert (
+        server._classify_activity("POST", "/gradio_api/call/process_video") == "process"
+    )
+    assert server._classify_activity("POST", "/gradio_api/queue/join") == "process"
+    assert server._classify_activity("POST", "/gradio_api/queue/join/") == "process"
+    assert server._classify_activity("GET", "/gradio_api/queue/data") is None
+    assert server._classify_activity("GET", "/") is None
+    assert server._classify_activity("POST", "/gradio_api/other") is None
+
+
+def test_activity_middleware_records_process() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    async def downstream(scope, receive, send):
+        return None
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/gradio_api/call/process_video",
+        "headers": [],
+        "client": ("203.0.113.7", 51234),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    assert entries[0].action == "process"
+    assert entries[0].client_ip == "203.0.113.7"
+
+
+def test_activity_middleware_records_queued_process() -> None:
+    """Queued submissions hit ``queue/join`` and must record a ``process``."""
+
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    async def downstream(scope, receive, send):
+        return None
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/gradio_api/queue/join",
+        "headers": [],
+        "client": ("203.0.113.9", 51200),
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    assert entries[0].action == "process"
+    assert entries[0].client_ip == "203.0.113.9"
+
+
+def test_activity_middleware_passes_through_non_http() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+    seen: list[str] = []
+
+    async def downstream(scope, receive, send):
+        seen.append(scope["type"])
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    _run_asgi(middleware, {"type": "lifespan"}, [])
+
+    assert seen == ["lifespan"]
+    assert recorder.snapshot() == []
+
+
+def test_activity_middleware_client_ip_unknown_without_client() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    async def downstream(scope, receive, send):
+        return None
+
+    middleware = server.ActivityMiddleware(downstream, recorder=recorder)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/gradio_api/upload",
+        "headers": [],
+    }
+
+    _run_asgi(middleware, scope, [])
+
+    entries = recorder.snapshot()
+    assert len(entries) == 1
+    assert entries[0].client_ip == "unknown"
+
+
+def test_resolve_host_ip_skips_loopback(monkeypatch) -> None:
+    class _Probe:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def connect(self, address):
+            return None
+
+        def getsockname(self):
+            return ("10.20.30.40", 12345)
+
+    monkeypatch.setattr(server, "_preferred_lan_ip", lambda: "")
+    monkeypatch.setattr(server.socket, "socket", lambda *a, **k: _Probe())
+
+    assert server._resolve_host_ip() == "10.20.30.40"
+
+
+def test_resolve_host_ip_falls_back_when_probe_loopback(monkeypatch) -> None:
+    class _Probe:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def connect(self, address):
+            return None
+
+        def getsockname(self):
+            return ("127.0.0.1", 12345)
+
+    monkeypatch.setattr(server, "_preferred_lan_ip", lambda: "")
+    monkeypatch.setattr(server.socket, "socket", lambda *a, **k: _Probe())
+    monkeypatch.setattr(server.socket, "gethostname", lambda: "host")
+    monkeypatch.setattr(server.socket, "gethostbyname", lambda name: "127.0.1.1")
+
+    assert server._resolve_host_ip() == ""
+
+
+def test_preferred_lan_ip_prefers_192_168_over_vpn_and_docker() -> None:
+    addresses = [
+        "127.0.0.1",
+        "10.8.1.28",  # VPN tunnel
+        "172.18.0.1",  # docker bridge
+        "192.168.1.14",  # LAN
+    ]
+    assert server._preferred_lan_ip(lambda: iter(addresses)) == "192.168.1.14"
+
+
+def test_preferred_lan_ip_returns_empty_without_192_168() -> None:
+    addresses = ["127.0.0.1", "10.8.1.28", "172.18.0.1"]
+    assert server._preferred_lan_ip(lambda: iter(addresses)) == ""
+
+
+def test_resolve_host_ip_prefers_lan_over_probe(monkeypatch) -> None:
+    """A 192.168 interface address wins over the VPN default-route probe."""
+
+    class _Probe:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def connect(self, address):
+            return None
+
+        def getsockname(self):
+            return ("10.8.1.28", 12345)  # VPN tunnel
+
+    monkeypatch.setattr(server, "_preferred_lan_ip", lambda: "192.168.1.14")
+    monkeypatch.setattr(server.socket, "socket", lambda *a, **k: _Probe())
+
+    assert server._resolve_host_ip() == "192.168.1.14"
+
+
+def test_activity_endpoint_returns_entries_and_identity(monkeypatch) -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+    recorder.record("203.0.113.7", "upload", timestamp=1.0)
+    recorder.record("203.0.113.8", "download", timestamp=2.0)
+    # Pin the resolved LAN IP so the asserted URL does not depend on the host's
+    # network configuration.
+    monkeypatch.setattr(server, "_resolve_host_ip", lambda: "192.0.2.5")
+
+    middleware = server.ActivityMiddleware(
+        lambda scope, receive, send: None,
+        recorder=recorder,
+        identity_factory=lambda: "talks-host (192.0.2.5)",
+    )
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/activity",
+        "headers": [],
+        "client": ("203.0.113.9", 8000),
+        "server": ("0.0.0.0", 9005),
+    }
+
+    sent = _run_asgi(middleware, scope, [])
+
+    start = next(msg for msg in sent if msg["type"] == "http.response.start")
+    assert start["status"] == 200
+    assert any(
+        key == b"content-type" and value == b"application/json"
+        for key, value in start["headers"]
+    )
+
+    body = next(msg for msg in sent if msg["type"] == "http.response.body")["body"]
+    payload = json.loads(body.decode("utf-8"))
+
+    assert payload["server"]["identity"] == "talks-host (192.0.2.5)"
+    assert payload["server"]["url"] == "http://192.0.2.5:9005/"
+    assert [entry["action"] for entry in payload["entries"]] == ["upload", "download"]
+    assert payload["entries"][0]["client_ip"] == "203.0.113.7"
+    assert payload["entries"][0]["timestamp"] == 1.0
+
+
+def test_activity_endpoint_handles_empty_recorder() -> None:
+    recorder = server.ActivityRecorder(maxlen=10)
+
+    middleware = server.ActivityMiddleware(
+        lambda scope, receive, send: None,
+        recorder=recorder,
+        identity_factory=lambda: "talks-host",
+    )
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/activity",
+        "headers": [],
+        "client": ("203.0.113.9", 8000),
+    }
+
+    sent = _run_asgi(middleware, scope, [])
+
+    body = next(msg for msg in sent if msg["type"] == "http.response.body")["body"]
+    payload = json.loads(body.decode("utf-8"))
+
+    assert payload["entries"] == []
+    assert payload["server"]["identity"] == "talks-host"
+    # No scope["server"] → URL is omitted rather than guessed incorrectly.
+    assert payload["server"]["url"] is None

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import subprocess
+from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pytest
@@ -27,6 +28,41 @@ class DummyReporter(NullProgressReporter):
 
     def log(self, message: str) -> None:
         self.messages.append(message)
+
+
+class RecordingReporter(DummyReporter):
+    """Records task openings and progress advances for assertions."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tasks: List[tuple] = []
+        self.advances: List[tuple] = []
+
+    def task(self, *, desc: str = "", total: Optional[int] = None, unit: str = ""):
+        self.tasks.append((desc, total, unit))
+        reporter = self
+
+        class _Handle(AbstractContextManager):
+            def __init__(self) -> None:
+                self.current = 0
+
+            def ensure_total(self, total: int) -> None:
+                pass
+
+            def advance(self, amount: int) -> None:
+                self.current += amount
+                reporter.advances.append((desc, amount))
+
+            def finish(self) -> None:
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+        return _Handle()
 
 
 def test_speed_up_video_returns_result(monkeypatch, tmp_path):
@@ -120,6 +156,89 @@ def test_speed_up_video_returns_result(monkeypatch, tmp_path):
     assert result.size_ratio == 1.0
     assert reporter.messages  # progress logs should be collected
     assert ffmpeg_calls == [options.prefer_global_ffmpeg]
+
+
+def test_speed_up_video_reports_audio_processing_progress(monkeypatch, tmp_path):
+    """The pipeline should open an ``Audio processing:`` task and advance it."""
+
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+
+    options = ProcessingOptions(
+        input_file=input_path,
+        temp_folder=tmp_path / "temp",
+        output_file=tmp_path / "output.mp4",
+    )
+
+    reporter = RecordingReporter()
+
+    monkeypatch.setattr(
+        "talks_reducer.pipeline._extract_video_metadata",
+        lambda _input, _frame_rate: {
+            "frame_rate": 30.0,
+            "duration": 2.0,
+            "width": 1920.0,
+            "height": 1080.0,
+        },
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.has_audio_stream",
+        lambda _path: True,
+    )
+
+    def fake_read(_path):
+        return 48000, np.zeros((30, 1), dtype=np.int16)
+
+    monkeypatch.setattr("talks_reducer.pipeline.wavfile.read", fake_read)
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.wavfile.write",
+        lambda path, sample_rate, data: Path(path).write_bytes(b"audio"),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.get_max_volume", lambda _data: 1.0
+    )
+
+    def fake_process(*args, progress_callback=None, **kwargs):
+        if progress_callback is not None:
+            progress_callback(12)
+            progress_callback(18)
+        return (np.zeros((10, 1)), [[0, 10, 0, 10]])
+
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.process_audio_chunks", fake_process
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.detect_loud_frames",
+        lambda *args, **kwargs: np.array([True] * 10),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.build_chunks",
+        lambda *_args, **_kwargs: ([[0, 10, 0]], np.array([True] * 10)),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.get_tree_expression", lambda _chunks: "X"
+    )
+
+    def fake_run(command, *args, **kwargs):
+        if command == "render":
+            options.output_file.write_bytes(b"fake")
+        return None
+
+    dependencies = PipelineDependencies(
+        get_ffmpeg_path=lambda prefer=False: "ffmpeg",
+        check_cuda_available=lambda _path: False,
+        build_extract_audio_command=lambda *args, **kwargs: "extract",
+        build_video_commands=lambda *args, **kwargs: ("render", None, False),
+        run_timed_ffmpeg_command=fake_run,
+    )
+
+    speed_up_video(options, reporter=reporter, dependencies=dependencies)
+
+    assert ("Audio processing:", 30, "samples") in reporter.tasks
+    assert reporter.advances == [
+        ("Audio processing:", 12),
+        ("Audio processing:", 18),
+    ]
 
 
 def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
@@ -354,7 +473,8 @@ def test_speed_up_video_cleans_temp_on_abort(monkeypatch, tmp_path):
     with pytest.raises(ProcessingAborted):
         speed_up_video(options, reporter=reporter, dependencies=dependencies)
 
-    assert not temp_path.exists()
+    assert temp_path.exists()
+    assert list(temp_path.iterdir()) == []
     assert ffmpeg_calls == [options.prefer_global_ffmpeg]
 
 
@@ -536,8 +656,11 @@ def test_small_mode_preserves_lower_resolution(monkeypatch, tmp_path):
     assert any("Keeping original resolution" in msg for msg in reporter.messages)
     assert not any("Scaling down from" in msg for msg in reporter.messages)
 
-    # Read the actual filter graph file that was created
-    filter_graph_path = tmp_path / "temp" / "filterGraph.txt"
+    # Read the actual filter graph file that was created; pipeline now places
+    # intermediates inside a per-job subdirectory under the configured temp folder.
+    job_dirs = list((tmp_path / "temp").glob("job_*"))
+    assert len(job_dirs) == 1
+    filter_graph_path = job_dirs[0] / "filterGraph.txt"
     assert filter_graph_path.exists()
     filter_graph = filter_graph_path.read_text()
     # Filter graph should NOT contain scale filter since we keep original resolution
@@ -633,9 +756,267 @@ def test_small_mode_scales_down_when_larger(monkeypatch, tmp_path):
     # Should scale down from 720p to 480p
     assert any("Scaling down from 720p to 480p" in msg for msg in reporter.messages)
 
-    # Read the actual filter graph file that was created
-    filter_graph_path = tmp_path / "temp" / "filterGraph.txt"
+    # Read the actual filter graph file that was created; pipeline now places
+    # intermediates inside a per-job subdirectory under the configured temp folder.
+    job_dirs = list((tmp_path / "temp").glob("job_*"))
+    assert len(job_dirs) == 1
+    filter_graph_path = job_dirs[0] / "filterGraph.txt"
     assert filter_graph_path.exists()
     filter_graph = filter_graph_path.read_text()
     # Filter graph SHOULD contain scale filter
     assert "scale=-2:480" in filter_graph
+
+
+def _stub_pipeline_externals(monkeypatch, options):
+    """Install the minimal stubs needed to run :func:`speed_up_video` end-to-end."""
+
+    monkeypatch.setattr(
+        "talks_reducer.pipeline._extract_video_metadata",
+        lambda _input, _frame_rate: {
+            "frame_rate": 30.0,
+            "duration": 2.0,
+            "width": 1920.0,
+            "height": 1080.0,
+        },
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.has_audio_stream", lambda _path: True
+    )
+
+    def fake_read(_path):
+        return 48000, np.zeros((30, 1), dtype=np.int16)
+
+    monkeypatch.setattr("talks_reducer.pipeline.wavfile.read", fake_read)
+
+    def fake_write(path, _sample_rate, _data):
+        Path(path).write_bytes(b"audio")
+
+    monkeypatch.setattr("talks_reducer.pipeline.wavfile.write", fake_write)
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.get_max_volume", lambda _data: 1.0
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.process_audio_chunks",
+        lambda *args, **kwargs: (np.zeros((10, 1)), [[0, 10, 0, 10]]),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.detect_loud_frames",
+        lambda *args, **kwargs: np.array([True] * 10),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.build_chunks",
+        lambda *_args, **_kwargs: ([[0, 10, 0]], np.array([True] * 10)),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.get_tree_expression", lambda _chunks: "X"
+    )
+
+    def fake_run(command, *args, **kwargs):
+        if command == "render":
+            options.output_file.write_bytes(b"fake")
+
+    return PipelineDependencies(
+        get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
+        check_cuda_available=lambda _path: False,
+        build_extract_audio_command=lambda *args, **kwargs: "extract",
+        build_video_commands=lambda *args, **kwargs: ("render", None, False),
+        run_timed_ffmpeg_command=fake_run,
+    )
+
+
+def test_speed_up_video_skips_audio_when_speeds_neutral(monkeypatch, tmp_path):
+    """When both speeds are 1.0, the audio processing branch is bypassed."""
+
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"input")
+
+    options = ProcessingOptions(
+        input_file=input_path,
+        temp_folder=tmp_path / "temp",
+        output_file=tmp_path / "output.mp4",
+        silent_speed=1.0,
+        sounded_speed=1.0,
+    )
+
+    monkeypatch.setattr(
+        "talks_reducer.pipeline._extract_video_metadata",
+        lambda _input, _frame_rate: {
+            "frame_rate": 30.0,
+            "duration": 2.0,
+            "frame_count": 60,
+            "width": 1920.0,
+            "height": 1080.0,
+        },
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.has_audio_stream", lambda _path: True
+    )
+
+    def fail_call(name):
+        def _stub(*_args, **_kwargs):
+            raise AssertionError(f"{name} must not be called when both speeds are 1.0")
+
+        return _stub
+
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.wavfile.read", fail_call("wavfile.read")
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.wavfile.write", fail_call("wavfile.write")
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.get_max_volume",
+        fail_call("get_max_volume"),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.audio_utils.process_audio_chunks",
+        fail_call("process_audio_chunks"),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.detect_loud_frames",
+        fail_call("detect_loud_frames"),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.build_chunks",
+        fail_call("build_chunks"),
+    )
+    monkeypatch.setattr(
+        "talks_reducer.pipeline.chunk_utils.get_tree_expression",
+        fail_call("get_tree_expression"),
+    )
+
+    captured_video_kwargs: dict = {}
+
+    def fake_build_video_commands(*args, **kwargs):
+        captured_video_kwargs.update(kwargs)
+        return ("render", None, False)
+
+    def fake_run(command, *args, **kwargs):
+        if command == "render":
+            options.output_file.write_bytes(b"fake")
+
+    extract_calls: List[str] = []
+
+    def fake_build_extract(*args, **kwargs):
+        extract_calls.append("called")
+        return "extract"
+
+    dependencies = PipelineDependencies(
+        get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
+        check_cuda_available=lambda _path: False,
+        build_extract_audio_command=fake_build_extract,
+        build_video_commands=fake_build_video_commands,
+        run_timed_ffmpeg_command=fake_run,
+    )
+
+    reporter = DummyReporter()
+    result = speed_up_video(options, reporter=reporter, dependencies=dependencies)
+
+    assert extract_calls == []
+    assert captured_video_kwargs.get("keep_input_audio") is True
+    assert result.chunk_count == 0
+    assert any("skipping audio processing" in msg for msg in reporter.messages)
+
+
+def test_speed_up_video_preserves_base_temp_folder(monkeypatch, tmp_path):
+    """The configured temp folder is a base directory shared across runs.
+
+    After a successful run the base must still exist and be empty so that a
+    second, concurrent process can create its own job subdirectory without
+    racing the first.
+    """
+
+    base_temp = tmp_path / "shared-temp"
+
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+
+    options = ProcessingOptions(
+        input_file=input_path,
+        temp_folder=base_temp,
+        output_file=tmp_path / "output.mp4",
+    )
+    dependencies = _stub_pipeline_externals(monkeypatch, options)
+
+    speed_up_video(options, reporter=DummyReporter(), dependencies=dependencies)
+
+    assert base_temp.exists()
+    assert list(base_temp.iterdir()) == []
+
+
+def test_speed_up_video_two_runs_share_base_without_collision(monkeypatch, tmp_path):
+    """Two successive runs against the same base temp folder should both succeed."""
+
+    base_temp = tmp_path / "shared-temp"
+
+    input_a = tmp_path / "a.mp4"
+    input_a.write_bytes(b"fake-a")
+    input_b = tmp_path / "b.mp4"
+    input_b.write_bytes(b"fake-b")
+
+    options_a = ProcessingOptions(
+        input_file=input_a,
+        temp_folder=base_temp,
+        output_file=tmp_path / "a-out.mp4",
+    )
+    options_b = ProcessingOptions(
+        input_file=input_b,
+        temp_folder=base_temp,
+        output_file=tmp_path / "b-out.mp4",
+    )
+
+    deps_a = _stub_pipeline_externals(monkeypatch, options_a)
+    speed_up_video(options_a, reporter=DummyReporter(), dependencies=deps_a)
+
+    deps_b = _stub_pipeline_externals(monkeypatch, options_b)
+    speed_up_video(options_b, reporter=DummyReporter(), dependencies=deps_b)
+
+    assert options_a.output_file.exists()
+    assert options_b.output_file.exists()
+    assert base_temp.exists()
+    assert list(base_temp.iterdir()) == []
+
+
+def test_speed_up_video_job_subdir_isolated_between_concurrent_runs(
+    monkeypatch, tmp_path
+):
+    """A second run started while the first still holds its subdir must get a fresh one.
+
+    The first run's cleanup is suppressed so its job directory lingers, simulating
+    a concurrent in-flight process. The second run must still succeed and choose
+    a distinct job directory rather than reusing or clobbering the first.
+    """
+
+    base_temp = tmp_path / "shared-temp"
+
+    input_a = tmp_path / "a.mp4"
+    input_a.write_bytes(b"fake-a")
+    input_b = tmp_path / "b.mp4"
+    input_b.write_bytes(b"fake-b")
+
+    options_a = ProcessingOptions(
+        input_file=input_a,
+        temp_folder=base_temp,
+        output_file=tmp_path / "a-out.mp4",
+    )
+    options_b = ProcessingOptions(
+        input_file=input_b,
+        temp_folder=base_temp,
+        output_file=tmp_path / "b-out.mp4",
+    )
+
+    deps_a = _stub_pipeline_externals(monkeypatch, options_a)
+    deps_a.delete_path = lambda _path: None  # First run's workspace lingers.
+    speed_up_video(options_a, reporter=DummyReporter(), dependencies=deps_a)
+
+    lingering = list(base_temp.glob("job_*"))
+    assert len(lingering) == 1
+
+    deps_b = _stub_pipeline_externals(monkeypatch, options_b)
+    speed_up_video(options_b, reporter=DummyReporter(), dependencies=deps_b)
+
+    assert options_a.output_file.exists()
+    assert options_b.output_file.exists()
+    # Run B cleaned up its own subdir; run A's lingering subdir must remain untouched.
+    remaining = list(base_temp.glob("job_*"))
+    assert remaining == lingering

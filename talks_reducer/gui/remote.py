@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 from ..pipeline import ProcessingAborted
+from .progress import map_stage_progress
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from .app import TalksReducerGUI
@@ -225,6 +226,53 @@ def _load_service_client() -> object:
     return importlib.import_module("talks_reducer.service_client")
 
 
+class _TransferSpeedTracker:
+    """Compute a smoothed transfer rate (MB/s) from byte-counted progress events.
+
+    Upload and download callbacks fire once per streamed chunk, so the
+    instantaneous chunk-to-chunk rate is far too noisy to display. The tracker
+    averages the bytes transferred over a sliding ``min_interval`` window and
+    reports the rate in megabytes per second (``bytes / 1e6 / seconds``), holding
+    the last computed value steady between window refreshes. Switching transfer
+    phase (a different ``desc``) or a byte count that drops below the window start
+    (a fresh 0→100 cycle) resets the window and suppresses the rate until enough
+    time has elapsed again.
+    """
+
+    def __init__(
+        self,
+        *,
+        min_interval: float = 0.4,
+        clock: Optional[Callable[[], float]] = None,
+    ) -> None:
+        self._min_interval = min_interval
+        self._clock = clock if clock is not None else time.monotonic
+        self._desc: Optional[str] = None
+        self._window_start_time = 0.0
+        self._window_start_bytes = 0
+        self._rate_mb_s: Optional[float] = None
+
+    def update(self, desc: str, current: Optional[int]) -> Optional[float]:
+        """Return the current smoothed rate in MB/s, or ``None`` when unknown."""
+
+        if current is None:
+            return None
+        now = self._clock()
+        if desc != self._desc or current < self._window_start_bytes:
+            self._desc = desc
+            self._window_start_time = now
+            self._window_start_bytes = current
+            self._rate_mb_s = None
+            return None
+        elapsed = now - self._window_start_time
+        if elapsed >= self._min_interval:
+            delta_bytes = current - self._window_start_bytes
+            self._rate_mb_s = max(0.0, delta_bytes / elapsed / 1_000_000)
+            self._window_start_time = now
+            self._window_start_bytes = current
+        return self._rate_mb_s
+
+
 def process_files_via_server(
     gui: "TalksReducerGUI",
     files: List[str],
@@ -247,11 +295,11 @@ def process_files_via_server(
         service_module = load_service_client()
     except ModuleNotFoundError as exc:
         gui._append_log(f"Server client unavailable: {exc}")
+        error_message = (
+            "Remote processing requires the gradio_client package.\n\n" f"{exc}"
+        )
         gui._schedule_on_ui_thread(
-            lambda: gui.messagebox.showerror(
-                "Server unavailable",
-                "Remote processing requires the gradio_client package.",
-            )
+            lambda: gui.messagebox.showerror("Server unavailable", error_message)
         )
         gui._schedule_on_ui_thread(lambda: gui._set_status("Error"))
         return False
@@ -296,11 +344,78 @@ def process_files_via_server(
         "prefer_global_ffmpeg",
         "add_codec_suffix",
         "optimize",
+        "cut_start_seconds",
+        "cut_end_seconds",
     }
     ignored = [key for key in args if key not in allowed_remote_keys]
     if ignored:
         ignored_options = ", ".join(sorted(ignored))
         gui._append_log(f"Server mode ignores the following options: {ignored_options}")
+
+    speed_tracker = _TransferSpeedTracker()
+
+    def _handle_remote_progress(
+        desc: str,
+        current: Optional[int],
+        total: Optional[int],
+        unit: str,
+    ) -> None:
+        """Map streamed remote progress onto the GUI bar and status label."""
+
+        normalized_desc = desc.strip().lower() if isinstance(desc, str) else ""
+        # The first downloaded bytes close the post-processing gap, so cancel the
+        # "Waiting for download…" heartbeat as soon as a download event arrives.
+        if normalized_desc.startswith("downloading"):
+            gui._cancel_download_wait()
+        # Real streamed audio/final progress makes the synthetic audio fallback
+        # timer redundant: cancel it on ``Audio processing:`` and complete the
+        # audio phase on ``Generating final`` so the timer cannot keep overwriting
+        # the status with synthetic percentages.
+        gui._apply_stage_transition(desc if isinstance(desc, str) else "")
+        bar_value = map_stage_progress(desc, current, total)
+        if bar_value is None:
+            return
+        label = desc.strip() if isinstance(desc, str) else ""
+        if total and total > 0 and current is not None:
+            percent = min(int(current * 100 / total), 100)
+            status_text = f"{label} {percent}%".strip() if label else f"{percent}%"
+        else:
+            status_text = label
+
+        # Append the live transfer rate to byte-counted upload/download events so
+        # the status reads e.g. "Uploading: 55%, 5.5 MB/s". Other stages (audio,
+        # final encode) are measured in samples/frames and carry no byte rate.
+        if unit == "bytes" and normalized_desc.startswith(("uploading", "downloading")):
+            rate = speed_tracker.update(normalized_desc, current)
+            if rate is not None:
+                status_text = f"{status_text}, {rate:.1f} MB/s"
+
+        # ``_handle_remote_progress`` runs synchronously on the background worker
+        # thread, just like the local pipeline callback. Delegate to
+        # ``_set_progress_monotonic`` so the monotonic clamp reads and updates the
+        # synchronous ``_progress_floor`` attribute instead of the Tkinter
+        # ``progress_var``. The variable is only written from inside a deferred
+        # ``root.after`` updater, so back-to-back remote events would otherwise all
+        # observe the same stale value and could queue a lower bar value after a
+        # higher one.
+        gui._set_progress_monotonic(bar_value)
+        gui._schedule_on_ui_thread(
+            lambda text=status_text: gui._set_status("processing", text)
+        )
+
+        # Once the final-generation stage reports completion the remote pipeline
+        # is done and the only remaining work is the post-processing finalization
+        # and the download. Start the waiting heartbeat after the completion
+        # status is queued so it surfaces during the otherwise-silent gap before
+        # the first ``Downloading:`` event.
+        if (
+            normalized_desc.startswith("generating final")
+            and total
+            and total > 0
+            and current is not None
+            and current >= total
+        ):
+            gui._begin_download_wait()
 
     small_mode = bool(args.get("small", False))
     small_target_height = args.get("small_target_height")
@@ -319,6 +434,15 @@ def process_files_via_server(
     for index, file in enumerate(files, start=1):
         _ensure_not_stopped()
         basename = os.path.basename(file)
+        if index > 1:
+            # Re-base the progress bar so a completed file does not pin the bar
+            # at 100% while the next file uploads and processes. The first file
+            # is already re-based by the "Starting processing…" run-start reset.
+            # Reset the synchronous ``_progress_floor`` too (not just the visible
+            # bar): ``_set_progress_monotonic`` clamps against the floor, which the
+            # previous file left near 100%, so failing to reset it would keep the
+            # next file's lower-mapped progress pinned at the old value.
+            gui._reset_progress_baseline()
         gui._append_log(f"Uploading {index}/{len(files)}: {basename} to {server_url}")
         input_path = Path(file)
 
@@ -361,14 +485,22 @@ def process_files_via_server(
                 silent_threshold=args.get("silent_threshold"),
                 sounded_speed=args.get("sounded_speed"),
                 silent_speed=args.get("silent_speed"),
+                cut_enabled="cut_start_seconds" in args or "cut_end_seconds" in args,
+                cut_start_seconds=args.get("cut_start_seconds"),
+                cut_end_seconds=args.get("cut_end_seconds"),
                 stream_updates=True,
                 log_callback=gui._append_log,
                 should_cancel=lambda: gui._stop_requested,
+                progress_callback=_handle_remote_progress,
             )
             _ensure_not_stopped()
         except ProcessingAborted:
+            # A stop request (or any abort) must not leave the waiting heartbeat
+            # ticking on the UI thread after the job ends.
+            gui._cancel_download_wait()
             raise
         except Exception as exc:  # pragma: no cover - network safeguard
+            gui._cancel_download_wait()
             error_detail = f"{exc.__class__.__name__}: {exc}"
             error_msg = f"Processing failed: {error_detail}"
             gui._append_log(error_msg)
@@ -380,6 +512,10 @@ def process_files_via_server(
             )
             return False
 
+        # The download has finished by the time ``send_video`` returns; make sure
+        # no waiting heartbeat lingers into the next file of a batch even when the
+        # job produced no ``Downloading:`` events to cancel it.
+        gui._cancel_download_wait()
         gui._last_output = Path(destination)
         time_ratio, size_ratio = parse_summary(summary)
         gui._last_time_ratio = time_ratio

@@ -127,6 +127,14 @@ except Exception:
 
 hiddenimports = ["tkinterdnd2"]
 hiddenimports.extend(collect_submodules("talks_reducer"))
+# gradio_client is imported lazily via importlib in the GUI, and fsspec loads
+# backend modules through plugin discovery. Collect both explicitly so remote
+# mode works in the PyInstaller bundle.
+for _pkg in ("gradio_client", "fsspec"):
+    try:
+        hiddenimports.extend(collect_submodules(_pkg))
+    except Exception:
+        pass
 
 DEFAULT_EXCLUDES = [
     "PySide6",
@@ -141,7 +149,6 @@ DEFAULT_EXCLUDES = [
     "torchaudio",
     "tensorflow",
     "tensorboard",
-    "fsspec",
     "setuptools",
     "pkg_resources",
     "wheel",
