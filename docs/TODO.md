@@ -1,6 +1,0 @@
-- [ ] cut video before converting (trim from begin and end): add an optional trim step that drops a leading and trailing portion of each input before the speed-up pipeline runs.
-  - **Activation** — a checkbox/flag to turn trimming on; when off, behaviour is unchanged.
-  - **GUI** — after a file is selected, show a video player plus a range slider so the user can scrub and pick the start/end of the kept fragment; the selected in/out points drive the trim.
-  - **CLI** — expose start/end trim options (e.g. `--cut-start` / `--cut-end`, accepting seconds or `HH:MM:SS`) so the same trim is available headless.
-  - **Web UI (gradio)** — mirror the trim controls (enable toggle + start/end fields) so remote/server use supports trimming too.
-  - **Simple mode** — keep the trim controls available/usable in Simple mode for both the desktop GUI and the web UI.
