@@ -442,6 +442,12 @@ class CliApplication:
             remote_option_values["prefer_global_ffmpeg"] = True
         if getattr(parsed_args, "optimize", True) is False:
             remote_option_values["optimize"] = False
+        cut_start_value = float(getattr(parsed_args, "cut_start_seconds", 0.0) or 0.0)
+        cut_end_value = float(getattr(parsed_args, "cut_end_seconds", 0.0) or 0.0)
+        if cut_start_value > 0.0 or cut_end_value > 0.0:
+            remote_option_values["cut_enabled"] = True
+            remote_option_values["cut_start_seconds"] = cut_start_value
+            remote_option_values["cut_end_seconds"] = cut_end_value
 
         unsupported_options: List[str] = []
         for name in (

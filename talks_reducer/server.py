@@ -983,7 +983,7 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
             value=False,
             info=(
                 "Keep only the [start, end] fragment before processing. "
-                "Use the player above to find the timestamps."
+                "Enter start/end timestamps in seconds below."
             ),
         )
         with gr.Row():

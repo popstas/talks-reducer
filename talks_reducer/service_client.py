@@ -484,6 +484,9 @@ def send_video(
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
     silent_speed: Optional[float] = None,
+    cut_enabled: bool = False,
+    cut_start_seconds: Optional[float] = None,
+    cut_end_seconds: Optional[float] = None,
     log_callback: Optional[Callable[[str], None]] = None,
     stream_updates: bool = False,
     should_cancel: Optional[Callable[[], bool]] = None,
@@ -520,6 +523,9 @@ def send_video(
         silent_threshold,
         sounded_speed,
         silent_speed,
+        bool(cut_enabled),
+        cut_start_seconds,
+        cut_end_seconds,
     )
     submit_kwargs: dict[str, Any] = {"api_name": "/process_video"}
 
