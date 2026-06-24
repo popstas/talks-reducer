@@ -793,7 +793,7 @@ class TalksReducerGUI:
             import shlex
 
             subprocess.run(
-                shlex.split(command, posix=(sys.platform != "win32")),
+                shlex.split(command),
                 capture_output=True,
                 timeout=15,
                 creationflags=creationflags,

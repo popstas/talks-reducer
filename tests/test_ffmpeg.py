@@ -385,6 +385,10 @@ def test_build_trim_input_args_end_only():
     assert ffmpeg.build_trim_input_args(0.0, 30.0) == ["-t 30"]
 
 
+def test_build_trim_input_args_inverted_range_is_no_trim():
+    assert ffmpeg.build_trim_input_args(30.0, 10.0) == []
+
+
 def test_build_extract_audio_command_with_trim(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
 

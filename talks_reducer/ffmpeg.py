@@ -563,6 +563,11 @@ def build_trim_input_args(
     start = float(cut_start_seconds or 0.0)
     end = float(cut_end_seconds or 0.0)
 
+    # An inverted range (end <= start) keeps nothing, so emit no trim rather
+    # than silently degrading to "keep from start to EOF".
+    if end > 0 and end <= start:
+        return []
+
     args: List[str] = []
     if start > 0:
         args.append(f"-ss {start:.6g}")
