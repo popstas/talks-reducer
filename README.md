@@ -78,6 +78,20 @@ keyframes further apart when using `--small`, trading seek responsiveness for a
 smaller output file. The advanced GUI slider defaults to 30 seconds and lets you
 pick anywhere between snappy one-second GOPs and ultra-light 60-second spacing.
 
+Only need a fragment of a recording? Trim it down before the speed-up encode
+with `--cut-start` and `--cut-end`. Both accept either seconds (`12.5`) or a
+timecode (`HH:MM:SS[.ms]`, `MM:SS`, or `SS`) and define a *keep range* like a
+video editor: `--cut-start` is the timestamp to start keeping and `--cut-end` is
+the timestamp to stop keeping. Leave `--cut-end` at its `0` default to keep
+everything to the end of the file. Both default to `0`, so omitting them leaves
+the input untouched (no `-ss`/`-t` is added to FFmpeg). The trimmed span is what
+drives progress and target-duration reporting, so the bars stay accurate.
+
+```sh
+talks-reducer --cut-start 00:00:10 --cut-end 00:01:00 demo.mp4  # keep 10s–60s
+talks-reducer --cut-start 90 demo.mp4  # drop the first 90 seconds, keep to EOF
+```
+
 Want to see progress as the remote server works? Add `--server-stream` so the
 CLI prints live progress bars and log lines while you wait for the download. The
 stream walks through every stage of the job: an `Uploading:` bar that advances
@@ -208,7 +222,7 @@ last 100 requests in memory (process-local, not persisted). Because the
 endpoint is unauthenticated, anyone who can reach the server port can read which
 client IPs have used it.
 
-This opens a local web page featuring a drag-and-drop upload zone, **Small video**, **Target 480p**, and **Optimized encoding** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a live
+This opens a local web page featuring a drag-and-drop upload zone, **Small video**, **Target 480p**, and **Optimized encoding** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a **Cut video** checkbox that reveals start/end inputs (in seconds) for trimming the upload to a keep range before processing—scrub with the embedded player to find the timestamps—a live
 progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current
 Talks Reducer version so you can confirm which build the server is running. Once the job completes you can inspect the resulting
 compression ratio and download the rendered video directly from the page.
@@ -236,7 +250,14 @@ flight the status also shows the live transfer rate next to the percentage, e.g.
 `Uploading: 55%, 5.5 MB/s`. While you're there, enable
 **Use global FFmpeg** whenever your PATH provides newer GPU encoders—the toggle disables itself when no system binary is available—and adjust
 **Keyframe interval (s)** under **Advanced** to balance scroll smoothness and
-output size without touching the CLI.
+output size without touching the CLI. Tick **Cut video** (available in both
+Simple and Advanced layouts) to reveal two linked start/end range sliders and a
+frame-scrub thumbnail: after you pick a file the slider range is set from the
+video duration, and dragging a handle refreshes a Pillow-rendered still extracted
+at that timestamp so you can frame the keep range before converting. The
+checkbox state and last start/end values persist across launches; clearing it
+omits the trim entirely. When FFmpeg/FFprobe are unavailable the panel still
+appears but hides the preview gracefully.
 
 ### Uploading and retrieving a processed video
 

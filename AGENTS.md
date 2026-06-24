@@ -29,6 +29,16 @@ Look at the commit history to get more examples.
 - **Small video** — toggles the `--small` preset used by the CLI.
 - **Open after convert** — controls whether the exported file is revealed in
   your system file manager as soon as each job finishes.
+- **Cut video** — a checkbox (available in both Simple and Advanced layouts)
+  that reveals a collapsible trim panel with two linked range sliders
+  (start ≤ end, range `0..duration`) and a frame-scrub thumbnail. On file-select
+  the slider range is seeded from `get_video_duration` (ffprobe); dragging a
+  handle debounces a `build_extract_frame_command` ffmpeg call and renders the
+  still via Pillow (`ImageTk`). When the box is on, the GUI passes
+  `--cut-start`/`--cut-end` (keep-range in/out timestamps, end `0` = EOF) through
+  to the pipeline; when off the trim args are omitted. The enabled flag plus the
+  last start/end values persist via `GUIPreferences` (`cut_enabled`, `cut_start`,
+  `cut_end`). Missing ffmpeg/ffprobe hides the preview gracefully.
 - **Advanced** — reveals optional controls for the output path, temp folder,
   timing/audio knobs mirrored from the command line, and an appearance picker
   that can force dark or light mode or follow your operating system.

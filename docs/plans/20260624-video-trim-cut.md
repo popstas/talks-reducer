@@ -180,9 +180,9 @@
       test_gui_app, test_gui_layout — all passing)
 
 ### Task 10: Documentation
-- [ ] update `README.md` with the `--cut-start`/`--cut-end` CLI options and the GUI/web "Cut
+- [x] update `README.md` with the `--cut-start`/`--cut-end` CLI options and the GUI/web "Cut
       video" controls
-- [ ] update the **Graphical Interface** section in `CLAUDE.md`/`AGENTS.md` describing the Cut
+- [x] update the **Graphical Interface** section in `CLAUDE.md`/`AGENTS.md` describing the Cut
       video checkbox, range sliders, and frame-scrub thumbnail (Simple + Advanced)
 
 *Note: ralphex automatically moves completed plans to `docs/plans/completed/`.*
