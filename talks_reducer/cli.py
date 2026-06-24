@@ -17,6 +17,7 @@ from .ffmpeg import FFmpegNotFoundError
 from .models import ProcessingOptions, default_temp_folder
 from .pipeline import speed_up_video
 from .progress import TqdmProgressReporter
+from .timecode import parse_timecode
 from .version_utils import resolve_version
 
 
@@ -163,6 +164,26 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Stream remote progress updates when using --url.",
     )
+    parser.add_argument(
+        "--cut-start",
+        dest="cut_start_seconds",
+        type=parse_timecode,
+        default=0.0,
+        help=(
+            "Keep only the fragment starting at this timestamp before processing. "
+            "Accepts seconds (12.5) or HH:MM:SS[.ms] (00:01:45). Defaults to 0 (start of video)."
+        ),
+    )
+    parser.add_argument(
+        "--cut-end",
+        dest="cut_end_seconds",
+        type=parse_timecode,
+        default=0.0,
+        help=(
+            "Stop keeping the fragment at this timestamp before processing. "
+            "Accepts seconds (12.5) or HH:MM:SS[.ms] (00:01:45). Defaults to 0 (until end of video)."
+        ),
+    )
     return parser
 
 
@@ -213,6 +234,15 @@ class CliApplication:
         """Execute the CLI pipeline for *parsed_args*."""
 
         start_time = time.time()
+
+        cut_start = float(getattr(parsed_args, "cut_start_seconds", 0.0) or 0.0)
+        cut_end = float(getattr(parsed_args, "cut_end_seconds", 0.0) or 0.0)
+        if cut_end and cut_end <= cut_start:
+            return 1, [
+                "Error: --cut-end must be greater than --cut-start "
+                f"(got --cut-start {cut_start:g}, --cut-end {cut_end:g})."
+            ]
+
         files = self._gather_files(parsed_args.input_file)
 
         # Check if any files were found
@@ -316,6 +346,14 @@ class CliApplication:
                 option_kwargs["prefer_global_ffmpeg"] = bool(
                     local_options["prefer_global_ffmpeg"]
                 )
+            if "cut_start_seconds" in local_options:
+                option_kwargs["cut_start_seconds"] = float(
+                    local_options["cut_start_seconds"]
+                )
+            if "cut_end_seconds" in local_options:
+                option_kwargs["cut_end_seconds"] = float(
+                    local_options["cut_end_seconds"]
+                )
             options = ProcessingOptions(**option_kwargs)
 
             try:
@@ -404,6 +442,12 @@ class CliApplication:
             remote_option_values["prefer_global_ffmpeg"] = True
         if getattr(parsed_args, "optimize", True) is False:
             remote_option_values["optimize"] = False
+        cut_start_value = float(getattr(parsed_args, "cut_start_seconds", 0.0) or 0.0)
+        cut_end_value = float(getattr(parsed_args, "cut_end_seconds", 0.0) or 0.0)
+        if cut_start_value > 0.0 or cut_end_value > 0.0:
+            remote_option_values["cut_enabled"] = True
+            remote_option_values["cut_start_seconds"] = cut_start_value
+            remote_option_values["cut_end_seconds"] = cut_end_value
 
         unsupported_options: List[str] = []
         for name in (

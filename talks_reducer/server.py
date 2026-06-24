@@ -748,6 +748,9 @@ def process_video(
     silent_threshold: Optional[float] = None,
     sounded_speed: Optional[float] = None,
     silent_speed: Optional[float] = None,
+    cut_enabled: bool = False,
+    cut_start_seconds: Optional[float] = None,
+    cut_end_seconds: Optional[float] = None,
     progress: Optional[gr.Progress] = gr.Progress(track_tqdm=False),
     *,
     dependencies: Optional[ProcessVideoDependencies] = None,
@@ -810,6 +813,10 @@ def process_video(
 
     if small_video and small_480:
         option_kwargs["small_target_height"] = 480
+
+    if cut_enabled:
+        option_kwargs["cut_start_seconds"] = float(cut_start_seconds or 0.0)
+        option_kwargs["cut_end_seconds"] = float(cut_end_seconds or 0.0)
 
     options = ProcessingOptions(
         input_file=input_path,
@@ -971,6 +978,27 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
                 label="Silent threshold",
             )
 
+        cut_enabled_checkbox = gr.Checkbox(
+            label="Cut video",
+            value=False,
+            info=(
+                "Keep only the [start, end] fragment before processing. "
+                "Enter start/end timestamps in seconds below."
+            ),
+        )
+        with gr.Row():
+            cut_start_input = gr.Number(
+                value=0.0,
+                minimum=0.0,
+                label="Cut start (seconds)",
+            )
+            cut_end_input = gr.Number(
+                value=0.0,
+                minimum=0.0,
+                label="Cut end (seconds)",
+                info="0 keeps the video until its end.",
+            )
+
         video_output = gr.Video(label="Processed video")
         summary_output = gr.Markdown()
         download_output = gr.File(label="Download processed file", interactive=False)
@@ -989,6 +1017,9 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
                 silent_threshold_input,
                 sounded_speed_input,
                 silent_speed_input,
+                cut_enabled_checkbox,
+                cut_start_input,
+                cut_end_input,
             ],
             outputs=[video_output, log_output, summary_output, download_output],
             queue=True,

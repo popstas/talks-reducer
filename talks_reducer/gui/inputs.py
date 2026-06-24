@@ -49,8 +49,28 @@ class InputController:
             if path and path not in self.gui.input_files:
                 self.gui.input_files.append(path)
                 added = True
+        if added:
+            notify = getattr(self.gui, "_on_inputs_updated", None)
+            if callable(notify):
+                notify()
         if auto_run and added and self.gui.run_after_drop_var.get():
+            if self._cut_requires_manual_convert():
+                return
             self.gui._start_run()
+
+    def _cut_requires_manual_convert(self) -> bool:
+        """Return ``True`` when an active Cut + Advanced layout defers the run.
+
+        With Cut video enabled outside Simple mode the user reviews the trim and
+        starts processing with the panel's **Convert** button, so dropping a file
+        must not kick off the conversion automatically.
+        """
+
+        cut_var = getattr(self.gui, "cut_enabled_var", None)
+        simple_var = getattr(self.gui, "simple_mode_var", None)
+        if cut_var is None or simple_var is None:
+            return False
+        return bool(cut_var.get()) and not bool(simple_var.get())
 
     def clear_input_files(self) -> None:
         """Clear all queued input files."""

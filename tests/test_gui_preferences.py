@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from talks_reducer.gui.preferences import (
     GUIPreferences,
+    PreferenceController,
     determine_config_path,
     load_settings,
 )
@@ -67,3 +69,39 @@ def test_save_and_load_round_trip(tmp_path):
     prefs.update("threshold", 0.75)
     reloaded = load_settings(config_path)
     assert reloaded["threshold"] == pytest.approx(0.75)
+
+
+def test_on_cut_change_persists_values(tmp_path):
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    gui = SimpleNamespace(
+        preferences=prefs,
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=lambda: 12.5),
+        cut_end_var=SimpleNamespace(get=lambda: 90.0),
+    )
+
+    PreferenceController(gui).on_cut_change()
+
+    loaded = load_settings(config_path)
+    assert loaded["cut_enabled"] is True
+    assert loaded["cut_start"] == pytest.approx(12.5)
+    assert loaded["cut_end"] == pytest.approx(90.0)
+
+
+def test_on_cut_change_handles_invalid_values(tmp_path):
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    gui = SimpleNamespace(
+        preferences=prefs,
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        cut_start_var=SimpleNamespace(get=lambda: "bad"),
+        cut_end_var=SimpleNamespace(get=lambda: None),
+    )
+
+    PreferenceController(gui).on_cut_change()
+
+    loaded = load_settings(config_path)
+    assert loaded["cut_enabled"] is False
+    assert loaded["cut_start"] == pytest.approx(0.0)
+    assert loaded["cut_end"] == pytest.approx(0.0)

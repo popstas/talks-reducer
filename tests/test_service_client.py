@@ -490,6 +490,42 @@ def test_send_video_forwards_custom_options(monkeypatch, tmp_path, codec):
     assert submission_args[5] is False
     assert submission_args[6] is True
     assert submission_args[7:10] == (0.12, 1.5, 6.0)
+    # No trim requested -> defaults appended after the speed args, matching the
+    # server's positional ``inputs`` order (cut_enabled, cut_start, cut_end).
+    assert submission_args[10:13] == (False, None, None)
+
+
+def test_send_video_forwards_cut_range(monkeypatch, tmp_path):
+    """The keep-range trim values must reach the server in positional order."""
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"input")
+    server_file = tmp_path / "server_output.mp4"
+    server_file.write_bytes(b"processed")
+
+    client_instance = DummyClient("http://localhost:9005/")
+    client_instance.job_outputs = [
+        (str(server_file), "log", "summary", str(server_file))
+    ]
+
+    monkeypatch.setattr(service_client, "Client", lambda url: client_instance)
+    monkeypatch.setattr(
+        service_client, "gradio_file", lambda path: SimpleNamespace(path=path)
+    )
+
+    service_client.send_video(
+        input_path=input_file,
+        output_path=None,
+        server_url="http://localhost:9005/",
+        cut_enabled=True,
+        cut_start_seconds=10.0,
+        cut_end_seconds=60.0,
+    )
+
+    submission_args, _ = client_instance.submissions[0]
+    assert submission_args[10] is True
+    assert submission_args[11] == 10.0
+    assert submission_args[12] == 60.0
 
 
 def test_send_video_honors_add_codec_suffix(monkeypatch, tmp_path):

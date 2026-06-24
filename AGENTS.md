@@ -29,6 +29,24 @@ Look at the commit history to get more examples.
 - **Small video** — toggles the `--small` preset used by the CLI.
 - **Open after convert** — controls whether the exported file is revealed in
   your system file manager as soon as each job finishes.
+- **Cut video** — an **Advanced-only** checkbox (`apply_simple_mode` hides it and
+  its panel in Simple mode) that reveals a collapsible trim panel with two linked
+  range sliders (start ≤ end, range `0..duration`), each paired with an editable
+  time entry (`cut_start_text_var`/`cut_end_text_var`) and a tall **Convert**
+  button that spans both rows. On file-select the slider range is seeded from
+  `get_video_duration` (ffprobe). Entries mirror the handles as `HH:MM:SS.mmm`
+  (`format_timecode(..., milliseconds=True)`) and accept manual edits parsed by
+  `parse_timecode` (`_on_cut_entry_commit`), allowing millisecond input. With Cut
+  on, dropping a file does not auto-convert
+  (`InputController._cut_requires_manual_convert`); the user clicks **Convert**
+  (revealed by `_update_cut_convert_button`). `_collect_arguments` ignores the
+  trim while Simple mode is on, so a persisted flag never trims there. When
+  applied, the GUI emits the same keep-range used by the `--cut-start`/`--cut-end`
+  CLI flags as `cut_start_seconds`/`cut_end_seconds` (in/out timestamps, end
+  `0` = EOF) into `ProcessingOptions` locally or into `service_client.send_video`
+  for the remote path; when off the trim args are omitted. The enabled flag plus
+  the last start/end values persist via `GUIPreferences` (`cut_enabled`,
+  `cut_start`, `cut_end`).
 - **Advanced** — reveals optional controls for the output path, temp folder,
   timing/audio knobs mirrored from the command line, and an appearance picker
   that can force dark or light mode or follow your operating system.

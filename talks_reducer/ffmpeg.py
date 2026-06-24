@@ -546,6 +546,96 @@ def run_timed_ffmpeg_command(
         progress.finish()
 
 
+def build_trim_input_args(
+    cut_start_seconds: float = 0.0,
+    cut_end_seconds: float = 0.0,
+) -> List[str]:
+    """Return input-level ``-ss``/``-t`` flags for a keep-range trim.
+
+    The trim keeps the ``[cut_start_seconds, cut_end_seconds]`` fragment of the
+    input. ``cut_end_seconds`` of ``0`` means "until end of file", so only
+    ``-ss`` is emitted; when both bounds are ``0`` (or otherwise produce no
+    trim) an empty list is returned and the command is left unchanged. ``-t``
+    (duration) is preferred over ``-to`` because a pre-input ``-ss`` combined
+    with ``-to`` is interpreted inconsistently across FFmpeg versions.
+    """
+
+    start = float(cut_start_seconds or 0.0)
+    end = float(cut_end_seconds or 0.0)
+
+    # An inverted range (end <= start) keeps nothing, so emit no trim rather
+    # than silently degrading to "keep from start to EOF".
+    if end > 0 and end <= start:
+        return []
+
+    args: List[str] = []
+    if start > 0:
+        args.append(f"-ss {start:.6g}")
+    if end > 0:
+        duration = end - start
+        if duration > 0:
+            args.append(f"-t {duration:.6g}")
+    return args
+
+
+def get_video_duration(
+    input_file: str,
+    ffprobe_path: Optional[str] = None,
+) -> float:
+    """Return the duration of ``input_file`` in seconds via ffprobe.
+
+    Returns ``0.0`` when ffprobe is unavailable, the file cannot be probed, or
+    the reported duration is missing/invalid so callers can degrade gracefully.
+    """
+
+    try:
+        ffprobe_path = ffprobe_path or get_ffprobe_path()
+    except FFmpegNotFoundError:
+        return 0.0
+
+    command = [
+        ffprobe_path,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        input_file,
+    ]
+
+    creationflags = 0
+    if sys.platform == "win32":
+        # CREATE_NO_WINDOW = 0x08000000
+        creationflags = 0x08000000
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=creationflags,
+        )
+    except (
+        subprocess.TimeoutExpired,
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+    ):
+        return 0.0
+
+    if result.returncode != 0:
+        return 0.0
+
+    raw = (result.stdout or "").strip()
+    try:
+        duration = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+    return duration if duration > 0 else 0.0
+
+
 def build_extract_audio_command(
     input_file: str,
     output_wav: str,
@@ -553,6 +643,8 @@ def build_extract_audio_command(
     audio_bitrate: str,
     hwaccel: Optional[List[str]] = None,
     ffmpeg_path: Optional[str] = None,
+    cut_start_seconds: float = 0.0,
+    cut_end_seconds: float = 0.0,
 ) -> str:
     """Build the FFmpeg command used to extract audio into a temporary WAV file."""
 
@@ -560,6 +652,7 @@ def build_extract_audio_command(
     ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
     command_parts: List[str] = [f'"{ffmpeg_path}"']
     command_parts.extend(hwaccel)
+    command_parts.extend(build_trim_input_args(cut_start_seconds, cut_end_seconds))
     command_parts.extend(
         [
             f'-i "{input_file}"',
@@ -587,6 +680,8 @@ def build_video_commands(
     keyframe_interval_seconds: float = 30.0,
     video_codec: str = "hevc",
     keep_input_audio: bool = False,
+    cut_start_seconds: float = 0.0,
+    cut_end_seconds: float = 0.0,
 ) -> Tuple[str, Optional[str], bool]:
     """Create the FFmpeg command strings used to render the final video output.
 
@@ -611,7 +706,8 @@ def build_video_commands(
         hwaccel_args = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
         global_parts.extend(hwaccel_args)
 
-    input_parts = [f'-i "{input_file}"']
+    trim_args = build_trim_input_args(cut_start_seconds, cut_end_seconds)
+    input_parts = trim_args + [f'-i "{input_file}"']
     if audio_file:
         input_parts.append(f'-i "{audio_file}"')
 
@@ -841,7 +937,9 @@ __all__ = [
     "get_ffprobe_path",
     "check_cuda_available",
     "run_timed_ffmpeg_command",
+    "build_trim_input_args",
     "build_extract_audio_command",
+    "get_video_duration",
     "build_video_commands",
     "shutil_which",
 ]

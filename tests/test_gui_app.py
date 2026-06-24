@@ -233,6 +233,9 @@ def test_collect_arguments_includes_video_codec():
         add_codec_suffix_var=SimpleNamespace(get=lambda: False),
         use_global_ffmpeg_var=SimpleNamespace(get=lambda: True),
         optimize_var=SimpleNamespace(get=lambda: True),
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        cut_start_var=SimpleNamespace(get=lambda: 0.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     gui._parse_float = lambda value, _label: float(value)
@@ -259,6 +262,9 @@ def test_collect_arguments_includes_add_codec_suffix():
         add_codec_suffix_var=SimpleNamespace(get=lambda: True),
         use_global_ffmpeg_var=SimpleNamespace(get=lambda: False),
         optimize_var=SimpleNamespace(get=lambda: True),
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        cut_start_var=SimpleNamespace(get=lambda: 0.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     gui._parse_float = lambda value, _label: float(value)
@@ -267,6 +273,306 @@ def test_collect_arguments_includes_add_codec_suffix():
 
     assert args["add_codec_suffix"] is True
     assert args["prefer_global_ffmpeg"] is False
+
+
+def _make_collect_gui(**overrides) -> SimpleNamespace:
+    defaults = dict(
+        output_var=SimpleNamespace(get=lambda: ""),
+        temp_var=SimpleNamespace(get=lambda: ""),
+        silent_threshold_var=SimpleNamespace(get=lambda: 0.01),
+        sounded_speed_var=SimpleNamespace(get=lambda: 1.0),
+        silent_speed_var=SimpleNamespace(get=lambda: 4.0),
+        frame_margin_var=SimpleNamespace(get=lambda: "2"),
+        sample_rate_var=SimpleNamespace(get=lambda: "48000"),
+        keyframe_interval_var=SimpleNamespace(get=lambda: 30.0),
+        small_var=SimpleNamespace(get=lambda: False),
+        small_480_var=SimpleNamespace(get=lambda: False),
+        video_codec_var=SimpleNamespace(get=lambda: "h264", set=lambda value: None),
+        add_codec_suffix_var=SimpleNamespace(get=lambda: False),
+        use_global_ffmpeg_var=SimpleNamespace(get=lambda: False),
+        optimize_var=SimpleNamespace(get=lambda: True),
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        cut_start_var=SimpleNamespace(get=lambda: 0.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
+        simple_mode_var=SimpleNamespace(get=lambda: False),
+        preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
+    )
+    defaults.update(overrides)
+    gui = SimpleNamespace(**defaults)
+    gui._parse_float = lambda value, _label: float(value)
+    return gui
+
+
+def test_collect_arguments_includes_cut_range_when_enabled():
+    gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=lambda: 10.0),
+        cut_end_var=SimpleNamespace(get=lambda: 60.0),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["cut_start_seconds"] == 10.0
+    assert args["cut_end_seconds"] == 60.0
+
+
+def test_collect_arguments_ignores_cut_in_simple_mode():
+    # Cut is Advanced-only: a persisted enabled flag must not trim in Simple mode.
+    gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=lambda: 10.0),
+        cut_end_var=SimpleNamespace(get=lambda: 60.0),
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert "cut_start_seconds" not in args
+    assert "cut_end_seconds" not in args
+
+
+def test_collect_arguments_omits_cut_range_when_disabled():
+    gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        cut_start_var=SimpleNamespace(get=lambda: 10.0),
+        cut_end_var=SimpleNamespace(get=lambda: 60.0),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert "cut_start_seconds" not in args
+    assert "cut_end_seconds" not in args
+
+
+def test_collect_arguments_allows_cut_end_zero_for_eof():
+    gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=lambda: 5.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["cut_start_seconds"] == 5.0
+    assert args["cut_end_seconds"] == 0.0
+
+
+def test_collect_arguments_rejects_invalid_cut_range():
+    gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=lambda: 60.0),
+        cut_end_var=SimpleNamespace(get=lambda: 10.0),
+    )
+
+    with pytest.raises(ValueError):
+        app.TalksReducerGUI._collect_arguments(gui)
+
+
+class _RecordingLabel:
+    def __init__(self) -> None:
+        self.configure_calls: list = []
+
+    def configure(self, **kwargs) -> None:
+        self.configure_calls.append(kwargs)
+
+
+class _RecordingSlider:
+    def __init__(self) -> None:
+        self.configure_calls: list = []
+
+    def configure(self, **kwargs) -> None:
+        self.configure_calls.append(kwargs)
+
+    def grid(self) -> None:
+        pass
+
+    def grid_remove(self) -> None:
+        pass
+
+
+def _make_cut_slider_gui(start: float, end: float) -> SimpleNamespace:
+    gui = SimpleNamespace(
+        cut_start_var=_RecordingVar(start),
+        cut_end_var=_RecordingVar(end),
+        cut_start_text_var=_RecordingVar(""),
+        cut_end_text_var=_RecordingVar(""),
+    )
+    gui._refresh_cut_entry_text = (
+        lambda which: app.TalksReducerGUI._refresh_cut_entry_text(gui, which)
+    )
+    gui._on_cut_slider_change = lambda which: app.TalksReducerGUI._on_cut_slider_change(
+        gui, which
+    )
+    return gui
+
+
+def test_on_cut_slider_change_clamps_start_to_end():
+    gui = _make_cut_slider_gui(70.0, 60.0)
+
+    app.TalksReducerGUI._on_cut_slider_change(gui, "start")
+
+    assert gui.cut_start_var.get() == 60.0
+    # The entry mirrors the clamped handle with millisecond precision.
+    assert gui.cut_start_text_var.get() == "00:01:00.000"
+
+
+def test_on_cut_slider_change_clamps_end_to_start():
+    gui = _make_cut_slider_gui(30.0, 10.0)
+
+    app.TalksReducerGUI._on_cut_slider_change(gui, "end")
+
+    assert gui.cut_end_var.get() == 30.0
+
+
+def test_on_cut_entry_commit_parses_milliseconds():
+    gui = _make_cut_slider_gui(0.0, 0.0)
+    gui._cut_duration = 600.0
+    gui.cut_start_text_var.set("00:01:02.500")
+
+    app.TalksReducerGUI._on_cut_entry_commit(gui, "start")
+
+    assert gui.cut_start_var.get() == pytest.approx(62.5)
+
+
+def test_on_cut_entry_commit_rejects_invalid_input():
+    gui = _make_cut_slider_gui(12.0, 0.0)
+    gui._cut_duration = 600.0
+    gui.cut_start_text_var.set("not-a-time")
+
+    app.TalksReducerGUI._on_cut_entry_commit(gui, "start")
+
+    # Malformed input is rejected and the entry restored to the handle value.
+    assert gui.cut_start_var.get() == 12.0
+    assert gui.cut_start_text_var.get() == "00:00:12.000"
+
+
+def test_update_cut_range_sets_slider_to_duration(monkeypatch):
+    import talks_reducer.ffmpeg as ffmpeg_module
+
+    monkeypatch.setattr(ffmpeg_module, "get_video_duration", lambda path: 120.0)
+
+    start_slider = _RecordingSlider()
+    end_slider = _RecordingSlider()
+    gui = SimpleNamespace(
+        input_files=["video.mp4"],
+        cut_start_slider=start_slider,
+        cut_end_slider=end_slider,
+        cut_start_var=_RecordingVar(0.0),
+        cut_end_var=_RecordingVar(0.0),
+        _cut_duration=0.0,
+    )
+
+    app.TalksReducerGUI._update_cut_range_for_input(gui)
+
+    assert gui._cut_duration == 120.0
+    assert start_slider.configure_calls[-1]["to"] == 120.0
+    assert end_slider.configure_calls[-1]["to"] == 120.0
+    # End handle defaults to the discovered duration on first learn.
+    assert gui.cut_end_var.get() == 120.0
+
+
+def test_update_cut_range_clamps_stale_values_to_shorter_duration(monkeypatch):
+    import talks_reducer.ffmpeg as ffmpeg_module
+
+    monkeypatch.setattr(ffmpeg_module, "get_video_duration", lambda path: 60.0)
+
+    gui = SimpleNamespace(
+        input_files=["short.mp4"],
+        cut_start_slider=_RecordingSlider(),
+        cut_end_slider=_RecordingSlider(),
+        # Stale values persisted from a longer video, both past the new EOF.
+        cut_start_var=_RecordingVar(120.0),
+        cut_end_var=_RecordingVar(300.0),
+        _cut_duration=0.0,
+    )
+
+    app.TalksReducerGUI._update_cut_range_for_input(gui)
+
+    assert gui._cut_duration == 60.0
+    # The end handle is clamped to the new EOF, while a start handle past the
+    # new EOF resets to the beginning so the range stays valid (non-empty)
+    # instead of collapsing both handles onto EOF.
+    assert gui.cut_start_var.get() == 0.0
+    assert gui.cut_end_var.get() == 60.0
+
+    # The clamped range must survive ``_collect_arguments`` without tripping the
+    # ``cut_end <= cut_start`` guard, otherwise Run would fail for shorter videos.
+    collect_gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=gui.cut_start_var.get),
+        cut_end_var=SimpleNamespace(get=gui.cut_end_var.get),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(collect_gui)
+
+    assert args["cut_start_seconds"] == 0.0
+    assert args["cut_end_seconds"] == 60.0
+
+
+def test_update_cut_range_no_input_is_noop():
+    gui = SimpleNamespace(input_files=[], _cut_duration=0.0)
+
+    app.TalksReducerGUI._update_cut_range_for_input(gui)
+
+    assert gui._cut_duration == 0.0
+
+
+def test_update_cut_convert_button_shows_in_advanced_cut():
+    button = _RecordingSlider()
+    shown: list = []
+    button.grid = lambda: shown.append(True)
+    button.grid_remove = lambda: shown.append(False)
+    gui = SimpleNamespace(
+        cut_convert_button=button,
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        simple_mode_var=SimpleNamespace(get=lambda: False),
+    )
+
+    app.TalksReducerGUI._update_cut_convert_button(gui)
+
+    assert shown[-1] is True
+
+
+def test_update_cut_convert_button_hidden_in_simple_mode():
+    button = _RecordingSlider()
+    shown: list = []
+    button.grid = lambda: shown.append(True)
+    button.grid_remove = lambda: shown.append(False)
+    gui = SimpleNamespace(
+        cut_convert_button=button,
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+    )
+
+    app.TalksReducerGUI._update_cut_convert_button(gui)
+
+    assert shown[-1] is False
+
+
+def test_on_inputs_updated_refreshes_cut_range_when_enabled():
+    calls: list = []
+    gui = SimpleNamespace(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        _update_cut_range_for_input=lambda: calls.append("range"),
+        _on_cut_slider_change=lambda which: calls.append(which),
+    )
+
+    app.TalksReducerGUI._on_inputs_updated(gui)
+
+    assert calls == ["range", "start"]
+
+
+def test_on_inputs_updated_noop_when_cut_disabled():
+    calls: list = []
+    gui = SimpleNamespace(
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        _update_cut_range_for_input=lambda: calls.append("range"),
+        _on_cut_slider_change=lambda which: calls.append(which),
+    )
+
+    app.TalksReducerGUI._on_inputs_updated(gui)
+
+    assert calls == []
 
 
 class _RecordingVar:

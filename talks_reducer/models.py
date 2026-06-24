@@ -38,6 +38,13 @@ class ProcessingOptions:
 
     The fields map 1:1 to the command line options exposed by the CLI so the
     same configuration can be shared between user interfaces.
+
+    ``cut_start_seconds`` and ``cut_end_seconds`` describe an optional
+    keep-range trim applied before the speed-up pipeline runs, expressed in
+    seconds. ``cut_start_seconds`` is the timestamp to start keeping and
+    ``cut_end_seconds`` is the timestamp to stop keeping. An end value of
+    ``0.0`` means "keep until the end of the video" (EOF); when both are
+    ``0.0`` no trim is applied and processing is byte-for-byte unchanged.
     """
 
     input_file: Path
@@ -57,6 +64,8 @@ class ProcessingOptions:
     keyframe_interval_seconds: float = 30.0
     prefer_global_ffmpeg: bool = False
     add_codec_suffix: bool = False
+    cut_start_seconds: float = 0.0
+    cut_end_seconds: float = 0.0
 
 
 @dataclass(frozen=True)

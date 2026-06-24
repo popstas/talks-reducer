@@ -45,6 +45,102 @@ def test_build_parser_includes_version_and_defaults(
     assert codec_suffix_args.add_codec_suffix is True
 
 
+def test_build_parser_parses_cut_timecodes(tmp_path: Path) -> None:
+    """The parser should accept --cut-start/--cut-end as seconds or HH:MM:SS."""
+
+    parser = cli._build_parser()
+
+    defaults = parser.parse_args(["input.mp4"])
+    assert defaults.cut_start_seconds == pytest.approx(0.0)
+    assert defaults.cut_end_seconds == pytest.approx(0.0)
+
+    seconds = parser.parse_args(["--cut-start", "12.5", "--cut-end", "30", "input.mp4"])
+    assert seconds.cut_start_seconds == pytest.approx(12.5)
+    assert seconds.cut_end_seconds == pytest.approx(30.0)
+
+    clock = parser.parse_args(
+        ["--cut-start", "00:00:10", "--cut-end", "00:01:45", "input.mp4"]
+    )
+    assert clock.cut_start_seconds == pytest.approx(10.0)
+    assert clock.cut_end_seconds == pytest.approx(105.0)
+
+
+def test_build_parser_rejects_malformed_cut_timecode() -> None:
+    """Malformed timecodes should be rejected by argparse."""
+
+    parser = cli._build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--cut-start", "aa:bb", "input.mp4"])
+
+
+def test_cli_application_passes_cut_range_to_options() -> None:
+    """Trim timecodes should reach the constructed ProcessingOptions."""
+
+    parsed_args = SimpleNamespace(
+        input_file=["input.mp4"],
+        cut_start_seconds=10.0,
+        cut_end_seconds=105.0,
+    )
+
+    speed_calls: list[cli.ProcessingOptions] = []
+
+    def fake_speed_up(options: cli.ProcessingOptions, reporter: object):
+        speed_calls.append(options)
+        return SimpleNamespace(output_file=Path("/videos/output.mp4"))
+
+    class DummyReporter:
+        def log(self, message: str) -> None:
+            pass
+
+    app = cli.CliApplication(
+        gather_files=lambda paths: ["/videos/input.mp4"],
+        send_video=None,
+        speed_up=fake_speed_up,
+        reporter_factory=DummyReporter,
+    )
+
+    exit_code, error_messages = app.run(parsed_args)
+
+    assert exit_code == 0
+    assert error_messages == []
+    assert len(speed_calls) == 1
+    assert speed_calls[0].cut_start_seconds == pytest.approx(10.0)
+    assert speed_calls[0].cut_end_seconds == pytest.approx(105.0)
+
+
+def test_cli_application_rejects_invalid_cut_range() -> None:
+    """An end timecode not after the start should produce an error and abort."""
+
+    parsed_args = SimpleNamespace(
+        input_file=["input.mp4"],
+        cut_start_seconds=30.0,
+        cut_end_seconds=10.0,
+    )
+
+    speed_calls: list[cli.ProcessingOptions] = []
+
+    def fake_speed_up(options: cli.ProcessingOptions, reporter: object):
+        speed_calls.append(options)
+        return SimpleNamespace(output_file=Path("/videos/output.mp4"))
+
+    app = cli.CliApplication(
+        gather_files=lambda paths: (_ for _ in ()).throw(
+            AssertionError("files should not be gathered")
+        ),
+        send_video=None,
+        speed_up=fake_speed_up,
+        reporter_factory=lambda: None,
+    )
+
+    exit_code, error_messages = app.run(parsed_args)
+
+    assert exit_code == 1
+    assert speed_calls == []
+    assert error_messages
+    assert "--cut-end must be greater than --cut-start" in error_messages[0]
+
+
 def test_gather_input_files_collects_valid_paths(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -647,6 +743,113 @@ def test_process_via_server_handles_multiple_files_and_warnings(
         assert call["stream_updates"] is True
         assert callable(call["log_callback"])
         assert callable(call["progress_callback"])
+
+
+def test_process_via_server_forwards_cut_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-zero keep-range should be forwarded to the remote server."""
+
+    parsed_args = SimpleNamespace(
+        input_file=["/videos/example.mp4"],
+        output_file=None,
+        temp_folder=None,
+        silent_threshold=None,
+        silent_speed=None,
+        sounded_speed=None,
+        frame_spreadage=None,
+        sample_rate=None,
+        keyframe_interval_seconds=None,
+        optimize=True,
+        small=False,
+        server_url="http://localhost:9005",
+        server_stream=False,
+        video_codec="h264",
+        host=None,
+        prefer_global_ffmpeg=False,
+        cut_start_seconds=10.0,
+        cut_end_seconds=105.0,
+    )
+
+    send_calls: list[dict[str, object]] = []
+
+    def fake_send_video(**kwargs: object):
+        send_calls.append(dict(kwargs))
+        return Path("/tmp/server-result.mp4"), "Summary", "Log"
+
+    monkeypatch.setattr(cli, "_print_total_time", lambda start_time: None)
+
+    app = cli.CliApplication(
+        gather_files=lambda inputs: list(inputs),
+        send_video=fake_send_video,
+        speed_up=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()),
+        reporter_factory=lambda: None,
+    )
+
+    success, errors, _ = app._process_via_server(
+        ["/videos/example.mp4"], parsed_args, start_time=0.0
+    )
+
+    assert success is True
+    assert errors == []
+    assert len(send_calls) == 1
+    call = send_calls[0]
+    assert call["cut_enabled"] is True
+    assert call["cut_start_seconds"] == pytest.approx(10.0)
+    assert call["cut_end_seconds"] == pytest.approx(105.0)
+
+
+def test_process_via_server_omits_cut_range_when_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When no trim is requested the remote call should not enable cutting."""
+
+    parsed_args = SimpleNamespace(
+        input_file=["/videos/example.mp4"],
+        output_file=None,
+        temp_folder=None,
+        silent_threshold=None,
+        silent_speed=None,
+        sounded_speed=None,
+        frame_spreadage=None,
+        sample_rate=None,
+        keyframe_interval_seconds=None,
+        optimize=True,
+        small=False,
+        server_url="http://localhost:9005",
+        server_stream=False,
+        video_codec="h264",
+        host=None,
+        prefer_global_ffmpeg=False,
+        cut_start_seconds=0.0,
+        cut_end_seconds=0.0,
+    )
+
+    send_calls: list[dict[str, object]] = []
+
+    def fake_send_video(**kwargs: object):
+        send_calls.append(dict(kwargs))
+        return Path("/tmp/server-result.mp4"), "Summary", "Log"
+
+    monkeypatch.setattr(cli, "_print_total_time", lambda start_time: None)
+
+    app = cli.CliApplication(
+        gather_files=lambda inputs: list(inputs),
+        send_video=fake_send_video,
+        speed_up=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()),
+        reporter_factory=lambda: None,
+    )
+
+    success, _, _ = app._process_via_server(
+        ["/videos/example.mp4"], parsed_args, start_time=0.0
+    )
+
+    assert success is True
+    assert len(send_calls) == 1
+    call = send_calls[0]
+    assert "cut_enabled" not in call
+    assert "cut_start_seconds" not in call
+    assert "cut_end_seconds" not in call
 
 
 def test_print_total_time_formats_elapsed_time(

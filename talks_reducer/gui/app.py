@@ -36,6 +36,7 @@ try:
     from ..models import ProcessingOptions
     from ..pipeline import ProcessingAborted, speed_up_video
     from ..progress import ProgressHandle
+    from ..timecode import format_timecode, parse_timecode
     from ..version_utils import resolve_version
     from . import discovery as discovery_helpers
     from . import layout as layout_helpers
@@ -114,6 +115,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.models import ProcessingOptions
     from talks_reducer.pipeline import ProcessingAborted, speed_up_video
     from talks_reducer.progress import ProgressHandle
+    from talks_reducer.timecode import format_timecode, parse_timecode
     from talks_reducer.version_utils import resolve_version
 
 try:
@@ -192,7 +194,7 @@ class TalksReducerGUI:
         self._apply_window_icon()
 
         self._full_size = (1200, 900)
-        self._simple_size = (470, 270)
+        self._simple_size = (470, 300)
         # self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
         self.style = self.ttk.Style(self.root)
 
@@ -258,6 +260,22 @@ class TalksReducerGUI:
         self.open_after_convert_var = tk.BooleanVar(
             value=self.preferences.get("open_after_convert", True)
         )
+        self.cut_enabled_var = tk.BooleanVar(
+            value=bool(self.preferences.get("cut_enabled", False))
+        )
+        self.cut_start_var = tk.DoubleVar(
+            value=self.preferences.get_float("cut_start", 0.0)
+        )
+        self.cut_end_var = tk.DoubleVar(
+            value=self.preferences.get_float("cut_end", 0.0)
+        )
+        # Editable text mirrors of the cut handles for manual timecode entry.
+        self.cut_start_text_var = tk.StringVar(
+            value=format_timecode(self.cut_start_var.get(), milliseconds=True)
+        )
+        self.cut_end_text_var = tk.StringVar(
+            value=format_timecode(self.cut_end_var.get(), milliseconds=True)
+        )
         stored_codec = str(self.preferences.get("video_codec", "h264")).lower()
         if stored_codec not in {"h264", "hevc", "av1"}:
             stored_codec = "h264"
@@ -287,6 +305,9 @@ class TalksReducerGUI:
         self.open_after_convert_var.trace_add(
             "write", self._on_open_after_convert_change
         )
+        self.cut_enabled_var.trace_add("write", self._on_cut_change)
+        self.cut_start_var.trace_add("write", self._on_cut_change)
+        self.cut_end_var.trace_add("write", self._on_cut_change)
         self.video_codec_var.trace_add("write", self._on_video_codec_change)
         self.add_codec_suffix_var.trace_add("write", self._on_add_codec_suffix_change)
         self.optimize_var.trace_add("write", self._on_optimize_change)
@@ -301,6 +322,7 @@ class TalksReducerGUI:
         self._basic_variables: dict[str, tk.DoubleVar] = {}
         self._slider_updaters: dict[str, Callable[[str], None]] = {}
         self._sliders: list[tk.Scale] = []
+        self._cut_duration: float = 0.0
 
         self._build_layout()
         self._sync_simple_preset()
@@ -630,6 +652,159 @@ class TalksReducerGUI:
     def _toggle_advanced(self, *, initial: bool = False) -> None:
         self.preference_controller.toggle_advanced(initial=initial)
 
+    def _on_inputs_updated(self) -> None:
+        """Refresh the Cut video range/preview when the input queue changes."""
+
+        if not getattr(self, "cut_enabled_var", None):
+            return
+        if self.cut_enabled_var.get():
+            self._update_cut_range_for_input()
+            self._on_cut_slider_change("start")
+
+    def _toggle_cut_panel(self) -> None:
+        """Show or hide the Cut video panel based on ``cut_enabled_var``."""
+
+        panel = getattr(self, "cut_panel", None)
+        if panel is None:
+            return
+        if self.cut_enabled_var.get():
+            panel.grid()
+            self._update_cut_range_for_input()
+            self._on_cut_slider_change("end")
+        else:
+            panel.grid_remove()
+        self._update_cut_convert_button()
+
+    def _on_cut_slider_change(self, which: str) -> None:
+        """Clamp the start/end handles and mirror them into the text entries.
+
+        ``start`` is never allowed past ``end`` (when an end is set) and ``end``
+        never below ``start``; the entry fields mirror the handles as
+        ``HH:MM:SS.mmm`` so the value can be edited by hand.
+        """
+
+        try:
+            start = float(self.cut_start_var.get())
+            end = float(self.cut_end_var.get())
+        except (TypeError, ValueError):
+            return
+
+        if which == "start" and end > 0 and start > end:
+            start = end
+            self.cut_start_var.set(start)
+        elif which == "end" and end > 0 and end < start:
+            end = start
+            self.cut_end_var.set(end)
+
+        self._refresh_cut_entry_text("start")
+        self._refresh_cut_entry_text("end")
+
+    def _refresh_cut_entry_text(self, which: str) -> None:
+        """Update a cut entry's text from its slider value unless it has focus."""
+
+        if which == "start":
+            text_var = getattr(self, "cut_start_text_var", None)
+            entry = getattr(self, "cut_start_entry", None)
+            value = float(self.cut_start_var.get())
+        else:
+            text_var = getattr(self, "cut_end_text_var", None)
+            entry = getattr(self, "cut_end_entry", None)
+            value = float(self.cut_end_var.get())
+        if text_var is None:
+            return
+        # Avoid clobbering text the user is actively typing into the entry.
+        if entry is not None:
+            with suppress(Exception):
+                if entry.focus_get() is entry:
+                    return
+        text_var.set(format_timecode(value, milliseconds=True))
+
+    def _on_cut_entry_commit(self, which: str) -> None:
+        """Parse a manually-typed timecode into the matching slider handle."""
+
+        text_var = (
+            self.cut_start_text_var if which == "start" else self.cut_end_text_var
+        )
+        raw = text_var.get().strip()
+        try:
+            seconds = parse_timecode(raw)
+        except (ValueError, TypeError):
+            # Reject malformed input by restoring the current handle value.
+            self._refresh_cut_entry_text(which)
+            return
+
+        duration = getattr(self, "_cut_duration", 0.0)
+        if duration > 0:
+            seconds = min(seconds, duration)
+        seconds = round(seconds, 3)
+
+        if which == "start":
+            self.cut_start_var.set(seconds)
+        else:
+            self.cut_end_var.set(seconds)
+        self._on_cut_slider_change(which)
+
+    def _update_cut_convert_button(self) -> None:
+        """Show the **Convert** button only for the Advanced cut workflow.
+
+        When Cut video is enabled and Simple mode is off the conversion must wait
+        for an explicit click, so the button is revealed; otherwise it is hidden
+        (Simple mode auto-converts and the Advanced Run button covers the rest).
+        """
+
+        button = getattr(self, "cut_convert_button", None)
+        if button is None:
+            return
+        show = self.cut_enabled_var.get() and not self.simple_mode_var.get()
+        if show:
+            button.grid()
+        else:
+            button.grid_remove()
+
+    def _update_cut_range_for_input(self) -> None:
+        """Set the slider range from the duration of the first queued input."""
+
+        if not self.input_files:
+            return
+        try:
+            from ..ffmpeg import get_video_duration
+        except Exception:  # pragma: no cover - defensive import guard
+            return
+
+        duration = 0.0
+        try:
+            duration = float(get_video_duration(self.input_files[0]))
+        except Exception:
+            duration = 0.0
+
+        self._cut_duration = duration
+        for slider in (
+            getattr(self, "cut_start_slider", None),
+            getattr(self, "cut_end_slider", None),
+        ):
+            if slider is not None:
+                with suppress(Exception):
+                    slider.configure(to=duration)
+
+        # Clamp any stale handle values (e.g. persisted from a longer video)
+        # into the new ``0..duration`` range so the forwarded trim cannot start
+        # or end past EOF, which the pipeline would otherwise silently ignore.
+        # A start handle at or past the new EOF is meaningless, so reset it to
+        # the beginning rather than to ``duration``; otherwise both handles
+        # could collapse onto EOF and produce an empty (``end <= start``) range
+        # that ``_collect_arguments`` rejects on Run.
+        if duration > 0:
+            with suppress(TypeError, ValueError):
+                if float(self.cut_end_var.get()) > duration:
+                    self.cut_end_var.set(round(duration, 1))
+            with suppress(TypeError, ValueError):
+                if float(self.cut_start_var.get()) >= duration:
+                    self.cut_start_var.set(0.0)
+
+        # Default the end handle to the full duration the first time we learn it.
+        if duration > 0 and float(self.cut_end_var.get()) <= 0:
+            self.cut_end_var.set(round(duration, 1))
+
     def _check_for_updates(self) -> None:
         """Check for updates from GitHub releases."""
         if not sys.platform == "win32":
@@ -914,6 +1089,9 @@ class TalksReducerGUI:
     def _on_open_after_convert_change(self, *_: object) -> None:
         self.preference_controller.on_open_after_convert_change(*_)
 
+    def _on_cut_change(self, *_: object) -> None:
+        self.preference_controller.on_cut_change(*_)
+
     def _on_video_codec_change(self, *_: object) -> None:
         self.preference_controller.on_video_codec_change(*_)
 
@@ -1124,6 +1302,17 @@ class TalksReducerGUI:
             args["small"] = True
             if self.small_480_var.get():
                 args["small_target_height"] = 480
+        # Cut video is an Advanced-only feature; Simple mode never trims even if
+        # the flag persisted from a previous Advanced session.
+        if self.cut_enabled_var.get() and not self.simple_mode_var.get():
+            cut_start = float(self.cut_start_var.get())
+            cut_end = float(self.cut_end_var.get())
+            if cut_end and cut_end <= cut_start:
+                raise ValueError(
+                    "Cut end must be greater than cut start (or 0 for end of video)."
+                )
+            args["cut_start_seconds"] = round(cut_start, 3)
+            args["cut_end_seconds"] = round(cut_end, 3)
         return args
 
     def _process_files_via_server(

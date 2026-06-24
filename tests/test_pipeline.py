@@ -9,8 +9,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from talks_reducer import audio as audio_module
 from talks_reducer import ffmpeg as ffmpeg_module
 from talks_reducer import pipeline
+from talks_reducer.models import ProcessingOptions
+from talks_reducer.progress import NullProgressReporter
 
 
 @pytest.mark.parametrize(
@@ -297,6 +300,233 @@ def test_prepare_output_audio_squeezes_single_channel() -> None:
 
     assert result.ndim == 1
     np.testing.assert_allclose(result, mono_audio[:, 0])
+
+
+def test_resolve_trim_no_trim_returns_original() -> None:
+    """With both bounds at zero the source duration/frame count pass through."""
+
+    options = ProcessingOptions(input_file=Path("video.mp4"))
+    reporter = NullProgressReporter()
+
+    result = pipeline._resolve_trim(options, 10.0, 300, 30.0, reporter)
+
+    assert result == (0.0, 0.0, 10.0, 300)
+
+
+def test_resolve_trim_full_range_scales_effective_span() -> None:
+    """A `[start, end]` range yields the trimmed duration and frame count."""
+
+    options = ProcessingOptions(
+        input_file=Path("video.mp4"),
+        cut_start_seconds=2.0,
+        cut_end_seconds=5.0,
+    )
+    reporter = NullProgressReporter()
+
+    cut_start, cut_end, effective_duration, effective_frames = pipeline._resolve_trim(
+        options, 10.0, 300, 30.0, reporter
+    )
+
+    assert cut_start == pytest.approx(2.0)
+    assert cut_end == pytest.approx(5.0)
+    assert effective_duration == pytest.approx(3.0)
+    assert effective_frames == 90
+
+
+def test_resolve_trim_start_only_keeps_until_eof() -> None:
+    """A start-only trim keeps everything from the start to the end of file."""
+
+    options = ProcessingOptions(
+        input_file=Path("video.mp4"),
+        cut_start_seconds=4.0,
+    )
+    reporter = NullProgressReporter()
+
+    cut_start, cut_end, effective_duration, effective_frames = pipeline._resolve_trim(
+        options, 10.0, 300, 30.0, reporter
+    )
+
+    assert cut_start == pytest.approx(4.0)
+    assert cut_end == pytest.approx(0.0)
+    assert effective_duration == pytest.approx(6.0)
+    assert effective_frames == 180
+
+
+def test_resolve_trim_caps_end_at_eof() -> None:
+    """An end beyond the duration is capped at the end of the file."""
+
+    options = ProcessingOptions(
+        input_file=Path("video.mp4"),
+        cut_start_seconds=2.0,
+        cut_end_seconds=99.0,
+    )
+    reporter = NullProgressReporter()
+
+    cut_start, cut_end, effective_duration, effective_frames = pipeline._resolve_trim(
+        options, 10.0, 300, 30.0, reporter
+    )
+
+    assert cut_start == pytest.approx(2.0)
+    assert cut_end == pytest.approx(10.0)
+    assert effective_duration == pytest.approx(8.0)
+    assert effective_frames == 240
+
+
+def test_resolve_trim_ignores_empty_range() -> None:
+    """A range that collapses to <= 0 length is ignored with a warning."""
+
+    options = ProcessingOptions(
+        input_file=Path("video.mp4"),
+        cut_start_seconds=8.0,
+        cut_end_seconds=3.0,
+    )
+    reporter = NullProgressReporter()
+
+    result = pipeline._resolve_trim(options, 10.0, 300, 30.0, reporter)
+
+    assert result == (0.0, 0.0, 10.0, 300)
+
+
+def test_resolve_trim_ignores_start_beyond_duration() -> None:
+    """A start at or beyond the duration disables the trim."""
+
+    options = ProcessingOptions(
+        input_file=Path("video.mp4"),
+        cut_start_seconds=12.0,
+    )
+    reporter = NullProgressReporter()
+
+    result = pipeline._resolve_trim(options, 10.0, 300, 30.0, reporter)
+
+    assert result == (0.0, 0.0, 10.0, 300)
+
+
+def test_resolve_trim_unknown_duration_uses_requested_range() -> None:
+    """When the source duration is unknown the requested span drives the trim."""
+
+    options = ProcessingOptions(
+        input_file=Path("video.mp4"),
+        cut_start_seconds=2.0,
+        cut_end_seconds=5.0,
+    )
+    reporter = NullProgressReporter()
+
+    cut_start, cut_end, effective_duration, effective_frames = pipeline._resolve_trim(
+        options, 0.0, 0, 30.0, reporter
+    )
+
+    assert cut_start == pytest.approx(2.0)
+    assert cut_end == pytest.approx(5.0)
+    assert effective_duration == pytest.approx(3.0)
+    assert effective_frames == 90
+
+
+def test_resolve_trim_unknown_duration_ignores_empty_range() -> None:
+    """An inverted range is ignored even when the source duration is unknown."""
+
+    options = ProcessingOptions(
+        input_file=Path("video.mp4"),
+        cut_start_seconds=8.0,
+        cut_end_seconds=3.0,
+    )
+    reporter = NullProgressReporter()
+
+    result = pipeline._resolve_trim(options, 0.0, 0, 30.0, reporter)
+
+    assert result == (0.0, 0.0, 0.0, 0)
+
+
+def _run_no_audio_pipeline(tmp_path, monkeypatch, options_kwargs):
+    """Drive ``speed_up_video`` through the no-audio branch with mocks.
+
+    Returns ``(video_kwargs, encode_totals)`` captured from the stubbed
+    dependencies so callers can assert on trim wiring and frame estimation.
+    """
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"fake")
+
+    metadata = {
+        "frame_rate": 30.0,
+        "duration": 10.0,
+        "frame_count": 300,
+        "width": 1920.0,
+        "height": 1080.0,
+    }
+
+    def fake_metadata(path, frame_rate):
+        return dict(metadata)
+
+    monkeypatch.setattr(pipeline, "_extract_video_metadata", fake_metadata)
+    monkeypatch.setattr(audio_module, "has_audio_stream", lambda path: False)
+
+    video_kwargs = {}
+
+    def fake_build_video_commands(*args, **kwargs):
+        video_kwargs.update(kwargs)
+        return "video-command", None, False
+
+    encode_totals = []
+
+    def fake_run_timed(command, **kwargs):
+        encode_totals.append(kwargs.get("total"))
+
+    dependencies = pipeline.PipelineDependencies(
+        get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
+        check_cuda_available=lambda ffmpeg_path: False,
+        build_video_commands=fake_build_video_commands,
+        run_timed_ffmpeg_command=fake_run_timed,
+    )
+
+    options = ProcessingOptions(
+        input_file=input_file,
+        output_file=tmp_path / "output.mp4",
+        temp_folder=tmp_path / "temp",
+        **options_kwargs,
+    )
+
+    pipeline.speed_up_video(options, dependencies=dependencies)
+
+    return video_kwargs, encode_totals
+
+
+def test_speed_up_video_passes_trim_to_video_command(tmp_path, monkeypatch) -> None:
+    """An active trim reaches the video builder and shrinks the frame estimate."""
+
+    video_kwargs, encode_totals = _run_no_audio_pipeline(
+        tmp_path,
+        monkeypatch,
+        {"cut_start_seconds": 2.0, "cut_end_seconds": 5.0},
+    )
+
+    assert video_kwargs["cut_start_seconds"] == pytest.approx(2.0)
+    assert video_kwargs["cut_end_seconds"] == pytest.approx(5.0)
+    # 3s effective span at 30 fps -> 90 frames.
+    assert encode_totals == [90]
+
+
+def test_speed_up_video_no_trim_uses_full_frame_count(tmp_path, monkeypatch) -> None:
+    """Without trim the builder receives zeros and the full frame count is used."""
+
+    video_kwargs, encode_totals = _run_no_audio_pipeline(tmp_path, monkeypatch, {})
+
+    assert video_kwargs["cut_start_seconds"] == pytest.approx(0.0)
+    assert video_kwargs["cut_end_seconds"] == pytest.approx(0.0)
+    assert encode_totals == [300]
+
+
+def test_speed_up_video_caps_trim_at_eof(tmp_path, monkeypatch) -> None:
+    """An end beyond EOF is capped before reaching the video builder."""
+
+    video_kwargs, encode_totals = _run_no_audio_pipeline(
+        tmp_path,
+        monkeypatch,
+        {"cut_start_seconds": 2.0, "cut_end_seconds": 99.0},
+    )
+
+    assert video_kwargs["cut_end_seconds"] == pytest.approx(10.0)
+    # 8s effective span at 30 fps -> 240 frames.
+    assert encode_totals == [240]
 
 
 def test_create_path_builds_nested_directories(tmp_path) -> None:

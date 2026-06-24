@@ -157,6 +157,84 @@ def _build_scale_only_filter_graph(
     return filter_graph_path
 
 
+def _resolve_trim(
+    options: ProcessingOptions,
+    original_duration: float,
+    frame_count: int,
+    frame_rate: float,
+    reporter: ProgressReporter,
+) -> tuple[float, float, float, int]:
+    """Resolve the requested keep-range trim against the source metadata.
+
+    Returns ``(cut_start, cut_end, effective_duration, effective_frame_count)``
+    where ``cut_start``/``cut_end`` are the (clamped) values to feed the FFmpeg
+    command builders and the effective duration/frame count describe the trimmed
+    span used for progress and final-encode estimation. When no trim is
+    requested — or the requested range would yield a non-positive span — the
+    original duration/frame count are returned and no trim is applied (a warning
+    is logged for invalid ranges) so behaviour stays byte-for-byte unchanged.
+    """
+
+    cut_start = max(0.0, float(getattr(options, "cut_start_seconds", 0.0) or 0.0))
+    cut_end = max(0.0, float(getattr(options, "cut_end_seconds", 0.0) or 0.0))
+
+    if cut_start <= 0 and cut_end <= 0:
+        return 0.0, 0.0, original_duration, frame_count
+
+    if original_duration > 0:
+        if cut_start >= original_duration:
+            reporter.log(
+                "Cut start {start:.2f}s is at or beyond the video duration "
+                "{dur:.2f}s; ignoring trim.".format(
+                    start=cut_start, dur=original_duration
+                )
+            )
+            return 0.0, 0.0, original_duration, frame_count
+
+        effective_end = cut_end if cut_end > 0 else original_duration
+        if effective_end > original_duration:
+            reporter.log(
+                "Cut end {end:.2f}s exceeds the video duration {dur:.2f}s; "
+                "capping at end of file.".format(end=cut_end, dur=original_duration)
+            )
+            effective_end = original_duration
+            cut_end = original_duration
+
+        if effective_end <= cut_start:
+            reporter.log(
+                "Cut range [{start:.2f}s, {end:.2f}s] is empty; ignoring trim.".format(
+                    start=cut_start, end=effective_end
+                )
+            )
+            return 0.0, 0.0, original_duration, frame_count
+
+        effective_duration = effective_end - cut_start
+    else:
+        if cut_end > 0 and cut_end <= cut_start:
+            reporter.log(
+                "Cut range [{start:.2f}s, {end:.2f}s] is empty; ignoring trim.".format(
+                    start=cut_start, end=cut_end
+                )
+            )
+            return 0.0, 0.0, original_duration, frame_count
+        effective_duration = (cut_end - cut_start) if cut_end > 0 else original_duration
+
+    if frame_rate > 0 and effective_duration > 0:
+        effective_frame_count = int(math.ceil(effective_duration * frame_rate))
+    else:
+        effective_frame_count = frame_count
+
+    reporter.log(
+        "Trimming to keep-range [{start:.2f}s, {end}] (effective duration "
+        "{dur:.2f}s).".format(
+            start=cut_start,
+            end=("{:.2f}s".format(cut_end) if cut_end > 0 else "end of file"),
+            dur=effective_duration,
+        )
+    )
+    return cut_start, cut_end, effective_duration, effective_frame_count
+
+
 def speed_up_video(
     options: ProcessingOptions,
     reporter: ProgressReporter | None = None,
@@ -230,6 +308,19 @@ def speed_up_video(
         )
     )
 
+    (
+        cut_start_seconds,
+        cut_end_seconds,
+        effective_duration,
+        effective_frame_count,
+    ) = _resolve_trim(
+        options,
+        original_duration,
+        frame_count,
+        frame_rate,
+        reporter,
+    )
+
     reporter.log("Processing on: {}".format("GPU (CUDA)" if cuda_available else "CPU"))
     if options.optimize:
         reporter.log("Optimized encoding enabled")
@@ -259,9 +350,9 @@ def speed_up_video(
     stop_cb: Callable[[], bool] | None = None
     if hasattr(reporter, "stop_requested") and callable(reporter.stop_requested):
         stop_cb = reporter.stop_requested
-    estimated_total_frames = frame_count
-    if estimated_total_frames <= 0 and original_duration > 0 and frame_rate > 0:
-        estimated_total_frames = int(math.ceil(original_duration * frame_rate))
+    estimated_total_frames = effective_frame_count
+    if estimated_total_frames <= 0 and effective_duration > 0 and frame_rate > 0:
+        estimated_total_frames = int(math.ceil(effective_duration * frame_rate))
 
     audio_new_path: Path | None = None
     filter_graph_path: Path | None = None
@@ -281,6 +372,8 @@ def speed_up_video(
             audio_bitrate,
             hwaccel,
             ffmpeg_path=ffmpeg_path,
+            cut_start_seconds=cut_start_seconds,
+            cut_end_seconds=cut_end_seconds,
         )
 
         _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
@@ -405,6 +498,8 @@ def speed_up_video(
             keyframe_interval_seconds=options.keyframe_interval_seconds,
             video_codec=options.video_codec,
             keep_input_audio=keep_input_audio,
+            cut_start_seconds=cut_start_seconds,
+            cut_end_seconds=cut_end_seconds,
         )
     )
     reporter.log(
@@ -441,10 +536,12 @@ def speed_up_video(
         if has_audio and updated_chunks:
             final_total_frames = updated_chunks[-1][3] if updated_chunks else 0
         else:
-            # No audio - use original frame count
-            final_total_frames = frame_count if frame_count > 0 else 0
-            if final_total_frames <= 0 and original_duration > 0 and frame_rate > 0:
-                final_total_frames = int(math.ceil(original_duration * frame_rate))
+            # No audio - use the (possibly trimmed) effective frame count
+            final_total_frames = (
+                effective_frame_count if effective_frame_count > 0 else 0
+            )
+            if final_total_frames <= 0 and effective_duration > 0 and frame_rate > 0:
+                final_total_frames = int(math.ceil(effective_duration * frame_rate))
 
         if final_total_frames > 0:
             reporter.log(f"Final encode target frames: {final_total_frames}")

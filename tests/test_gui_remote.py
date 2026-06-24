@@ -578,6 +578,44 @@ def test_process_files_via_server_passes_speed_options(tmp_path: Path) -> None:
     assert captured_kwargs.get("video_codec") == "av1"
 
 
+def test_process_files_via_server_forwards_cut_without_ignored_log(
+    tmp_path: Path,
+) -> None:
+    gui = StubGUI()
+    captured_send_kwargs: dict[str, object] = {}
+
+    def load_client() -> object:
+        def _send_video(**kwargs: object):
+            captured_send_kwargs.update(kwargs)
+            return (str(tmp_path / "clip.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=_send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "clip.mp4")],
+        args={
+            "cut_start_seconds": 10.0,
+            "cut_end_seconds": 30.0,
+        },
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small, small_480, **kwargs: tmp_path
+        / path.name,
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    # The trim values are actually forwarded to the remote service...
+    assert captured_send_kwargs.get("cut_enabled") is True
+    assert captured_send_kwargs.get("cut_start_seconds") == 10.0
+    assert captured_send_kwargs.get("cut_end_seconds") == 30.0
+    # ...so they must not be reported to the user as ignored.
+    assert not any("ignores the following" in message for message in gui.logs)
+
+
 def test_process_files_via_server_download_bar_reaches_100_once(
     tmp_path: Path,
 ) -> None:

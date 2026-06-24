@@ -212,6 +212,11 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         _start_discovery=Mock(),
         _refresh_theme=Mock(),
         _toggle_advanced=Mock(),
+        _toggle_cut_panel=Mock(),
+        _on_cut_slider_change=Mock(),
+        _on_cut_entry_commit=Mock(),
+        _update_cut_convert_button=Mock(),
+        _start_run=Mock(),
         _update_processing_mode_state=Mock(),
         _stop_processing=Mock(),
         _open_last_output=Mock(),
@@ -220,6 +225,11 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
+        cut_enabled_var=BooleanVarStub(value=False),
+        cut_start_var=DoubleVarStub(value=0.0),
+        cut_end_var=DoubleVarStub(value=0.0),
+        cut_start_text_var=StringVarStub(value="00:00:00.000"),
+        cut_end_text_var=StringVarStub(value="00:00:00.000"),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
         simple_codec_var=StringVarStub(value=""),
@@ -409,6 +419,11 @@ def test_build_layout_initializes_widgets(monkeypatch):
         _start_discovery=start_discovery,
         _refresh_theme=refresh_theme,
         _toggle_advanced=toggle_advanced,
+        _toggle_cut_panel=Mock(),
+        _on_cut_slider_change=Mock(),
+        _on_cut_entry_commit=Mock(),
+        _update_cut_convert_button=Mock(),
+        _start_run=Mock(),
         _update_processing_mode_state=update_processing_mode_state,
         _stop_processing=stop_processing,
         _open_last_output=open_last_output,
@@ -417,6 +432,11 @@ def test_build_layout_initializes_widgets(monkeypatch):
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
+        cut_enabled_var=BooleanVarStub(value=False),
+        cut_start_var=DoubleVarStub(value=0.0),
+        cut_end_var=DoubleVarStub(value=0.0),
+        cut_start_text_var=StringVarStub(value="00:00:00.000"),
+        cut_end_text_var=StringVarStub(value="00:00:00.000"),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
         simple_codec_var=StringVarStub(value=""),
@@ -475,6 +495,62 @@ def test_build_layout_initializes_widgets(monkeypatch):
     assert gui.use_global_ffmpeg_check.kwargs["state"] == "normal"
 
 
+def _build_layout_with_cut(monkeypatch, *, cut_enabled: bool):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    gui = _make_layout_gui(cut_enabled_var=BooleanVarStub(value=cut_enabled))
+    layout.build_layout(gui)
+    return gui
+
+
+def test_build_cut_panel_constructs_widgets(monkeypatch):
+    gui = _build_layout_with_cut(monkeypatch, cut_enabled=True)
+
+    assert isinstance(gui.cut_check, WidgetStub)
+    assert gui.cut_check.kwargs["variable"] is gui.cut_enabled_var
+    assert gui.cut_check.kwargs["command"] is gui._toggle_cut_panel
+
+    assert isinstance(gui.cut_panel, WidgetStub)
+    assert isinstance(gui.cut_start_slider, WidgetStub)
+    assert isinstance(gui.cut_end_slider, WidgetStub)
+    assert gui.cut_start_slider.kwargs["variable"] is gui.cut_start_var
+    assert gui.cut_end_slider.kwargs["variable"] is gui.cut_end_var
+    # Manual-entry inputs replace the old read-only timecode labels.
+    assert isinstance(gui.cut_start_entry, WidgetStub)
+    assert isinstance(gui.cut_end_entry, WidgetStub)
+    assert gui.cut_start_entry.kwargs["textvariable"] is gui.cut_start_text_var
+    assert gui.cut_end_entry.kwargs["textvariable"] is gui.cut_end_text_var
+    # The tall Convert button drives the Advanced cut workflow.
+    assert isinstance(gui.cut_convert_button, WidgetStub)
+    assert gui.cut_convert_button.kwargs["command"] is gui._start_run
+    assert not hasattr(gui, "cut_thumbnail_label")
+
+    # Visible because the checkbox is enabled: not hidden after creation.
+    assert gui.cut_panel.grid_calls
+    assert not gui.cut_panel.grid_remove_calls
+
+
+def test_build_cut_panel_hidden_when_disabled(monkeypatch):
+    gui = _build_layout_with_cut(monkeypatch, cut_enabled=False)
+
+    assert isinstance(gui.cut_panel, WidgetStub)
+    # Hidden because the checkbox is off: grid_remove() called after creation.
+    assert gui.cut_panel.grid_remove_calls
+
+
+def test_build_cut_panel_sliders_forward_to_handler(monkeypatch):
+    gui = _build_layout_with_cut(monkeypatch, cut_enabled=True)
+
+    gui.cut_start_slider.kwargs["command"]("0")
+    gui.cut_end_slider.kwargs["command"]("0")
+
+    assert gui._on_cut_slider_change.call_args_list[0].args == ("start",)
+    assert gui._on_cut_slider_change.call_args_list[1].args == ("end",)
+
+
 def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
     monkeypatch.setattr(layout, "add_slider", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
@@ -521,6 +597,11 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         _start_discovery=Mock(),
         _refresh_theme=Mock(),
         _toggle_advanced=Mock(),
+        _toggle_cut_panel=Mock(),
+        _on_cut_slider_change=Mock(),
+        _on_cut_entry_commit=Mock(),
+        _update_cut_convert_button=Mock(),
+        _start_run=Mock(),
         _update_processing_mode_state=Mock(),
         _stop_processing=Mock(),
         _open_last_output=Mock(),
@@ -529,6 +610,11 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
+        cut_enabled_var=BooleanVarStub(value=False),
+        cut_start_var=DoubleVarStub(value=0.0),
+        cut_end_var=DoubleVarStub(value=0.0),
+        cut_start_text_var=StringVarStub(value="00:00:00.000"),
+        cut_end_text_var=StringVarStub(value="00:00:00.000"),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
         simple_codec_var=StringVarStub(value=""),
@@ -942,6 +1028,9 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
         advanced_frame=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
+        cut_check=make_widget_mock(),
+        cut_panel=make_widget_mock(),
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
         drop_zone=Mock(),
     )
 
@@ -952,6 +1041,9 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     gui.button_frame.grid_remove.assert_called_once()
     gui.advanced_frame.grid_remove.assert_called_once()
     gui.run_after_drop_var.set.assert_called_once_with(True)
+    # Cut video is hidden in Simple mode regardless of the persisted flag.
+    gui.cut_check.pack_forget.assert_called_once()
+    gui.cut_panel.grid_remove.assert_called_once()
     apply_size.assert_called_once_with(gui, simple=True)
     gui.drop_zone.focus_set.assert_called_once()
 
@@ -968,6 +1060,10 @@ def test_apply_simple_mode_full_branch(monkeypatch):
         advanced_frame=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: True),
+        cut_check=make_widget_mock(),
+        cut_panel=make_widget_mock(),
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        tk=SimpleNamespace(LEFT="left"),
         drop_zone=Mock(),
     )
 
@@ -977,6 +1073,9 @@ def test_apply_simple_mode_full_branch(monkeypatch):
     gui.log_frame.grid.assert_called_once()
     gui.button_frame.grid.assert_called_once()
     gui.advanced_frame.grid.assert_called_once()
+    # Advanced restores the Cut video checkbox; the panel shows because cut is on.
+    gui.cut_check.pack.assert_called_once()
+    gui.cut_panel.grid.assert_called_once()
     apply_size.assert_called_once_with(gui, simple=False)
     gui.run_after_drop_var.set.assert_not_called()
 

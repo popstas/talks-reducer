@@ -344,6 +344,8 @@ def process_files_via_server(
         "prefer_global_ffmpeg",
         "add_codec_suffix",
         "optimize",
+        "cut_start_seconds",
+        "cut_end_seconds",
     }
     ignored = [key for key in args if key not in allowed_remote_keys]
     if ignored:
@@ -483,6 +485,9 @@ def process_files_via_server(
                 silent_threshold=args.get("silent_threshold"),
                 sounded_speed=args.get("sounded_speed"),
                 silent_speed=args.get("silent_speed"),
+                cut_enabled="cut_start_seconds" in args or "cut_end_seconds" in args,
+                cut_start_seconds=args.get("cut_start_seconds"),
+                cut_end_seconds=args.get("cut_end_seconds"),
                 stream_updates=True,
                 log_callback=gui._append_log,
                 should_cancel=lambda: gui._stop_requested,
