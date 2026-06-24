@@ -212,6 +212,8 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         _start_discovery=Mock(),
         _refresh_theme=Mock(),
         _toggle_advanced=Mock(),
+        _toggle_cut_panel=Mock(),
+        _on_cut_slider_change=Mock(),
         _update_processing_mode_state=Mock(),
         _stop_processing=Mock(),
         _open_last_output=Mock(),
@@ -220,6 +222,9 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
+        cut_enabled_var=BooleanVarStub(value=False),
+        cut_start_var=DoubleVarStub(value=0.0),
+        cut_end_var=DoubleVarStub(value=0.0),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
         simple_codec_var=StringVarStub(value=""),
@@ -409,6 +414,8 @@ def test_build_layout_initializes_widgets(monkeypatch):
         _start_discovery=start_discovery,
         _refresh_theme=refresh_theme,
         _toggle_advanced=toggle_advanced,
+        _toggle_cut_panel=Mock(),
+        _on_cut_slider_change=Mock(),
         _update_processing_mode_state=update_processing_mode_state,
         _stop_processing=stop_processing,
         _open_last_output=open_last_output,
@@ -417,6 +424,9 @@ def test_build_layout_initializes_widgets(monkeypatch):
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
+        cut_enabled_var=BooleanVarStub(value=False),
+        cut_start_var=DoubleVarStub(value=0.0),
+        cut_end_var=DoubleVarStub(value=0.0),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
         simple_codec_var=StringVarStub(value=""),
@@ -475,6 +485,54 @@ def test_build_layout_initializes_widgets(monkeypatch):
     assert gui.use_global_ffmpeg_check.kwargs["state"] == "normal"
 
 
+def _build_layout_with_cut(monkeypatch, *, cut_enabled: bool):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    gui = _make_layout_gui(cut_enabled_var=BooleanVarStub(value=cut_enabled))
+    layout.build_layout(gui)
+    return gui
+
+
+def test_build_cut_panel_constructs_widgets(monkeypatch):
+    gui = _build_layout_with_cut(monkeypatch, cut_enabled=True)
+
+    assert isinstance(gui.cut_check, WidgetStub)
+    assert gui.cut_check.kwargs["variable"] is gui.cut_enabled_var
+    assert gui.cut_check.kwargs["command"] is gui._toggle_cut_panel
+
+    assert isinstance(gui.cut_panel, WidgetStub)
+    assert isinstance(gui.cut_start_slider, WidgetStub)
+    assert isinstance(gui.cut_end_slider, WidgetStub)
+    assert gui.cut_start_slider.kwargs["variable"] is gui.cut_start_var
+    assert gui.cut_end_slider.kwargs["variable"] is gui.cut_end_var
+    assert isinstance(gui.cut_thumbnail_label, WidgetStub)
+
+    # Visible because the checkbox is enabled: not hidden after creation.
+    assert gui.cut_panel.grid_calls
+    assert not gui.cut_panel.grid_remove_calls
+
+
+def test_build_cut_panel_hidden_when_disabled(monkeypatch):
+    gui = _build_layout_with_cut(monkeypatch, cut_enabled=False)
+
+    assert isinstance(gui.cut_panel, WidgetStub)
+    # Hidden because the checkbox is off: grid_remove() called after creation.
+    assert gui.cut_panel.grid_remove_calls
+
+
+def test_build_cut_panel_sliders_forward_to_handler(monkeypatch):
+    gui = _build_layout_with_cut(monkeypatch, cut_enabled=True)
+
+    gui.cut_start_slider.kwargs["command"]("0")
+    gui.cut_end_slider.kwargs["command"]("0")
+
+    assert gui._on_cut_slider_change.call_args_list[0].args == ("start",)
+    assert gui._on_cut_slider_change.call_args_list[1].args == ("end",)
+
+
 def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
     monkeypatch.setattr(layout, "add_slider", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
@@ -521,6 +579,8 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         _start_discovery=Mock(),
         _refresh_theme=Mock(),
         _toggle_advanced=Mock(),
+        _toggle_cut_panel=Mock(),
+        _on_cut_slider_change=Mock(),
         _update_processing_mode_state=Mock(),
         _stop_processing=Mock(),
         _open_last_output=Mock(),
@@ -529,6 +589,9 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
+        cut_enabled_var=BooleanVarStub(value=False),
+        cut_start_var=DoubleVarStub(value=0.0),
+        cut_end_var=DoubleVarStub(value=0.0),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
         simple_codec_var=StringVarStub(value=""),

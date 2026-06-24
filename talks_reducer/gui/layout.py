@@ -115,6 +115,67 @@ def _apply_simple_codec(gui: "TalksReducerGUI") -> None:
             break
 
 
+def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> None:
+    """Build the collapsible **Cut video** panel with range sliders + thumbnail.
+
+    The panel hosts two linked sliders (start ≤ end, range ``0..duration``) and a
+    label that displays a Pillow-rendered frame thumbnail. It is shown only when
+    ``cut_enabled_var`` is set and is available in both Simple and Advanced
+    layouts. Slider movement is forwarded to ``gui._on_cut_slider_change`` so the
+    application can clamp the handles and refresh the preview.
+    """
+
+    panel = gui.ttk.Frame(parent)
+    panel.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+    panel.columnconfigure(1, weight=1)
+    gui.cut_panel = panel
+
+    gui.ttk.Label(panel, text="Start").grid(row=0, column=0, sticky="w")
+    gui.cut_start_slider = gui.tk.Scale(
+        panel,
+        variable=gui.cut_start_var,
+        from_=0.0,
+        to=0.0,
+        orient=gui.tk.HORIZONTAL,
+        resolution=0.1,
+        showvalue=False,
+        command=lambda _value: gui._on_cut_slider_change("start"),
+        length=240,
+        highlightthickness=0,
+    )
+    gui.cut_start_slider.grid(row=0, column=1, sticky="ew", padx=(8, 8))
+    gui.cut_start_value_label = gui.ttk.Label(panel, text="00:00:00")
+    gui.cut_start_value_label.grid(row=0, column=2, sticky="e")
+
+    gui.ttk.Label(panel, text="End").grid(row=1, column=0, sticky="w", pady=(4, 0))
+    gui.cut_end_slider = gui.tk.Scale(
+        panel,
+        variable=gui.cut_end_var,
+        from_=0.0,
+        to=0.0,
+        orient=gui.tk.HORIZONTAL,
+        resolution=0.1,
+        showvalue=False,
+        command=lambda _value: gui._on_cut_slider_change("end"),
+        length=240,
+        highlightthickness=0,
+    )
+    gui.cut_end_slider.grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(4, 0))
+    gui.cut_end_value_label = gui.ttk.Label(panel, text="00:00:00")
+    gui.cut_end_value_label.grid(row=1, column=2, sticky="e", pady=(4, 0))
+
+    gui.cut_thumbnail_label = gui.tk.Label(panel, text="")
+    gui.cut_thumbnail_label.grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+    sliders = getattr(gui, "_sliders", None)
+    if isinstance(sliders, list):
+        sliders.append(gui.cut_start_slider)
+        sliders.append(gui.cut_end_slider)
+
+    if not gui.cut_enabled_var.get():
+        panel.grid_remove()
+
+
 def build_layout(gui: "TalksReducerGUI") -> None:
     """Construct the main layout for the GUI."""
 
@@ -205,13 +266,23 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=gui.open_after_convert_var,
     ).pack(side=gui.tk.LEFT, padx=(65, 0))
 
+    gui.cut_check = gui.ttk.Checkbutton(
+        checkbox_row1,
+        text="Cut video",
+        variable=gui.cut_enabled_var,
+        command=gui._toggle_cut_panel,
+    )
+    gui.cut_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+
+    build_cut_panel(gui, checkbox_frame, row=2)
+
     gui.simple_mode_check = gui.ttk.Checkbutton(
         checkbox_frame,
         text="Simple mode",
         variable=gui.simple_mode_var,
         command=gui._toggle_simple_mode,
     )
-    gui.simple_mode_check.grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 0))
+    gui.simple_mode_check.grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
     gui.simple_speedup_frame = speedup_frame
     gui.simple_speedup_label = speedup_label

@@ -49,6 +49,10 @@ class InputController:
             if path and path not in self.gui.input_files:
                 self.gui.input_files.append(path)
                 added = True
+        if added:
+            notify = getattr(self.gui, "_on_inputs_updated", None)
+            if callable(notify):
+                notify()
         if auto_run and added and self.gui.run_after_drop_var.get():
             self.gui._start_run()
 

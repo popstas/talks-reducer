@@ -573,6 +573,94 @@ def build_trim_input_args(
     return args
 
 
+def build_extract_frame_command(
+    input_file: str,
+    timestamp: float,
+    output_image: str,
+    ffmpeg_path: Optional[str] = None,
+) -> str:
+    """Build the FFmpeg command that extracts a single still frame.
+
+    The frame nearest ``timestamp`` (seconds) is written to ``output_image`` as
+    a single image. Input-level ``-ss`` is used so the seek is fast, and
+    ``-frames:v 1`` limits the output to one frame. Used by the desktop GUI to
+    render a frame-scrub thumbnail while the user picks a trim range.
+    """
+
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+    start = max(float(timestamp or 0.0), 0.0)
+    command_parts: List[str] = [f'"{ffmpeg_path}"', "-y"]
+    if start > 0:
+        command_parts.append(f"-ss {start:.6g}")
+    command_parts.extend(
+        [
+            f'-i "{input_file}"',
+            "-frames:v 1",
+            f'"{output_image}"',
+            "-hide_banner -loglevel error",
+        ]
+    )
+    return " ".join(command_parts)
+
+
+def get_video_duration(
+    input_file: str,
+    ffprobe_path: Optional[str] = None,
+) -> float:
+    """Return the duration of ``input_file`` in seconds via ffprobe.
+
+    Returns ``0.0`` when ffprobe is unavailable, the file cannot be probed, or
+    the reported duration is missing/invalid so callers can degrade gracefully.
+    """
+
+    try:
+        ffprobe_path = ffprobe_path or get_ffprobe_path()
+    except FFmpegNotFoundError:
+        return 0.0
+
+    command = [
+        ffprobe_path,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        input_file,
+    ]
+
+    creationflags = 0
+    if sys.platform == "win32":
+        # CREATE_NO_WINDOW = 0x08000000
+        creationflags = 0x08000000
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=creationflags,
+        )
+    except (
+        subprocess.TimeoutExpired,
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+    ):
+        return 0.0
+
+    if result.returncode != 0:
+        return 0.0
+
+    raw = (result.stdout or "").strip()
+    try:
+        duration = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+    return duration if duration > 0 else 0.0
+
+
 def build_extract_audio_command(
     input_file: str,
     output_wav: str,
@@ -876,6 +964,8 @@ __all__ = [
     "run_timed_ffmpeg_command",
     "build_trim_input_args",
     "build_extract_audio_command",
+    "build_extract_frame_command",
+    "get_video_duration",
     "build_video_commands",
     "shutil_which",
 ]

@@ -36,6 +36,7 @@ try:
     from ..models import ProcessingOptions
     from ..pipeline import ProcessingAborted, speed_up_video
     from ..progress import ProgressHandle
+    from ..timecode import format_timecode
     from ..version_utils import resolve_version
     from . import discovery as discovery_helpers
     from . import layout as layout_helpers
@@ -114,6 +115,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.models import ProcessingOptions
     from talks_reducer.pipeline import ProcessingAborted, speed_up_video
     from talks_reducer.progress import ProgressHandle
+    from talks_reducer.timecode import format_timecode
     from talks_reducer.version_utils import resolve_version
 
 try:
@@ -313,6 +315,9 @@ class TalksReducerGUI:
         self._basic_variables: dict[str, tk.DoubleVar] = {}
         self._slider_updaters: dict[str, Callable[[str], None]] = {}
         self._sliders: list[tk.Scale] = []
+        self._cut_duration: float = 0.0
+        self._cut_thumbnail_job: Optional[str] = None
+        self._cut_thumbnail_image: Optional[object] = None
 
         self._build_layout()
         self._sync_simple_preset()
@@ -641,6 +646,170 @@ class TalksReducerGUI:
 
     def _toggle_advanced(self, *, initial: bool = False) -> None:
         self.preference_controller.toggle_advanced(initial=initial)
+
+    def _on_inputs_updated(self) -> None:
+        """Refresh the Cut video range/preview when the input queue changes."""
+
+        if not getattr(self, "cut_enabled_var", None):
+            return
+        if self.cut_enabled_var.get():
+            self._update_cut_range_for_input()
+            self._on_cut_slider_change("start")
+
+    def _toggle_cut_panel(self) -> None:
+        """Show or hide the Cut video panel based on ``cut_enabled_var``."""
+
+        panel = getattr(self, "cut_panel", None)
+        if panel is None:
+            return
+        if self.cut_enabled_var.get():
+            panel.grid()
+            self._update_cut_range_for_input()
+            self._on_cut_slider_change("end")
+        else:
+            panel.grid_remove()
+
+    def _on_cut_slider_change(self, which: str) -> None:
+        """Clamp the start/end handles, refresh labels, and queue a preview.
+
+        ``start`` is never allowed past ``end`` (when an end is set) and ``end``
+        never below ``start``; the value labels mirror the handles as
+        ``HH:MM:SS`` and a debounced thumbnail refresh is scheduled.
+        """
+
+        try:
+            start = float(self.cut_start_var.get())
+            end = float(self.cut_end_var.get())
+        except (TypeError, ValueError):
+            return
+
+        if which == "start" and end > 0 and start > end:
+            start = end
+            self.cut_start_var.set(start)
+        elif which == "end" and end > 0 and end < start:
+            end = start
+            self.cut_end_var.set(end)
+
+        start_label = getattr(self, "cut_start_value_label", None)
+        if start_label is not None:
+            start_label.configure(text=format_timecode(start))
+        end_label = getattr(self, "cut_end_value_label", None)
+        if end_label is not None:
+            end_label.configure(text=format_timecode(end))
+
+        self._schedule_cut_thumbnail(which)
+
+    def _update_cut_range_for_input(self) -> None:
+        """Set the slider range from the duration of the first queued input."""
+
+        if not self.input_files:
+            return
+        try:
+            from ..ffmpeg import get_video_duration
+        except Exception:  # pragma: no cover - defensive import guard
+            return
+
+        duration = 0.0
+        try:
+            duration = float(get_video_duration(self.input_files[0]))
+        except Exception:
+            duration = 0.0
+
+        self._cut_duration = duration
+        for slider in (
+            getattr(self, "cut_start_slider", None),
+            getattr(self, "cut_end_slider", None),
+        ):
+            if slider is not None:
+                with suppress(Exception):
+                    slider.configure(to=duration)
+
+        # Default the end handle to the full duration the first time we learn it.
+        if duration > 0 and float(self.cut_end_var.get()) <= 0:
+            self.cut_end_var.set(round(duration, 1))
+
+    def _schedule_cut_thumbnail(self, which: str = "start") -> None:
+        """Debounce thumbnail refreshes so dragging spawns at most one ffmpeg."""
+
+        job = getattr(self, "_cut_thumbnail_job", None)
+        if job is not None:
+            with suppress(Exception):
+                self.root.after_cancel(job)
+            self._cut_thumbnail_job = None
+
+        def run() -> None:
+            self._cut_thumbnail_job = None
+            self._refresh_cut_thumbnail(which)
+
+        with suppress(Exception):
+            self._cut_thumbnail_job = self.root.after(200, run)
+
+    def _refresh_cut_thumbnail(self, which: str = "start") -> None:
+        """Render the frame at the active handle into the thumbnail label.
+
+        The preview is hidden gracefully when ffmpeg/ffprobe or Pillow are
+        unavailable, no input is queued, or frame extraction fails.
+        """
+
+        label = getattr(self, "cut_thumbnail_label", None)
+        if label is None or not self.input_files:
+            return
+
+        try:
+            from PIL import Image, ImageTk
+
+            from ..ffmpeg import build_extract_frame_command, get_ffmpeg_path
+        except Exception:  # pragma: no cover - Pillow/ffmpeg unavailable
+            with suppress(Exception):
+                label.configure(image="", text="")
+            return
+
+        if which == "end":
+            timestamp = float(self.cut_end_var.get())
+        else:
+            timestamp = float(self.cut_start_var.get())
+
+        import tempfile
+
+        try:
+            ffmpeg_path = get_ffmpeg_path()
+        except Exception:
+            with suppress(Exception):
+                label.configure(image="", text="")
+            return
+
+        output_image = os.path.join(
+            tempfile.gettempdir(), "talks_reducer_cut_preview.jpg"
+        )
+        command = build_extract_frame_command(
+            self.input_files[0], timestamp, output_image, ffmpeg_path=ffmpeg_path
+        )
+
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = 0x08000000
+
+        try:
+            import shlex
+
+            subprocess.run(
+                shlex.split(command, posix=(sys.platform != "win32")),
+                capture_output=True,
+                timeout=15,
+                creationflags=creationflags,
+            )
+            image = Image.open(output_image)
+            image.thumbnail((320, 180))
+            photo = ImageTk.PhotoImage(image)
+        except Exception:
+            with suppress(Exception):
+                label.configure(image="", text="")
+            return
+
+        # Keep a reference so the image is not garbage-collected.
+        self._cut_thumbnail_image = photo
+        with suppress(Exception):
+            label.configure(image=photo, text="")
 
     def _check_for_updates(self) -> None:
         """Check for updates from GitHub releases."""

@@ -352,6 +352,137 @@ def test_collect_arguments_rejects_invalid_cut_range():
         app.TalksReducerGUI._collect_arguments(gui)
 
 
+class _RecordingLabel:
+    def __init__(self) -> None:
+        self.configure_calls: list = []
+
+    def configure(self, **kwargs) -> None:
+        self.configure_calls.append(kwargs)
+
+
+class _RecordingSlider:
+    def __init__(self) -> None:
+        self.configure_calls: list = []
+
+    def configure(self, **kwargs) -> None:
+        self.configure_calls.append(kwargs)
+
+    def grid(self) -> None:
+        pass
+
+    def grid_remove(self) -> None:
+        pass
+
+
+def test_on_cut_slider_change_clamps_start_to_end():
+    gui = SimpleNamespace(
+        cut_start_var=_RecordingVar(70.0),
+        cut_end_var=_RecordingVar(60.0),
+        cut_start_value_label=_RecordingLabel(),
+        cut_end_value_label=_RecordingLabel(),
+        _schedule_cut_thumbnail=lambda which: None,
+    )
+
+    app.TalksReducerGUI._on_cut_slider_change(gui, "start")
+
+    assert gui.cut_start_var.get() == 60.0
+    assert gui.cut_start_value_label.configure_calls[-1]["text"] == "00:01:00"
+
+
+def test_on_cut_slider_change_clamps_end_to_start():
+    gui = SimpleNamespace(
+        cut_start_var=_RecordingVar(30.0),
+        cut_end_var=_RecordingVar(10.0),
+        cut_start_value_label=_RecordingLabel(),
+        cut_end_value_label=_RecordingLabel(),
+        _schedule_cut_thumbnail=lambda which: None,
+    )
+
+    app.TalksReducerGUI._on_cut_slider_change(gui, "end")
+
+    assert gui.cut_end_var.get() == 30.0
+
+
+def test_update_cut_range_sets_slider_to_duration(monkeypatch):
+    import talks_reducer.ffmpeg as ffmpeg_module
+
+    monkeypatch.setattr(ffmpeg_module, "get_video_duration", lambda path: 120.0)
+
+    start_slider = _RecordingSlider()
+    end_slider = _RecordingSlider()
+    gui = SimpleNamespace(
+        input_files=["video.mp4"],
+        cut_start_slider=start_slider,
+        cut_end_slider=end_slider,
+        cut_end_var=_RecordingVar(0.0),
+        _cut_duration=0.0,
+    )
+
+    app.TalksReducerGUI._update_cut_range_for_input(gui)
+
+    assert gui._cut_duration == 120.0
+    assert start_slider.configure_calls[-1]["to"] == 120.0
+    assert end_slider.configure_calls[-1]["to"] == 120.0
+    # End handle defaults to the discovered duration on first learn.
+    assert gui.cut_end_var.get() == 120.0
+
+
+def test_update_cut_range_no_input_is_noop():
+    gui = SimpleNamespace(input_files=[], _cut_duration=0.0)
+
+    app.TalksReducerGUI._update_cut_range_for_input(gui)
+
+    assert gui._cut_duration == 0.0
+
+
+def test_refresh_cut_thumbnail_hides_preview_without_ffmpeg(monkeypatch):
+    import talks_reducer.ffmpeg as ffmpeg_module
+
+    def raise_not_found(*args, **kwargs):
+        raise ffmpeg_module.FFmpegNotFoundError("no ffmpeg")
+
+    monkeypatch.setattr(ffmpeg_module, "get_ffmpeg_path", raise_not_found)
+
+    label = _RecordingLabel()
+    gui = SimpleNamespace(
+        cut_thumbnail_label=label,
+        input_files=["video.mp4"],
+        cut_start_var=_RecordingVar(5.0),
+        cut_end_var=_RecordingVar(0.0),
+    )
+
+    app.TalksReducerGUI._refresh_cut_thumbnail(gui, "start")
+
+    assert label.configure_calls
+    assert label.configure_calls[-1].get("image") == ""
+
+
+def test_on_inputs_updated_refreshes_cut_range_when_enabled():
+    calls: list = []
+    gui = SimpleNamespace(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        _update_cut_range_for_input=lambda: calls.append("range"),
+        _on_cut_slider_change=lambda which: calls.append(which),
+    )
+
+    app.TalksReducerGUI._on_inputs_updated(gui)
+
+    assert calls == ["range", "start"]
+
+
+def test_on_inputs_updated_noop_when_cut_disabled():
+    calls: list = []
+    gui = SimpleNamespace(
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        _update_cut_range_for_input=lambda: calls.append("range"),
+        _on_cut_slider_change=lambda which: calls.append(which),
+    )
+
+    app.TalksReducerGUI._on_inputs_updated(gui)
+
+    assert calls == []
+
+
 class _RecordingVar:
     def __init__(self, value=None) -> None:
         self._value = value

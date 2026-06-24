@@ -148,20 +148,21 @@
 - [x] run `pytest tests/test_gui_app.py` — must pass before Task 8
 
 ### Task 8: Desktop GUI — frame-scrub thumbnail + range sliders
-- [ ] add `build_extract_frame_command(input_file, timestamp, output_image, ffmpeg_path)` to
+- [x] add `build_extract_frame_command(input_file, timestamp, output_image, ffmpeg_path)` to
       `talks_reducer/ffmpeg.py` (`-ss <t> -i <in> -frames:v 1 <out.jpg>`) and a
       `get_video_duration(path)` ffprobe helper, both with tests in `tests/test_ffmpeg.py`
-- [ ] in `talks_reducer/gui/layout.py`, build a collapsible **Cut video** panel shown when the
-      checkbox is on: two linked `ttk.Scale` sliders (start ≤ end, range `0..duration`) and a
+- [x] in `talks_reducer/gui/layout.py`, build a collapsible **Cut video** panel shown when the
+      checkbox is on: two linked sliders (start ≤ end, range `0..duration`) and a
       `Label` hosting a Pillow `ImageTk` thumbnail; available in **both Simple and Advanced**
-- [ ] in `app.py`, on file-select set the slider range from `get_video_duration`; debounce slider
+      (uses `tk.Scale` for `resolution`/`command` support, consistent with the keyframe slider)
+- [x] in `app.py`, on file-select set the slider range from `get_video_duration`; debounce slider
       drags to refresh the thumbnail (extract frame at the active handle, render with Pillow);
       guard against missing ffmpeg/ffprobe by hiding the preview gracefully
-- [ ] write tests in `tests/test_gui_layout.py`/`test_gui_app.py` for panel construction, the
+- [x] write tests in `tests/test_gui_layout.py`/`test_gui_app.py` for panel construction, the
       enable/disable visibility toggle, slider clamping (start ≤ end), and the duration→range wiring
       (mock frame extraction; no real rendering in tests)
-- [ ] write tests for the no-ffmpeg fallback (panel still constructs, preview hidden)
-- [ ] run `pytest tests/test_gui_layout.py tests/test_gui_app.py` — must pass before Task 9
+- [x] write tests for the no-ffmpeg fallback (panel still constructs, preview hidden)
+- [x] run `pytest tests/test_gui_layout.py tests/test_gui_app.py` — must pass before Task 9
 
 ### Task 9: Verify acceptance criteria
 - [ ] verify CLI, web UI, and desktop GUI all produce a correctly trimmed output for a sample

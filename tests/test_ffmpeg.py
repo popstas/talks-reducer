@@ -430,6 +430,80 @@ def test_build_extract_audio_command_no_trim_unchanged(monkeypatch):
     assert "-t " not in command
 
 
+def test_build_extract_frame_command(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command = ffmpeg.build_extract_frame_command(
+        "input.mp4",
+        12.5,
+        "frame.jpg",
+    )
+
+    expected = (
+        '"/usr/bin/ffmpeg" -y -ss 12.5 -i "input.mp4" '
+        '-frames:v 1 "frame.jpg" -hide_banner -loglevel error'
+    )
+    assert command == expected
+
+
+def test_build_extract_frame_command_at_zero(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command = ffmpeg.build_extract_frame_command(
+        "input.mp4",
+        0.0,
+        "frame.jpg",
+        ffmpeg_path="/usr/bin/ffmpeg",
+    )
+
+    assert "-ss " not in command
+    assert '-i "input.mp4" -frames:v 1 "frame.jpg"' in command
+
+
+def test_get_video_duration_parses_ffprobe_output(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffprobe_path", lambda: "/usr/bin/ffprobe")
+
+    def fake_run(command, **kwargs):
+        assert command[0] == "/usr/bin/ffprobe"
+        assert "format=duration" in command
+        return SimpleNamespace(returncode=0, stdout="123.45\n", stderr="")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+
+    assert ffmpeg.get_video_duration("input.mp4") == pytest.approx(123.45)
+
+
+def test_get_video_duration_returns_zero_on_error(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffprobe_path", lambda: "/usr/bin/ffprobe")
+
+    def fake_run(command, **kwargs):
+        return SimpleNamespace(returncode=1, stdout="", stderr="boom")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+
+    assert ffmpeg.get_video_duration("missing.mp4") == 0.0
+
+
+def test_get_video_duration_handles_missing_ffprobe(monkeypatch):
+    def raise_not_found():
+        raise ffmpeg.FFmpegNotFoundError("no ffprobe")
+
+    monkeypatch.setattr(ffmpeg, "get_ffprobe_path", raise_not_found)
+
+    assert ffmpeg.get_video_duration("input.mp4") == 0.0
+
+
+def test_get_video_duration_handles_invalid_output(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffprobe_path", lambda: "/usr/bin/ffprobe")
+
+    def fake_run(command, **kwargs):
+        return SimpleNamespace(returncode=0, stdout="N/A\n", stderr="")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+
+    assert ffmpeg.get_video_duration("input.mp4") == 0.0
+
+
 def test_build_video_commands_with_trim(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
 
