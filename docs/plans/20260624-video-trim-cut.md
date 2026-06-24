@@ -72,13 +72,13 @@
 ## Implementation Steps
 
 ### Task 1: Timecode parsing helper
-- [ ] create `talks_reducer/timecode.py` with `parse_timecode(value) -> float` accepting a
+- [x] create `talks_reducer/timecode.py` with `parse_timecode(value) -> float` accepting a
       float/int seconds value or a `HH:MM:SS[.ms]` / `MM:SS` / `SS` string, returning seconds
-- [ ] add `format_timecode(seconds) -> str` (→ `HH:MM:SS`) for GUI/log display
-- [ ] raise `ValueError` for negative or malformed input
-- [ ] write tests in `tests/test_timecode.py` for valid forms (`"12.5"`, `"01:45"`, `"00:01:45.5"`, numeric)
-- [ ] write tests for error cases (negative, `"aa:bb"`, empty)
-- [ ] run `pytest tests/test_timecode.py` — must pass before Task 2
+- [x] add `format_timecode(seconds) -> str` (→ `HH:MM:SS`) for GUI/log display
+- [x] raise `ValueError` for negative or malformed input
+- [x] write tests in `tests/test_timecode.py` for valid forms (`"12.5"`, `"01:45"`, `"00:01:45.5"`, numeric)
+- [x] write tests for error cases (negative, `"aa:bb"`, empty)
+- [x] run `pytest tests/test_timecode.py` — must pass before Task 2
 
 ### Task 2: Add trim fields to ProcessingOptions
 - [ ] add `cut_start_seconds: float = 0.0` and `cut_end_seconds: float = 0.0` to
