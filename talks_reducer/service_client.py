@@ -888,7 +888,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="hevc",
         help=(
             "Select the video encoder used for the render (default: hevc — "
-            "h.265 for roughly 25% smaller files). Switch to h264 (about 10% "
+            "h.265 for roughly 25%% smaller files). Switch to h264 (about 10%% "
             "faster) or av1 (no advantages) when you want different trade-offs, "
             "or mp3 to export an audio-only file."
         ),
