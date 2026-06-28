@@ -278,6 +278,16 @@ click **Convert** when you are ready. The checkbox state and last start/end
 values persist across launches; clearing it (or switching to Simple mode) omits
 the trim entirely.
 
+On Windows, the full (non-Simple) layout shows a **Create lnk** button next to
+the **Advanced** button (hidden on other platforms). It opens a small dialog
+where you tick the presets you want—
+**Small**, **720** or **480** (these imply Small), **Silent speed**, **Sounded
+speed**, **Silent threshold**, and **Codec**—each pre-checked to match your
+current GUI state. A live preview shows the resulting command line as you toggle
+options, and clicking **Create** writes a `.lnk` shortcut to your Desktop seeded
+with those CLI flags. The shortcut doubles as a drop-target: drag a video onto it
+to launch the GUI with the chosen presets and auto-convert the file.
+
 ### Uploading and retrieving a processed video
 
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
