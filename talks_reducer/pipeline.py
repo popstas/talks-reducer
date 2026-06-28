@@ -669,8 +669,13 @@ def _input_to_output_filename(
     include_speed_marker = not (neutral_silent and neutral_sounded)
 
     normalized_codec = str(video_codec or "hevc").strip().lower()
+    is_audio_only = normalized_codec == "mp3"
     force_codec_suffix = not include_speed_marker and not small
-    include_codec_suffix = (add_codec_suffix or force_codec_suffix) and normalized_codec
+    include_codec_suffix = (
+        (add_codec_suffix or force_codec_suffix)
+        and normalized_codec
+        and not is_audio_only
+    )
 
     suffix_tokens: list[str] = []
 
@@ -690,8 +695,9 @@ def _input_to_output_filename(
         suffix_tokens.append(normalized_codec)
 
     suffix = f"_{'_'.join(suffix_tokens)}" if suffix_tokens else ""
+    extension = ".mp3" if is_audio_only else ".mp4"
     stem = filename.name[:dot_index] if dot_index != -1 else filename.name
-    return filename.with_name(stem + suffix + ".mp4")
+    return filename.with_name(stem + suffix + extension)
 
 
 def _create_path(path: Path) -> None:

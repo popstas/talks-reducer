@@ -129,6 +129,36 @@ from talks_reducer.progress import NullProgressReporter
             1.0,
             Path("plain_h264.mp4"),
         ),
+        (
+            Path("talk.mp4"),
+            False,
+            None,
+            False,
+            "mp3",
+            None,
+            None,
+            Path("talk_speedup.mp3"),
+        ),
+        (
+            Path("talk.mp4"),
+            False,
+            None,
+            False,
+            "mp3",
+            1.0,
+            1.0,
+            Path("talk.mp3"),
+        ),
+        (
+            Path("talk.mkv"),
+            False,
+            None,
+            True,
+            "MP3",
+            None,
+            None,
+            Path("talk_speedup.mp3"),
+        ),
     ],
 )
 def test_input_to_output_filename(
@@ -153,6 +183,20 @@ def test_input_to_output_filename(
         sounded_speed=sounded_speed,
     )
     assert output == expected
+
+
+@pytest.mark.parametrize("video_codec", ["h264", "hevc", "av1", None])
+def test_input_to_output_filename_non_mp3_stays_mp4(video_codec) -> None:
+    """Only the ``mp3`` codec switches the output extension to ``.mp3``."""
+
+    output = pipeline._input_to_output_filename(
+        Path("talk.mkv"),
+        False,
+        None,
+        video_codec=video_codec,
+    )
+
+    assert output.suffix == ".mp4"
 
 
 def test_input_to_output_filename_adds_fast_suffix() -> None:

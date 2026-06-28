@@ -76,18 +76,18 @@
 ## Implementation Steps
 
 ### Task 1: Audio-only output filename (`.mp3` extension)
-- [ ] In `talks_reducer/pipeline.py` `_input_to_output_filename()` (lines 653–694),
+- [x] In `talks_reducer/pipeline.py` `_input_to_output_filename()` (lines 653–694),
       compute the extension from the normalized codec: `.mp3` when
       `normalized_codec == "mp3"`, otherwise `.mp4` (replace the hardcoded `.mp4` at
       line 694). Keep the existing suffix-token logic (e.g. `_speedup`) so output is like
       `talk_speedup.mp3`.
-- [ ] For `mp3`, do not append a redundant `mp3` codec suffix token (the extension already
+- [x] For `mp3`, do not append a redundant `mp3` codec suffix token (the extension already
       conveys it) — adjust `include_codec_suffix` so `normalized_codec == "mp3"` is excluded.
-- [ ] In `tests/test_pipeline.py`, extend the `test_input_to_output_filename`
+- [x] In `tests/test_pipeline.py`, extend the `test_input_to_output_filename`
       parametrization with `video_codec="mp3"` cases asserting a `.mp3` extension
       (with speedup, and with neutral speeds).
-- [ ] Add an error/edge test: codecs other than `mp3` still yield `.mp4`.
-- [ ] Run `python -m pytest tests/test_pipeline.py -q` — must pass before next task.
+- [x] Add an error/edge test: codecs other than `mp3` still yield `.mp4`.
+- [x] Run `python -m pytest tests/test_pipeline.py -q` — must pass before next task.
 
 ### Task 2: Audio-only ffmpeg command builder
 - [ ] In `talks_reducer/ffmpeg.py`, add `build_audio_only_command(input_file, audio_file,
