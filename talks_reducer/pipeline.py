@@ -19,6 +19,7 @@ from talks_reducer.version_utils import resolve_version
 from . import audio as audio_utils
 from . import chunks as chunk_utils
 from .ffmpeg import (
+    build_audio_only_command,
     build_extract_audio_command,
     build_video_commands,
     check_cuda_available,
@@ -43,6 +44,7 @@ class PipelineDependencies:
     build_video_commands: Callable[..., tuple[str, str | None, bool]] = (
         build_video_commands
     )
+    build_audio_only_command: Callable[..., str] = build_audio_only_command
     run_timed_ffmpeg_command: Callable[..., None] = run_timed_ffmpeg_command
     create_path: Callable[[Path], None] | None = None
     delete_path: Callable[[Path], None] | None = None
@@ -332,9 +334,14 @@ def speed_up_video(
             target_height = 720
         reporter.log("Small mode scaling to %dp" % target_height)
 
+    is_mp3_output = str(options.video_codec).strip().lower() == "mp3"
+
     # Check if the video has an audio stream
     has_audio = audio_utils.has_audio_stream(os.fspath(input_path))
     if not has_audio:
+        if is_mp3_output:
+            dependencies.delete_path(job_temp_path)
+            raise ValueError("mp3 output requires an audio stream")
         reporter.log(
             "No audio stream found. Video will be re-encoded without speed modification."
         )
@@ -484,24 +491,38 @@ def speed_up_video(
         )
 
     keep_input_audio = has_audio and neutral_speeds
-    command_str, fallback_command_str, use_cuda_encoder = (
-        dependencies.build_video_commands(
+    if is_mp3_output:
+        # Audio-only render: encode the processed WAV (trim/speed already baked
+        # in) when available, otherwise the original input with trim applied.
+        command_str = dependencies.build_audio_only_command(
             os.fspath(input_path),
             os.fspath(audio_new_path) if audio_new_path else None,
-            os.fspath(filter_graph_path) if filter_graph_path else None,
             os.fspath(output_path),
             ffmpeg_path=ffmpeg_path,
-            cuda_available=cuda_available,
-            optimize=options.optimize,
-            small=options.small,
-            frame_rate=frame_rate,
-            keyframe_interval_seconds=options.keyframe_interval_seconds,
-            video_codec=options.video_codec,
-            keep_input_audio=keep_input_audio,
             cut_start_seconds=cut_start_seconds,
             cut_end_seconds=cut_end_seconds,
         )
-    )
+        fallback_command_str = None
+        use_cuda_encoder = False
+    else:
+        command_str, fallback_command_str, use_cuda_encoder = (
+            dependencies.build_video_commands(
+                os.fspath(input_path),
+                os.fspath(audio_new_path) if audio_new_path else None,
+                os.fspath(filter_graph_path) if filter_graph_path else None,
+                os.fspath(output_path),
+                ffmpeg_path=ffmpeg_path,
+                cuda_available=cuda_available,
+                optimize=options.optimize,
+                small=options.small,
+                frame_rate=frame_rate,
+                keyframe_interval_seconds=options.keyframe_interval_seconds,
+                video_codec=options.video_codec,
+                keep_input_audio=keep_input_audio,
+                cut_start_seconds=cut_start_seconds,
+                cut_end_seconds=cut_end_seconds,
+            )
+        )
     reporter.log(
         (
             "Encoder plan: codec={codec} | CUDA available={cuda} | "

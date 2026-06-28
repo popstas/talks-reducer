@@ -107,25 +107,25 @@
 - [x] Run `python -m pytest tests/test_ffmpeg.py -q` — must pass before next task.
 
 ### Task 3: Branch the pipeline to audio-only render for mp3
-- [ ] In `talks_reducer/pipeline.py` `speed_up_video()`, before the
+- [x] In `talks_reducer/pipeline.py` `speed_up_video()`, before the
       `build_video_commands(...)` call (lines ~486–504), branch when
       `str(options.video_codec).strip().lower() == "mp3"`: call the new
       `dependencies.build_audio_only_command(...)` with `audio_new_path` (or the input
       file when no processed audio exists), `output_path`, trim seconds, and ffmpeg path;
       set `command_str`, `fallback_command_str=None`, `use_cuda_encoder=False`. Skip the
       video filter-graph requirement check for this path.
-- [ ] Wire `build_audio_only_command` into the pipeline's `dependencies` namespace the
+- [x] Wire `build_audio_only_command` into the pipeline's `dependencies` namespace the
       same way `build_video_commands` is exposed (so tests can mock it).
-- [ ] Handle the no-audio edge: if `mp3` is requested but the input has no audio stream,
+- [x] Handle the no-audio edge: if `mp3` is requested but the input has no audio stream,
       raise a clear error (e.g. `ValueError("mp3 output requires an audio stream")`) and
       clean up the temp dir.
-- [ ] Confirm the post-render metadata/size step (lines 616–635) tolerates an audio-only
+- [x] Confirm the post-render metadata/size step (lines 616–635) tolerates an audio-only
       output (ffprobe returns duration; frame_rate falls back to the source value).
-- [ ] In `tests/test_pipeline.py`, add a test that `speed_up_video` with
+- [x] In `tests/test_pipeline.py`, add a test that `speed_up_video` with
       `video_codec="mp3"` calls `build_audio_only_command` (not `build_video_commands`),
       writes a `.mp3` output path, and returns a `ProcessingResult`.
-- [ ] Add an error test for the no-audio + mp3 case.
-- [ ] Run `python -m pytest tests/test_pipeline.py -q` — must pass before next task.
+- [x] Add an error test for the no-audio + mp3 case.
+- [x] Run `python -m pytest tests/test_pipeline.py -q` — must pass before next task.
 
 ### Task 4: CLI `--video-codec mp3`
 - [ ] In `talks_reducer/cli.py`, add `"mp3"` to the `--video-codec` `choices` (line 107)

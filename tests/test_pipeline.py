@@ -573,6 +573,105 @@ def test_speed_up_video_caps_trim_at_eof(tmp_path, monkeypatch) -> None:
     assert encode_totals == [240]
 
 
+def test_speed_up_video_mp3_uses_audio_only_command(tmp_path, monkeypatch) -> None:
+    """With ``video_codec="mp3"`` the pipeline renders via the audio-only builder."""
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"fake")
+
+    metadata = {
+        "frame_rate": 30.0,
+        "duration": 10.0,
+        "frame_count": 300,
+        "width": 1920.0,
+        "height": 1080.0,
+    }
+
+    monkeypatch.setattr(
+        pipeline, "_extract_video_metadata", lambda path, frame_rate: dict(metadata)
+    )
+    monkeypatch.setattr(audio_module, "has_audio_stream", lambda path: True)
+
+    audio_kwargs = {}
+    audio_args = {}
+
+    def fake_build_audio_only(input_arg, audio_arg, output_arg, **kwargs):
+        audio_args["input"] = input_arg
+        audio_args["audio"] = audio_arg
+        audio_args["output"] = output_arg
+        audio_kwargs.update(kwargs)
+        return "audio-only-command"
+
+    def fail_build_video_commands(*args, **kwargs):  # pragma: no cover - must not run
+        raise AssertionError("build_video_commands should not be called for mp3")
+
+    commands_run = []
+
+    def fake_run_timed(command, **kwargs):
+        commands_run.append(command)
+
+    dependencies = pipeline.PipelineDependencies(
+        get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
+        check_cuda_available=lambda ffmpeg_path: False,
+        build_video_commands=fail_build_video_commands,
+        build_audio_only_command=fake_build_audio_only,
+        run_timed_ffmpeg_command=fake_run_timed,
+    )
+
+    output_file = tmp_path / "output.mp3"
+    options = ProcessingOptions(
+        input_file=input_file,
+        output_file=output_file,
+        temp_folder=tmp_path / "temp",
+        video_codec="mp3",
+        silent_speed=1.0,
+        sounded_speed=1.0,
+    )
+
+    result = pipeline.speed_up_video(options, dependencies=dependencies)
+
+    assert commands_run == ["audio-only-command"]
+    assert audio_args["output"] == os.fspath(output_file)
+    assert str(audio_args["output"]).endswith(".mp3")
+    assert result.output_file == output_file
+    assert result.used_cuda is False
+
+
+def test_speed_up_video_mp3_without_audio_raises(tmp_path, monkeypatch) -> None:
+    """Requesting mp3 output on a file without audio raises a clear error."""
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"fake")
+
+    metadata = {
+        "frame_rate": 30.0,
+        "duration": 10.0,
+        "frame_count": 300,
+        "width": 1920.0,
+        "height": 1080.0,
+    }
+
+    monkeypatch.setattr(
+        pipeline, "_extract_video_metadata", lambda path, frame_rate: dict(metadata)
+    )
+    monkeypatch.setattr(audio_module, "has_audio_stream", lambda path: False)
+
+    dependencies = pipeline.PipelineDependencies(
+        get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
+        check_cuda_available=lambda ffmpeg_path: False,
+    )
+
+    options = ProcessingOptions(
+        input_file=input_file,
+        output_file=tmp_path / "output.mp3",
+        temp_folder=tmp_path / "temp",
+        video_codec="mp3",
+    )
+
+    with pytest.raises(ValueError, match="mp3 output requires an audio stream"):
+        pipeline.speed_up_video(options, dependencies=dependencies)
+
+
 def test_create_path_builds_nested_directories(tmp_path) -> None:
     """The helper should create the requested directory tree if missing."""
 
