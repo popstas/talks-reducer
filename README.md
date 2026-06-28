@@ -83,7 +83,10 @@ need the quickest NVENC path or `--video-codec av1` to experiment with modern
 AV1 output. Choose `--video-codec mp3` to skip video entirely and export an
 **audio-only `.mp3`** (encoded with `libmp3lame -q:a 2`, ~190 kbps VBR): the talk
 is still silence-trimmed and speed-adjusted exactly as usual, but the result is a
-`<name>.mp3` file instead of `<name>.mp4`.
+`<name>.mp3` file instead of `<name>.mp4`. When the mp3 codec is selected you can
+also feed **audio-only inputs** (for example `.m4a`, `.wav`, or `.aac`) — files
+without a video stream are accepted only in this mode; the other codecs still
+require a video stream.
 Every interface—the CLI, GUI, and browser UI—shares the same encoder choices so
 you can pick once and get consistent results everywhere.
 

@@ -52,3 +52,27 @@ def test_extend_inputs_auto_runs_without_cut():
     controller.extend_inputs(["video.mp4"], auto_run=True)
 
     assert started == [True]
+
+
+def test_ask_for_input_files_offers_audio_filter():
+    """The file picker exposes an audio filter so .m4a inputs are selectable."""
+
+    captured: dict[str, object] = {}
+
+    def fake_askopenfilenames(**kwargs):
+        captured.update(kwargs)
+        return ()
+
+    gui = SimpleNamespace(
+        filedialog=SimpleNamespace(askopenfilenames=fake_askopenfilenames)
+    )
+    controller = InputController(gui)
+
+    controller.ask_for_input_files()
+
+    filter_labels = {label for label, _patterns in captured["filetypes"]}
+    assert "Audio files" in filter_labels
+    audio_patterns = next(
+        patterns for label, patterns in captured["filetypes"] if label == "Audio files"
+    )
+    assert "*.m4a" in audio_patterns

@@ -293,6 +293,13 @@ def speed_up_video(
     original_width = metadata.get("width", 0)
     original_height = metadata.get("height", 0)
 
+    # Audio-only inputs report no video stream (zero dimensions, no frames) and
+    # therefore no frame rate; fall back to a sane default so the chunk/sample
+    # math stays valid.
+    has_video_stream = original_width > 0 or original_height > 0 or frame_count > 0
+    if not frame_rate or frame_rate <= 0:
+        frame_rate = 30.0
+
     app_version = resolve_version()
     if app_version and app_version != "unknown":
         reporter.log(f"talks-reducer v{app_version}")
@@ -335,6 +342,14 @@ def speed_up_video(
         reporter.log("Small mode scaling to %dp" % target_height)
 
     is_mp3_output = str(options.video_codec).strip().lower() == "mp3"
+
+    # Audio-only inputs can only produce the audio-only mp3 output; every other
+    # codec needs a video stream to render.
+    if not has_video_stream and not is_mp3_output:
+        dependencies.delete_path(job_temp_path)
+        raise ValueError(
+            "input has no video stream; select the mp3 codec to process audio-only files"
+        )
 
     # Check if the video has an audio stream
     has_audio = audio_utils.has_audio_stream(os.fspath(input_path))

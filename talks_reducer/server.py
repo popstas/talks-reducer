@@ -923,8 +923,8 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
 
         with gr.Column():
             file_input = gr.File(
-                label="Video file",
-                file_types=["video"],
+                label="Video or audio file",
+                file_types=["video", "audio"],
                 type="filepath",
             )
 

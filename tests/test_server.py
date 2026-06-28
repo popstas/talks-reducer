@@ -686,6 +686,21 @@ def test_build_interface_codec_dropdown_includes_mp3() -> None:
     assert "mp3" in codec_values
 
 
+def test_build_interface_file_input_accepts_audio() -> None:
+    demo = server.build_interface()
+
+    file_types: list[str] = []
+    for component in demo.blocks.values():
+        if (
+            getattr(component, "label", None) == "Video or audio file"
+            and getattr(component, "file_types", None) is not None
+        ):
+            file_types = list(component.file_types)
+            break
+
+    assert "audio" in file_types
+
+
 def test_process_video_raises_when_pipeline_reports_error(
     tmp_path: Path,
 ) -> None:

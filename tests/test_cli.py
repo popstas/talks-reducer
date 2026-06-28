@@ -124,7 +124,7 @@ def test_cli_application_passes_cut_range_to_options() -> None:
             pass
 
     app = cli.CliApplication(
-        gather_files=lambda paths: ["/videos/input.mp4"],
+        gather_files=lambda paths, **_kwargs: ["/videos/input.mp4"],
         send_video=None,
         speed_up=fake_speed_up,
         reporter_factory=DummyReporter,
@@ -155,7 +155,7 @@ def test_cli_application_rejects_invalid_cut_range() -> None:
         return SimpleNamespace(output_file=Path("/videos/output.mp4"))
 
     app = cli.CliApplication(
-        gather_files=lambda paths: (_ for _ in ()).throw(
+        gather_files=lambda paths, **_kwargs: (_ for _ in ()).throw(
             AssertionError("files should not be gathered")
         ),
         send_video=None,
@@ -169,6 +169,34 @@ def test_cli_application_rejects_invalid_cut_range() -> None:
     assert speed_calls == []
     assert error_messages
     assert "--cut-end must be greater than --cut-start" in error_messages[0]
+
+
+def test_cli_application_allows_audio_only_for_mp3_codec() -> None:
+    """The mp3 codec forwards ``allow_audio_only=True`` to the file gatherer."""
+
+    captured: dict[str, object] = {}
+
+    def fake_speed_up(options: cli.ProcessingOptions, reporter: object):
+        return SimpleNamespace(output_file=Path("/videos/output.mp3"))
+
+    def gather_files(paths, **kwargs):
+        captured.update(kwargs)
+        return ["/videos/talk.m4a"]
+
+    for codec, expected in (("mp3", True), ("hevc", False)):
+        captured.clear()
+        parsed_args = SimpleNamespace(input_file=["talk.m4a"], video_codec=codec)
+        app = cli.CliApplication(
+            gather_files=gather_files,
+            send_video=None,
+            speed_up=fake_speed_up,
+            reporter_factory=lambda: SimpleNamespace(log=lambda message: None),
+        )
+
+        exit_code, _ = app.run(parsed_args)
+
+        assert exit_code == 0
+        assert captured.get("allow_audio_only") is expected
 
 
 def test_gather_input_files_collects_valid_paths(
@@ -196,6 +224,36 @@ def test_gather_input_files_collects_valid_paths(
     assert str(file_path.resolve()) in results
     assert str(valid_child) in results
     assert len(results) == 2
+
+
+def test_gather_input_files_excludes_audio_only_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Audio-only files are skipped unless ``allow_audio_only`` is set."""
+
+    audio_file = tmp_path / "talk.m4a"
+    audio_file.write_text("data")
+
+    monkeypatch.setattr(cli.audio, "is_valid_video_file", lambda candidate: False)
+    monkeypatch.setattr(cli.audio, "is_valid_input_file", lambda candidate: True)
+
+    assert cli.gather_input_files([str(audio_file)]) == []
+
+
+def test_gather_input_files_accepts_audio_only_when_allowed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With ``allow_audio_only`` an audio-only file (no video stream) is collected."""
+
+    audio_file = tmp_path / "talk.m4a"
+    audio_file.write_text("data")
+
+    monkeypatch.setattr(cli.audio, "is_valid_video_file", lambda candidate: False)
+    monkeypatch.setattr(cli.audio, "is_valid_input_file", lambda candidate: True)
+
+    results = cli.gather_input_files([str(audio_file)], allow_audio_only=True)
+
+    assert results == [str(audio_file.resolve())]
 
 
 def test_print_total_time_formats_elapsed(
@@ -236,7 +294,7 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
 
     gathered: list[list[str]] = []
 
-    def gather_files(paths: list[str]) -> list[str]:
+    def gather_files(paths: list[str], **_kwargs: object) -> list[str]:
         gathered.append(list(paths))
         return ["/videos/input.mp4"]
 
@@ -304,7 +362,7 @@ def test_cli_application_forwards_mp3_video_codec() -> None:
         prefer_global_ffmpeg=False,
     )
 
-    def gather_files(paths: list[str]) -> list[str]:
+    def gather_files(paths: list[str], **_kwargs: object) -> list[str]:
         return ["/videos/input.mp4"]
 
     speed_calls: list[cli.ProcessingOptions] = []
@@ -356,7 +414,7 @@ def test_cli_application_falls_back_to_local_after_remote_failure() -> None:
         prefer_global_ffmpeg=True,
     )
 
-    def gather_files(_paths: list[str]) -> list[str]:
+    def gather_files(_paths: list[str], **_kwargs: object) -> list[str]:
         return ["/videos/input.mp4"]
 
     def failing_send_video(**kwargs: object):
@@ -577,7 +635,7 @@ def test_cli_application_uses_remote_server_when_url_provided() -> None:
     )
 
     app = cli.CliApplication(
-        gather_files=lambda paths: ["/tmp/input.mp4"],
+        gather_files=lambda paths, **_kwargs: ["/tmp/input.mp4"],
         send_video=fake_send_video,
         speed_up=fail_speed_up,
         reporter_factory=reporter_factory,
@@ -779,7 +837,7 @@ def test_process_via_server_handles_multiple_files_and_warnings(
     monkeypatch.setattr(cli, "_print_total_time", lambda start_time: print("TOTAL"))
 
     app = cli.CliApplication(
-        gather_files=lambda inputs: list(inputs),
+        gather_files=lambda inputs, **_kwargs: list(inputs),
         send_video=fake_send_video,
         speed_up=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()),
         reporter_factory=lambda: None,
@@ -853,7 +911,7 @@ def test_process_via_server_forwards_cut_range(
     monkeypatch.setattr(cli, "_print_total_time", lambda start_time: None)
 
     app = cli.CliApplication(
-        gather_files=lambda inputs: list(inputs),
+        gather_files=lambda inputs, **_kwargs: list(inputs),
         send_video=fake_send_video,
         speed_up=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()),
         reporter_factory=lambda: None,
@@ -907,7 +965,7 @@ def test_process_via_server_omits_cut_range_when_zero(
     monkeypatch.setattr(cli, "_print_total_time", lambda start_time: None)
 
     app = cli.CliApplication(
-        gather_files=lambda inputs: list(inputs),
+        gather_files=lambda inputs, **_kwargs: list(inputs),
         send_video=fake_send_video,
         speed_up=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()),
         reporter_factory=lambda: None,
@@ -960,7 +1018,7 @@ def test_process_via_server_handles_missing_remote_support() -> None:
     )
 
     app = cli.CliApplication(
-        gather_files=lambda paths: list(paths),
+        gather_files=lambda paths, **_kwargs: list(paths),
         send_video=None,
         speed_up=lambda *_args, **_kwargs: None,
         reporter_factory=lambda: None,
