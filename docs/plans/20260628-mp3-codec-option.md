@@ -179,11 +179,12 @@
       flake8 nor ruff is installed in this environment; skipped).
 
 ### Task 8: [Final] Update documentation
-- [ ] Update `README.md`: document `--video-codec mp3` and the audio-only behavior in the
+- [x] Update `README.md`: document `--video-codec mp3` and the audio-only behavior in the
       CLI options and codec sections.
-- [ ] Update `CLAUDE.md` GUI notes if the codec selector description needs the mp3 option.
-- [ ] Note the new codec value in `CHANGELOG.md` context if applicable (release notes are
-      generated from `feat:`-prefixed commits).
+- [x] Update `CLAUDE.md` GUI notes if the codec selector description needs the mp3 option
+      (no change needed — CLAUDE.md has no codec-selector description to extend).
+- [x] Note the new codec value in `CHANGELOG.md` context if applicable (release notes are
+      generated from `feat:`-prefixed commits; this `feat:` commit supplies the context).
 
 *Note: ralphex automatically moves completed plans to `docs/plans/completed/`.*
 

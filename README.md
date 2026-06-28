@@ -80,7 +80,10 @@ Need a different compression target? HEVC (`--video-codec hevc`) is now the
 default and targets roughly 25% smaller files with tuned presets, adaptive
 quantization, and multipass lookahead. Switch to `--video-codec h264` when you
 need the quickest NVENC path or `--video-codec av1` to experiment with modern
-AV1 output.
+AV1 output. Choose `--video-codec mp3` to skip video entirely and export an
+**audio-only `.mp3`** (encoded with `libmp3lame -q:a 2`, ~190 kbps VBR): the talk
+is still silence-trimmed and speed-adjusted exactly as usual, but the result is a
+`<name>.mp3` file instead of `<name>.mp4`.
 Every interface—the CLI, GUI, and browser UI—shares the same encoder choices so
 you can pick once and get consistent results everywhere.
 
@@ -240,12 +243,12 @@ last 100 requests in memory (process-local, not persisted). Because the
 endpoint is unauthenticated, anyone who can reach the server port can read which
 client IPs have used it.
 
-This opens a local web page featuring a drag-and-drop upload zone, **Small video**, **Target 480p**, and **Optimized encoding** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a **Cut video** checkbox plus always-visible **Cut start**/**Cut end** number inputs (in seconds); the keep range is applied only when the checkbox is ticked—scrub with the embedded player to find the timestamps—a live
+This opens a local web page featuring a drag-and-drop upload zone, **Small video**, **Target 480p**, and **Optimized encoding** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), av1 (no advantages), and mp3 (audio only), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a **Cut video** checkbox plus always-visible **Cut start**/**Cut end** number inputs (in seconds); the keep range is applied only when the checkbox is ticked—scrub with the embedded player to find the timestamps—a live
 progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current
 Talks Reducer version so you can confirm which build the server is running. Once the job completes you can inspect the resulting
 compression ratio and download the rendered video directly from the page.
 The desktop GUI mirrors this behaviour. A **Video codec** picker in the
-basic options lets you swap between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) without touching the CLI. Open **Advanced** settings to provide a
+basic options lets you swap between h.265 (25% smaller), h.264 (10% faster), av1 (no advantages), and mp3 (audio only) without touching the CLI. Open **Advanced** settings to provide a
 server URL and click **Discover** to scan your local network for Talks Reducer
 instances listening on port `9005`. The button now updates with the discovery
 progress, showing the scanned/total host count as `scanned / total`. A new
