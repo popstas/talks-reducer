@@ -40,6 +40,7 @@ try:
     from ..version_utils import resolve_version
     from . import discovery as discovery_helpers
     from . import layout as layout_helpers
+    from . import shortcut as shortcut_helpers
     from . import update_checker
     from .inputs import InputController
     from .preferences import GUIPreferences, PreferenceController, determine_config_path
@@ -80,6 +81,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from talks_reducer.gui import discovery as discovery_helpers
     from talks_reducer.gui import layout as layout_helpers
+    from talks_reducer.gui import shortcut as shortcut_helpers
     from talks_reducer.gui import update_checker
     from talks_reducer.gui.inputs import InputController
     from talks_reducer.gui.preferences import (
@@ -635,6 +637,10 @@ class TalksReducerGUI:
 
     def _show_discovery_results(self, urls: List[str]) -> None:
         discovery_helpers.show_discovery_results(self, urls)
+
+    def _open_create_lnk_dialog(self) -> None:
+        """Open the Windows-only **Create lnk** desktop-shortcut dialog."""
+        shortcut_helpers.open_create_lnk_dialog(self)
 
     def _sync_simple_preset(self, *_: object) -> None:
         """Update the simple-mode speedup dropdown to reflect current speed vars."""
