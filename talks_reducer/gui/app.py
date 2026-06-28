@@ -1144,6 +1144,20 @@ class TalksReducerGUI:
     def _configure_drop_targets(self, widget) -> None:
         self.inputs.configure_drop_targets(widget)
 
+    def _refresh_slider_label(self, setting_key: str) -> None:
+        """Re-run a slider's formatting callback after a programmatic value change.
+
+        The slider ``command`` callback only fires on user interaction, so the
+        value label beside it stays stale when seeded values are applied
+        programmatically. Invoking the stored updater refreshes the label.
+        """
+
+        updater = self._slider_updaters.get(setting_key)
+        variable = self._basic_variables.get(setting_key)
+        if updater is None or variable is None:
+            return
+        updater(str(variable.get()))
+
     def _apply_cli_settings(self, settings: dict) -> None:
         """Apply CLI-provided options to the matching GUI controls.
 
@@ -1161,10 +1175,13 @@ class TalksReducerGUI:
             self.small_480_var.set(bool(settings["small_480"]))
         if "silent_speed" in settings:
             self.silent_speed_var.set(float(settings["silent_speed"]))
+            self._refresh_slider_label("silent_speed")
         if "sounded_speed" in settings:
             self.sounded_speed_var.set(float(settings["sounded_speed"]))
+            self._refresh_slider_label("sounded_speed")
         if "silent_threshold" in settings:
             self.silent_threshold_var.set(float(settings["silent_threshold"]))
+            self._refresh_slider_label("silent_threshold")
         if "frame_spreadage" in settings:
             self.frame_margin_var.set(_format_seed_number(settings["frame_spreadage"]))
         if "sample_rate" in settings:

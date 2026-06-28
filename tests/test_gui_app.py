@@ -589,12 +589,21 @@ class _RecordingVar:
 
 
 def _make_settings_gui() -> SimpleNamespace:
-    return SimpleNamespace(
+    silent_speed_var = _RecordingVar(4.0)
+    sounded_speed_var = _RecordingVar(1.0)
+    silent_threshold_var = _RecordingVar(0.01)
+    slider_calls: dict[str, list] = {}
+
+    def _make_updater(key: str):
+        slider_calls[key] = []
+        return lambda value: slider_calls[key].append(value)
+
+    gui = SimpleNamespace(
         small_var=_RecordingVar(False),
         small_480_var=_RecordingVar(False),
-        silent_speed_var=_RecordingVar(4.0),
-        sounded_speed_var=_RecordingVar(1.0),
-        silent_threshold_var=_RecordingVar(0.01),
+        silent_speed_var=silent_speed_var,
+        sounded_speed_var=sounded_speed_var,
+        silent_threshold_var=silent_threshold_var,
         frame_margin_var=_RecordingVar("2"),
         sample_rate_var=_RecordingVar("48000"),
         keyframe_interval_var=_RecordingVar(30.0),
@@ -606,7 +615,22 @@ def _make_settings_gui() -> SimpleNamespace:
         temp_var=_RecordingVar(""),
         server_url_var=_RecordingVar(""),
         processing_mode_var=_RecordingVar("local"),
+        _slider_updaters={
+            "silent_speed": _make_updater("silent_speed"),
+            "sounded_speed": _make_updater("sounded_speed"),
+            "silent_threshold": _make_updater("silent_threshold"),
+        },
+        _basic_variables={
+            "silent_speed": silent_speed_var,
+            "sounded_speed": sounded_speed_var,
+            "silent_threshold": silent_threshold_var,
+        },
     )
+    gui.slider_calls = slider_calls
+    gui._refresh_slider_label = lambda key: app.TalksReducerGUI._refresh_slider_label(
+        gui, key
+    )
+    return gui
 
 
 def test_apply_cli_settings_updates_controls():
@@ -628,6 +652,34 @@ def test_apply_cli_settings_updates_controls():
     assert gui.optimize_var.get() is False
     # Untouched controls keep their existing values.
     assert gui.sounded_speed_var.set_calls == []
+
+
+def test_apply_cli_settings_refreshes_seeded_slider_labels():
+    gui = _make_settings_gui()
+
+    app.TalksReducerGUI._apply_cli_settings(
+        gui,
+        {
+            "silent_speed": 10.0,
+            "sounded_speed": 1.5,
+            "silent_threshold": 0.05,
+        },
+    )
+
+    assert gui.silent_speed_var.get() == 10.0
+    assert gui.slider_calls["silent_speed"] == ["10.0"]
+    assert gui.slider_calls["sounded_speed"] == ["1.5"]
+    assert gui.slider_calls["silent_threshold"] == ["0.05"]
+
+
+def test_apply_cli_settings_skips_slider_refresh_when_value_absent():
+    gui = _make_settings_gui()
+
+    app.TalksReducerGUI._apply_cli_settings(gui, {"small": True})
+
+    assert gui.slider_calls["silent_speed"] == []
+    assert gui.slider_calls["sounded_speed"] == []
+    assert gui.slider_calls["silent_threshold"] == []
 
 
 def test_apply_cli_settings_server_url_switches_to_remote():
