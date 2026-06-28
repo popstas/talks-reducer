@@ -620,6 +620,67 @@ def test_process_video_accepts_hevc_codec(tmp_path: Path) -> None:
     assert seen_codecs == ["hevc"]
 
 
+def test_process_video_accepts_mp3_codec(tmp_path: Path) -> None:
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+
+    seen_codecs: list[str] = []
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        seen_codecs.append(options.video_codec)
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or options.input_file,
+            frame_rate=24.0,
+            original_duration=120.0,
+            output_duration=30.0,
+            chunk_count=5,
+            used_cuda=False,
+            max_audio_volume=0.6,
+            time_ratio=0.25,
+            size_ratio=0.3,
+        )
+
+    dependencies = server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                video_codec="mp3",
+                progress=None,
+                dependencies=dependencies,
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+
+    assert outputs[-1][0] is not None
+    assert seen_codecs == ["mp3"]
+
+
+def test_build_interface_codec_dropdown_includes_mp3() -> None:
+    demo = server.build_interface()
+
+    codec_choices: list[tuple[str, str]] = []
+    for component in demo.blocks.values():
+        if getattr(component, "label", None) == "Video codec" and hasattr(
+            component, "choices"
+        ):
+            codec_choices = list(component.choices)
+            break
+
+    codec_values = [value for _label, value in codec_choices]
+    assert "mp3" in codec_values
+
+
 def test_process_video_raises_when_pipeline_reports_error(
     tmp_path: Path,
 ) -> None:

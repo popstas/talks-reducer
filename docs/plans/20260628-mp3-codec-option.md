@@ -154,18 +154,18 @@
       must pass before next task.
 
 ### Task 6: Server (gradio) + remote client codec choice
-- [ ] In `talks_reducer/server.py`: add `("mp3 (audio only)", "mp3")` to `codec_dropdown`
+- [x] In `talks_reducer/server.py`: add `("mp3 (audio only)", "mp3")` to `codec_dropdown`
       choices (lines 930–938), add `"mp3"` to the codec guard-set at line 773, and update
       the UI help markdown (line 911) to mention mp3 audio-only output.
-- [ ] In `talks_reducer/service_client.py`: add `"mp3"` to the remote `--video-codec`
+- [x] In `talks_reducer/service_client.py`: add `"mp3"` to the remote `--video-codec`
       `choices` near line 886. (The `send_video(video_codec=...)` forwarding at lines 480,
       520 already passes the value through — verify no extra change needed.)
-- [ ] In `tests/test_server.py`, add a test that `process_video(..., video_codec="mp3")`
+- [x] In `tests/test_server.py`, add a test that `process_video(..., video_codec="mp3")`
       produces `ProcessingOptions(video_codec="mp3")` and that the dropdown choices include
       `mp3`.
-- [ ] In `tests/test_service_client.py`, add a test that `--video-codec mp3` is accepted
+- [x] In `tests/test_service_client.py`, add a test that `--video-codec mp3` is accepted
       and forwarded in the submit args.
-- [ ] Run `python -m pytest tests/test_server.py tests/test_service_client.py -q` —
+- [x] Run `python -m pytest tests/test_server.py tests/test_service_client.py -q` —
       must pass before next task.
 
 ### Task 7: Verify acceptance criteria

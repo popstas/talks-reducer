@@ -452,7 +452,7 @@ def test_send_video_stream_flag(monkeypatch, tmp_path):
     assert destination.name == server_file.name
 
 
-@pytest.mark.parametrize("codec", ["av1", "hevc"])
+@pytest.mark.parametrize("codec", ["av1", "hevc", "mp3"])
 def test_send_video_forwards_custom_options(monkeypatch, tmp_path, codec):
     input_file = tmp_path / "input.mp4"
     input_file.write_bytes(b"input")
@@ -614,6 +614,32 @@ def test_main_prints_summary(monkeypatch, tmp_path, capsys):
     captured = capsys.readouterr()
     assert "summary" in captured.out
     assert str(destination_file) in captured.out
+
+
+def test_main_accepts_mp3_video_codec(monkeypatch, tmp_path, capsys):
+    input_file = tmp_path / "input.mp4"
+    destination_file = tmp_path / "output.mp3"
+
+    def fake_send_video(*, log_callback=None, **kwargs):
+        assert kwargs["video_codec"] == "mp3"
+        return destination_file, "summary", "log"
+
+    monkeypatch.setattr(
+        service_client, "send_video", lambda **kwargs: fake_send_video(**kwargs)
+    )
+
+    service_client.main(
+        [
+            str(input_file),
+            "--server",
+            "http://localhost:9005/",
+            "--video-codec",
+            "mp3",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert "summary" in captured.out
 
 
 def test_main_stream_option(monkeypatch, tmp_path, capsys):

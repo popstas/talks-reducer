@@ -770,7 +770,7 @@ def process_video(
     )
 
     codec_value = (video_codec or "hevc").strip().lower()
-    if codec_value not in {"h264", "hevc", "av1"}:
+    if codec_value not in {"h264", "hevc", "av1", "mp3"}:
         codec_value = "hevc"
 
     normalized_sounded_speed: Optional[float] = None
@@ -908,7 +908,8 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
             by default to apply the 720p/128k preset before processing starts—clear it to
             keep the original resolution or pair it with **Target 480p** to downscale
             further. Choose **Video codec** to switch between h.265 (≈25% smaller),
-            h.264 (≈10% faster), and av1 (no advantages) compression, and enable
+            h.264 (≈10% faster), av1 (no advantages) compression, and mp3
+            (audio-only output), and enable
             **Use global FFmpeg** when your system install offers hardware encoders that the
             bundled build lacks.
 
@@ -932,6 +933,7 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
                 ("h.265 (25% smaller)", "hevc"),
                 ("h.264 (10% faster)", "h264"),
                 ("av1 (no advantages)", "av1"),
+                ("mp3 (audio only)", "mp3"),
             ],
             value="hevc",
             label="Video codec",
