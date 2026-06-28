@@ -169,12 +169,14 @@
       must pass before next task.
 
 ### Task 7: Verify acceptance criteria
-- [ ] Verify mp3 selectable and functional in CLI, desktop GUI, web/server UI, and remote
+- [x] Verify mp3 selectable and functional in CLI, desktop GUI, web/server UI, and remote
       client (value reaches `ProcessingOptions`/`send_video`).
-- [ ] Verify output is `<name>.mp3` and other codecs remain `.mp4`.
-- [ ] Run the full unit suite: `python -m pytest tests/ -q` — all pass.
-- [ ] Run `black .` and `isort .` — no diffs / formatting clean.
-- [ ] Run any configured linter (flake8/ruff if present) — fix all issues.
+- [x] Verify output is `<name>.mp3` and other codecs remain `.mp4`.
+- [x] Run the full unit suite: `python -m pytest tests/ -q` — all pass (614 passed; fixed
+      a stale `test_gui_layout.py` codec-button assertion that missed mp3).
+- [x] Run `black .` and `isort .` — no diffs / formatting clean.
+- [x] Run any configured linter (flake8/ruff if present) — fix all issues (neither
+      flake8 nor ruff is installed in this environment; skipped).
 
 ### Task 8: [Final] Update documentation
 - [ ] Update `README.md`: document `--video-codec mp3` and the audio-only behavior in the
