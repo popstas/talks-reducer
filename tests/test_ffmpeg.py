@@ -369,6 +369,60 @@ def test_build_extract_audio_command(monkeypatch):
     assert command == expected
 
 
+def test_build_audio_only_command_uses_processed_wav(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command = ffmpeg.build_audio_only_command(
+        "input.mp4",
+        "audioNew.wav",
+        "talk_speedup.mp3",
+    )
+
+    expected = (
+        '"/usr/bin/ffmpeg" -y -i "audioNew.wav" -vn -map 0:a:0 '
+        '-c:a libmp3lame -q:a 2 "talk_speedup.mp3" '
+        "-loglevel warning -stats -hide_banner"
+    )
+    assert command == expected
+    assert "libmp3lame" in command
+    assert "-q:a 2" in command
+    assert "-vn" in command
+    assert command.split('"talk_speedup.mp3"')[0].endswith("-q:a 2 ")
+    # The processed WAV is the source; the original input is not referenced.
+    assert "input.mp4" not in command
+
+
+def test_build_audio_only_command_falls_back_to_input_with_trim(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command = ffmpeg.build_audio_only_command(
+        "input.mp4",
+        None,
+        "talk.mp3",
+        cut_start_seconds=10.0,
+        cut_end_seconds=60.0,
+    )
+
+    assert '-ss 10 -t 50 -i "input.mp4"' in command
+    assert "libmp3lame" in command
+    assert "-q:a 2" in command
+    assert command.rstrip().endswith("-loglevel warning -stats -hide_banner")
+    assert '"talk.mp3"' in command
+
+
+def test_build_audio_only_command_input_without_trim(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    command = ffmpeg.build_audio_only_command(
+        "input.mp4",
+        None,
+        "talk.mp3",
+    )
+
+    assert '"/usr/bin/ffmpeg" -y -i "input.mp4"' in command
+    assert "-ss" not in command
+
+
 def test_build_trim_input_args_full_range():
     assert ffmpeg.build_trim_input_args(10.0, 60.0) == ["-ss 10", "-t 50"]
 

@@ -90,7 +90,7 @@
 - [x] Run `python -m pytest tests/test_pipeline.py -q` — must pass before next task.
 
 ### Task 2: Audio-only ffmpeg command builder
-- [ ] In `talks_reducer/ffmpeg.py`, add `build_audio_only_command(input_file, audio_file,
+- [x] In `talks_reducer/ffmpeg.py`, add `build_audio_only_command(input_file, audio_file,
       output_file, *, ffmpeg_path=None, cut_start_seconds=0.0, cut_end_seconds=0.0,
       quality="2")` that returns a single command string:
       `"<ffmpeg>" -y [trim args] -i "<src>" -vn -map 0:a:0 -c:a libmp3lame -q:a 2
@@ -98,13 +98,13 @@
       processed WAV) as `<src>` when provided; otherwise use `input_file` with
       `build_trim_input_args(cut_start_seconds, cut_end_seconds)` applied. No CUDA, no
       fallback command.
-- [ ] Leave `build_video_commands()`' guard at line 726 unchanged (mp3 never reaches it).
-- [ ] In `tests/test_ffmpeg.py`, add tests asserting `build_audio_only_command` emits
+- [x] Leave `build_video_commands()`' guard at line 726 unchanged (mp3 never reaches it).
+- [x] In `tests/test_ffmpeg.py`, add tests asserting `build_audio_only_command` emits
       `libmp3lame`, `-q:a 2`, `-vn`, ends in the `.mp3` output path, and uses the processed
       WAV when supplied.
-- [ ] Add an edge test: when `audio_file` is `None`, the command reads from `input_file`
+- [x] Add an edge test: when `audio_file` is `None`, the command reads from `input_file`
       and includes trim args when `cut_start_seconds`/`cut_end_seconds` are set.
-- [ ] Run `python -m pytest tests/test_ffmpeg.py -q` — must pass before next task.
+- [x] Run `python -m pytest tests/test_ffmpeg.py -q` — must pass before next task.
 
 ### Task 3: Branch the pipeline to audio-only render for mp3
 - [ ] In `talks_reducer/pipeline.py` `speed_up_video()`, before the
