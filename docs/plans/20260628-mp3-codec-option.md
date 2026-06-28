@@ -128,14 +128,14 @@
 - [x] Run `python -m pytest tests/test_pipeline.py -q` — must pass before next task.
 
 ### Task 4: CLI `--video-codec mp3`
-- [ ] In `talks_reducer/cli.py`, add `"mp3"` to the `--video-codec` `choices` (line 107)
+- [x] In `talks_reducer/cli.py`, add `"mp3"` to the `--video-codec` `choices` (line 107)
       and mention mp3 (audio-only output) in the help text (lines 110–112).
-- [ ] Confirm the option assembly (lines 335–336) forwards `mp3` unchanged into
+- [x] Confirm the option assembly (lines 335–336) forwards `mp3` unchanged into
       `ProcessingOptions` (no extra handling expected).
-- [ ] In `tests/test_cli.py`, add a test that `--video-codec mp3` parses and produces
+- [x] In `tests/test_cli.py`, add a test that `--video-codec mp3` parses and produces
       `ProcessingOptions(video_codec="mp3")`.
-- [ ] Add a test that an invalid codec is still rejected by argparse `choices`.
-- [ ] Run `python -m pytest tests/test_cli.py -q` — must pass before next task.
+- [x] Add a test that an invalid codec is still rejected by argparse `choices`.
+- [x] Run `python -m pytest tests/test_cli.py -q` — must pass before next task.
 
 ### Task 5: Desktop GUI codec selector + persistence
 - [ ] In `talks_reducer/gui/layout.py`: add `"mp3": "mp3 (audio only)"` to `CODEC_LABELS`

@@ -104,12 +104,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--video-codec",
-        choices=["h264", "hevc", "av1"],
+        choices=["h264", "hevc", "av1", "mp3"],
         default="hevc",
         help=(
             "Select the video encoder used for the final render (default: hevc — "
             "h.265 for roughly 25%% smaller files). Pick h264 (about 10%% faster) "
-            "when speed matters or av1 (no advantages) for experimental runs."
+            "when speed matters or av1 (no advantages) for experimental runs. "
+            "Choose mp3 to export an audio-only .mp3 file instead of a video."
         ),
     )
     parser.add_argument(

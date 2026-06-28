@@ -45,6 +45,25 @@ def test_build_parser_includes_version_and_defaults(
     assert codec_suffix_args.add_codec_suffix is True
 
 
+def test_build_parser_accepts_mp3_video_codec() -> None:
+    """The parser should accept ``--video-codec mp3`` for audio-only output."""
+
+    parser = cli._build_parser()
+
+    args = parser.parse_args(["--video-codec", "mp3", "input.mp4"])
+
+    assert args.video_codec == "mp3"
+
+
+def test_build_parser_rejects_unknown_video_codec() -> None:
+    """An unknown codec is rejected by argparse ``choices``."""
+
+    parser = cli._build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--video-codec", "vp9", "input.mp4"])
+
+
 def test_build_parser_format_help_does_not_crash() -> None:
     """Help text with literal percent signs must not break argparse formatting."""
 
@@ -270,6 +289,49 @@ def test_cli_application_builds_processing_options_and_runs_local_pipeline() -> 
         for msg in logged_messages
     )
     assert any(message.startswith("Result: ") for message in logged_messages)
+
+
+def test_cli_application_forwards_mp3_video_codec() -> None:
+    """The ``mp3`` codec is forwarded unchanged into ``ProcessingOptions``."""
+
+    parsed_args = SimpleNamespace(
+        input_file=["input.mp4"],
+        output_file=None,
+        temp_folder="/tmp/work",
+        video_codec="mp3",
+        server_url=None,
+        host=None,
+        prefer_global_ffmpeg=False,
+    )
+
+    def gather_files(paths: list[str]) -> list[str]:
+        return ["/videos/input.mp4"]
+
+    speed_calls: list[cli.ProcessingOptions] = []
+
+    def fake_speed_up(options: cli.ProcessingOptions, reporter: object):
+        speed_calls.append(options)
+        return SimpleNamespace(
+            output_file=Path("/videos/input.mp3"), time_ratio=0.5, size_ratio=0.25
+        )
+
+    class DummyReporter:
+        def log(self, message: str) -> None:
+            pass
+
+    app = cli.CliApplication(
+        gather_files=gather_files,
+        send_video=None,
+        speed_up=fake_speed_up,
+        reporter_factory=DummyReporter,
+    )
+
+    exit_code, error_messages = app.run(parsed_args)
+
+    assert exit_code == 0
+    assert error_messages == []
+    assert len(speed_calls) == 1
+    assert speed_calls[0].video_codec == "mp3"
 
 
 def test_cli_application_falls_back_to_local_after_remote_failure() -> None:
