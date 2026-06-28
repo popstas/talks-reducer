@@ -481,7 +481,9 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.server_discover_button = gui.ttk.Button(
         gui.basic_options_frame, text="Discover", command=gui._start_discovery
     )
-    gui.server_discover_button.grid(row=5, column=2, padx=(8, 0))
+    gui.server_discover_button.grid(
+        row=5, column=2, padx=(8, 0), pady=(8, 0), sticky="ew"
+    )
 
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
         row=6, column=0, sticky="w", pady=(8, 0)

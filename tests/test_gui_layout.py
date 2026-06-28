@@ -351,6 +351,26 @@ def test_build_layout_hides_local_server_url_in_standalone_mode(monkeypatch):
     assert label.grid_remove_calls
 
 
+def test_build_layout_aligns_server_entry_and_discover_button(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    gui = _make_layout_gui()
+
+    layout.build_layout(gui)
+
+    entry_grid = gui.server_entry.grid_calls[-1][1]
+    button_grid = gui.server_discover_button.grid_calls[-1][1]
+
+    # The entry and the Discover button share a row and must align vertically:
+    # same top padding so their baselines match.
+    assert entry_grid["row"] == button_grid["row"] == 5
+    assert entry_grid["pady"] == button_grid["pady"] == (8, 0)
+    assert button_grid["sticky"] == "ew"
+
+
 def test_build_layout_initializes_widgets(monkeypatch):
     add_slider_mock = Mock()
     add_entry_mock = Mock()
