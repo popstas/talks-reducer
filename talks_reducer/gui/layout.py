@@ -79,6 +79,7 @@ CODEC_LABELS: dict[str, str] = {
     "h264": "H.264",
     "hevc": "H.265",
     "av1": "AV1",
+    "mp3": "mp3 (audio only)",
 }
 
 
@@ -418,6 +419,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         ("h264", "h.264 (faster)"),
         ("hevc", "h.265 (25% smaller)"),
         ("av1", "av1 (no advantages)"),
+        ("mp3", "mp3 (audio only)"),
     ):
         button = gui.ttk.Radiobutton(
             codec_choice,

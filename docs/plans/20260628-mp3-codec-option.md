@@ -138,19 +138,19 @@
 - [x] Run `python -m pytest tests/test_cli.py -q` — must pass before next task.
 
 ### Task 5: Desktop GUI codec selector + persistence
-- [ ] In `talks_reducer/gui/layout.py`: add `"mp3": "mp3 (audio only)"` to `CODEC_LABELS`
+- [x] In `talks_reducer/gui/layout.py`: add `"mp3": "mp3 (audio only)"` to `CODEC_LABELS`
       (line 78) and add `("mp3", "mp3 (audio only)")` to the advanced-mode radiobutton
       tuple (lines 417–423). The simple-mode combobox picks this up via
       `CODEC_LABELS.values()` automatically.
-- [ ] In `talks_reducer/gui/app.py`, add `"mp3"` to the codec guard-sets at lines 291,
+- [x] In `talks_reducer/gui/app.py`, add `"mp3"` to the codec guard-sets at lines 291,
       1193, and 1304 so the value is accepted on load and in `_collect_arguments`.
-- [ ] In `talks_reducer/gui/preferences.py`, add `"mp3"` to the guard-set in
+- [x] In `talks_reducer/gui/preferences.py`, add `"mp3"` to the guard-set in
       `on_video_codec_change` (line 170) so the choice persists.
-- [ ] In `tests/test_gui_app.py`, add tests that selecting `mp3` is accepted (not reset to
+- [x] In `tests/test_gui_app.py`, add tests that selecting `mp3` is accepted (not reset to
       `h264`) and that `_collect_arguments` emits `video_codec="mp3"`.
-- [ ] In `tests/test_gui_preferences.py`, add a test that `mp3` round-trips through
+- [x] In `tests/test_gui_preferences.py`, add a test that `mp3` round-trips through
       preferences.
-- [ ] Run `python -m pytest tests/test_gui_app.py tests/test_gui_preferences.py -q` —
+- [x] Run `python -m pytest tests/test_gui_app.py tests/test_gui_preferences.py -q` —
       must pass before next task.
 
 ### Task 6: Server (gradio) + remote client codec choice

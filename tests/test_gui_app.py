@@ -246,6 +246,47 @@ def test_collect_arguments_includes_video_codec():
     assert gui.video_codec_var.set_calls == []
 
 
+def test_collect_arguments_accepts_mp3_codec():
+    class DummyVar:
+        def __init__(self, value: str) -> None:
+            self._value = value
+            self.set_calls: list[str] = []
+
+        def get(self) -> str:
+            return self._value
+
+        def set(self, value: str) -> None:
+            self._value = value
+            self.set_calls.append(value)
+
+    gui = SimpleNamespace(
+        output_var=SimpleNamespace(get=lambda: ""),
+        temp_var=SimpleNamespace(get=lambda: ""),
+        silent_threshold_var=SimpleNamespace(get=lambda: 0.01),
+        sounded_speed_var=SimpleNamespace(get=lambda: 1.0),
+        silent_speed_var=SimpleNamespace(get=lambda: 4.0),
+        frame_margin_var=SimpleNamespace(get=lambda: "2"),
+        sample_rate_var=SimpleNamespace(get=lambda: "48000"),
+        keyframe_interval_var=SimpleNamespace(get=lambda: 30.0),
+        small_var=SimpleNamespace(get=lambda: False),
+        small_480_var=SimpleNamespace(get=lambda: False),
+        video_codec_var=DummyVar("mp3"),
+        add_codec_suffix_var=SimpleNamespace(get=lambda: False),
+        use_global_ffmpeg_var=SimpleNamespace(get=lambda: True),
+        optimize_var=SimpleNamespace(get=lambda: True),
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        cut_start_var=SimpleNamespace(get=lambda: 0.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
+        preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
+    )
+    gui._parse_float = lambda value, _label: float(value)
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["video_codec"] == "mp3"
+    assert gui.video_codec_var.set_calls == []
+
+
 def test_collect_arguments_includes_add_codec_suffix():
     gui = SimpleNamespace(
         output_var=SimpleNamespace(get=lambda: ""),
