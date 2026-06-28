@@ -662,7 +662,12 @@ def test_process_video_accepts_mp3_codec(tmp_path: Path) -> None:
     finally:
         server._cleanup_workspaces()
 
-    assert outputs[-1][0] is not None
+    final = outputs[-1]
+    # Audio-only output: the ``gr.Video`` preview slot is suppressed, while the
+    # download slot carries the ``.mp3`` file produced by ``_build_output_path``.
+    assert final[0] is None
+    assert final[3] is not None
+    assert Path(final[3]).suffix == ".mp3"
     assert seen_codecs == ["mp3"]
 
 

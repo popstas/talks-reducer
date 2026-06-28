@@ -876,11 +876,16 @@ def process_video(
     log_text = "\n".join(collected_logs)
     summary = _format_summary(final_result)
 
+    output_path = str(final_result.output_file)
+    # Audio-only ``.mp3`` results have no video stream, so the ``gr.Video``
+    # preview cannot render them; leave it empty and rely on the download slot.
+    is_audio_only = Path(final_result.output_file).suffix.lower() == ".mp3"
+
     yield (
-        str(final_result.output_file),
+        None if is_audio_only else output_path,
         log_text,
         summary,
-        str(final_result.output_file),
+        output_path,
     )
 
 

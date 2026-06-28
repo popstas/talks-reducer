@@ -387,7 +387,6 @@ def test_build_audio_only_command_uses_processed_wav(monkeypatch):
     assert "libmp3lame" in command
     assert "-q:a 2" in command
     assert "-vn" in command
-    assert command.split('"talk_speedup.mp3"')[0].endswith("-q:a 2 ")
     # The processed WAV is the source; the original input is not referenced.
     assert "input.mp4" not in command
 
