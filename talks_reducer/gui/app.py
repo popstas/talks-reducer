@@ -432,7 +432,12 @@ class TalksReducerGUI:
                 self._ffmpeg_process = proc
 
             try:
-                files = gather_input_files(self.input_files)
+                allow_audio_only = (
+                    str(args.get("video_codec", "") or "").strip().lower() == "mp3"
+                )
+                files = gather_input_files(
+                    self.input_files, allow_audio_only=allow_audio_only
+                )
                 if not files:
                     self._schedule_on_ui_thread(
                         lambda: self.messagebox.showwarning(
