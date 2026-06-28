@@ -578,6 +578,44 @@ def test_process_files_via_server_passes_speed_options(tmp_path: Path) -> None:
     assert captured_kwargs.get("video_codec") == "av1"
 
 
+def test_process_files_via_server_preserves_mp3_codec(tmp_path: Path) -> None:
+    gui = StubGUI()
+    captured_kwargs: dict[str, object] = {}
+    sent_kwargs: dict[str, object] = {}
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            sent_kwargs.update(kwargs)
+            return (str(tmp_path / "clip.mp3"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    def default_destination(
+        path: Path, small: bool, small_480: bool, **kwargs: object
+    ) -> Path:
+        captured_kwargs.update(kwargs)
+        return tmp_path / f"{path.stem}.mp3"
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "clip.mp4")],
+        args={
+            "video_codec": "mp3",
+            "add_codec_suffix": False,
+        },
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=default_destination,
+        parse_summary=lambda _summary: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    assert captured_kwargs.get("video_codec") == "mp3"
+    assert sent_kwargs.get("video_codec") == "mp3"
+
+
 def test_process_files_via_server_forwards_cut_without_ignored_log(
     tmp_path: Path,
 ) -> None:

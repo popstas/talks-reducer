@@ -80,7 +80,13 @@ Need a different compression target? HEVC (`--video-codec hevc`) is now the
 default and targets roughly 25% smaller files with tuned presets, adaptive
 quantization, and multipass lookahead. Switch to `--video-codec h264` when you
 need the quickest NVENC path or `--video-codec av1` to experiment with modern
-AV1 output.
+AV1 output. Choose `--video-codec mp3` to skip video entirely and export an
+**audio-only `.mp3`** (encoded with `libmp3lame -q:a 2`, ~190 kbps VBR): the talk
+is still silence-trimmed and speed-adjusted exactly as usual, but the result is a
+`<name>.mp3` file instead of `<name>.mp4`. When the mp3 codec is selected you can
+also feed **audio-only inputs** (for example `.m4a`, `.wav`, or `.aac`) — files
+without a video stream are accepted only in this mode; the other codecs still
+require a video stream.
 Every interface—the CLI, GUI, and browser UI—shares the same encoder choices so
 you can pick once and get consistent results everywhere.
 
@@ -240,12 +246,12 @@ last 100 requests in memory (process-local, not persisted). Because the
 endpoint is unauthenticated, anyone who can reach the server port can read which
 client IPs have used it.
 
-This opens a local web page featuring a drag-and-drop upload zone, **Small video**, **Target 480p**, and **Optimized encoding** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a **Cut video** checkbox plus always-visible **Cut start**/**Cut end** number inputs (in seconds); the keep range is applied only when the checkbox is ticked—scrub with the embedded player to find the timestamps—a live
+This opens a local web page featuring a drag-and-drop upload zone, **Small video**, **Target 480p**, and **Optimized encoding** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), av1 (no advantages), and mp3 (audio only), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a **Cut video** checkbox plus always-visible **Cut start**/**Cut end** number inputs (in seconds); the keep range is applied only when the checkbox is ticked—scrub with the embedded player to find the timestamps—a live
 progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current
 Talks Reducer version so you can confirm which build the server is running. Once the job completes you can inspect the resulting
 compression ratio and download the rendered video directly from the page.
 The desktop GUI mirrors this behaviour. A **Video codec** picker in the
-basic options lets you swap between h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) without touching the CLI. Open **Advanced** settings to provide a
+basic options lets you swap between h.265 (25% smaller), h.264 (10% faster), av1 (no advantages), and mp3 (audio only) without touching the CLI. Open **Advanced** settings to provide a
 server URL and click **Discover** to scan your local network for Talks Reducer
 instances listening on port `9005`. The button now updates with the discovery
 progress, showing the scanned/total host count as `scanned / total`. A new
@@ -292,9 +298,9 @@ to launch the GUI with the chosen presets and auto-convert the file.
 
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
 2. Drag a video onto the **Video file** drop zone or click to browse and select one from disk.
-3. **Optimized encoding** stays enabled to apply the tuned codec arguments, and **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear the checkboxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the default h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) compression profiles, and enable **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the bundled build omits before you submit. Disable **Optimized encoding** or pass `--no-optimize` when you want the fastest CUDA-oriented preset.
+3. **Optimized encoding** stays enabled to apply the tuned codec arguments, and **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear the checkboxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the default h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) compression profiles, or pick **mp3 (audio only)** to export an audio-only `.mp3` instead of a video, and enable **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the bundled build omits before you submit. Disable **Optimized encoding** or pass `--no-optimize` when you want the fastest CUDA-oriented preset.
 4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives. While the file uploads the server console streams `Receiving upload: …%` lines as the bytes arrive, then logs an `Upload received:` line with the filename and size, then streams the `Extracting audio:`, `Audio processing:`, and `Generating final:` stages back to the browser so you can watch real progress for each phase. As the finished file is sent back to the client the console streams matching `Sending download <filename>: …%` lines.
-5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally.
+5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally. When you choose the **mp3 (audio only)** codec the result has no video stream, so the preview stays empty and you simply use **Download processed file** to grab the `.mp3`.
 
 Need to change where the server listens? Run `talks-reducer server --host 0.0.0.0 --port 7860` (or any other port) to bind to a
 different address.
@@ -309,7 +315,7 @@ python -m talks_reducer.service_client --server http://127.0.0.1:9005/ --input d
 ```
 
 The helper wraps the Gradio API exposed by `server.py`, waits for processing to complete, then copies the rendered file to the
-path you provide. Pass `--small` (and optionally `--480`) to mirror the **Small video**/**Target 480p** checkboxes, toggle `--no-optimize` to disable the optimized encoding preset, `--video-codec hevc`, `--video-codec h264`, or `--video-codec av1` to match the codec radio buttons, `--add-codec-suffix` to append the selected codec to the default output filename, `--prefer-global-ffmpeg` to reuse the system FFmpeg before the bundled copy, or `--print-log` to stream the server log after the
+path you provide. Pass `--small` (and optionally `--480`) to mirror the **Small video**/**Target 480p** checkboxes, toggle `--no-optimize` to disable the optimized encoding preset, `--video-codec hevc`, `--video-codec h264`, `--video-codec av1`, or `--video-codec mp3` (audio-only `.mp3` output) to match the codec radio buttons, `--add-codec-suffix` to append the selected codec to the default output filename, `--prefer-global-ffmpeg` to reuse the system FFmpeg before the bundled copy, or `--print-log` to stream the server log after the
 download finishes.
 
 ## Windows installer packaging

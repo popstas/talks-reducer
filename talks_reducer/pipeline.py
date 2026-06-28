@@ -19,6 +19,7 @@ from talks_reducer.version_utils import resolve_version
 from . import audio as audio_utils
 from . import chunks as chunk_utils
 from .ffmpeg import (
+    build_audio_only_command,
     build_extract_audio_command,
     build_video_commands,
     check_cuda_available,
@@ -43,6 +44,7 @@ class PipelineDependencies:
     build_video_commands: Callable[..., tuple[str, str | None, bool]] = (
         build_video_commands
     )
+    build_audio_only_command: Callable[..., str] = build_audio_only_command
     run_timed_ffmpeg_command: Callable[..., None] = run_timed_ffmpeg_command
     create_path: Callable[[Path], None] | None = None
     delete_path: Callable[[Path], None] | None = None
@@ -291,6 +293,13 @@ def speed_up_video(
     original_width = metadata.get("width", 0)
     original_height = metadata.get("height", 0)
 
+    # Audio-only inputs report no video stream (zero dimensions, no frames) and
+    # therefore no frame rate; fall back to a sane default so the chunk/sample
+    # math stays valid.
+    has_video_stream = original_width > 0 or original_height > 0 or frame_count > 0
+    if not frame_rate or frame_rate <= 0:
+        frame_rate = 30.0
+
     app_version = resolve_version()
     if app_version and app_version != "unknown":
         reporter.log(f"talks-reducer v{app_version}")
@@ -332,9 +341,22 @@ def speed_up_video(
             target_height = 720
         reporter.log("Small mode scaling to %dp" % target_height)
 
+    is_mp3_output = str(options.video_codec).strip().lower() == "mp3"
+
+    # Audio-only inputs can only produce the audio-only mp3 output; every other
+    # codec needs a video stream to render.
+    if not has_video_stream and not is_mp3_output:
+        dependencies.delete_path(job_temp_path)
+        raise ValueError(
+            "input has no video stream; select the mp3 codec to process audio-only files"
+        )
+
     # Check if the video has an audio stream
     has_audio = audio_utils.has_audio_stream(os.fspath(input_path))
     if not has_audio:
+        if is_mp3_output:
+            dependencies.delete_path(job_temp_path)
+            raise ValueError("mp3 output requires an audio stream")
         reporter.log(
             "No audio stream found. Video will be re-encoded without speed modification."
         )
@@ -484,24 +506,38 @@ def speed_up_video(
         )
 
     keep_input_audio = has_audio and neutral_speeds
-    command_str, fallback_command_str, use_cuda_encoder = (
-        dependencies.build_video_commands(
+    if is_mp3_output:
+        # Audio-only render: encode the processed WAV (trim/speed already baked
+        # in) when available, otherwise the original input with trim applied.
+        command_str = dependencies.build_audio_only_command(
             os.fspath(input_path),
             os.fspath(audio_new_path) if audio_new_path else None,
-            os.fspath(filter_graph_path) if filter_graph_path else None,
             os.fspath(output_path),
             ffmpeg_path=ffmpeg_path,
-            cuda_available=cuda_available,
-            optimize=options.optimize,
-            small=options.small,
-            frame_rate=frame_rate,
-            keyframe_interval_seconds=options.keyframe_interval_seconds,
-            video_codec=options.video_codec,
-            keep_input_audio=keep_input_audio,
             cut_start_seconds=cut_start_seconds,
             cut_end_seconds=cut_end_seconds,
         )
-    )
+        fallback_command_str = None
+        use_cuda_encoder = False
+    else:
+        command_str, fallback_command_str, use_cuda_encoder = (
+            dependencies.build_video_commands(
+                os.fspath(input_path),
+                os.fspath(audio_new_path) if audio_new_path else None,
+                os.fspath(filter_graph_path) if filter_graph_path else None,
+                os.fspath(output_path),
+                ffmpeg_path=ffmpeg_path,
+                cuda_available=cuda_available,
+                optimize=options.optimize,
+                small=options.small,
+                frame_rate=frame_rate,
+                keyframe_interval_seconds=options.keyframe_interval_seconds,
+                video_codec=options.video_codec,
+                keep_input_audio=keep_input_audio,
+                cut_start_seconds=cut_start_seconds,
+                cut_end_seconds=cut_end_seconds,
+            )
+        )
     reporter.log(
         (
             "Encoder plan: codec={codec} | CUDA available={cuda} | "
@@ -669,8 +705,13 @@ def _input_to_output_filename(
     include_speed_marker = not (neutral_silent and neutral_sounded)
 
     normalized_codec = str(video_codec or "hevc").strip().lower()
+    is_audio_only = normalized_codec == "mp3"
     force_codec_suffix = not include_speed_marker and not small
-    include_codec_suffix = (add_codec_suffix or force_codec_suffix) and normalized_codec
+    include_codec_suffix = (
+        (add_codec_suffix or force_codec_suffix)
+        and normalized_codec
+        and not is_audio_only
+    )
 
     suffix_tokens: list[str] = []
 
@@ -690,8 +731,9 @@ def _input_to_output_filename(
         suffix_tokens.append(normalized_codec)
 
     suffix = f"_{'_'.join(suffix_tokens)}" if suffix_tokens else ""
+    extension = ".mp3" if is_audio_only else ".mp4"
     stem = filename.name[:dot_index] if dot_index != -1 else filename.name
-    return filename.with_name(stem + suffix + ".mp4")
+    return filename.with_name(stem + suffix + extension)
 
 
 def _create_path(path: Path) -> None:

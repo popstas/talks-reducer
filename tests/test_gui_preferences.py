@@ -89,6 +89,42 @@ def test_on_cut_change_persists_values(tmp_path):
     assert loaded["cut_end"] == pytest.approx(90.0)
 
 
+def test_on_video_codec_change_persists_mp3(tmp_path):
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    recorded: list[str] = []
+    gui = SimpleNamespace(
+        preferences=prefs,
+        video_codec_var=SimpleNamespace(
+            get=lambda: "mp3", set=lambda value: recorded.append(value)
+        ),
+    )
+
+    PreferenceController(gui).on_video_codec_change()
+
+    assert recorded == []
+    loaded = load_settings(config_path)
+    assert loaded["video_codec"] == "mp3"
+
+
+def test_on_video_codec_change_resets_unknown_codec(tmp_path):
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    recorded: list[str] = []
+    gui = SimpleNamespace(
+        preferences=prefs,
+        video_codec_var=SimpleNamespace(
+            get=lambda: "bogus", set=lambda value: recorded.append(value)
+        ),
+    )
+
+    PreferenceController(gui).on_video_codec_change()
+
+    assert recorded == ["h264"]
+    loaded = load_settings(config_path)
+    assert loaded["video_codec"] == "h264"
+
+
 def test_on_cut_change_handles_invalid_values(tmp_path):
     config_path = tmp_path / "settings.json"
     prefs = GUIPreferences(config_path)

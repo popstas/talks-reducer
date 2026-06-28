@@ -30,6 +30,7 @@ class InputController:
             title="Select input files",
             filetypes=[
                 ("Video files", "*.mp4 *.mkv *.mov *.avi *.m4v"),
+                ("Audio files", "*.mp3 *.m4a *.aac *.wav *.flac *.ogg *.opus *.wma"),
                 ("All", "*.*"),
             ],
         )

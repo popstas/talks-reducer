@@ -666,6 +666,48 @@ def build_extract_audio_command(
     return " ".join(command_parts)
 
 
+def build_audio_only_command(
+    input_file: str,
+    audio_file: Optional[str],
+    output_file: str,
+    *,
+    ffmpeg_path: Optional[str] = None,
+    cut_start_seconds: float = 0.0,
+    cut_end_seconds: float = 0.0,
+    quality: str = "2",
+) -> str:
+    """Build the FFmpeg command that renders an audio-only ``.mp3`` output.
+
+    When ``audio_file`` (the already silence-trimmed/speed-adjusted WAV) is
+    provided it is used directly as the source, since the trim and speed are
+    already baked into it. Otherwise the original ``input_file`` is used and the
+    keep-range ``-ss``/``-t`` flags from ``build_trim_input_args`` are applied.
+    The audio is encoded with ``libmp3lame`` at the fixed VBR ``-q:a`` quality
+    (default ``2``, ~190 kbps). No CUDA and no fallback command.
+    """
+
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+    command_parts: List[str] = [f'"{ffmpeg_path}"', "-y"]
+
+    if audio_file:
+        command_parts.append(f'-i "{audio_file}"')
+    else:
+        command_parts.extend(build_trim_input_args(cut_start_seconds, cut_end_seconds))
+        command_parts.append(f'-i "{input_file}"')
+
+    command_parts.extend(
+        [
+            "-vn",
+            "-map 0:a:0",
+            "-c:a libmp3lame",
+            f"-q:a {quality}",
+            f'"{output_file}"',
+            "-loglevel warning -stats -hide_banner",
+        ]
+    )
+    return " ".join(command_parts)
+
+
 def build_video_commands(
     input_file: str,
     audio_file: Optional[str],

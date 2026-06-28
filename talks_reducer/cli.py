@@ -104,12 +104,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--video-codec",
-        choices=["h264", "hevc", "av1"],
+        choices=["h264", "hevc", "av1", "mp3"],
         default="hevc",
         help=(
             "Select the video encoder used for the final render (default: hevc — "
             "h.265 for roughly 25%% smaller files). Pick h264 (about 10%% faster) "
-            "when speed matters or av1 (no advantages) for experimental runs."
+            "when speed matters or av1 (no advantages) for experimental runs. "
+            "Choose mp3 to export an audio-only .mp3 file instead of a video."
         ),
     )
     parser.add_argument(
@@ -187,17 +188,30 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def gather_input_files(paths: List[str]) -> List[str]:
-    """Expand provided paths into a flat list of files that contain video streams."""
+def gather_input_files(
+    paths: List[str], *, allow_audio_only: bool = False
+) -> List[str]:
+    """Expand provided paths into a flat list of processable media files.
+
+    By default only files that contain a video stream are collected. When
+    ``allow_audio_only`` is True (e.g. the mp3 codec is selected) audio-only
+    files such as ``.m4a`` are also accepted as long as they carry an audio
+    stream.
+    """
+
+    def _is_accepted(candidate: str) -> bool:
+        if audio.is_valid_video_file(candidate):
+            return True
+        return allow_audio_only and audio.is_valid_input_file(candidate)
 
     files: List[str] = []
     for input_path in paths:
-        if os.path.isfile(input_path) and audio.is_valid_video_file(input_path):
+        if os.path.isfile(input_path) and _is_accepted(input_path):
             files.append(os.path.abspath(input_path))
         elif os.path.isdir(input_path):
             for file in os.listdir(input_path):
                 candidate = os.path.join(input_path, file)
-                if audio.is_valid_video_file(candidate):
+                if _is_accepted(candidate):
                     files.append(candidate)
     return files
 
@@ -243,17 +257,26 @@ class CliApplication:
                 f"(got --cut-start {cut_start:g}, --cut-end {cut_end:g})."
             ]
 
-        files = self._gather_files(parsed_args.input_file)
+        allow_audio_only = (
+            str(getattr(parsed_args, "video_codec", "") or "").strip().lower() == "mp3"
+        )
+        files = self._gather_files(
+            parsed_args.input_file, allow_audio_only=allow_audio_only
+        )
 
         # Check if any files were found
         if not files:
+            media_kind = "media" if allow_audio_only else "video"
             error_messages: List[str] = []
             for input_path in parsed_args.input_file:
                 if os.path.isfile(input_path):
-                    # File exists but was rejected - check if it's a valid video file
-                    if not audio.is_valid_video_file(input_path):
+                    # File exists but was rejected - check if it's a valid input.
+                    accepted = audio.is_valid_video_file(input_path) or (
+                        allow_audio_only and audio.is_valid_input_file(input_path)
+                    )
+                    if not accepted:
                         error_messages.append(
-                            f"Error: '{input_path}' is not a valid video file."
+                            f"Error: '{input_path}' is not a valid {media_kind} file."
                         )
                     else:
                         error_messages.append(
@@ -261,7 +284,7 @@ class CliApplication:
                         )
                 elif os.path.isdir(input_path):
                     error_messages.append(
-                        f"Error: No valid video files found in '{input_path}'."
+                        f"Error: No valid {media_kind} files found in '{input_path}'."
                     )
                 else:
                     error_messages.append(

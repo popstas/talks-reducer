@@ -167,7 +167,7 @@ class PreferenceController:
 
     def on_video_codec_change(self, *_: object) -> None:
         value = self.gui.video_codec_var.get().strip().lower()
-        if value not in {"h264", "hevc", "av1"}:
+        if value not in {"h264", "hevc", "av1", "mp3"}:
             value = "h264"
             self.gui.video_codec_var.set(value)
         self.gui.preferences.update("video_codec", value)

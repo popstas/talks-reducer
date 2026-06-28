@@ -428,7 +428,7 @@ def process_files_via_server(
     small_480_mode = small_mode and small_target_height_value == 480
     add_codec_suffix = bool(args.get("add_codec_suffix", False))
     codec_value = str(args.get("video_codec", "h264")).strip().lower()
-    if codec_value not in {"h264", "hevc", "av1"}:
+    if codec_value not in {"h264", "hevc", "av1", "mp3"}:
         codec_value = "h264"
 
     for index, file in enumerate(files, start=1):
