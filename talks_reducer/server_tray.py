@@ -104,6 +104,15 @@ _ICON_RELATIVE_PATHS = (
     Path("docs") / "assets",
 )
 
+#: Minimum luminance (0-255) for a source pixel to count as foreground glyph.
+#: Tune this to control how much of the bright artwork survives in the menu bar
+#: silhouette; the dark background falls well below it.
+_TEMPLATE_LUMINANCE_THRESHOLD = 110
+
+#: Minimum original alpha (0-255) for a source pixel to be kept. Pixels in the
+#: icon's transparent rounded corners fall below it and stay transparent.
+_TEMPLATE_ALPHA_THRESHOLD = 128
+
 
 def _iter_icon_candidates() -> Iterator[Path]:
     """Yield possible tray icon paths ordered from most to least specific."""
@@ -127,22 +136,36 @@ def _generate_fallback_icon() -> Image.Image:
     return image
 
 
-def _make_macos_template_icon(image: Image.Image) -> Image.Image:
-    """Return a monochrome silhouette suitable for the macOS menu bar.
+def _make_macos_template_icon(
+    image: Image.Image,
+    *,
+    luminance_threshold: int = _TEMPLATE_LUMINANCE_THRESHOLD,
+    alpha_threshold: int = _TEMPLATE_ALPHA_THRESHOLD,
+) -> Image.Image:
+    """Return a two-tone silhouette suitable for the macOS menu bar.
 
     macOS renders menu bar icons as *template images*: only the alpha channel is
     used and the system tints the resulting shape to match the light or dark menu
     bar. The Talks Reducer app icon is a bright glyph on a dark, fully opaque
     rounded square, so keying purely on the alpha channel would yield a solid
-    blob. Instead the silhouette treats the dark background as transparent and
-    the brighter colors as white: luminance (scaled by the original alpha)
-    becomes the new alpha channel, so the play/chevron/list glyphs show through
-    and the dark background drops out.
+    blob.
+
+    To keep the menu bar glyph crisp the silhouette uses only two values:
+    transparent and white. A source pixel becomes opaque white when it is both
+    bright enough (luminance at or above *luminance_threshold*) and originally
+    opaque (alpha at or above *alpha_threshold*); every other pixel becomes fully
+    transparent. This drops the dark background and the icon's transparent
+    corners while keeping the play/chevron/list glyphs.
     """
 
     rgba = image.convert("RGBA")
-    luminance = rgba.convert("L")
-    template_alpha = ImageChops.multiply(luminance, rgba.getchannel("A"))
+    luminance_mask = rgba.convert("L").point(
+        lambda value: 255 if value >= luminance_threshold else 0
+    )
+    alpha_mask = rgba.getchannel("A").point(
+        lambda value: 255 if value >= alpha_threshold else 0
+    )
+    template_alpha = ImageChops.multiply(luminance_mask, alpha_mask)
     silhouette = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
     silhouette.putalpha(template_alpha)
     return silhouette

@@ -416,7 +416,7 @@ def test_create_tray_app_keeps_detached_mode_off_macos(
     assert app._tray_mode == "pystray-detached"
 
 
-def test_make_macos_template_icon_keys_silhouette_on_luminance() -> None:
+def test_make_macos_template_icon_is_strictly_two_tone() -> None:
     from PIL import Image
 
     image = Image.new("RGBA", (3, 1), (20, 24, 30, 255))  # dark background
@@ -426,13 +426,31 @@ def test_make_macos_template_icon_keys_silhouette_on_luminance() -> None:
     result = server_tray._make_macos_template_icon(image)
 
     assert result.mode == "RGBA"
-    # Bright opaque pixels become a fully opaque white silhouette.
+    # Bright opaque pixels become fully opaque white.
     assert result.getpixel((0, 0)) == (255, 255, 255, 255)
-    # The dark, opaque background is treated as black and nearly drops out.
-    assert result.getpixel((1, 0))[:3] == (255, 255, 255)
-    assert result.getpixel((1, 0))[3] < 40
+    # The dark, opaque background drops out entirely.
+    assert result.getpixel((1, 0))[3] == 0
     # Transparent pixels stay transparent regardless of brightness.
     assert result.getpixel((2, 0))[3] == 0
+
+    # The whole image only ever uses two tones: transparent and opaque white.
+    alpha_values = {a for _, _, _, a in result.convert("RGBA").getdata()}
+    assert alpha_values <= {0, 255}
+    for r, g, b, a in result.convert("RGBA").getdata():
+        if a == 255:
+            assert (r, g, b) == (255, 255, 255)
+
+
+def test_make_macos_template_icon_threshold_is_configurable() -> None:
+    from PIL import Image
+
+    image = Image.new("RGBA", (1, 1), (120, 120, 120, 255))  # mid-gray glyph
+
+    kept = server_tray._make_macos_template_icon(image, luminance_threshold=100)
+    dropped = server_tray._make_macos_template_icon(image, luminance_threshold=200)
+
+    assert kept.getpixel((0, 0)) == (255, 255, 255, 255)
+    assert dropped.getpixel((0, 0))[3] == 0
 
 
 def test_load_icon_applies_monochrome_only_on_macos(
