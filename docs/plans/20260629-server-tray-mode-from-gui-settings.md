@@ -142,18 +142,18 @@
 - [x] run `black`/`isort`; run tests — must pass before Task 4.
 
 ### Task 4: Honor the preference on cold start
-- [ ] In `gui/startup.py:main`, after arg parsing, when there is **no** `--server`,
+- [x] In `gui/startup.py:main`, after arg parsing, when there is **no** `--server`,
       **no** `--server-managed`, **no** positional inputs/seeded launch, and
       `GUIPreferences().get("start_in_server_tray", False)` is `True`, route into
       `server_tray.main(["--with-gui"])` and return (so the app boots straight into
       tray mode). Keep `--server-managed` children always running the plain GUI.
-- [ ] Ensure the routing reads preferences without importing heavy GUI state
+- [x] Ensure the routing reads preferences without importing heavy GUI state
       (use the existing `GUIPreferences` loader) and is safe when the config file
       is missing/corrupt (treat as `False`).
-- [ ] write tests: routing fires when pref True + no flags (monkeypatch
+- [x] write tests: routing fires when pref True + no flags (monkeypatch
       `server_tray.main`, fake prefs); does **not** fire when `--server-managed`,
       when inputs present, or when pref False.
-- [ ] run `black`/`isort`; run tests — must pass before Task 5.
+- [x] run `black`/`isort`; run tests — must pass before Task 5.
 
 ### Task 5: Make the server-tray child-GUI command frozen-aware
 - [ ] Update `server_tray._ServerTrayApplication._build_gui_command()` to use the
