@@ -185,6 +185,19 @@ class PreferenceController:
             "use_global_ffmpeg", bool(self.gui.use_global_ffmpeg_var.get())
         )
 
+    def on_start_in_server_tray_change(self, *_: object) -> None:
+        """Persist the server-tray toggle and dispatch the switch action.
+
+        Seeding the variable sets ``_suppress_server_tray_toggle`` so this
+        callback becomes a no-op until the GUI is fully initialised.
+        """
+
+        if getattr(self.gui, "_suppress_server_tray_toggle", False):
+            return
+        value = bool(self.gui.start_in_server_tray_var.get())
+        self.gui.preferences.update("start_in_server_tray", value)
+        self.gui._apply_server_tray_toggle(value)
+
     def on_processing_mode_change(self, *_: object) -> None:
         value = self.gui.processing_mode_var.get()
         if value not in {"local", "remote"}:

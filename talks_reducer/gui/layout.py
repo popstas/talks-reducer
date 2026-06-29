@@ -690,6 +690,15 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     if isinstance(sliders, list):
         sliders.append(gui.keyframe_interval_slider)
 
+    gui.start_in_server_tray_check = gui.ttk.Checkbutton(
+        gui.advanced_frame,
+        text="Run as server in tray",
+        variable=gui.start_in_server_tray_var,
+    )
+    gui.start_in_server_tray_check.grid(
+        row=7, column=0, columnspan=3, sticky="w", pady=4
+    )
+
     gui._toggle_advanced(initial=True)
     gui._update_processing_mode_state()
     update_basic_reset_state(gui)

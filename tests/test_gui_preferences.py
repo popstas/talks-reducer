@@ -125,6 +125,56 @@ def test_on_video_codec_change_resets_unknown_codec(tmp_path):
     assert loaded["video_codec"] == "h264"
 
 
+def test_start_in_server_tray_round_trip(tmp_path):
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+
+    assert prefs.get("start_in_server_tray", False) is False
+
+    prefs.update("start_in_server_tray", True)
+
+    loaded = load_settings(config_path)
+    assert loaded["start_in_server_tray"] is True
+
+    reloaded = GUIPreferences(config_path)
+    assert reloaded.get("start_in_server_tray", False) is True
+
+
+def test_on_start_in_server_tray_change_persists_and_dispatches(tmp_path):
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    dispatched: list[bool] = []
+    gui = SimpleNamespace(
+        preferences=prefs,
+        _suppress_server_tray_toggle=False,
+        start_in_server_tray_var=SimpleNamespace(get=lambda: True),
+        _apply_server_tray_toggle=lambda value: dispatched.append(value),
+    )
+
+    PreferenceController(gui).on_start_in_server_tray_change()
+
+    assert dispatched == [True]
+    loaded = load_settings(config_path)
+    assert loaded["start_in_server_tray"] is True
+
+
+def test_on_start_in_server_tray_change_suppressed_is_noop(tmp_path):
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    dispatched: list[bool] = []
+    gui = SimpleNamespace(
+        preferences=prefs,
+        _suppress_server_tray_toggle=True,
+        start_in_server_tray_var=SimpleNamespace(get=lambda: True),
+        _apply_server_tray_toggle=lambda value: dispatched.append(value),
+    )
+
+    PreferenceController(gui).on_start_in_server_tray_change()
+
+    assert dispatched == []
+    assert "start_in_server_tray" not in load_settings(config_path)
+
+
 def test_on_cut_change_handles_invalid_values(tmp_path):
     config_path = tmp_path / "settings.json"
     prefs = GUIPreferences(config_path)

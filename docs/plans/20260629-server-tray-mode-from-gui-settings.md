@@ -108,20 +108,20 @@
 - [x] run `black`/`isort`; run tests — must pass before Task 2.
 
 ### Task 2: Add `start_in_server_tray` preference + Advanced checkbox
-- [ ] Define the preference key (default `False`) and seed
+- [x] Define the preference key (default `False`) and seed
       `self.start_in_server_tray_var = tk.BooleanVar(...)` in `TalksReducerGUI`
       from `preferences.get("start_in_server_tray", False)`; set an internal
       `_suppress_server_tray_toggle` guard so seeding doesn't fire the action.
-- [ ] Add a **"Run as server in tray"** checkbox to the Advanced panel in
+- [x] Add a **"Run as server in tray"** checkbox to the Advanced panel in
       `gui/layout.py` (mirror the optimize / use_global_ffmpeg checkbox wiring),
       bound to `start_in_server_tray_var`.
-- [ ] Add `on_start_in_server_tray_change()` to `PreferenceController` that calls
+- [x] Add `on_start_in_server_tray_change()` to `PreferenceController` that calls
       `preferences.update("start_in_server_tray", bool(value))` and dispatches to
       the Task 3 switch logic.
-- [ ] write tests: `GUIPreferences` persists/loads the key round-trip via a temp dir.
-- [ ] write tests: controller callback updates the preference (monkeypatched
+- [x] write tests: `GUIPreferences` persists/loads the key round-trip via a temp dir.
+- [x] write tests: controller callback updates the preference (monkeypatched
       switch hook so no process spawns).
-- [ ] run `black`/`isort`; run tests — must pass before Task 3.
+- [x] run `black`/`isort`; run tests — must pass before Task 3.
 
 ### Task 3: Switch modes immediately when the toggle changes
 - [ ] Implement `TalksReducerGUI._apply_server_tray_toggle(enabled)`:

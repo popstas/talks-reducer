@@ -304,6 +304,11 @@ class TalksReducerGUI:
             value=bool(self.preferences.get("optimize", True))
         )
         self.use_global_ffmpeg_var = tk.BooleanVar(value=prefer_global)
+        # Guard so seeding ``start_in_server_tray_var`` never fires the switch action.
+        self._suppress_server_tray_toggle = False
+        self.start_in_server_tray_var = tk.BooleanVar(
+            value=bool(self.preferences.get("start_in_server_tray", False))
+        )
         stored_mode = str(self.preferences.get("processing_mode", "local"))
         if stored_mode not in {"local", "remote"}:
             stored_mode = "local"
@@ -323,6 +328,9 @@ class TalksReducerGUI:
         self.add_codec_suffix_var.trace_add("write", self._on_add_codec_suffix_change)
         self.optimize_var.trace_add("write", self._on_optimize_change)
         self.use_global_ffmpeg_var.trace_add("write", self._on_use_global_ffmpeg_change)
+        self.start_in_server_tray_var.trace_add(
+            "write", self._on_start_in_server_tray_change
+        )
         self.server_url_var = tk.StringVar(
             value=str(self.preferences.get("server_url", ""))
         )
@@ -1123,6 +1131,19 @@ class TalksReducerGUI:
 
     def _on_use_global_ffmpeg_change(self, *_: object) -> None:
         self.preference_controller.on_use_global_ffmpeg_change(*_)
+
+    def _on_start_in_server_tray_change(self, *_: object) -> None:
+        self.preference_controller.on_start_in_server_tray_change(*_)
+
+    def _apply_server_tray_toggle(self, enabled: bool) -> None:
+        """Switch into or out of server-tray mode.
+
+        The concrete relaunch behaviour is implemented in a later task; this
+        placeholder keeps the preference-controller dispatch valid in the
+        meantime.
+        """
+
+        return
 
     def _on_processing_mode_change(self, *_: object) -> None:
         self.preference_controller.on_processing_mode_change(*_)

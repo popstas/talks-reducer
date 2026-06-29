@@ -246,6 +246,7 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         video_codec_var=StringVarStub(value="hevc"),
         add_codec_suffix_var=BooleanVarStub(value=False),
         use_global_ffmpeg_var=BooleanVarStub(value=True),
+        start_in_server_tray_var=BooleanVarStub(value=False),
         global_ffmpeg_available=True,
     )
     for key, value in overrides.items():
@@ -469,6 +470,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         video_codec_var=StringVarStub(value="hevc"),
         add_codec_suffix_var=BooleanVarStub(value=False),
         use_global_ffmpeg_var=BooleanVarStub(value=False),
+        start_in_server_tray_var=BooleanVarStub(value=False),
         global_ffmpeg_available=True,
     )
 
@@ -651,6 +653,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         video_codec_var=StringVarStub(value="hevc"),
         add_codec_suffix_var=BooleanVarStub(value=False),
         use_global_ffmpeg_var=BooleanVarStub(value=True),
+        start_in_server_tray_var=BooleanVarStub(value=False),
         global_ffmpeg_available=False,
     )
 
