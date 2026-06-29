@@ -156,13 +156,13 @@
 - [x] run `black`/`isort`; run tests — must pass before Task 5.
 
 ### Task 5: Make the server-tray child-GUI command frozen-aware
-- [ ] Update `server_tray._ServerTrayApplication._build_gui_command()` to use the
+- [x] Update `server_tray._ServerTrayApplication._build_gui_command()` to use the
       Task 1 helper (`build_app_command("gui", extra_args=["--server-managed",
       "--server-url", url])`) so `--with-gui` works inside the frozen `.app`
       (current `-m talks_reducer.gui` fails when frozen).
-- [ ] update existing `tests/test_server_tray.py` expectations for the command and
+- [x] update existing `tests/test_server_tray.py` expectations for the command and
       add a frozen-case test (monkeypatch `sys.frozen`).
-- [ ] run `black`/`isort`; run tests — must pass before Task 6.
+- [x] run `black`/`isort`; run tests — must pass before Task 6.
 
 ### Task 6: Verify acceptance criteria
 - [ ] Verify all Overview requirements are implemented (toggle present, persists,

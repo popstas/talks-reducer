@@ -16,6 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from PIL import Image, ImageChops
 
+from .gui.relaunch import build_app_command
 from .icons import iter_icon_candidates
 from .server import build_interface
 from .server import build_launch_app_kwargs as _build_launch_app_kwargs
@@ -397,11 +398,11 @@ class _ServerTrayApplication:
         the server has not reported its own URL yet).
         """
 
-        command = [sys.executable, "-m", "talks_reducer.gui", "--server-managed"]
+        extra_args = ["--server-managed"]
         local_url = self._local_url or _guess_local_url(self._host, self._port)
         if local_url:
-            command.extend(["--server-url", local_url])
-        return command
+            extra_args.extend(["--server-url", local_url])
+        return build_app_command("gui", extra_args=extra_args)
 
     def _launch_gui(
         self,
