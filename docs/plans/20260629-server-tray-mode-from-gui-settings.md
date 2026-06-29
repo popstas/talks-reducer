@@ -90,22 +90,22 @@
 ## Implementation Steps
 
 ### Task 1: Frozen-aware app relaunch helper
-- [ ] Add `talks_reducer/gui/relaunch.py` with `build_app_command(mode, *, extra_args=None)`
+- [x] Add `talks_reducer/gui/relaunch.py` with `build_app_command(mode, *, extra_args=None)`
       returning the argv to start the app in a given mode, handling both frozen
       PyInstaller bundles (`getattr(sys, "frozen", False)` → `[sys.executable, *args]`)
       and source/console runs (`[sys.executable, "-m", "talks_reducer.<module>", *args]`).
-- [ ] Support two modes: `"server-tray"` → server tray + managed GUI
+- [x] Support two modes: `"server-tray"` → server tray + managed GUI
       (frozen: `[exe, "--server", "--with-gui"]`; source: `[exe, "-m",
       "talks_reducer.server_tray", "--with-gui"]`) and `"gui"` → plain desktop GUI
       (frozen: `[exe]`; source: `[exe, "-m", "talks_reducer.gui"]`).
-- [ ] Add `spawn_detached(command)` that launches the process decoupled from the
+- [x] Add `spawn_detached(command)` that launches the process decoupled from the
       parent (`start_new_session=True` on POSIX; `DETACHED_PROCESS`/`CREATE_NEW_PROCESS_GROUP`
       creationflags on Windows) and returns the `Popen`.
-- [ ] write tests for `build_app_command` (frozen vs non-frozen × both modes,
+- [x] write tests for `build_app_command` (frozen vs non-frozen × both modes,
       monkeypatching `sys.frozen`/`sys.executable`).
-- [ ] write tests for `spawn_detached` (monkeypatch `subprocess.Popen`, assert
+- [x] write tests for `spawn_detached` (monkeypatch `subprocess.Popen`, assert
       command + platform-appropriate kwargs; error path when Popen raises).
-- [ ] run `black`/`isort`; run tests — must pass before Task 2.
+- [x] run `black`/`isort`; run tests — must pass before Task 2.
 
 ### Task 2: Add `start_in_server_tray` preference + Advanced checkbox
 - [ ] Define the preference key (default `False`) and seed
