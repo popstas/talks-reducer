@@ -1167,6 +1167,79 @@ def test_build_launch_app_kwargs_registers_middleware() -> None:
     assert any(
         getattr(entry, "cls", None) is server.ActivityMiddleware for entry in middleware
     )
+    assert any(
+        getattr(entry, "cls", None) is server.PWAManifestMiddleware
+        for entry in middleware
+    )
+
+
+def test_pwa_manifest_middleware_serves_custom_manifest() -> None:
+    """The PWA middleware should answer /manifest.json with the app icon."""
+
+    async def downstream(scope, receive, send):  # pragma: no cover - not reached
+        raise AssertionError("manifest request should not reach the app")
+
+    middleware = server.PWAManifestMiddleware(downstream)
+
+    scope = {"type": "http", "method": "GET", "path": "/manifest.json", "headers": []}
+    sent = _run_asgi(middleware, scope, [])
+
+    start = next(msg for msg in sent if msg["type"] == "http.response.start")
+    assert start["status"] == 200
+    body = b"".join(
+        msg.get("body", b"") for msg in sent if msg["type"] == "http.response.body"
+    )
+    manifest = json.loads(body.decode("utf-8"))
+
+    assert manifest["name"].startswith("Talks Reducer")
+    icons = manifest["icons"]
+    assert icons, "expected at least one manifest icon"
+    assert all("logo_nosize" not in icon["src"] for icon in icons)
+    assert any(icon["src"] == server._PWA_ICON_ROUTE for icon in icons)
+
+
+def test_pwa_manifest_middleware_serves_icon(tmp_path: Path) -> None:
+    """The PWA middleware should serve the bundled icon bytes as PNG."""
+
+    icon_path = tmp_path / "icon.png"
+    icon_path.write_bytes(b"\x89PNG\r\n\x1a\nDATA")
+
+    async def downstream(scope, receive, send):  # pragma: no cover - not reached
+        raise AssertionError("icon request should not reach the app")
+
+    middleware = server.PWAManifestMiddleware(downstream, icon_path=icon_path)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": server._PWA_ICON_ROUTE,
+        "headers": [],
+    }
+    sent = _run_asgi(middleware, scope, [])
+
+    start = next(msg for msg in sent if msg["type"] == "http.response.start")
+    assert start["status"] == 200
+    assert (b"content-type", b"image/png") in start["headers"]
+    body = b"".join(
+        msg.get("body", b"") for msg in sent if msg["type"] == "http.response.body"
+    )
+    assert body == icon_path.read_bytes()
+
+
+def test_pwa_manifest_middleware_passes_through_other_routes() -> None:
+    """Unrelated requests should reach the wrapped application untouched."""
+
+    seen: list[str] = []
+
+    async def downstream(scope, receive, send):
+        seen.append(scope["path"])
+
+    middleware = server.PWAManifestMiddleware(downstream)
+
+    scope = {"type": "http", "method": "GET", "path": "/", "headers": []}
+    _run_asgi(middleware, scope, [])
+
+    assert seen == ["/"]
 
 
 def test_activity_recorder_records_and_respects_maxlen() -> None:

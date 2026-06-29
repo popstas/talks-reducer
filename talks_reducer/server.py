@@ -399,6 +399,114 @@ class ActivityMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
+_PWA_ICON_FILENAMES = ("app-256.png", "app.png")
+_PWA_ICON_PATH = find_icon_path(filenames=_PWA_ICON_FILENAMES)
+_PWA_ICON_ROUTE = "/talks-reducer-icon.png"
+
+
+def _build_pwa_manifest() -> dict[str, object]:
+    """Return the web app manifest describing the installable Talks Reducer PWA."""
+
+    app_version = resolve_version()
+    version_suffix = (
+        f" v{app_version}" if app_version and app_version != "unknown" else ""
+    )
+    return {
+        "name": f"Talks Reducer Web UI{version_suffix}",
+        "short_name": "Talks Reducer",
+        "icons": [
+            {
+                "src": _PWA_ICON_ROUTE,
+                "sizes": "256x256",
+                "type": "image/png",
+                "purpose": "any",
+            }
+        ],
+        "start_url": "./",
+        "display": "standalone",
+    }
+
+
+class PWAManifestMiddleware:
+    """ASGI middleware overriding the PWA manifest and serving its icon.
+
+    Gradio auto-generates ``/manifest.json`` referencing its own bundled logo, so
+    an installed Progressive Web App would otherwise display the Gradio icon. This
+    middleware answers ``GET /manifest.json`` with a manifest pointing at the
+    Talks Reducer icon and serves that icon from :data:`_PWA_ICON_ROUTE`. Every
+    other request is passed through untouched.
+    """
+
+    def __init__(
+        self,
+        app: Callable,
+        *,
+        icon_path: Optional[Path | str] = None,
+        manifest_factory: Optional[Callable[[], dict[str, object]]] = None,
+    ) -> None:
+        self.app = app
+        resolved_icon = icon_path if icon_path is not None else _PWA_ICON_PATH
+        self._icon_path = Path(resolved_icon) if resolved_icon else None
+        self._manifest_factory = manifest_factory or _build_pwa_manifest
+
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        if scope.get("type") == "http" and scope.get("method", "GET") == "GET":
+            path = (scope.get("path", "") or "").rstrip("/")
+            if path == "/manifest.json":
+                await self._send_manifest(send)
+                return
+            if self._icon_path is not None and path == _PWA_ICON_ROUTE.rstrip("/"):
+                await self._send_icon(send)
+                return
+
+        await self.app(scope, receive, send)
+
+    async def _send_manifest(self, send: Callable) -> None:
+        body = json.dumps(self._manifest_factory()).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-type", b"application/manifest+json"),
+                    (b"content-length", str(len(body)).encode("latin-1")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+    async def _send_icon(self, send: Callable) -> None:
+        try:
+            data = Path(self._icon_path).read_bytes()
+        except OSError:
+            await self._send_not_found(send)
+            return
+
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-type", b"image/png"),
+                    (b"content-length", str(len(data)).encode("latin-1")),
+                    (b"cache-control", b"public, max-age=86400"),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": data})
+
+    @staticmethod
+    async def _send_not_found(send: Callable) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 404,
+                "headers": [(b"content-length", b"0")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b""})
+
+
 def build_launch_app_kwargs() -> dict[str, object]:
     """Return ``app_kwargs`` enabling server-side transfer progress logging."""
 
@@ -409,6 +517,7 @@ def build_launch_app_kwargs() -> dict[str, object]:
 
     return {
         "middleware": [
+            Middleware(PWAManifestMiddleware),
             Middleware(TransferProgressMiddleware),
             Middleware(ActivityMiddleware),
         ]
@@ -1064,6 +1173,7 @@ __all__ = [
     "ActivityMiddleware",
     "ActivityRecorder",
     "GradioProgressReporter",
+    "PWAManifestMiddleware",
     "TransferProgressMiddleware",
     "build_interface",
     "build_launch_app_kwargs",

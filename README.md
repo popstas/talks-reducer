@@ -149,6 +149,13 @@ The browser UI mirrors the CLI timing controls with sliders for the silent
 threshold and playback speeds, so you can tune exports without leaving the
 remote workflow.
 
+The web UI is also an installable Progressive Web App (PWA): open it in a
+Chromium-based browser and use **Install app** to add a standalone Talks Reducer
+window with the app's own icon (served from `/manifest.json` and
+`/talks-reducer-icon.png`). Browsers only offer installation over `https://` or
+`http://localhost`, so reach a LAN server through a TLS proxy if the install
+prompt does not appear.
+
 By default the server processes one job at a time. Pass `--concurrency N` to let
 several clients process simultaneously (each concurrent job runs its own FFmpeg,
 so keep `N` small). Note this only affects concurrent *processing* — file
