@@ -1695,3 +1695,164 @@ def test_on_close_cancels_timers_and_destroys():
     gui._stop_activity_log.assert_called_once_with()
     gui._cancel_download_wait.assert_called_once_with()
     gui.root.destroy.assert_called_once_with()
+
+
+def _make_server_tray_gui(**overrides):
+    """Build a minimal stand-in GUI for ``_apply_server_tray_toggle`` tests."""
+
+    gui = SimpleNamespace(
+        _suppress_server_tray_toggle=False,
+        server_managed=False,
+        _close_for_relaunch=MagicMock(),
+        _stop_parent_tray=MagicMock(),
+    )
+    for key, value in overrides.items():
+        setattr(gui, key, value)
+    return gui
+
+
+def test_apply_server_tray_toggle_enable_spawns_and_closes(monkeypatch):
+    gui = _make_server_tray_gui(server_managed=False)
+    built: list[str] = []
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(
+        app.relaunch,
+        "build_app_command",
+        lambda mode, **kwargs: built.append(mode) or [mode],
+    )
+    monkeypatch.setattr(
+        app.relaunch, "spawn_detached", lambda command: spawned.append(command)
+    )
+
+    app.TalksReducerGUI._apply_server_tray_toggle(gui, True)
+
+    assert built == ["server-tray"]
+    assert spawned == [["server-tray"]]
+    gui._close_for_relaunch.assert_called_once_with()
+    gui._stop_parent_tray.assert_not_called()
+
+
+def test_apply_server_tray_toggle_enable_noop_when_managed(monkeypatch):
+    gui = _make_server_tray_gui(server_managed=True)
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(
+        app.relaunch, "build_app_command", lambda mode, **kwargs: [mode]
+    )
+    monkeypatch.setattr(
+        app.relaunch, "spawn_detached", lambda command: spawned.append(command)
+    )
+
+    app.TalksReducerGUI._apply_server_tray_toggle(gui, True)
+
+    assert spawned == []
+    gui._close_for_relaunch.assert_not_called()
+
+
+def test_apply_server_tray_toggle_disable_spawns_gui_and_stops_parent(monkeypatch):
+    gui = _make_server_tray_gui(server_managed=True)
+    built: list[str] = []
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(
+        app.relaunch,
+        "build_app_command",
+        lambda mode, **kwargs: built.append(mode) or [mode],
+    )
+    monkeypatch.setattr(
+        app.relaunch, "spawn_detached", lambda command: spawned.append(command)
+    )
+
+    app.TalksReducerGUI._apply_server_tray_toggle(gui, False)
+
+    assert built == ["gui"]
+    assert spawned == [["gui"]]
+    gui._stop_parent_tray.assert_called_once_with()
+    gui._close_for_relaunch.assert_called_once_with()
+
+
+def test_apply_server_tray_toggle_disable_noop_when_not_managed(monkeypatch):
+    gui = _make_server_tray_gui(server_managed=False)
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(
+        app.relaunch, "build_app_command", lambda mode, **kwargs: [mode]
+    )
+    monkeypatch.setattr(
+        app.relaunch, "spawn_detached", lambda command: spawned.append(command)
+    )
+
+    app.TalksReducerGUI._apply_server_tray_toggle(gui, False)
+
+    assert spawned == []
+    gui._close_for_relaunch.assert_not_called()
+    gui._stop_parent_tray.assert_not_called()
+
+
+def test_apply_server_tray_toggle_suppressed_is_noop(monkeypatch):
+    gui = _make_server_tray_gui(_suppress_server_tray_toggle=True)
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(
+        app.relaunch, "build_app_command", lambda mode, **kwargs: [mode]
+    )
+    monkeypatch.setattr(
+        app.relaunch, "spawn_detached", lambda command: spawned.append(command)
+    )
+
+    app.TalksReducerGUI._apply_server_tray_toggle(gui, True)
+
+    assert spawned == []
+    gui._close_for_relaunch.assert_not_called()
+
+
+def test_close_for_relaunch_destroys_window():
+    gui = SimpleNamespace(
+        _closing=False,
+        _stop_activity_log=MagicMock(),
+        _cancel_download_wait=MagicMock(),
+        root=SimpleNamespace(destroy=MagicMock()),
+    )
+
+    app.TalksReducerGUI._close_for_relaunch(gui)
+
+    assert gui._closing is True
+    gui._stop_activity_log.assert_called_once_with()
+    gui._cancel_download_wait.assert_called_once_with()
+    gui.root.destroy.assert_called_once_with()
+
+
+def test_stop_parent_tray_posix_sends_sigterm(monkeypatch):
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr(app.sys, "platform", "linux")
+    monkeypatch.setattr(app.os, "getppid", lambda: 4321)
+    monkeypatch.setattr(app.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
+    gui = SimpleNamespace()
+    app.TalksReducerGUI._stop_parent_tray(gui)
+
+    assert killed == [(4321, app.signal.SIGTERM)]
+
+
+def test_stop_parent_tray_windows_uses_taskkill(monkeypatch):
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(app.sys, "platform", "win32")
+    monkeypatch.setattr(app.os, "getppid", lambda: 99)
+    monkeypatch.setattr(
+        app.relaunch, "spawn_detached", lambda command: spawned.append(command)
+    )
+
+    gui = SimpleNamespace()
+    app.TalksReducerGUI._stop_parent_tray(gui)
+
+    assert spawned == [["taskkill", "/PID", "99", "/T", "/F"]]
+
+
+def test_stop_parent_tray_suppresses_errors(monkeypatch):
+    monkeypatch.setattr(app.sys, "platform", "linux")
+    monkeypatch.setattr(app.os, "getppid", lambda: 1)
+
+    def boom(pid, sig):
+        raise OSError("nope")
+
+    monkeypatch.setattr(app.os, "kill", boom)
+
+    gui = SimpleNamespace()
+    # Should not raise despite os.kill failing.
+    app.TalksReducerGUI._stop_parent_tray(gui)

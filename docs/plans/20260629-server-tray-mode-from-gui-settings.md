@@ -124,22 +124,22 @@
 - [x] run `black`/`isort`; run tests — must pass before Task 3.
 
 ### Task 3: Switch modes immediately when the toggle changes
-- [ ] Implement `TalksReducerGUI._apply_server_tray_toggle(enabled)`:
+- [x] Implement `TalksReducerGUI._apply_server_tray_toggle(enabled)`:
       when `enabled` and **not** `server_managed` → `spawn_detached(build_app_command("server-tray"))`,
       then close the current window; ignore (no-op) if already `server_managed`.
-- [ ] When **disabling** from a `server_managed` GUI → persist `False`,
+- [x] When **disabling** from a `server_managed` GUI → persist `False`,
       `spawn_detached(build_app_command("gui"))`, best-effort stop the parent tray
       (`os.kill(os.getppid(), signal.SIGTERM)` on POSIX; `CTRL_BREAK`/`taskkill`
       fallback on Windows, wrapped in `suppress(Exception)`), then close.
-- [ ] Guard re-entrancy: skip the action while `_suppress_server_tray_toggle` is set
+- [x] Guard re-entrancy: skip the action while `_suppress_server_tray_toggle` is set
       and never act inside a `--server-managed` child when *enabling* (prevents
       spawn loops).
-- [ ] write tests for the enable branch (non-managed): asserts command built +
+- [x] write tests for the enable branch (non-managed): asserts command built +
       window-close hook called (monkeypatch `spawn_detached` and `root.destroy`).
-- [ ] write tests for the disable branch (managed): asserts plain-GUI command +
+- [x] write tests for the disable branch (managed): asserts plain-GUI command +
       best-effort parent-stop invoked (monkeypatch `os.kill`/Popen).
-- [ ] write tests for the guard: no spawn while suppressed / when managed+enable.
-- [ ] run `black`/`isort`; run tests — must pass before Task 4.
+- [x] write tests for the guard: no spawn while suppressed / when managed+enable.
+- [x] run `black`/`isort`; run tests — must pass before Task 4.
 
 ### Task 4: Honor the preference on cold start
 - [ ] In `gui/startup.py:main`, after arg parsing, when there is **no** `--server`,

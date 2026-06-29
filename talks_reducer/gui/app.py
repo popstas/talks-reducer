@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -40,6 +41,7 @@ try:
     from ..version_utils import resolve_version
     from . import discovery as discovery_helpers
     from . import layout as layout_helpers
+    from . import relaunch
     from . import shortcut as shortcut_helpers
     from . import update_checker
     from .inputs import InputController
@@ -81,6 +83,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from talks_reducer.gui import discovery as discovery_helpers
     from talks_reducer.gui import layout as layout_helpers
+    from talks_reducer.gui import relaunch
     from talks_reducer.gui import shortcut as shortcut_helpers
     from talks_reducer.gui import update_checker
     from talks_reducer.gui.inputs import InputController
@@ -1136,14 +1139,57 @@ class TalksReducerGUI:
         self.preference_controller.on_start_in_server_tray_change(*_)
 
     def _apply_server_tray_toggle(self, enabled: bool) -> None:
-        """Switch into or out of server-tray mode.
+        """Switch into or out of server-tray mode immediately.
 
-        The concrete relaunch behaviour is implemented in a later task; this
-        placeholder keeps the preference-controller dispatch valid in the
-        meantime.
+        Enabling from a standalone GUI spawns a detached server-tray process
+        (server + tray icon hosting a managed GUI) and closes this window.
+        Disabling from a ``--server-managed`` GUI spawns a plain GUI,
+        best-effort stops the parent tray process, then closes this window.
+
+        The action is skipped while ``_suppress_server_tray_toggle`` is set
+        (seeding the variable) and never spawns a nested server-tray from a
+        ``--server-managed`` child, preventing relaunch loops.
         """
 
-        return
+        if getattr(self, "_suppress_server_tray_toggle", False):
+            return
+
+        if enabled:
+            if self.server_managed:
+                # Already hosted by a tray parent; nothing to switch.
+                return
+            relaunch.spawn_detached(relaunch.build_app_command("server-tray"))
+            self._close_for_relaunch()
+            return
+
+        if not self.server_managed:
+            # Plain GUI with the toggle already off; nothing to switch.
+            return
+        relaunch.spawn_detached(relaunch.build_app_command("gui"))
+        self._stop_parent_tray()
+        self._close_for_relaunch()
+
+    def _close_for_relaunch(self) -> None:
+        """Tear down background timers and destroy the window for a relaunch."""
+
+        self._closing = True
+        with suppress(Exception):
+            self._stop_activity_log()
+        with suppress(Exception):
+            self._cancel_download_wait()
+        self.root.destroy()
+
+    def _stop_parent_tray(self) -> None:
+        """Best-effort stop of the parent server-tray process when disabling."""
+
+        with suppress(Exception):
+            parent_pid = os.getppid()
+            if sys.platform == "win32":
+                relaunch.spawn_detached(
+                    ["taskkill", "/PID", str(parent_pid), "/T", "/F"]
+                )
+            else:
+                os.kill(parent_pid, signal.SIGTERM)
 
     def _on_processing_mode_change(self, *_: object) -> None:
         self.preference_controller.on_processing_mode_change(*_)
@@ -1281,7 +1327,6 @@ class TalksReducerGUI:
 
     def _stop_processing(self) -> None:
         """Stop the currently running processing by terminating FFmpeg."""
-        import signal
 
         self._stop_requested = True
         # Update button text to indicate stopping state
