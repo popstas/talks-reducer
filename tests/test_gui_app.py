@@ -1701,7 +1701,6 @@ def _make_server_tray_gui(**overrides):
     """Build a minimal stand-in GUI for ``_apply_server_tray_toggle`` tests."""
 
     gui = SimpleNamespace(
-        _suppress_server_tray_toggle=False,
         server_managed=False,
         _close_for_relaunch=MagicMock(),
         _stop_parent_tray=MagicMock(),
@@ -1784,22 +1783,6 @@ def test_apply_server_tray_toggle_disable_noop_when_not_managed(monkeypatch):
     assert spawned == []
     gui._close_for_relaunch.assert_not_called()
     gui._stop_parent_tray.assert_not_called()
-
-
-def test_apply_server_tray_toggle_suppressed_is_noop(monkeypatch):
-    gui = _make_server_tray_gui(_suppress_server_tray_toggle=True)
-    spawned: list[list[str]] = []
-    monkeypatch.setattr(
-        app.relaunch, "build_app_command", lambda mode, **kwargs: [mode]
-    )
-    monkeypatch.setattr(
-        app.relaunch, "spawn_detached", lambda command: spawned.append(command)
-    )
-
-    app.TalksReducerGUI._apply_server_tray_toggle(gui, True)
-
-    assert spawned == []
-    gui._close_for_relaunch.assert_not_called()
 
 
 def test_close_for_relaunch_destroys_window():

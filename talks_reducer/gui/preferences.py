@@ -101,23 +101,43 @@ class GUIPreferences:
 
         return number
 
-    def update(self, key: str, value: object) -> None:
-        """Persist the provided *value* when it differs from the stored value."""
+    def update(self, key: str, value: object) -> bool:
+        """Persist the provided *value* when it differs from the stored value.
+
+        Returns ``True`` when the stored value matches *value* on disk (either
+        already present or freshly written) and ``False`` when the write fails.
+        On a failed write the in-memory value is rolled back so it stays
+        consistent with what is actually on disk.
+        """
 
         if self._settings.get(key) == value:
-            return
+            return True
+        missing = object()
+        previous = self._settings.get(key, missing)
         self._settings[key] = value
-        self.save()
+        if self.save():
+            return True
+        if previous is missing:
+            self._settings.pop(key, None)
+        else:
+            self._settings[key] = previous
+        return False
 
-    def save(self) -> None:
-        """Write the current settings to disk, creating parent directories."""
+    def save(self) -> bool:
+        """Write the current settings to disk, creating parent directories.
+
+        Returns ``True`` when the file is written and ``False`` when an
+        ``OSError`` prevents persistence, so callers that must not act on a
+        stale ``settings.json`` can detect the failure.
+        """
 
         try:
             self._config_path.parent.mkdir(parents=True, exist_ok=True)
             with self._config_path.open("w", encoding="utf-8") as handle:
                 json.dump(self._settings, handle, indent=2, sort_keys=True)
         except OSError:
-            pass
+            return False
+        return True
 
 
 class PreferenceController:
@@ -125,6 +145,7 @@ class PreferenceController:
 
     def __init__(self, gui: "TalksReducerGUI") -> None:
         self.gui = gui
+        self._restoring_server_tray = False
 
     def on_theme_change(self, *_: object) -> None:
         self.gui.preferences.update("theme", self.gui.theme_var.get())
@@ -186,17 +207,68 @@ class PreferenceController:
         )
 
     def on_start_in_server_tray_change(self, *_: object) -> None:
-        """Persist the server-tray toggle and dispatch the switch action.
+        """Dispatch the switch action and persist the server-tray toggle.
 
-        Seeding the variable sets ``_suppress_server_tray_toggle`` so this
-        callback becomes a no-op until the GUI is fully initialised.
+        Seeding ``start_in_server_tray_var`` never fires this callback because
+        the variable is created before its ``trace_add`` is installed.
+
+        Both directions persist *before* the switch spawns the replacement
+        process; otherwise that freshly spawned process could cold-start and
+        read a stale value from ``settings.json`` before this write lands. When
+        disabling, a stale ``True`` would boot the new plain GUI straight back
+        into server-tray mode (a relaunch loop). When enabling, a stale
+        ``False`` would seed the managed GUI child's checkbox unchecked while it
+        actually runs under tray mode, forcing the user to toggle twice to
+        disable. On the enable path the write is reverted if the relaunch spawn
+        fails, so a failed relaunch still leaves the stored value effectively
+        off.
+
+        ``preferences.update`` swallows ``OSError`` and reports failure rather
+        than raising, so if the write to ``settings.json`` cannot land the
+        relaunch is aborted entirely: spawning a process that would cold-start
+        from a stale file is worse than not switching. The checkbox is restored
+        to the persisted value so it never advertises a switch that did not
+        happen.
         """
 
-        if getattr(self.gui, "_suppress_server_tray_toggle", False):
+        if self._restoring_server_tray:
+            # Re-entrant callback fired by ``_restore_server_tray_var`` setting
+            # the variable back to its persisted value. Skip it so the restore
+            # never dispatches a relaunch the failed write was meant to abort.
             return
+
         value = bool(self.gui.start_in_server_tray_var.get())
-        self.gui.preferences.update("start_in_server_tray", value)
-        self.gui._apply_server_tray_toggle(value)
+        if not self.gui.preferences.update("start_in_server_tray", value):
+            self._restore_server_tray_var()
+            return
+        if value:
+            try:
+                self.gui._apply_server_tray_toggle(value)
+            except Exception:
+                self.gui.preferences.update("start_in_server_tray", False)
+                raise
+        else:
+            self.gui._apply_server_tray_toggle(value)
+
+    def _restore_server_tray_var(self) -> None:
+        """Reset the toggle variable to the value persisted on disk.
+
+        Used when a persistence failure aborts the switch so the checkbox
+        reflects the stored state instead of the attempted change. In real Tk
+        ``set`` fires the ``write`` trace, which would re-enter
+        ``on_start_in_server_tray_change`` and could dispatch the very relaunch
+        the failed write was meant to abort (e.g. a standalone GUI with a
+        persisted ``True`` whose disable write fails would restore ``True`` and
+        spawn server-tray). The ``_restoring_server_tray`` guard makes that
+        re-entrant callback a no-op.
+        """
+
+        stored = bool(self.gui.preferences.get("start_in_server_tray", False))
+        self._restoring_server_tray = True
+        try:
+            self.gui.start_in_server_tray_var.set(stored)
+        finally:
+            self._restoring_server_tray = False
 
     def on_processing_mode_change(self, *_: object) -> None:
         value = self.gui.processing_mode_var.get()

@@ -16,7 +16,6 @@ from urllib.parse import urlsplit, urlunsplit
 
 from PIL import Image, ImageChops
 
-from .gui.relaunch import build_app_command
 from .icons import iter_icon_candidates
 from .server import build_interface
 from .server import build_launch_app_kwargs as _build_launch_app_kwargs
@@ -396,7 +395,13 @@ class _ServerTrayApplication:
         ``--server-managed`` flag plus a ``--server-url`` argument pointing at the
         server's LAN-reachable URL (falling back to the guessed loopback URL when
         the server has not reported its own URL yet).
+
+        ``build_app_command`` is imported lazily so that importing
+        ``server_tray`` does not eagerly pull in the GUI/Tkinter stack; the
+        helper is only needed when the tray actually launches a managed GUI.
         """
+
+        from .gui.relaunch import build_app_command
 
         extra_args = ["--server-managed"]
         local_url = self._local_url or _guess_local_url(self._host, self._port)

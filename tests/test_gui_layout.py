@@ -515,6 +515,11 @@ def test_build_layout_initializes_widgets(monkeypatch):
     assert hasattr(gui, "use_global_ffmpeg_check")
     assert gui.use_global_ffmpeg_check.kwargs["variable"] is gui.use_global_ffmpeg_var
     assert gui.use_global_ffmpeg_check.kwargs["state"] == "normal"
+    assert hasattr(gui, "start_in_server_tray_check")
+    assert (
+        gui.start_in_server_tray_check.kwargs["variable"]
+        is gui.start_in_server_tray_var
+    )
 
 
 def _build_layout_with_cut(monkeypatch, *, cut_enabled: bool):

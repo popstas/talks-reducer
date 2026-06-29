@@ -22,6 +22,7 @@ def test_main_launches_gui_when_no_arguments(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(startup, "TalksReducerGUI", DummyApp)
     monkeypatch.setattr(startup, "_check_tkinter_available", lambda: (True, ""))
+    monkeypatch.setattr(startup, "_should_start_in_server_tray", lambda: False)
 
     cli_calls: list[list[str]] = []
 

@@ -307,8 +307,6 @@ class TalksReducerGUI:
             value=bool(self.preferences.get("optimize", True))
         )
         self.use_global_ffmpeg_var = tk.BooleanVar(value=prefer_global)
-        # Guard so seeding ``start_in_server_tray_var`` never fires the switch action.
-        self._suppress_server_tray_toggle = False
         self.start_in_server_tray_var = tk.BooleanVar(
             value=bool(self.preferences.get("start_in_server_tray", False))
         )
@@ -1146,13 +1144,14 @@ class TalksReducerGUI:
         Disabling from a ``--server-managed`` GUI spawns a plain GUI,
         best-effort stops the parent tray process, then closes this window.
 
-        The action is skipped while ``_suppress_server_tray_toggle`` is set
-        (seeding the variable) and never spawns a nested server-tray from a
-        ``--server-managed`` child, preventing relaunch loops.
+        Enabling never spawns a nested server-tray from a ``--server-managed``
+        child, preventing relaunch loops. The caller persists
+        ``start_in_server_tray`` *before* invoking this method in both
+        directions so the spawned process never reads a stale value during its
+        cold start (``False`` would show the managed GUI child's toggle
+        unchecked; ``True`` would loop the plain GUI back into tray mode); on
+        the enable path the caller reverts that write if the spawn fails.
         """
-
-        if getattr(self, "_suppress_server_tray_toggle", False):
-            return
 
         if enabled:
             if self.server_managed:
