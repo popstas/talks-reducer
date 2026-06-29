@@ -416,19 +416,23 @@ def test_create_tray_app_keeps_detached_mode_off_macos(
     assert app._tray_mode == "pystray-detached"
 
 
-def test_make_macos_template_icon_produces_black_silhouette() -> None:
+def test_make_macos_template_icon_keys_silhouette_on_luminance() -> None:
     from PIL import Image
 
-    image = Image.new("RGBA", (4, 4), (10, 200, 30, 255))
-    image.putpixel((0, 0), (5, 5, 5, 0))  # transparent corner
+    image = Image.new("RGBA", (3, 1), (20, 24, 30, 255))  # dark background
+    image.putpixel((0, 0), (255, 255, 255, 255))  # bright foreground glyph
+    image.putpixel((2, 0), (255, 255, 255, 0))  # transparent corner
 
     result = server_tray._make_macos_template_icon(image)
 
     assert result.mode == "RGBA"
-    # Opaque pixels collapse to black while keeping their original alpha.
-    assert result.getpixel((1, 1)) == (0, 0, 0, 255)
-    # Transparent pixels remain transparent.
-    assert result.getpixel((0, 0))[3] == 0
+    # Bright opaque pixels become a fully opaque white silhouette.
+    assert result.getpixel((0, 0)) == (255, 255, 255, 255)
+    # The dark, opaque background is treated as black and nearly drops out.
+    assert result.getpixel((1, 0))[:3] == (255, 255, 255)
+    assert result.getpixel((1, 0))[3] < 40
+    # Transparent pixels stay transparent regardless of brightness.
+    assert result.getpixel((2, 0))[3] == 0
 
 
 def test_load_icon_applies_monochrome_only_on_macos(

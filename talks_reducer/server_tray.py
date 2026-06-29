@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Optional, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 from .icons import iter_icon_candidates
 from .server import build_interface
@@ -132,13 +132,19 @@ def _make_macos_template_icon(image: Image.Image) -> Image.Image:
 
     macOS renders menu bar icons as *template images*: only the alpha channel is
     used and the system tints the resulting shape to match the light or dark menu
-    bar. Collapsing the colored icon to a solid-black silhouette keyed on its
-    alpha channel produces the expected monochrome appearance.
+    bar. The Talks Reducer app icon is a bright glyph on a dark, fully opaque
+    rounded square, so keying purely on the alpha channel would yield a solid
+    blob. Instead the silhouette treats the dark background as transparent and
+    the brighter colors as white: luminance (scaled by the original alpha)
+    becomes the new alpha channel, so the play/chevron/list glyphs show through
+    and the dark background drops out.
     """
 
     rgba = image.convert("RGBA")
-    silhouette = Image.new("RGBA", rgba.size, (0, 0, 0, 255))
-    silhouette.putalpha(rgba.getchannel("A"))
+    luminance = rgba.convert("L")
+    template_alpha = ImageChops.multiply(luminance, rgba.getchannel("A"))
+    silhouette = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+    silhouette.putalpha(template_alpha)
     return silhouette
 
 
