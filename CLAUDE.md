@@ -52,6 +52,30 @@ start/end values persist via `GUIPreferences` (`cut_enabled`, `cut_start`,
 - **Advanced** — reveals optional controls for the output path, temp folder,
 timing/audio knobs mirrored from the command line, and an appearance picker
 that can force dark or light mode or follow your operating system.
+- **Run as server in tray** — an **Advanced** checkbox bound to
+`start_in_server_tray_var` and persisted via `GUIPreferences`
+(`start_in_server_tray`, default `False`). Toggling it both switches now and
+persists. When enabled from a standalone GUI, `_apply_server_tray_toggle` calls
+`spawn_detached(build_app_command("server-tray"))` (see `gui/relaunch.py`) and
+closes the window; the relaunched process runs `server-tray --with-gui`, putting
+the tray + Gradio server on the main thread and the GUI back as a
+`--server-managed` child. When disabled from that managed child, it relaunches
+`build_app_command("gui")`, best-effort stops the parent tray
+(`os.kill(os.getppid(), SIGTERM)` on POSIX; `CTRL_BREAK`/`taskkill` on Windows,
+all `suppress(Exception)`), and closes. A `_suppress_server_tray_toggle` guard
+keeps seeding the var from firing the action, and a managed child never re-enters
+server-tray mode when enabling (no spawn loops). `build_app_command` is
+frozen-aware: in a PyInstaller bundle it returns `[sys.executable, *args]`
+(e.g. `[exe, "--server", "--with-gui"]`); from source it returns
+`[sys.executable, "-m", "talks_reducer.<module>", *args]`, since `-m` execution
+is unavailable in the frozen `.app`. On cold start `gui/startup.py:main` honors
+the persisted preference — when no `--server`/`--server-managed` flag, no
+positional inputs/seeded launch, and `start_in_server_tray` is `True` (missing or
+corrupt config treated as `False`), it routes into `server_tray.main(["--with-gui"])`.
+The rationale for the tray-as-parent/GUI-as-child split: on macOS pystray's
+`icon.run()` and Tkinter's `mainloop()` both require the process main thread and
+cannot coexist in one process, so the toggle relaunches the app into whichever
+arrangement is requested rather than spawning a tray thread.
 - **Server mode (`--server-managed`)** — when the tray launches the GUI it passes
 `--server-managed` and `--server-url <local url>`. The window then shows a
 **Server:** label near **Processing mode** with the LAN-reachable address and a

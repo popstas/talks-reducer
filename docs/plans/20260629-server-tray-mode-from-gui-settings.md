@@ -174,10 +174,10 @@
 - [x] (No automated e2e harness in this project — manual checks live in Post-Completion.)
 
 ### Task 7: [Final] Update documentation
-- [ ] Update `README.md` (the macOS/Homebrew + GUI sections) to document the new
+- [x] Update `README.md` (the macOS/Homebrew + GUI sections) to document the new
       "Run as server in tray" setting and how it relates to
       `talks-reducer-server-tray`.
-- [ ] Update `CLAUDE.md` GUI notes to describe the toggle, the relaunch model, and
+- [x] Update `CLAUDE.md` GUI notes to describe the toggle, the relaunch model, and
       the main-thread Tkinter-vs-pystray rationale.
 
 *Note: ralphex automatically moves completed plans to `docs/plans/completed/`.*

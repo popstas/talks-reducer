@@ -227,6 +227,22 @@ The same flag works through the GUI launcher—`python -m talks_reducer.gui
 together. The GUI runs in its own process and is shut down cleanly when the
 server stops.
 
+You no longer need the terminal to reach this mode. The desktop GUI's
+**Advanced** panel now has a persisted **Run as server in tray** checkbox that
+switches into the tray-managed experience with one click—handy on macOS, where
+double-clicking the `.app` previously only opened the plain window. Ticking it
+relaunches the app into `server-tray --with-gui` mode (a detached process) and
+closes the current window; the menu-bar/system-tray icon appears and the window
+returns as a `--server-managed` child. Unticking it from that managed window
+relaunches the plain desktop GUI and stops the parent tray (and its server). The
+preference lives in the same `settings.json` as the other GUI toggles, so the
+next cold start boots straight into server-tray mode when it is left enabled.
+Because pystray's tray icon and Tkinter's event loop both require the process
+main thread on macOS and cannot share one process, the tray always runs as the
+parent and the GUI as a child—the toggle simply relaunches the app in whichever
+arrangement you asked for. The default is off, so existing standalone launches
+are unchanged.
+
 When the desktop window is launched this way, the tray passes it
 `--server-managed` and `--server-url <local url>` so the GUI knows it is running
 alongside a managed server. In this mode the window gains two extra pieces of
@@ -290,7 +306,9 @@ spanning both rows. After you pick a file the slider range is set from the video
 duration, and conversion does not start automatically: adjust the keep range and
 click **Convert** when you are ready. The checkbox state and last start/end
 values persist across launches; clearing it (or switching to Simple mode) omits
-the trim entirely.
+the trim entirely. The **Advanced** panel also exposes a **Run as server in
+tray** checkbox (default off) that relaunches the app into the tray-managed
+server mode described above and persists the choice for the next launch.
 
 On Windows, the full (non-Simple) layout shows a **Create lnk** button next to
 the **Advanced** button (hidden on other platforms). It opens a small dialog
