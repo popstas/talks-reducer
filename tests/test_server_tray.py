@@ -416,6 +416,68 @@ def test_create_tray_app_keeps_detached_mode_off_macos(
     assert app._tray_mode == "pystray-detached"
 
 
+def test_make_macos_template_icon_produces_black_silhouette() -> None:
+    from PIL import Image
+
+    image = Image.new("RGBA", (4, 4), (10, 200, 30, 255))
+    image.putpixel((0, 0), (5, 5, 5, 0))  # transparent corner
+
+    result = server_tray._make_macos_template_icon(image)
+
+    assert result.mode == "RGBA"
+    # Opaque pixels collapse to black while keeping their original alpha.
+    assert result.getpixel((1, 1)) == (0, 0, 0, 255)
+    # Transparent pixels remain transparent.
+    assert result.getpixel((0, 0))[3] == 0
+
+
+def test_load_icon_applies_monochrome_only_on_macos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: List[Any] = []
+
+    def _record(image: Any) -> Any:
+        calls.append(image)
+        return image
+
+    monkeypatch.setattr(server_tray, "_make_macos_template_icon", _record)
+
+    monkeypatch.setattr(server_tray.sys, "platform", "linux")
+    server_tray._load_icon()
+    assert calls == []
+
+    monkeypatch.setattr(server_tray.sys, "platform", "darwin")
+    server_tray._load_icon()
+    assert len(calls) == 1
+
+
+def test_apply_macos_template_image_sets_template_flag() -> None:
+    class FakeNSImage:
+        def __init__(self) -> None:
+            self.template: Optional[bool] = None
+
+        def setTemplate_(self, value: bool) -> None:  # noqa: N802 - AppKit API
+            self.template = value
+
+    class FakeIcon:
+        def __init__(self) -> None:
+            self._icon_image: Optional[FakeNSImage] = None
+            self.assert_calls = 0
+
+        def _assert_image(self) -> None:
+            self.assert_calls += 1
+            self._icon_image = FakeNSImage()
+
+    icon = FakeIcon()
+    server_tray._apply_macos_template_image(icon)
+
+    icon._assert_image()
+
+    assert icon.assert_calls == 1
+    assert icon._icon_image is not None
+    assert icon._icon_image.template is True
+
+
 def test_create_tray_app_headless_skips_pystray_requirement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

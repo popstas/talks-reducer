@@ -186,7 +186,8 @@ On macOS the tray icon must run on the process' main thread because pystray's
 AppKit backend drives the Cocoa run loop there. The default `--tray-mode
 pystray` already does this, so launch the tray with `talks-reducer server-tray`
 (the bundled pip app's `--server` entry point) and the icon appears in the menu
-bar. `--tray-mode pystray-detached` cannot render on macOS—it runs the icon on a
+bar as a monochrome template image that automatically follows the light or dark
+menu bar. `--tray-mode pystray-detached` cannot render on macOS—it runs the icon on a
 worker thread—so the launcher automatically downgrades it to the blocking
 `pystray` runner and logs a warning. When you only need the web server (for
 example over SSH or in a headless build), pass `--tray-mode headless` to skip

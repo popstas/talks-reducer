@@ -127,27 +127,81 @@ def _generate_fallback_icon() -> Image.Image:
     return image
 
 
+def _make_macos_template_icon(image: Image.Image) -> Image.Image:
+    """Return a monochrome silhouette suitable for the macOS menu bar.
+
+    macOS renders menu bar icons as *template images*: only the alpha channel is
+    used and the system tints the resulting shape to match the light or dark menu
+    bar. Collapsing the colored icon to a solid-black silhouette keyed on its
+    alpha channel produces the expected monochrome appearance.
+    """
+
+    rgba = image.convert("RGBA")
+    silhouette = Image.new("RGBA", rgba.size, (0, 0, 0, 255))
+    silhouette.putalpha(rgba.getchannel("A"))
+    return silhouette
+
+
+def _apply_macos_template_image(icon: Any) -> None:
+    """Mark the pystray icon's NSImage as a template so macOS auto-tints it.
+
+    pystray's AppKit backend builds the ``NSImage`` lazily inside
+    ``_assert_image`` and never flags it as a template image, so a monochrome
+    silhouette would still ignore the light/dark menu bar. Wrapping
+    ``_assert_image`` lets us call ``setTemplate_(True)`` on the image right after
+    it is (re)created. The wrapper degrades gracefully when the backend lacks the
+    AppKit hooks (e.g. the dummy backend used in tests).
+    """
+
+    original = getattr(icon, "_assert_image", None)
+    if not callable(original):
+        return
+
+    def _patched(*args: Any, **kwargs: Any) -> Any:
+        result = original(*args, **kwargs)
+        image = getattr(icon, "_icon_image", None)
+        setter = getattr(image, "setTemplate_", None)
+        if callable(setter):
+            with suppress(Exception):
+                setter(True)
+        return result
+
+    icon._assert_image = _patched
+
+
 def _load_icon() -> Image.Image:
-    """Load the tray icon image, falling back to a generated placeholder."""
+    """Load the tray icon image, falling back to a generated placeholder.
+
+    On macOS the loaded icon is converted into a monochrome template silhouette
+    so it matches the menu bar's native appearance.
+    """
 
     LOGGER.info("Attempting to load tray icon image.")
 
+    image: Optional[Image.Image] = None
     for candidate in _iter_icon_candidates():
         LOGGER.info("Checking icon candidate at %s", candidate)
         if not candidate.exists():
             continue
         try:
-            with Image.open(candidate) as image:
-                loaded = image.copy()
+            with Image.open(candidate) as loaded:
+                image = loaded.copy()
         except Exception as exc:  # pragma: no cover - diagnostic log
             LOGGER.warning("Failed to load tray icon from %s: %s", candidate, exc)
             continue
 
         LOGGER.info("Loaded tray icon from %s", candidate)
-        return loaded
+        break
 
-    LOGGER.warning("Falling back to generated tray icon; packaged image not found")
-    return _generate_fallback_icon()
+    if image is None:
+        LOGGER.warning("Falling back to generated tray icon; packaged image not found")
+        image = _generate_fallback_icon()
+
+    if sys.platform == "darwin":
+        LOGGER.info("Converting tray icon to a monochrome macOS template image")
+        image = _make_macos_template_icon(image)
+
+    return image
 
 
 def resolve_tray_mode(requested_mode: str, platform: Optional[str] = None) -> str:
@@ -443,6 +497,9 @@ class _ServerTrayApplication:
             f"{version_label} Server",
             menu=menu,
         )
+
+        if sys.platform == "darwin":
+            _apply_macos_template_image(self._icon)
 
         watcher = threading.Thread(
             target=self._await_server_start,
