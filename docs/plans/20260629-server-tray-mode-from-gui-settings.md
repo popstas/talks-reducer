@@ -165,13 +165,13 @@
 - [x] run `black`/`isort`; run tests — must pass before Task 6.
 
 ### Task 6: Verify acceptance criteria
-- [ ] Verify all Overview requirements are implemented (toggle present, persists,
+- [x] Verify all Overview requirements are implemented (toggle present, persists,
       switches now, cold-start routing, frozen-aware commands).
-- [ ] Verify edge cases: default OFF preserves current behavior; managed child never
+- [x] Verify edge cases: default OFF preserves current behavior; managed child never
       loops; missing config treated as OFF.
-- [ ] Run the full unit test suite — must pass.
-- [ ] Run `black --check` and `isort --check-only` — must be clean.
-- [ ] (No automated e2e harness in this project — manual checks live in Post-Completion.)
+- [x] Run the full unit test suite — must pass. (658 passed)
+- [x] Run `black --check` and `isort --check-only` — must be clean.
+- [x] (No automated e2e harness in this project — manual checks live in Post-Completion.)
 
 ### Task 7: [Final] Update documentation
 - [ ] Update `README.md` (the macOS/Homebrew + GUI sections) to document the new
