@@ -17,6 +17,16 @@ def is_windows() -> bool:
     return sys.platform == "win32"
 
 
+def is_macos() -> bool:
+    """Return True if running on macOS."""
+    return sys.platform == "darwin"
+
+
+def is_update_check_supported() -> bool:
+    """Return True if in-app update checking is available on this platform."""
+    return is_windows() or is_macos()
+
+
 def fetch_latest_version() -> Tuple[Optional[str], Optional[str]]:
     """
     Fetch the latest version from GitHub releases.
@@ -26,8 +36,8 @@ def fetch_latest_version() -> Tuple[Optional[str], Optional[str]]:
         contains the version (e.g., "0.9.4") and error_message is None.
         If failed, version_string is None and error_message contains the error.
     """
-    if not is_windows():
-        return None, "Update checking is only available on Windows"
+    if not is_update_check_supported():
+        return None, "Update checking is only available on Windows and macOS"
 
     try:
         # Follow redirect from /releases/latest to get the actual release page
@@ -109,6 +119,19 @@ def get_installer_url(version: str) -> str:
 def get_portable_url(version: str) -> str:
     """Construct the portable download URL for the given version."""
     return f"https://github.com/popstas/talks-reducer/releases/download/v{version}/talks-reducer-windows-{version}.zip"
+
+
+def get_macos_app_url(version: str) -> str:
+    """Construct the macOS .app zip download URL for the given version."""
+    return (
+        "https://github.com/popstas/talks-reducer/releases/download/"
+        f"v{version}/talks-reducer-macos.app-{version}.zip"
+    )
+
+
+def get_brew_upgrade_command() -> str:
+    """Return the Homebrew command that upgrades the macOS cask."""
+    return "brew upgrade --cask talks-reducer"
 
 
 def get_releases_page_url() -> str:

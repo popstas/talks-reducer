@@ -70,23 +70,23 @@
 ## Implementation Steps
 
 ### Task 1: Make `update_checker` macOS-aware (pure logic + helpers)
-- [ ] in `talks_reducer/gui/update_checker.py`, add `is_macos()` returning
+- [x] in `talks_reducer/gui/update_checker.py`, add `is_macos()` returning
       `sys.platform == "darwin"` and `is_update_check_supported()` returning
       `is_windows() or is_macos()`.
-- [ ] change the `fetch_latest_version()` guard from `if not is_windows()` to
+- [x] change the `fetch_latest_version()` guard from `if not is_windows()` to
       `if not is_update_check_supported()` so macOS reaches the (already
       platform-agnostic) GitHub release-tag fetch; keep the Windows path identical.
-- [ ] add `get_macos_app_url(version)` returning
+- [x] add `get_macos_app_url(version)` returning
       `https://github.com/popstas/talks-reducer/releases/download/v{version}/talks-reducer-macos.app-{version}.zip`.
-- [ ] add `get_brew_upgrade_command()` returning
+- [x] add `get_brew_upgrade_command()` returning
       `"brew upgrade --cask talks-reducer"` (single source for the message/clipboard).
-- [ ] create `tests/test_update_checker.py`: tests for `is_macos`,
+- [x] create `tests/test_update_checker.py`: tests for `is_macos`,
       `is_update_check_supported`, `get_macos_app_url`, `get_brew_upgrade_command`,
       `compare_versions` (newer/older/equal/padded/malformed), and
       `fetch_latest_version` on macOS (monkeypatch `sys.platform="darwin"` + a fake
       `urlopen` redirecting to `/releases/tag/v9.9.9`) plus the
       unsupported-platform error case.
-- [ ] run `pytest tests/test_update_checker.py` — must pass before Task 2.
+- [x] run `pytest tests/test_update_checker.py` — must pass before Task 2.
 
 ### Task 2: Branch the GUI check-complete flow for macOS
 - [ ] in `talks_reducer/gui/app.py`, relax `_check_for_updates()` so it runs when
