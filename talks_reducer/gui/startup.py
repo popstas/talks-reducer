@@ -330,11 +330,26 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
     # honor the persisted ``start_in_server_tray`` preference and boot straight
     # into the server-tray experience. Managed children always run the plain GUI
     # so enabling the preference never spawns a tray loop.
+    #
+    # The server-tray module pulls in optional dependencies (``pystray`` and the
+    # server stack) that may be absent from a frozen bundle. A persisted
+    # preference must never be able to brick the launcher, so any import or
+    # startup failure here falls through to the normal GUI instead of crashing —
+    # otherwise the user could not even open the window to disable the toggle.
     if not server_managed and _should_start_in_server_tray():
-        tray_module = _import_server_tray()
-        tray_main = getattr(tray_module, "main")
-        tray_main(["--with-gui"])
-        return False
+        try:
+            tray_module = _import_server_tray()
+            tray_main = getattr(tray_module, "main")
+        except Exception:  # pragma: no cover - exercised on bundles lacking deps
+            import traceback
+
+            sys.stderr.write(
+                "Warning: could not start in server tray; falling back to the GUI.\n"
+            )
+            sys.stderr.write(traceback.format_exc())
+        else:
+            tray_main(["--with-gui"])
+            return False
 
     is_frozen = getattr(sys, "frozen", False)
 

@@ -136,10 +136,16 @@ except Exception:
 
 hiddenimports = ["tkinterdnd2"]
 hiddenimports.extend(collect_submodules("talks_reducer"))
+# ``talks_reducer.server_tray`` is only reached through ``importlib`` (the GUI's
+# "Run as server in tray" toggle), so name it explicitly to guarantee the frozen
+# bundle keeps it even if submodule collection misses dynamically imported
+# modules. ``pystray`` loads its platform backend lazily, so collect its
+# submodules too.
+hiddenimports.append("talks_reducer.server_tray")
 # gradio_client is imported lazily via importlib in the GUI, and fsspec loads
 # backend modules through plugin discovery. Collect both explicitly so remote
 # mode works in the PyInstaller bundle.
-for _pkg in ("gradio_client", "fsspec"):
+for _pkg in ("gradio_client", "fsspec", "pystray"):
     try:
         hiddenimports.extend(collect_submodules(_pkg))
     except Exception:

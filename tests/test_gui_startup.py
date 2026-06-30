@@ -300,6 +300,37 @@ def test_main_server_forwards_with_gui_flag(monkeypatch: pytest.MonkeyPatch) -> 
     assert tray_calls == [["--with-gui"]]
 
 
+def test_main_falls_back_to_gui_when_server_tray_import_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    created: List[SimpleNamespace] = []
+
+    class DummyApp(SimpleNamespace):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.ran = False
+            created.append(self)
+
+        def run(self) -> None:  # pragma: no cover - simple stub
+            self.ran = True
+
+    def fail_import() -> None:
+        raise ModuleNotFoundError("No module named 'talks_reducer.server_tray'")
+
+    monkeypatch.setattr(startup, "TalksReducerGUI", DummyApp)
+    monkeypatch.setattr(startup, "_check_tkinter_available", lambda: (True, ""))
+    monkeypatch.setattr(startup, "_should_start_in_server_tray", lambda: True)
+    monkeypatch.setattr(startup, "_import_server_tray", fail_import)
+
+    result = startup.main([])
+
+    captured = capsys.readouterr()
+
+    assert result is True
+    assert created and created[0].ran is True
+    assert "falling back to the GUI" in captured.err
+
+
 def test_main_handles_missing_tkinter(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
