@@ -137,7 +137,7 @@
 - [x] verify new code paths have tests (success + error/edge).
 
 ### Task 5: [Final] Update documentation
-- [ ] update `README.md` (and `CLAUDE.md` GUI section if appropriate) to note the
+- [x] update `README.md` (and `CLAUDE.md` GUI section if appropriate) to note the
       macOS "Check updates" button under Advanced settings and that macOS updates
       are applied via `brew upgrade --cask talks-reducer`.
 
