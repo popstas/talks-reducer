@@ -61,6 +61,41 @@ def test_compare_versions(current: str, latest: str, expected: bool) -> None:
     assert update_checker.compare_versions(current, latest) is expected
 
 
+def test_build_update_message_macos() -> None:
+    presentation = update_checker.build_update_message("9.9.9", platform="darwin")
+
+    assert "9.9.9" in presentation.status_text
+    assert "brew upgrade --cask talks-reducer" in presentation.status_text
+    assert presentation.button_text == "Check updates"
+    assert presentation.enable_download is False
+    # Only the releases page link; no installer/portable download on macOS.
+    assert presentation.links == [
+        ("Releases page", update_checker.get_releases_page_url())
+    ]
+
+
+def test_build_update_message_windows() -> None:
+    presentation = update_checker.build_update_message("9.9.9", platform="win32")
+
+    assert presentation.status_text == "New version 9.9.9 is available!"
+    assert "brew" not in presentation.status_text
+    assert presentation.button_text == "Download 9.9.9"
+    assert presentation.enable_download is True
+    assert presentation.links == [
+        ("Download portable", update_checker.get_portable_url("9.9.9")),
+        ("Releases page", update_checker.get_releases_page_url()),
+    ]
+
+
+def test_build_update_message_defaults_to_current_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+    presentation = update_checker.build_update_message("1.2.3")
+    assert presentation.enable_download is False
+    assert "brew upgrade --cask talks-reducer" in presentation.status_text
+
+
 class _FakeResponse:
     """Minimal context-manager response mimicking urllib's urlopen result."""
 

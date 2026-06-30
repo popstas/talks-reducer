@@ -836,7 +836,7 @@ class TalksReducerGUI:
 
     def _check_for_updates(self) -> None:
         """Check for updates from GitHub releases."""
-        if not sys.platform == "win32":
+        if not update_checker.is_update_check_supported():
             return
 
         if not hasattr(self, "check_updates_button"):
@@ -921,20 +921,27 @@ class TalksReducerGUI:
             self._installer_url = installer_url
             self._portable_url = portable_url
 
-            # Change button to download
-            self.check_updates_button.configure(
-                text=f"Download {latest_version}",
-                command=self._download_and_install_update,
-            )
+            presentation = update_checker.build_update_message(latest_version)
+
+            if presentation.enable_download:
+                # Windows: button becomes the installer download action.
+                self.check_updates_button.configure(
+                    text=presentation.button_text,
+                    command=self._download_and_install_update,
+                )
+            else:
+                # macOS: updates go through Homebrew, so the button stays a
+                # plain "Check updates" and never wires the installer download.
+                self.check_updates_button.configure(
+                    text=presentation.button_text,
+                    command=self._check_for_updates,
+                )
 
             # Show status and links
             self._clear_update_status()
-            status_text = f"New version {latest_version} is available!"
-            links = [
-                ("Download portable", portable_url or ""),
-                ("Releases page", update_checker.get_releases_page_url()),
-            ]
-            self._set_update_status_with_links(status_text, links)
+            self._set_update_status_with_links(
+                presentation.status_text, presentation.links
+            )
 
     def _download_and_install_update(self) -> None:
         """Download and install the update."""

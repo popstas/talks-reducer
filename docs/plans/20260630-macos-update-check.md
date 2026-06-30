@@ -89,25 +89,25 @@
 - [x] run `pytest tests/test_update_checker.py` — must pass before Task 2.
 
 ### Task 2: Branch the GUI check-complete flow for macOS
-- [ ] in `talks_reducer/gui/app.py`, relax `_check_for_updates()` so it runs when
+- [x] in `talks_reducer/gui/app.py`, relax `_check_for_updates()` so it runs when
       the check is supported and the button exists: replace
       `if not sys.platform == "win32": return` with a guard using
       `update_checker.is_update_check_supported()` (still no-op without a
       `check_updates_button`).
-- [ ] in `_on_update_check_complete()`, branch when `latest_version` is newer: on
+- [x] in `_on_update_check_complete()`, branch when `latest_version` is newer: on
       **Windows**, keep the existing installer "Download" wiring; on **macOS**, set
       status to `New version {v} is available! Update with: brew upgrade --cask
       talks-reducer` with links `[("Releases page", get_releases_page_url())]` and
       leave the button as "Check updates" (no installer download). Use
       `update_checker.is_macos()` to branch.
-- [ ] do NOT call `_download_and_install_update` on macOS (no installer .exe);
+- [x] do NOT call `_download_and_install_update` on macOS (no installer .exe);
       ensure the macOS branch never wires that command onto the button.
-- [ ] extract the "build update-available presentation" decision into a small pure
+- [x] extract the "build update-available presentation" decision into a small pure
       helper (e.g. `update_checker.build_update_message(version, platform)` or a
       module-level function) so the branch is unit-testable without Tk.
-- [ ] add tests in `tests/test_update_checker.py` for the message-builder helper
+- [x] add tests in `tests/test_update_checker.py` for the message-builder helper
       (Windows vs macOS text/links; brew command present only on macOS).
-- [ ] run `pytest tests/test_update_checker.py tests/test_gui_app.py` — must pass
+- [x] run `pytest tests/test_update_checker.py tests/test_gui_app.py` — must pass
       before Task 3.
 
 ### Task 3: Add the Advanced-panel "Check updates" button on macOS
