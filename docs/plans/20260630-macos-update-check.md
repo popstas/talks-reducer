@@ -129,12 +129,12 @@
       before Task 4.
 
 ### Task 4: Verify acceptance criteria
-- [ ] verify Overview requirements: macOS button in Advanced settings, detects newer
+- [x] verify Overview requirements: macOS button in Advanced settings, detects newer
       release, points to releases page + brew command, no auto-install.
-- [ ] verify Windows installer flow is unchanged (button text/commands identical).
-- [ ] run the full unit suite (`pytest`).
-- [ ] run `black .` and `isort .` — no diffs left.
-- [ ] verify new code paths have tests (success + error/edge).
+- [x] verify Windows installer flow is unchanged (button text/commands identical).
+- [x] run the full unit suite (`pytest`).
+- [x] run `black .` and `isort .` — no diffs left.
+- [x] verify new code paths have tests (success + error/edge).
 
 ### Task 5: [Final] Update documentation
 - [ ] update `README.md` (and `CLAUDE.md` GUI section if appropriate) to note the
