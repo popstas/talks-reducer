@@ -129,10 +129,27 @@ def _collect_tcl_tk_data() -> list[tuple[str, str]]:
 if sys.platform == "darwin":
     datas.extend(_collect_tcl_tk_data())
 
-try:
-    datas.extend(collect_data_files("gradio_client"))
-except Exception:
-    pass
+# The "Run as server in tray" feature imports the full gradio server stack, not
+# just gradio_client (used by the GUI's remote mode). These packages ship runtime
+# data files that PyInstaller's module analysis does not pick up:
+#   * gradio's frontend templates plus ``package.json`` (read for its version),
+#   * ``safehttpx``/``groovy`` ``version.txt`` markers, which are read at import
+#     time and raise ``FileNotFoundError`` when missing, and
+#   * gradio and gradio_client read their own ``.py`` source files from disk at
+#     runtime (e.g. ``gradio/blocks_events.py`` for API introspection), so those
+#     modules must also be materialised as data files, not only frozen into the
+#     PYZ archive.
+# Collect everything so the bundled server can import and launch.
+for _pkg in ("gradio", "gradio_client"):
+    try:
+        datas.extend(collect_data_files(_pkg, include_py_files=True))
+    except Exception:
+        pass
+for _pkg in ("safehttpx", "groovy"):
+    try:
+        datas.extend(collect_data_files(_pkg))
+    except Exception:
+        pass
 
 hiddenimports = ["tkinterdnd2"]
 hiddenimports.extend(collect_submodules("talks_reducer"))
@@ -144,7 +161,10 @@ hiddenimports.extend(collect_submodules("talks_reducer"))
 hiddenimports.append("talks_reducer.server_tray")
 # gradio_client is imported lazily via importlib in the GUI, and fsspec loads
 # backend modules through plugin discovery. Collect both explicitly so remote
-# mode works in the PyInstaller bundle.
+# mode works in the PyInstaller bundle. (The full gradio package's modules are
+# already pulled in by ``talks_reducer.server``'s static ``import gradio``;
+# collecting all of its submodules here drags in ``backports`` shims that clash
+# with the excludes below, so only its data files are collected, above.)
 for _pkg in ("gradio_client", "fsspec", "pystray"):
     try:
         hiddenimports.extend(collect_submodules(_pkg))
@@ -155,7 +175,6 @@ DEFAULT_EXCLUDES = [
     "PySide6",
     "PyQt5",
     "PyQt6",
-    "pandas",
     "matplotlib",
     "numba",
     "cupy",
