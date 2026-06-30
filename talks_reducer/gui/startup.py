@@ -210,6 +210,37 @@ def _parse_seeded_launch(
     return None
 
 
+def _import_server_tray():
+    """Import and return the ``server_tray`` module relative to this package."""
+
+    package_name = __package__ or "talks_reducer"
+    module_name = f"{package_name}.server_tray"
+    try:
+        return importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        if exc.name != module_name:
+            raise
+        root_package = package_name.split(".")[0] or "talks_reducer"
+        return importlib.import_module(f"{root_package}.server_tray")
+
+
+def _should_start_in_server_tray() -> bool:
+    """Return the persisted ``start_in_server_tray`` preference, defaulting to False.
+
+    Reads the preference via the standard :class:`GUIPreferences` loader, which
+    already treats a missing or corrupt config file as an empty mapping, so a
+    broken settings file simply yields ``False`` here.
+    """
+
+    try:
+        from .preferences import GUIPreferences, determine_config_path
+
+        preferences = GUIPreferences(determine_config_path())
+        return bool(preferences.get("start_in_server_tray", False))
+    except Exception:  # pragma: no cover - defensive: never block launch
+        return False
+
+
 def main(argv: Optional[Sequence[str]] = None) -> bool:
     """Launch the GUI when run without arguments, otherwise defer to the CLI."""
 
@@ -258,15 +289,7 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
         local_server_url = None
 
     if parsed_args.server:
-        package_name = __package__ or "talks_reducer"
-        module_name = f"{package_name}.server_tray"
-        try:
-            tray_module = importlib.import_module(module_name)
-        except ModuleNotFoundError as exc:
-            if exc.name != module_name:
-                raise
-            root_package = package_name.split(".")[0] or "talks_reducer"
-            tray_module = importlib.import_module(f"{root_package}.server_tray")
+        tray_module = _import_server_tray()
         tray_main = getattr(tray_module, "main")
         tray_main(remaining)
         return False
@@ -301,6 +324,16 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
                 pass
 
         cli_main(argv)
+        return False
+
+    # No explicit flags, no positional inputs, and not a tray-managed child:
+    # honor the persisted ``start_in_server_tray`` preference and boot straight
+    # into the server-tray experience. Managed children always run the plain GUI
+    # so enabling the preference never spawns a tray loop.
+    if not server_managed and _should_start_in_server_tray():
+        tray_module = _import_server_tray()
+        tray_main = getattr(tray_module, "main")
+        tray_main(["--with-gui"])
         return False
 
     is_frozen = getattr(sys, "frozen", False)
@@ -367,5 +400,6 @@ def main(argv: Optional[Sequence[str]] = None) -> bool:
 __all__ = [
     "_check_tkinter_available",
     "_parse_seeded_launch",
+    "_should_start_in_server_tray",
     "main",
 ]

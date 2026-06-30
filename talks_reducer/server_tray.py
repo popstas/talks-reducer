@@ -395,13 +395,19 @@ class _ServerTrayApplication:
         ``--server-managed`` flag plus a ``--server-url`` argument pointing at the
         server's LAN-reachable URL (falling back to the guessed loopback URL when
         the server has not reported its own URL yet).
+
+        ``build_app_command`` is imported lazily so that importing
+        ``server_tray`` does not eagerly pull in the GUI/Tkinter stack; the
+        helper is only needed when the tray actually launches a managed GUI.
         """
 
-        command = [sys.executable, "-m", "talks_reducer.gui", "--server-managed"]
+        from .gui.relaunch import build_app_command
+
+        extra_args = ["--server-managed"]
         local_url = self._local_url or _guess_local_url(self._host, self._port)
         if local_url:
-            command.extend(["--server-url", local_url])
-        return command
+            extra_args.extend(["--server-url", local_url])
+        return build_app_command("gui", extra_args=extra_args)
 
     def _launch_gui(
         self,

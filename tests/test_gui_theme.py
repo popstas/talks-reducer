@@ -56,6 +56,7 @@ def test_apply_theme_updates_widgets():
     root = Mock()
     drop_zone = Mock()
     log_text = Mock()
+    activity_text = Mock()
     status_label = Mock()
     slider = Mock()
     apply_status = Mock()
@@ -67,6 +68,7 @@ def test_apply_theme_updates_widgets():
             "root": root,
             "drop_zone": drop_zone,
             "log_text": log_text,
+            "activity_text": activity_text,
             "status_label": status_label,
             "sliders": [slider],
             "tk": SimpleNamespace(FLAT="flat"),
@@ -89,6 +91,14 @@ def test_apply_theme_updates_widgets():
         bd=0,
     )
     log_text.configure.assert_called_once()
+    # The Connected clients panel is themed identically to the log area.
+    activity_text.configure.assert_called_once_with(
+        bg=LIGHT_THEME["surface"],
+        fg=LIGHT_THEME["foreground"],
+        insertbackground=LIGHT_THEME["foreground"],
+        highlightbackground=LIGHT_THEME["border"],
+        highlightcolor=LIGHT_THEME["border"],
+    )
     status_label.configure.assert_called_once_with(bg=LIGHT_THEME["background"])
     apply_status.assert_called_once_with("idle")
     style.configure.assert_any_call(

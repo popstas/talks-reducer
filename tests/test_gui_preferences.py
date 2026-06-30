@@ -125,6 +125,214 @@ def test_on_video_codec_change_resets_unknown_codec(tmp_path):
     assert loaded["video_codec"] == "h264"
 
 
+def test_start_in_server_tray_round_trip(tmp_path):
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+
+    assert prefs.get("start_in_server_tray", False) is False
+
+    prefs.update("start_in_server_tray", True)
+
+    loaded = load_settings(config_path)
+    assert loaded["start_in_server_tray"] is True
+
+    reloaded = GUIPreferences(config_path)
+    assert reloaded.get("start_in_server_tray", False) is True
+
+
+def test_on_start_in_server_tray_change_persists_and_dispatches(tmp_path):
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    dispatched: list[bool] = []
+    gui = SimpleNamespace(
+        preferences=prefs,
+        start_in_server_tray_var=SimpleNamespace(get=lambda: True),
+        _apply_server_tray_toggle=lambda value: dispatched.append(value),
+    )
+
+    PreferenceController(gui).on_start_in_server_tray_change()
+
+    assert dispatched == [True]
+    loaded = load_settings(config_path)
+    assert loaded["start_in_server_tray"] is True
+
+
+def test_on_start_in_server_tray_change_reverts_on_failure(tmp_path):
+    """A failed enable spawn reverts the optimistic ``True`` write to ``False``.
+
+    Enabling persists ``True`` before spawning so the relaunched managed GUI
+    child reads the up-to-date value, but if the spawn raises the write is
+    rolled back so a failed relaunch leaves the toggle effectively off.
+    """
+
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+
+    def _raise(_value):
+        raise RuntimeError("spawn failed")
+
+    gui = SimpleNamespace(
+        preferences=prefs,
+        start_in_server_tray_var=SimpleNamespace(get=lambda: True),
+        _apply_server_tray_toggle=_raise,
+    )
+
+    with pytest.raises(RuntimeError):
+        PreferenceController(gui).on_start_in_server_tray_change()
+
+    assert load_settings(config_path).get("start_in_server_tray", False) is False
+
+
+def test_on_start_in_server_tray_change_enable_persists_before_dispatch(tmp_path):
+    """Enabling must write ``True`` before the relaunch spawn to avoid a stale read.
+
+    The spawned server-tray's managed GUI child cold-starts and seeds its
+    checkbox from ``settings.json``; if the write lagged the spawn it could read
+    a stale ``False`` and show the toggle unchecked while running under tray
+    mode. The dispatch records what was on disk at call time.
+    """
+
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    observed: list[object] = []
+
+    def _record(_value):
+        observed.append(load_settings(config_path).get("start_in_server_tray"))
+
+    gui = SimpleNamespace(
+        preferences=prefs,
+        start_in_server_tray_var=SimpleNamespace(get=lambda: True),
+        _apply_server_tray_toggle=_record,
+    )
+
+    PreferenceController(gui).on_start_in_server_tray_change()
+
+    assert observed == [True]
+    assert load_settings(config_path)["start_in_server_tray"] is True
+
+
+def test_on_start_in_server_tray_change_disable_persists_before_dispatch(tmp_path):
+    """Disabling must write ``False`` before the relaunch spawn to avoid loops.
+
+    The spawned plain GUI cold-starts and re-reads ``settings.json``; if the
+    write lagged the spawn it could read a stale ``True`` and boot back into
+    server-tray mode. The dispatch records what was on disk at call time.
+    """
+
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    prefs.update("start_in_server_tray", True)
+    observed: list[object] = []
+
+    def _record(_value):
+        observed.append(load_settings(config_path).get("start_in_server_tray"))
+
+    gui = SimpleNamespace(
+        preferences=prefs,
+        start_in_server_tray_var=SimpleNamespace(get=lambda: False),
+        _apply_server_tray_toggle=_record,
+    )
+
+    PreferenceController(gui).on_start_in_server_tray_change()
+
+    assert observed == [False]
+    assert load_settings(config_path)["start_in_server_tray"] is False
+
+
+def test_on_start_in_server_tray_change_aborts_when_persist_fails(tmp_path):
+    """A failed persistence write aborts the relaunch and restores the toggle.
+
+    ``settings.json`` is unwritable, so ``update`` reports failure. Spawning a
+    relaunch that would cold-start from the stale file is worse than not
+    switching, so no dispatch happens and the checkbox is reset to the stored
+    value.
+    """
+
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    # Force every write to fail without touching the real filesystem.
+    prefs.save = lambda: False  # type: ignore[method-assign]
+
+    dispatched: list[bool] = []
+
+    class _Var:
+        def __init__(self, value: bool) -> None:
+            self.value = value
+            self.set_calls: list[bool] = []
+
+        def get(self) -> bool:
+            return self.value
+
+        def set(self, value: bool) -> None:
+            self.set_calls.append(value)
+            self.value = value
+
+    var = _Var(True)
+    gui = SimpleNamespace(
+        preferences=prefs,
+        start_in_server_tray_var=var,
+        _apply_server_tray_toggle=lambda value: dispatched.append(value),
+    )
+
+    PreferenceController(gui).on_start_in_server_tray_change()
+
+    assert dispatched == []
+    assert var.set_calls == [False]
+    assert load_settings(config_path).get("start_in_server_tray", False) is False
+
+
+def test_on_start_in_server_tray_change_restore_does_not_redispatch(tmp_path):
+    """The restore after a failed write must not re-enter and relaunch.
+
+    Reproduces the real-Tk scenario: a standalone GUI has ``True`` persisted,
+    the user unchecks the box, and the ``False`` write fails. Rollback restores
+    the in-memory ``True`` and ``_restore_server_tray_var`` sets the variable
+    back to ``True``. In real Tk that ``set`` re-fires the ``write`` trace, so
+    the fake var here invokes the controller again. Without the re-entrancy
+    guard the re-entry would call ``_apply_server_tray_toggle(True)`` and spawn
+    server-tray — exactly the relaunch the failed write was meant to abort.
+    """
+
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path, settings={"start_in_server_tray": True})
+    # Force every write to fail without touching the real filesystem.
+    prefs.save = lambda: False  # type: ignore[method-assign]
+
+    dispatched: list[bool] = []
+    controller_box: list[PreferenceController] = []
+
+    class _ReentrantVar:
+        """Fake ``BooleanVar`` whose ``set`` re-fires the write trace."""
+
+        def __init__(self, value: bool) -> None:
+            self.value = value
+            self.set_calls: list[bool] = []
+
+        def get(self) -> bool:
+            return self.value
+
+        def set(self, value: bool) -> None:
+            self.set_calls.append(value)
+            self.value = value
+            controller_box[0].on_start_in_server_tray_change()
+
+    var = _ReentrantVar(False)
+    gui = SimpleNamespace(
+        preferences=prefs,
+        start_in_server_tray_var=var,
+        _apply_server_tray_toggle=lambda value: dispatched.append(value),
+    )
+
+    controller = PreferenceController(gui)
+    controller_box.append(controller)
+
+    controller.on_start_in_server_tray_change()
+
+    assert dispatched == []
+    assert var.set_calls == [True]
+    assert load_settings(config_path).get("start_in_server_tray", False) is False
+
+
 def test_on_cut_change_handles_invalid_values(tmp_path):
     config_path = tmp_path / "settings.json"
     prefs = GUIPreferences(config_path)

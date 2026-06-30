@@ -22,6 +22,7 @@ def test_main_launches_gui_when_no_arguments(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(startup, "TalksReducerGUI", DummyApp)
     monkeypatch.setattr(startup, "_check_tkinter_available", lambda: (True, ""))
+    monkeypatch.setattr(startup, "_should_start_in_server_tray", lambda: False)
 
     cli_calls: list[list[str]] = []
 
@@ -442,6 +443,141 @@ def test_main_defaults_to_standalone_without_managed_flag(
     assert created
     assert created[0]["server_managed"] is False
     assert created[0]["local_server_url"] is None
+
+
+def test_main_routes_to_server_tray_when_preference_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No flags + pref True boots straight into server-tray mode."""
+
+    def fail_gui(*args, **kwargs):  # pragma: no cover - GUI should not launch
+        raise AssertionError("plain GUI should not launch when routing to tray")
+
+    monkeypatch.setattr(startup, "TalksReducerGUI", fail_gui)
+    monkeypatch.setattr(startup, "_should_start_in_server_tray", lambda: True)
+
+    tray_calls: list[list[str]] = []
+    tray_module = SimpleNamespace(main=lambda argv: tray_calls.append(list(argv)))
+    monkeypatch.setattr(startup, "_import_server_tray", lambda: tray_module)
+
+    result = startup.main([])
+
+    assert result is False
+    assert tray_calls == [["--with-gui"]]
+
+
+def test_main_does_not_route_when_preference_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pref False keeps the existing plain-GUI behavior."""
+
+    created: list[dict] = []
+    monkeypatch.setattr(startup, "TalksReducerGUI", _capturing_dummy_app(created))
+    monkeypatch.setattr(startup, "_check_tkinter_available", lambda: (True, ""))
+    monkeypatch.setattr(startup, "_should_start_in_server_tray", lambda: False)
+
+    def fail_tray():  # pragma: no cover - tray should not be imported
+        raise AssertionError("tray should not start when pref is disabled")
+
+    monkeypatch.setattr(startup, "_import_server_tray", fail_tray)
+
+    result = startup.main([])
+
+    assert result is True
+    assert created
+
+
+def test_main_does_not_route_for_managed_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``--server-managed`` child always runs the plain GUI, never the tray."""
+
+    created: list[dict] = []
+    monkeypatch.setattr(startup, "TalksReducerGUI", _capturing_dummy_app(created))
+    monkeypatch.setattr(startup, "_check_tkinter_available", lambda: (True, ""))
+
+    def fail_pref():  # pragma: no cover - pref must not even be consulted
+        raise AssertionError("preference should not be read for managed children")
+
+    monkeypatch.setattr(startup, "_should_start_in_server_tray", fail_pref)
+
+    def fail_tray():  # pragma: no cover - tray should not be imported
+        raise AssertionError("tray should not start in a managed child")
+
+    monkeypatch.setattr(startup, "_import_server_tray", fail_tray)
+
+    result = startup.main(["--server-managed", "--server-url", "http://x:9005/"])
+
+    assert result is True
+    assert created
+    assert created[0]["server_managed"] is True
+
+
+def test_main_does_not_route_when_inputs_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Positional inputs take precedence over the persisted tray preference."""
+
+    monkeypatch.setattr(startup, "TalksReducerGUI", object)
+
+    def fail_pref():  # pragma: no cover - pref must not be consulted with inputs
+        raise AssertionError("preference should not be read when inputs are present")
+
+    monkeypatch.setattr(startup, "_should_start_in_server_tray", fail_pref)
+
+    def fail_tray():  # pragma: no cover - tray should not be imported
+        raise AssertionError("tray should not start when inputs are present")
+
+    monkeypatch.setattr(startup, "_import_server_tray", fail_tray)
+
+    cli_calls: list[list[str]] = []
+    monkeypatch.setattr(startup, "cli_main", lambda args: cli_calls.append(list(args)))
+
+    result = startup.main(["video.mp4"])
+
+    assert result is False
+    assert cli_calls == [["video.mp4"]]
+
+
+def test_should_start_in_server_tray_reads_preference(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """The helper round-trips the persisted preference value."""
+
+    from talks_reducer.gui import preferences as prefs_module
+
+    config_path = tmp_path / "settings.json"
+    monkeypatch.setattr(
+        prefs_module, "determine_config_path", lambda: config_path, raising=False
+    )
+
+    prefs = prefs_module.GUIPreferences(config_path)
+    prefs.update("start_in_server_tray", True)
+
+    assert startup._should_start_in_server_tray() is True
+
+
+def test_should_start_in_server_tray_defaults_false_when_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A missing or corrupt config file is treated as ``False``."""
+
+    from talks_reducer.gui import preferences as prefs_module
+
+    missing = tmp_path / "settings.json"
+    monkeypatch.setattr(
+        prefs_module, "determine_config_path", lambda: missing, raising=False
+    )
+
+    assert startup._should_start_in_server_tray() is False
+
+    corrupt = tmp_path / "corrupt.json"
+    corrupt.write_text("{ not json", encoding="utf-8")
+    monkeypatch.setattr(
+        prefs_module, "determine_config_path", lambda: corrupt, raising=False
+    )
+
+    assert startup._should_start_in_server_tray() is False
 
 
 def test_main_server_url_without_managed_flag_passes_to_cli(

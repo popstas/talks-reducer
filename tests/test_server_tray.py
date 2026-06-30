@@ -634,3 +634,21 @@ def test_build_gui_command_prefers_reported_local_url() -> None:
         "--server-url",
         "http://192.168.1.50:9005/",
     ]
+
+
+def test_build_gui_command_frozen_uses_bundle_executable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _make_app("0.0.0.0", 9005)
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", "/Applications/Talks Reducer.app/MacOS/app")
+
+    command = app._build_gui_command()
+
+    assert command == [
+        "/Applications/Talks Reducer.app/MacOS/app",
+        "--server-managed",
+        "--server-url",
+        "http://127.0.0.1:9005/",
+    ]
