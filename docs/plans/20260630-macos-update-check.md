@@ -111,21 +111,21 @@
       before Task 3.
 
 ### Task 3: Add the Advanced-panel "Check updates" button on macOS
-- [ ] in `talks_reducer/gui/layout.py`, add a macOS branch that creates
+- [x] in `talks_reducer/gui/layout.py`, add a macOS branch that creates
       `gui.check_updates_button` (command `gui._check_for_updates`) and
       `gui.update_status_label` inside the **Advanced** panel (`gui.advanced_frame`),
       not the always-visible `button_frame`, so it appears under Advanced settings.
-- [ ] keep the existing Windows block (in `button_frame`) unchanged; ensure the two
+- [x] keep the existing Windows block (in `button_frame`) unchanged; ensure the two
       branches are mutually exclusive and a non-Windows/non-macOS platform creates
       neither (no `check_updates_button` attribute → handlers remain no-ops).
-- [ ] confirm `_set_update_status`, `_set_update_status_with_links`, and
+- [x] confirm `_set_update_status`, `_set_update_status_with_links`, and
       `_clear_update_status` operate via `hasattr(self, "update_status_label")` so
       they work for the macOS label placement.
-- [ ] add/extend a test in `tests/test_gui_layout.py` (monkeypatching
+- [x] add/extend a test in `tests/test_gui_layout.py` (monkeypatching
       `sys.platform="darwin"`) asserting the macOS layout creates
       `check_updates_button` + `update_status_label` and that they live under the
       Advanced frame; assert a Linux platform creates neither.
-- [ ] run `pytest tests/test_gui_layout.py tests/test_update_checker.py` — must pass
+- [x] run `pytest tests/test_gui_layout.py tests/test_update_checker.py` — must pass
       before Task 4.
 
 ### Task 4: Verify acceptance criteria

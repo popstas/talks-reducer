@@ -522,6 +522,41 @@ def test_build_layout_initializes_widgets(monkeypatch):
     )
 
 
+def test_build_layout_adds_macos_update_button_under_advanced(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+    monkeypatch.setattr(layout, "sys", SimpleNamespace(platform="darwin"))
+
+    gui = _make_layout_gui()
+
+    layout.build_layout(gui)
+
+    assert isinstance(gui.check_updates_button, WidgetStub)
+    assert gui.check_updates_button.kwargs["command"] is gui._check_for_updates
+    assert isinstance(gui.update_status_label, WidgetStub)
+    # Both widgets must live inside the Advanced panel, not the always-visible
+    # button frame, so they appear under Advanced settings.
+    assert gui.check_updates_button.args[0] is gui.advanced_frame
+    assert gui.update_status_label.args[0] is gui.advanced_frame
+
+
+def test_build_layout_omits_update_button_on_linux(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+    monkeypatch.setattr(layout, "sys", SimpleNamespace(platform="linux"))
+
+    gui = _make_layout_gui()
+
+    layout.build_layout(gui)
+
+    assert not hasattr(gui, "check_updates_button")
+    assert not hasattr(gui, "update_status_label")
+
+
 def _build_layout_with_cut(monkeypatch, *, cut_enabled: bool):
     monkeypatch.setattr(layout, "add_slider", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
