@@ -1079,27 +1079,40 @@ class TalksReducerGUI:
         palette = LIGHT_THEME if mode == "light" else DARK_THEME
         accent_color = palette["accent"]
 
-        # Create link labels in the button_frame
-        button_frame = self.update_status_label.master
-        current_column = 3  # Start after status label (column 2)
+        # Create link labels beside the status label. Derive the grid row and
+        # starting column from the label's own placement so links land next to
+        # it regardless of which frame the layout used (the always-visible
+        # ``button_frame`` on Windows at row 0, or ``advanced_frame`` on macOS
+        # at row 8). Hardcoding row 0 would strand the macOS links at the top of
+        # the Advanced panel, detached from the status text.
+        parent = self.update_status_label.master
+        status_grid = self.update_status_label.grid_info()
+        status_row = int(status_grid.get("row", 0))
+        status_column = int(status_grid.get("column", 0))
+        status_columnspan = int(status_grid.get("columnspan", 1) or 1)
+        current_column = status_column + status_columnspan
 
         for i, (link_text, url) in enumerate(links):
             # Add separator if not first link
             if i > 0:
-                separator = self.ttk.Label(button_frame, text=" | ")
-                separator.grid(row=0, column=current_column, sticky="w", padx=(4, 0))
+                separator = self.ttk.Label(parent, text=" | ")
+                separator.grid(
+                    row=status_row, column=current_column, sticky="w", padx=(4, 0)
+                )
                 current_column += 1
                 self._update_link_labels.append(separator)
 
             # Create clickable link label with same style as Link.TButton
             link_label = self.ttk.Label(
-                button_frame,
+                parent,
                 text=link_text,
                 foreground=accent_color,
                 cursor="hand2",
                 font=("TkDefaultFont", 8, "underline"),
             )
-            link_label.grid(row=0, column=current_column, sticky="w", padx=(4, 0))
+            link_label.grid(
+                row=status_row, column=current_column, sticky="w", padx=(4, 0)
+            )
 
             # Bind click event
             def on_link_click(event: Any, link_url: str = url) -> None:

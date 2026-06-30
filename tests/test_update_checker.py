@@ -64,8 +64,12 @@ def test_compare_versions(current: str, latest: str, expected: bool) -> None:
 def test_build_update_message_macos() -> None:
     presentation = update_checker.build_update_message("9.9.9", platform="darwin")
 
-    assert "9.9.9" in presentation.status_text
-    assert "brew upgrade --cask talks-reducer" in presentation.status_text
+    # Assert the full documented string so a spacing/wording regression in the
+    # concatenated f-string is caught (mirrors the Windows test's rigor).
+    assert presentation.status_text == (
+        "New version 9.9.9 is available! "
+        "Update with: brew upgrade --cask talks-reducer"
+    )
     assert presentation.button_text == "Check updates"
     assert presentation.enable_download is False
     # Only the releases page link; no installer/portable download on macOS.

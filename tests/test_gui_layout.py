@@ -540,6 +540,15 @@ def test_build_layout_adds_macos_update_button_under_advanced(monkeypatch):
     # button frame, so they appear under Advanced settings.
     assert gui.check_updates_button.args[0] is gui.advanced_frame
     assert gui.update_status_label.args[0] is gui.advanced_frame
+    # Both must sit on row 8 (rows 0-7 are taken by existing Advanced controls),
+    # so a future edit that collides with another row is caught here. The status
+    # label sits in a later column than the button so the two never overlap.
+    assert gui.check_updates_button.grid_calls[0][1]["row"] == 8
+    assert gui.update_status_label.grid_calls[0][1]["row"] == 8
+    assert (
+        gui.update_status_label.grid_calls[0][1]["column"]
+        > gui.check_updates_button.grid_calls[0][1]["column"]
+    )
 
 
 def test_build_layout_omits_update_button_on_linux(monkeypatch):

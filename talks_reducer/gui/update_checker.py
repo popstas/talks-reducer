@@ -1,4 +1,4 @@
-"""Update checker for Windows GUI that queries GitHub releases."""
+"""Update checker for the Windows and macOS GUI that queries GitHub releases."""
 
 from __future__ import annotations
 
