@@ -781,7 +781,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
 
     gui.activity_text = gui.tk.Text(
-        gui.activity_frame, wrap="none", height=6, state=gui.tk.DISABLED
+        gui.activity_frame, wrap="word", height=6, state=gui.tk.DISABLED
     )
     gui.activity_text.grid(row=1, column=0, sticky="nsew")
     activity_scroll = gui.ttk.Scrollbar(
@@ -1030,6 +1030,10 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
     if simple:
         gui.basic_options_frame.grid_remove()
         gui.log_frame.grid_remove()
+        # The Connected clients panel is a server-managed-only detail that has no
+        # place in the minimal Simple layout.
+        if hasattr(gui, "activity_frame"):
+            gui.activity_frame.grid_remove()
         if hasattr(gui, "button_frame"):
             gui.button_frame.grid_remove()
         gui.advanced_frame.grid_remove()
@@ -1047,6 +1051,13 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
     else:
         gui.basic_options_frame.grid()
         gui.log_frame.grid()
+        # Restore the Connected clients panel only when the GUI is managed by the
+        # server tray; standalone GUIs never show it.
+        if hasattr(gui, "activity_frame"):
+            if bool(getattr(gui, "server_managed", False)):
+                gui.activity_frame.grid()
+            else:
+                gui.activity_frame.grid_remove()
         if hasattr(gui, "button_frame"):
             gui.button_frame.grid()
         if gui.advanced_visible.get():

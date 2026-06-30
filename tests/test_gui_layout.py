@@ -1052,6 +1052,8 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
         simple_mode_var=SimpleNamespace(get=lambda: True),
         basic_options_frame=make_widget_mock(),
         log_frame=make_widget_mock(),
+        activity_frame=make_widget_mock(),
+        server_managed=True,
         button_frame=make_widget_mock(),
         advanced_frame=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
@@ -1066,6 +1068,9 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
 
     gui.basic_options_frame.grid_remove.assert_called_once()
     gui.log_frame.grid_remove.assert_called_once()
+    # The Connected clients panel is hidden in Simple mode even when managed.
+    gui.activity_frame.grid_remove.assert_called_once()
+    gui.activity_frame.grid.assert_not_called()
     gui.button_frame.grid_remove.assert_called_once()
     gui.advanced_frame.grid_remove.assert_called_once()
     gui.run_after_drop_var.set.assert_called_once_with(True)
@@ -1084,6 +1089,8 @@ def test_apply_simple_mode_full_branch(monkeypatch):
         simple_mode_var=SimpleNamespace(get=lambda: False),
         basic_options_frame=make_widget_mock(),
         log_frame=make_widget_mock(),
+        activity_frame=make_widget_mock(),
+        server_managed=True,
         button_frame=make_widget_mock(),
         advanced_frame=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
@@ -1099,6 +1106,9 @@ def test_apply_simple_mode_full_branch(monkeypatch):
 
     gui.basic_options_frame.grid.assert_called_once()
     gui.log_frame.grid.assert_called_once()
+    # A managed GUI restores the Connected clients panel in the full layout.
+    gui.activity_frame.grid.assert_called_once()
+    gui.activity_frame.grid_remove.assert_not_called()
     gui.button_frame.grid.assert_called_once()
     gui.advanced_frame.grid.assert_called_once()
     # Advanced restores the Cut video checkbox; the panel shows because cut is on.
@@ -1106,6 +1116,34 @@ def test_apply_simple_mode_full_branch(monkeypatch):
     gui.cut_panel.grid.assert_called_once()
     apply_size.assert_called_once_with(gui, simple=False)
     gui.run_after_drop_var.set.assert_not_called()
+
+
+def test_apply_simple_mode_full_branch_hides_activity_when_standalone(monkeypatch):
+    apply_size = Mock()
+    monkeypatch.setattr(layout, "apply_window_size", apply_size)
+
+    gui = SimpleNamespace(
+        simple_mode_var=SimpleNamespace(get=lambda: False),
+        basic_options_frame=make_widget_mock(),
+        log_frame=make_widget_mock(),
+        activity_frame=make_widget_mock(),
+        server_managed=False,
+        button_frame=make_widget_mock(),
+        advanced_frame=make_widget_mock(),
+        run_after_drop_var=SimpleNamespace(set=Mock()),
+        advanced_visible=SimpleNamespace(get=lambda: True),
+        cut_check=make_widget_mock(),
+        cut_panel=make_widget_mock(),
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        tk=SimpleNamespace(LEFT="left"),
+        drop_zone=Mock(),
+    )
+
+    layout.apply_simple_mode(gui)
+
+    # A standalone GUI never shows the Connected clients panel.
+    gui.activity_frame.grid.assert_not_called()
+    gui.activity_frame.grid_remove.assert_called_once()
 
 
 def test_apply_simple_mode_full_branch_hides_advanced_when_not_visible(monkeypatch):

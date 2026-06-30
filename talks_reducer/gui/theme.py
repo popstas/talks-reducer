@@ -291,15 +291,18 @@ def apply_theme(
             bd=0,
         )
 
-    log_text = widgets.get("log_text")
-    if log_text is not None:
-        log_text.configure(
-            bg=palette["surface"],
-            fg=palette["foreground"],
-            insertbackground=palette["foreground"],
-            highlightbackground=palette["border"],
-            highlightcolor=palette["border"],
-        )
+    # The log and the Connected clients panels share the same read-only text box
+    # styling so the server-managed activity log matches the main log area.
+    for text_key in ("log_text", "activity_text"):
+        text_widget = widgets.get(text_key)
+        if text_widget is not None:
+            text_widget.configure(
+                bg=palette["surface"],
+                fg=palette["foreground"],
+                insertbackground=palette["foreground"],
+                highlightbackground=palette["border"],
+                highlightcolor=palette["border"],
+            )
 
     status_label = widgets.get("status_label")
     if status_label is not None:

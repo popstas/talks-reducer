@@ -323,6 +323,7 @@ class PreferenceController:
                 "root": self.gui.root,
                 "drop_zone": getattr(self.gui, "drop_zone", None),
                 "log_text": getattr(self.gui, "log_text", None),
+                "activity_text": getattr(self.gui, "activity_text", None),
                 "status_label": getattr(self.gui, "status_label", None),
                 "sliders": getattr(self.gui, "_sliders", []),
                 "tk": self.gui.tk,
