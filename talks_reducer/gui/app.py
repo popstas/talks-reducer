@@ -263,7 +263,6 @@ class TalksReducerGUI:
         self._download_thread: Optional[threading.Thread] = None
         self._latest_version: Optional[str] = None
         self._installer_url: Optional[str] = None
-        self._portable_url: Optional[str] = None
         self._update_link_labels: List[Any] = []
 
         self.input_files: List[str] = []
@@ -892,10 +891,9 @@ class TalksReducerGUI:
 
                 if is_newer:
                     installer_url = update_checker.get_installer_url(latest_version)
-                    portable_url = update_checker.get_portable_url(latest_version)
                     self._schedule_on_ui_thread(
                         lambda: self._on_update_check_complete(
-                            latest_version, None, installer_url, portable_url
+                            latest_version, None, installer_url
                         )
                     )
                 else:
@@ -916,7 +914,6 @@ class TalksReducerGUI:
         latest_version: Optional[str],
         error: Optional[str],
         installer_url: Optional[str] = None,
-        portable_url: Optional[str] = None,
     ) -> None:
         """Handle update check completion."""
         if not hasattr(self, "check_updates_button"):
@@ -938,7 +935,6 @@ class TalksReducerGUI:
         if latest_version:
             self._latest_version = latest_version
             self._installer_url = installer_url
-            self._portable_url = portable_url
 
             presentation = update_checker.build_update_message(latest_version)
 
@@ -1054,7 +1050,6 @@ class TalksReducerGUI:
                 # Reset state
                 self._latest_version = None
                 self._installer_url = None
-                self._portable_url = None
             except Exception as exc:
                 self._clear_update_status()
                 self._set_update_status(f"Failed to launch installer: {str(exc)}")

@@ -86,7 +86,6 @@ def test_build_update_message_windows() -> None:
     assert presentation.button_text == "Download 9.9.9"
     assert presentation.enable_download is True
     assert presentation.links == [
-        ("Download portable", update_checker.get_portable_url("9.9.9")),
         ("Releases page", update_checker.get_releases_page_url()),
     ]
 
