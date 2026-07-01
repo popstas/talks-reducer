@@ -210,12 +210,17 @@ def _install_transfer_progress(
     api_name: Optional[str],
     upload_total: Optional[int],
     progress_callback: Callable[[str, Optional[int], Optional[int], str], None],
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> bool:
     """Patch the gradio endpoint to stream byte-level upload/download progress.
 
     Returns ``True`` when the endpoint was patched. Callers that receive
     ``False`` (for example because a stub client without real endpoints was
     supplied) should emit the synthetic upload-complete event themselves.
+
+    When *should_cancel* is supplied it is polled once per uploaded chunk so a
+    stop request aborts the in-flight upload within a single ~64 KiB chunk
+    instead of only after the whole file has been sent.
     """
 
     try:
@@ -246,6 +251,10 @@ def _install_transfer_progress(
 
         def _on_bytes(count: int) -> None:
             nonlocal sent
+            if should_cancel is not None and should_cancel():
+                # Raise mid-stream so httpx tears down the in-flight POST instead
+                # of finishing the upload before the cancel is noticed.
+                raise ProcessingAborted("Remote processing cancelled by user.")
             sent += count
             current = min(sent, upload_total) if upload_total else sent
             throttled("Uploading:", current, upload_total, "bytes")
@@ -545,6 +554,7 @@ def send_video(
             submit_kwargs.get("api_name"),
             upload_total,
             progress_callback,
+            should_cancel,
         )
 
     if job_factory is not None:

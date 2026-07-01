@@ -1839,3 +1839,133 @@ def test_stop_parent_tray_suppresses_errors(monkeypatch):
     gui = SimpleNamespace()
     # Should not raise despite os.kill failing.
     app.TalksReducerGUI._stop_parent_tray(gui)
+
+
+class _UpdateButtonStub:
+    """Records ``configure`` calls so update-flow wiring can be asserted."""
+
+    def __init__(self) -> None:
+        self.configure_calls: list[dict] = []
+
+    def configure(self, **kwargs) -> None:
+        self.configure_calls.append(kwargs)
+
+
+def _make_update_complete_gui() -> tuple[SimpleNamespace, _UpdateButtonStub, dict]:
+    button = _UpdateButtonStub()
+    captured: dict = {}
+    gui = SimpleNamespace(
+        check_updates_button=button,
+        tk=SimpleNamespace(NORMAL="normal", DISABLED="disabled"),
+        _check_for_updates=object(),
+        _download_and_install_update=object(),
+        _clear_update_status=lambda: None,
+        _set_update_status=lambda text: captured.update(status=text),
+        _set_update_status_with_links=lambda text, links: captured.update(
+            text=text, links=links
+        ),
+    )
+    return gui, button, captured
+
+
+def test_on_update_check_complete_macos_keeps_check_button(monkeypatch):
+    """On macOS the button stays a plain "Check updates" and never wires the
+    installer download path (the unsigned-installer flow the feature avoids)."""
+
+    from talks_reducer.gui import update_checker
+
+    monkeypatch.setattr(update_checker.sys, "platform", "darwin")
+    gui, button, captured = _make_update_complete_gui()
+
+    app.TalksReducerGUI._on_update_check_complete(gui, "9.9.9", None)
+
+    last = button.configure_calls[-1]
+    assert last["command"] is gui._check_for_updates
+    assert last["command"] is not gui._download_and_install_update
+    assert last["text"] == "Check updates"
+    assert "brew upgrade --cask talks-reducer" in captured["text"]
+
+
+def test_on_update_check_complete_windows_wires_download(monkeypatch):
+    """On Windows the button becomes the installer-download action."""
+
+    from talks_reducer.gui import update_checker
+
+    monkeypatch.setattr(update_checker.sys, "platform", "win32")
+    gui, button, captured = _make_update_complete_gui()
+
+    app.TalksReducerGUI._on_update_check_complete(gui, "9.9.9", None)
+
+    last = button.configure_calls[-1]
+    assert last["command"] is gui._download_and_install_update
+    assert last["text"] == "Download 9.9.9"
+    assert captured["text"] == "New version 9.9.9 is available!"
+
+
+class _LinkLabelStub:
+    def __init__(self, *args, **kwargs) -> None:
+        self.args = args
+        self.kwargs = kwargs
+        self.grid_calls: list[dict] = []
+        self.bind_calls: list[tuple] = []
+        self.destroyed = False
+
+    def grid(self, **kwargs) -> None:
+        self.grid_calls.append(kwargs)
+
+    def bind(self, sequence, callback) -> None:
+        self.bind_calls.append((sequence, callback))
+
+    def destroy(self) -> None:
+        self.destroyed = True
+
+
+class _LinkLabelFactory:
+    def __init__(self) -> None:
+        self.created: list[_LinkLabelStub] = []
+
+    def __call__(self, *args, **kwargs) -> _LinkLabelStub:
+        widget = _LinkLabelStub(*args, **kwargs)
+        self.created.append(widget)
+        return widget
+
+
+class _StatusLabelStub:
+    def __init__(self, grid_info: dict) -> None:
+        self._grid_info = grid_info
+        self.master = object()
+        self.config_calls: list[dict] = []
+
+    def grid_info(self) -> dict:
+        return self._grid_info
+
+    def config(self, **kwargs) -> None:
+        self.config_calls.append(kwargs)
+
+
+def test_set_update_status_with_links_places_links_on_status_row():
+    """Links must follow the status label's actual grid placement so the macOS
+    label at row 8 of the Advanced panel keeps its links beside it instead of
+    stranding them at the hardcoded row 0 (top of the panel)."""
+
+    factory = _LinkLabelFactory()
+    status_label = _StatusLabelStub({"row": 8, "column": 1, "columnspan": 2})
+    gui = SimpleNamespace(
+        update_status_label=status_label,
+        ttk=SimpleNamespace(Label=factory),
+        _resolve_theme_mode=lambda: "light",
+    )
+
+    app.TalksReducerGUI._set_update_status_with_links(
+        gui,
+        "New version 9.9.9 is available!",
+        [("Releases page", "https://example.com/releases")],
+    )
+
+    assert factory.created, "a clickable link label should be created"
+    link = factory.created[-1]
+    # Row matches the label (8), and the column starts right after the label's
+    # span (column 1 + columnspan 2 == 3), not the old hardcoded row 0/column 3.
+    assert link.grid_calls[0]["row"] == 8
+    assert link.grid_calls[0]["column"] == 3
+    assert link.args[0] is status_label.master

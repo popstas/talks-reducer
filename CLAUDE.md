@@ -52,6 +52,19 @@ start/end values persist via `GUIPreferences` (`cut_enabled`, `cut_start`,
 - **Advanced** — reveals optional controls for the output path, temp folder,
 timing/audio knobs mirrored from the command line, and an appearance picker
 that can force dark or light mode or follow your operating system.
+- **Check updates** — a platform-gated button (`update_checker.is_update_check_supported()`
+returns `True` on Windows and macOS). On **Windows** the button lives in the
+always-visible `button_frame` and downloads/launches the release installer. On
+**macOS** `layout.py` instead places `check_updates_button` +
+`update_status_label` inside `advanced_frame` (under Advanced settings); when a
+newer release is found `_on_update_check_complete` uses
+`update_checker.build_update_message(version, platform)` to show
+`New version {v} is available! Update with: brew upgrade --cask talks-reducer`
+plus a Releases-page link, and never wires `_download_and_install_update`
+(macOS builds are unsigned and installed via the `popstas/homebrew-talks-reducer`
+Homebrew tap, so no auto-install). Other platforms create neither widget, so the
+status helpers (`_set_update_status*`/`_clear_update_status`, all guarded by
+`hasattr(self, "update_status_label")`) stay no-ops.
 - **Run as server in tray** — an **Advanced** checkbox bound to
 `start_in_server_tray_var` and persisted via `GUIPreferences`
 (`start_in_server_tray`, default `False`). Toggling it both switches now and

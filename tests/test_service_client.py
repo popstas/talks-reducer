@@ -1099,6 +1099,76 @@ def test_install_transfer_progress_restores_httpx_on_error(monkeypatch, tmp_path
     assert service_client_module.httpx.stream is sentinel_stream
 
 
+def test_install_transfer_progress_cancels_upload_midstream(monkeypatch, tmp_path):
+    """A stop request aborts the upload mid-stream, not after it completes."""
+
+    upload_file = tmp_path / "input.mp4"
+    upload_file.write_bytes(b"0123456789")
+
+    class FakeEndpoint:
+        def _upload_file(self, file_obj, data_index=0):
+            with open(file_obj["path"], "rb") as handle:
+                service_client_module.httpx.post(
+                    "http://server/upload",
+                    files=[("files", ("input.mp4", handle))],
+                )
+            return {"path": "/server/input.mp4"}
+
+        def _download_file(self, payload):  # pragma: no cover - unused here
+            return b""
+
+    class FakeClient:
+        def __init__(self):
+            self.endpoints = {0: FakeEndpoint()}
+
+        def _infer_fn_index(self, api_name, fn_index):
+            return 0
+
+    import gradio_client.client as service_client_module
+
+    def fake_post(url, *args, files=None, **kwargs):
+        # httpx reads the wrapped file in 4-byte chunks while streaming the body.
+        for _field, spec in files:
+            handle = spec[1]
+            while handle.read(4):
+                pass
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: ["/x"])
+
+    monkeypatch.setattr(service_client_module.httpx, "post", fake_post)
+
+    # Cancel only after the first chunk has streamed so we prove the abort lands
+    # mid-upload rather than once every byte was already sent.
+    calls = {"count": 0}
+
+    def should_cancel() -> bool:
+        calls["count"] += 1
+        return calls["count"] > 1
+
+    client = FakeClient()
+    events: list[tuple[str, Optional[int], Optional[int], str]] = []
+
+    installed = service_client._install_transfer_progress(
+        client,
+        "/process_video",
+        upload_file.stat().st_size,
+        lambda *args: events.append(args),
+        should_cancel,
+    )
+    assert installed is True
+
+    endpoint = client.endpoints[0]
+    with pytest.raises(service_client.ProcessingAborted):
+        endpoint._upload_file({"path": str(upload_file)})
+
+    upload_events = [event for event in events if event[0] == "Uploading:"]
+    # The first chunk streamed before the cancel; the terminal 100% event never
+    # fires because the upload was aborted.
+    assert ("Uploading:", 4, 10, "bytes") in upload_events
+    assert ("Uploading:", 10, 10, "bytes") not in upload_events
+    # The ``finally`` block must restore the patched httpx.post despite the raise.
+    assert service_client_module.httpx.post is fake_post
+
+
 def test_install_transfer_progress_skips_completion_on_upload_error(
     monkeypatch, tmp_path
 ):

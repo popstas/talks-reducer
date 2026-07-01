@@ -69,7 +69,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
-Name: "addcontext"; Description: "Register ""Open with Talks Reducer"" in Explorer"; GroupDescription: "Shell integration:"
+Name: "addcontext"; Description: "Register ""Open with Talks Reducer"" in Explorer"; GroupDescription: "Shell integration:"; Flags: unchecked
 
 [Files]
 Source: "{#SOURCE_DIR}*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion

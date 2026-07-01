@@ -198,6 +198,12 @@ class TalksReducerGUI:
         else:
             self.root = tk.Tk()
 
+        # Hide the window while the layout is built and sized. Tk otherwise maps
+        # the window at its tiny default size and only resizes to the requested
+        # geometry once ``apply_window_size`` runs, producing a visible size flash
+        # on launch. It is revealed via ``deiconify`` at the end of ``__init__``.
+        self.root.withdraw()
+
         # Set window title with version information
         app_version = resolve_version()
         if app_version and app_version != "unknown":
@@ -209,7 +215,16 @@ class TalksReducerGUI:
 
         self._full_size = (1200, 900)
         self._simple_size = (470, 300)
-        # self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
+        # Seed the window geometry from the persisted Simple mode preference
+        # *before* building the layout so the window opens at its final size
+        # instead of snapping to the natural content size and then jumping once
+        # ``apply_window_size`` runs. ``simple_mode_var`` does not exist yet, so
+        # read the stored value directly (default True, matching the var below).
+        initial_simple = self.preferences.get("simple_mode", True)
+        initial_width, initial_height = (
+            self._simple_size if initial_simple else self._full_size
+        )
+        self.root.geometry(f"{initial_width}x{initial_height}")
         self.style = self.ttk.Style(self.root)
 
         self._processing_thread: Optional[threading.Thread] = None
@@ -248,7 +263,6 @@ class TalksReducerGUI:
         self._download_thread: Optional[threading.Thread] = None
         self._latest_version: Optional[str] = None
         self._installer_url: Optional[str] = None
-        self._portable_url: Optional[str] = None
         self._update_link_labels: List[Any] = []
 
         self.input_files: List[str] = []
@@ -401,6 +415,10 @@ class TalksReducerGUI:
         if self.server_managed:
             self.root.protocol("WM_DELETE_WINDOW", self._on_close)
             self._start_activity_log()
+
+        # Reveal the window now that the layout is built and the geometry is
+        # finalized, so it appears directly at its final size without a flash.
+        self.root.deiconify()
 
     def _start_run(self) -> None:
         if self._processing_thread and self._processing_thread.is_alive():
@@ -836,6 +854,9 @@ class TalksReducerGUI:
 
     def _check_for_updates(self) -> None:
         """Check for updates from GitHub releases."""
+        if not update_checker.is_update_check_supported():
+            return
+
         if not hasattr(self, "check_updates_button"):
             return
 
@@ -869,18 +890,10 @@ class TalksReducerGUI:
                 )
 
                 if is_newer:
-                    # Only Windows ships an installer/portable build that the GUI
-                    # can download and launch; elsewhere point users at the
-                    # releases page instead of a Windows ``.exe``.
-                    if sys.platform == "win32":
-                        installer_url = update_checker.get_installer_url(latest_version)
-                        portable_url = update_checker.get_portable_url(latest_version)
-                    else:
-                        installer_url = None
-                        portable_url = None
+                    installer_url = update_checker.get_installer_url(latest_version)
                     self._schedule_on_ui_thread(
                         lambda: self._on_update_check_complete(
-                            latest_version, None, installer_url, portable_url
+                            latest_version, None, installer_url
                         )
                     )
                 else:
@@ -901,7 +914,6 @@ class TalksReducerGUI:
         latest_version: Optional[str],
         error: Optional[str],
         installer_url: Optional[str] = None,
-        portable_url: Optional[str] = None,
     ) -> None:
         """Handle update check completion."""
         if not hasattr(self, "check_updates_button"):
@@ -923,28 +935,28 @@ class TalksReducerGUI:
         if latest_version:
             self._latest_version = latest_version
             self._installer_url = installer_url
-            self._portable_url = portable_url
 
-            self._clear_update_status()
-            status_text = f"New version {latest_version} is available!"
+            presentation = update_checker.build_update_message(latest_version)
 
-            if installer_url:
-                # Windows: offer an in-app download that launches the installer.
+            if presentation.enable_download:
+                # Windows: button becomes the installer download action.
                 self.check_updates_button.configure(
-                    text=f"Download {latest_version}",
+                    text=presentation.button_text,
                     command=self._download_and_install_update,
                 )
-                links = [
-                    ("Download portable", portable_url or ""),
-                    ("Releases page", update_checker.get_releases_page_url()),
-                ]
             else:
-                # Other platforms: no bundled installer to launch, so keep the
-                # button as-is and link to the releases page.
-                self.check_updates_button.configure(text="Check updates")
-                links = [("Releases page", update_checker.get_releases_page_url())]
+                # macOS: updates go through Homebrew, so the button stays a
+                # plain "Check updates" and never wires the installer download.
+                self.check_updates_button.configure(
+                    text=presentation.button_text,
+                    command=self._check_for_updates,
+                )
 
-            self._set_update_status_with_links(status_text, links)
+            # Show status and links
+            self._clear_update_status()
+            self._set_update_status_with_links(
+                presentation.status_text, presentation.links
+            )
 
     def _download_and_install_update(self) -> None:
         """Download and install the update."""
@@ -1038,7 +1050,6 @@ class TalksReducerGUI:
                 # Reset state
                 self._latest_version = None
                 self._installer_url = None
-                self._portable_url = None
             except Exception as exc:
                 self._clear_update_status()
                 self._set_update_status(f"Failed to launch installer: {str(exc)}")
@@ -1082,27 +1093,40 @@ class TalksReducerGUI:
         palette = LIGHT_THEME if mode == "light" else DARK_THEME
         accent_color = palette["accent"]
 
-        # Create link labels in the button_frame
-        button_frame = self.update_status_label.master
-        current_column = 3  # Start after status label (column 2)
+        # Create link labels beside the status label. Derive the grid row and
+        # starting column from the label's own placement so links land next to
+        # it regardless of which frame the layout used (the always-visible
+        # ``button_frame`` on Windows at row 0, or ``advanced_frame`` on macOS
+        # at row 8). Hardcoding row 0 would strand the macOS links at the top of
+        # the Advanced panel, detached from the status text.
+        parent = self.update_status_label.master
+        status_grid = self.update_status_label.grid_info()
+        status_row = int(status_grid.get("row", 0))
+        status_column = int(status_grid.get("column", 0))
+        status_columnspan = int(status_grid.get("columnspan", 1) or 1)
+        current_column = status_column + status_columnspan
 
         for i, (link_text, url) in enumerate(links):
             # Add separator if not first link
             if i > 0:
-                separator = self.ttk.Label(button_frame, text=" | ")
-                separator.grid(row=0, column=current_column, sticky="w", padx=(4, 0))
+                separator = self.ttk.Label(parent, text=" | ")
+                separator.grid(
+                    row=status_row, column=current_column, sticky="w", padx=(4, 0)
+                )
                 current_column += 1
                 self._update_link_labels.append(separator)
 
             # Create clickable link label with same style as Link.TButton
             link_label = self.ttk.Label(
-                button_frame,
+                parent,
                 text=link_text,
                 foreground=accent_color,
                 cursor="hand2",
                 font=("TkDefaultFont", 8, "underline"),
             )
-            link_label.grid(row=0, column=current_column, sticky="w", padx=(4, 0))
+            link_label.grid(
+                row=status_row, column=current_column, sticky="w", padx=(4, 0)
+            )
 
             # Bind click event
             def on_link_click(event: Any, link_url: str = url) -> None:

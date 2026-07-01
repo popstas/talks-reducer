@@ -1,4 +1,4 @@
-"""Update checker that queries GitHub releases across platforms."""
+"""Update checker for the Windows and macOS GUI that queries GitHub releases."""
 
 from __future__ import annotations
 
@@ -9,13 +9,24 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 
 def is_windows() -> bool:
     """Return True if running on Windows."""
     return sys.platform == "win32"
+
+
+def is_macos() -> bool:
+    """Return True if running on macOS."""
+    return sys.platform == "darwin"
+
+
+def is_update_check_supported() -> bool:
+    """Return True if in-app update checking is available on this platform."""
+    return is_windows() or is_macos()
 
 
 def _build_ssl_context() -> Optional[ssl.SSLContext]:
@@ -46,6 +57,9 @@ def fetch_latest_version() -> Tuple[Optional[str], Optional[str]]:
         contains the version (e.g., "0.9.4") and error_message is None.
         If failed, version_string is None and error_message contains the error.
     """
+    if not is_update_check_supported():
+        return None, "Update checking is only available on Windows and macOS"
+
     try:
         # Follow redirect from /releases/latest to get the actual release page
         url = "https://github.com/popstas/talks-reducer/releases/latest"
@@ -125,14 +139,81 @@ def get_installer_url(version: str) -> str:
     return f"https://github.com/popstas/talks-reducer/releases/download/v{version}/talks-reducer-{version}-setup.exe"
 
 
-def get_portable_url(version: str) -> str:
-    """Construct the portable download URL for the given version."""
-    return f"https://github.com/popstas/talks-reducer/releases/download/v{version}/talks-reducer-windows-{version}.zip"
+def get_macos_app_url(version: str) -> str:
+    """Construct the macOS .app zip download URL for the given version."""
+    return (
+        "https://github.com/popstas/talks-reducer/releases/download/"
+        f"v{version}/talks-reducer-macos.app-{version}.zip"
+    )
+
+
+def get_brew_upgrade_command() -> str:
+    """Return the Homebrew command that upgrades the macOS cask."""
+    return "brew upgrade --cask talks-reducer"
 
 
 def get_releases_page_url() -> str:
     """Return the releases page URL."""
     return "https://github.com/popstas/talks-reducer/releases"
+
+
+@dataclass(frozen=True)
+class UpdatePresentation:
+    """Platform-specific presentation for an available update.
+
+    Attributes:
+        status_text: Message describing the available update.
+        links: ``(label, url)`` pairs to render as clickable links.
+        button_text: Text the check-updates button should display.
+        enable_download: ``True`` when the button should launch the installer
+            download (Windows), ``False`` when it should remain a plain
+            "Check updates" button (macOS, where updates go through Homebrew).
+    """
+
+    status_text: str
+    links: List[Tuple[str, str]] = field(default_factory=list)
+    button_text: str = "Check updates"
+    enable_download: bool = False
+
+
+def build_update_message(
+    version: str, platform: Optional[str] = None
+) -> UpdatePresentation:
+    """Build the platform-specific presentation for an available update.
+
+    Args:
+        version: The newer version string discovered on GitHub releases.
+        platform: Platform identifier (defaults to ``sys.platform``). macOS
+            ("darwin") points the user at Homebrew without offering an
+            in-app installer download; every other supported platform keeps
+            the Windows installer download UX.
+
+    Returns:
+        An :class:`UpdatePresentation` describing the status text, links, and
+        button behavior for the given platform.
+    """
+    resolved_platform = sys.platform if platform is None else platform
+    releases_url = get_releases_page_url()
+
+    if resolved_platform == "darwin":
+        brew_command = get_brew_upgrade_command()
+        return UpdatePresentation(
+            status_text=(
+                f"New version {version} is available! " f"Update with: {brew_command}"
+            ),
+            links=[("Releases page", releases_url)],
+            button_text="Check updates",
+            enable_download=False,
+        )
+
+    return UpdatePresentation(
+        status_text=f"New version {version} is available!",
+        links=[
+            ("Releases page", releases_url),
+        ],
+        button_text=f"Download {version}",
+        enable_download=True,
+    )
 
 
 def download_file(

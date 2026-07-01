@@ -181,6 +181,94 @@ def test_process_audio_chunks_reports_incremental_progress(
     assert all(value >= 0 for value in increments)
 
 
+def test_process_audio_chunks_check_stop_aborts_between_chunks(
+    synthetic_audio_samples, prepared_chunks, fake_phase_vocoder
+):
+    """A raising ``check_stop`` aborts before processing the whole chunk list."""
+
+    stereo_audio = synthetic_audio_samples["stereo"]
+    chunk_outputs = [
+        np.array([[1.0, 2.0]], dtype=np.float32),
+        np.array([[2.0, -2.0]], dtype=np.float32),
+    ]
+    fake_phase_vocoder(chunk_outputs)
+
+    class _Stop(Exception):
+        pass
+
+    calls = {"count": 0}
+    increments: list[int] = []
+
+    def check_stop() -> None:
+        calls["count"] += 1
+        if calls["count"] > 1:
+            raise _Stop()
+
+    with pytest.raises(_Stop):
+        audio.process_audio_chunks(
+            stereo_audio,
+            prepared_chunks,
+            samples_per_frame=2.0,
+            speeds=[1.0, 0.5],
+            audio_fade_envelope_size=2,
+            max_audio_volume=2.0,
+            progress_callback=increments.append,
+            check_stop=check_stop,
+        )
+
+    # The stop was checked before each chunk and aborted before the second one,
+    # so only the first chunk reported progress.
+    assert increments == [4]
+
+
+def test_process_audio_chunks_check_stop_noop_matches_default(
+    synthetic_audio_samples, prepared_chunks, fake_phase_vocoder
+):
+    """A non-raising ``check_stop`` leaves the processed output unchanged."""
+
+    stereo_audio = synthetic_audio_samples["stereo"]
+    chunk_outputs = [
+        np.array(
+            [
+                [1.0, 2.0],
+                [3.0, 4.0],
+                [5.0, 6.0],
+                [7.0, 8.0],
+            ],
+            dtype=np.float32,
+        ),
+        np.array([[2.0, -2.0]], dtype=np.float32),
+    ]
+
+    fake_phase_vocoder(chunk_outputs)
+
+    processed_audio, updated_chunks = audio.process_audio_chunks(
+        stereo_audio,
+        prepared_chunks,
+        samples_per_frame=2.0,
+        speeds=[1.0, 0.5],
+        audio_fade_envelope_size=2,
+        max_audio_volume=2.0,
+        check_stop=lambda: None,
+    )
+
+    # Identical to ``test_process_audio_chunks_applies_envelope_and_updates_timings``:
+    # a no-op ``check_stop`` must not alter the processed output or timings.
+    expected_audio = np.array(
+        [
+            [0.0, 0.0],
+            [0.75, 1.0],
+            [2.5, 3.0],
+            [1.75, 2.0],
+            [0.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+
+    np.testing.assert_allclose(processed_audio, expected_audio)
+    assert updated_chunks == [[0, 2, 0, 2], [2, 3, 2, 3], [3, 3, 3, 3]]
+
+
 def test_process_audio_chunks_progress_callback_not_called_for_empty():
     """Empty inputs should complete cleanly without invoking the callback."""
 

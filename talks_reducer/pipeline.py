@@ -457,6 +457,9 @@ def speed_up_video(
                 options.audio_fade_envelope_size,
                 max_audio_volume,
                 progress_callback=audio_task.advance,
+                check_stop=lambda: _raise_if_stopped(
+                    reporter, temp_path=job_temp_path, dependencies=dependencies
+                ),
             )
 
         audio_new_path = job_temp_path / "audioNew.wav"

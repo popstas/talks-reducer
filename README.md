@@ -320,6 +320,16 @@ options, and clicking **Create** writes a `.lnk` shortcut to your Desktop seeded
 with those CLI flags. The shortcut doubles as a drop-target: drag a video onto it
 to launch the GUI with the chosen presets and auto-convert the file.
 
+On macOS, the **Advanced** panel adds a **Check updates** button that queries the
+latest GitHub release and compares it against the running version. When a newer
+release is found it reports the available version with the command to apply it,
+`brew upgrade --cask talks-reducer`, alongside a link to the Releases page. macOS
+builds are unsigned and distributed through the
+[`popstas/homebrew-talks-reducer`](https://github.com/popstas/homebrew-talks-reducer)
+tap, so the button never downloads or installs anything automatically—you upgrade
+with Homebrew. The Windows build keeps its own **Check updates** button (next to
+the run controls) that downloads and launches the installer.
+
 ### Uploading and retrieving a processed video
 
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
