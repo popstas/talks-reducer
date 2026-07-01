@@ -198,6 +198,12 @@ class TalksReducerGUI:
         else:
             self.root = tk.Tk()
 
+        # Hide the window while the layout is built and sized. Tk otherwise maps
+        # the window at its tiny default size and only resizes to the requested
+        # geometry once ``apply_window_size`` runs, producing a visible size flash
+        # on launch. It is revealed via ``deiconify`` at the end of ``__init__``.
+        self.root.withdraw()
+
         # Set window title with version information
         app_version = resolve_version()
         if app_version and app_version != "unknown":
@@ -209,7 +215,16 @@ class TalksReducerGUI:
 
         self._full_size = (1200, 900)
         self._simple_size = (470, 300)
-        # self.root.geometry(f"{self._full_size[0]}x{self._full_size[1]}")
+        # Seed the window geometry from the persisted Simple mode preference
+        # *before* building the layout so the window opens at its final size
+        # instead of snapping to the natural content size and then jumping once
+        # ``apply_window_size`` runs. ``simple_mode_var`` does not exist yet, so
+        # read the stored value directly (default True, matching the var below).
+        initial_simple = self.preferences.get("simple_mode", True)
+        initial_width, initial_height = (
+            self._simple_size if initial_simple else self._full_size
+        )
+        self.root.geometry(f"{initial_width}x{initial_height}")
         self.style = self.ttk.Style(self.root)
 
         self._processing_thread: Optional[threading.Thread] = None
@@ -401,6 +416,10 @@ class TalksReducerGUI:
         if self.server_managed:
             self.root.protocol("WM_DELETE_WINDOW", self._on_close)
             self._start_activity_log()
+
+        # Reveal the window now that the layout is built and the geometry is
+        # finalized, so it appears directly at its final size without a flash.
+        self.root.deiconify()
 
     def _start_run(self) -> None:
         if self._processing_thread and self._processing_thread.is_alive():
