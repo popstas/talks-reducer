@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 from queue import SimpleQueue
 from typing import Iterator
@@ -139,6 +141,69 @@ def test_run_pipeline_job_wraps_exceptions_with_gradio_error(tmp_path: Path) -> 
     error = emitted[1][1]
     assert isinstance(error, gr.Error)
     assert "Failed to process the video" in str(error)
+
+
+def test_gradio_progress_reporter_stop_flag() -> None:
+    reporter = server.GradioProgressReporter()
+    assert reporter.stop_requested() is False
+    reporter.request_stop()
+    assert reporter.stop_requested() is True
+
+
+def test_run_pipeline_job_aborts_worker_on_early_close(tmp_path: Path) -> None:
+    """Closing the generator early must trip ``request_stop`` and unwind the worker."""
+
+    input_file = tmp_path / "input.mp4"
+    output_file = tmp_path / "output.mp4"
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    input_file.write_bytes(b"")
+
+    options = ProcessingOptions(
+        input_file=input_file,
+        output_file=output_file,
+        temp_folder=temp_dir,
+        small=False,
+    )
+
+    holder: dict[str, server.GradioProgressReporter] = {}
+    worker_finished = threading.Event()
+
+    def _factory(progress_callback, log_callback):
+        reporter = server.GradioProgressReporter(
+            progress_callback=progress_callback, log_callback=log_callback
+        )
+        holder["reporter"] = reporter
+        return reporter
+
+    def _speed_up(_options, reporter):
+        reporter.log("started")
+        try:
+            while not reporter.stop_requested():
+                time.sleep(0.01)
+            raise server.ProcessingAborted("cancelled")
+        finally:
+            worker_finished.set()
+
+    events = SimpleQueue()
+    event_stream = server.run_pipeline_job(
+        options,
+        speed_up=_speed_up,
+        reporter_factory=_factory,
+        events=events,
+        enable_progress=True,
+        start_in_thread=True,
+    )
+
+    # Prime the generator so the worker thread starts and emits its first log,
+    # then leave it blocked on the stop flag.
+    first_kind, _ = next(event_stream)
+    assert first_kind == "log"
+
+    event_stream.close()
+
+    assert holder["reporter"].stop_requested() is True
+    assert worker_finished.wait(1.0)
 
 
 def test_describe_server_host_prefers_hostname_and_ip(

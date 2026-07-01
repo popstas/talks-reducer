@@ -117,11 +117,6 @@ def get_installer_url(version: str) -> str:
     return f"https://github.com/popstas/talks-reducer/releases/download/v{version}/talks-reducer-{version}-setup.exe"
 
 
-def get_portable_url(version: str) -> str:
-    """Construct the portable download URL for the given version."""
-    return f"https://github.com/popstas/talks-reducer/releases/download/v{version}/talks-reducer-windows-{version}.zip"
-
-
 def get_macos_app_url(version: str) -> str:
     """Construct the macOS .app zip download URL for the given version."""
     return (
@@ -192,7 +187,6 @@ def build_update_message(
     return UpdatePresentation(
         status_text=f"New version {version} is available!",
         links=[
-            ("Download portable", get_portable_url(version)),
             ("Releases page", releases_url),
         ],
         button_text=f"Download {version}",

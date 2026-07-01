@@ -14,7 +14,7 @@ from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from queue import SimpleQueue
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from typing import Callable, Iterator, Optional, Sequence, cast
 
 import gradio as gr
@@ -22,7 +22,11 @@ import gradio as gr
 from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
 from talks_reducer.icons import find_icon_path
 from talks_reducer.models import ProcessingOptions, ProcessingResult
-from talks_reducer.pipeline import _input_to_output_filename, speed_up_video
+from talks_reducer.pipeline import (
+    ProcessingAborted,
+    _input_to_output_filename,
+    speed_up_video,
+)
 from talks_reducer.progress import (
     CallbackProgressHandle,
     ProgressHandle,
@@ -76,6 +80,17 @@ class GradioProgressReporter(SignalProgressReporter):
         self._max_log_lines = max_log_lines
         self._active_desc = "Processing"
         self.logs: list[str] = []
+        self._stop_event = Event()
+
+    def stop_requested(self) -> bool:
+        """Return ``True`` once a client cancellation has requested a stop."""
+
+        return self._stop_event.is_set()
+
+    def request_stop(self) -> None:
+        """Signal the running pipeline to abort at its next stop check."""
+
+        self._stop_event.set()
 
     def log(self, message: str) -> None:
         """Collect log messages for display in the web interface."""
@@ -799,6 +814,10 @@ def run_pipeline_job(
     def _worker() -> None:
         try:
             result = speed_up(options, reporter=reporter)
+        except ProcessingAborted:
+            # A client cancellation tripped ``request_stop``; unwind quietly
+            # instead of surfacing a "Failed to process" error to the user.
+            reporter.log("Processing cancelled.")
         except FFmpegNotFoundError as exc:  # pragma: no cover - depends on runtime env
             _emit("error", gr.Error(str(exc)))
         except FileNotFoundError as exc:
@@ -827,6 +846,12 @@ def run_pipeline_job(
             yield (kind, payload)
     finally:
         if thread is not None:
+            # When the consumer stops early (gradio closing the generator on a
+            # client cancel), signal the worker to abort so ``join`` returns at
+            # the next stop check instead of blocking until the full job ends.
+            request_stop = getattr(reporter, "request_stop", None)
+            if callable(request_stop):
+                request_stop()
             thread.join()
 
 
@@ -1016,7 +1041,8 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
     )
 
     with gr.Blocks(title=f"Talks Reducer Web UI{version_suffix}") as demo:
-        gr.Markdown(f"""
+        gr.Markdown(
+            f"""
             ## Talks Reducer Web UI{version_suffix}
             Drop a video into the zone below or click to browse. **Small video** is enabled
             by default to apply the 720p/128k preset before processing starts—clear it to
@@ -1028,7 +1054,8 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
             bundled build lacks.
 
             Video will be rendered on server **{server_identity}**.
-            """.strip())
+            """.strip()
+        )
 
         with gr.Column():
             file_input = gr.File(

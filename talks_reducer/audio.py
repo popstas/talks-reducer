@@ -122,6 +122,7 @@ def process_audio_chunks(
     *,
     batch_size: int = 10,
     progress_callback: Optional[Callable[[int], None]] = None,
+    check_stop: Optional[Callable[[], None]] = None,
 ) -> Tuple[np.ndarray, List[List[int]]]:
     """Return processed audio and updated chunk timings for the provided chunk list.
 
@@ -129,6 +130,11 @@ def process_audio_chunks(
     with the number of source audio samples that chunk consumed. The reported
     increment is never negative, so zero-length chunks contribute ``0`` rather
     than a negative count.
+
+    When ``check_stop`` is provided it is invoked once per chunk before the
+    blocking phase-vocoder pass; the callback is expected to raise when the user
+    requested a stop, so cancellation is honored within a single chunk instead of
+    only after the whole audio stage completes.
     """
 
     audio_buffers: List[np.ndarray] = []
@@ -141,6 +147,8 @@ def process_audio_chunks(
         batch_audio: List[np.ndarray] = []
 
         for chunk in batch_chunks:
+            if check_stop is not None:
+                check_stop()
             start = int(chunk[0] * samples_per_frame)
             end = int(chunk[1] * samples_per_frame)
             audio_chunk = audio_data[start:end]
