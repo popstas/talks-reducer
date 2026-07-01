@@ -198,6 +198,34 @@ def _apply_macos_template_image(icon: Any) -> None:
     icon._assert_image = _patched
 
 
+def _apply_macos_accessory_policy() -> None:
+    """Hide the server-tray process from the macOS Dock.
+
+    The tray is a menu bar agent, yet macOS still gives its process a Dock icon
+    (and the spawned ``--server-managed`` GUI child a second one) unless the
+    application's activation policy is switched to *accessory*. Doing this at
+    runtime mirrors the ``LSUIElement`` bundle flag but only for this process, so
+    the GUI child — a separate application — keeps its regular Dock icon. The
+    call is a no-op off macOS or when AppKit is unavailable (e.g. tests).
+    """
+
+    if sys.platform != "darwin":
+        return
+
+    try:
+        from AppKit import (  # type: ignore import-not-found
+            NSApplication,
+            NSApplicationActivationPolicyAccessory,
+        )
+    except Exception:  # pragma: no cover - AppKit missing off macOS/tests
+        return
+
+    with suppress(Exception):
+        NSApplication.sharedApplication().setActivationPolicy_(
+            NSApplicationActivationPolicyAccessory
+        )
+
+
 def _load_icon() -> Image.Image:
     """Load the tray icon image, falling back to a generated placeholder.
 
@@ -535,6 +563,7 @@ class _ServerTrayApplication:
 
         if sys.platform == "darwin":
             _apply_macos_template_image(self._icon)
+            _apply_macos_accessory_policy()
 
         watcher = threading.Thread(
             target=self._await_server_start,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import ssl
 import sys
 import tempfile
 import urllib.error
@@ -28,6 +29,25 @@ def is_update_check_supported() -> bool:
     return is_windows() or is_macos()
 
 
+def _build_ssl_context() -> Optional[ssl.SSLContext]:
+    """Return an SSL context backed by certifi's CA bundle when available.
+
+    Frozen macOS/Linux builds ship their own Python without the system CA
+    certificates OpenSSL expects, so the default context raises
+    ``CERTIFICATE_VERIFY_FAILED`` against GitHub. Preferring certifi's bundle —
+    which is already present transitively via the HTTP stack — fixes the
+    verification while still validating the certificate chain. Falling back to
+    ``None`` lets ``urlopen`` use its platform default when certifi is missing.
+    """
+
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # pragma: no cover - certifi missing or unreadable bundle
+        return None
+
+
 def fetch_latest_version() -> Tuple[Optional[str], Optional[str]]:
     """
     Fetch the latest version from GitHub releases.
@@ -46,7 +66,9 @@ def fetch_latest_version() -> Tuple[Optional[str], Optional[str]]:
         req = urllib.request.Request(url)
         req.add_header("User-Agent", "Talks-Reducer-Update-Checker/1.0")
 
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with urllib.request.urlopen(
+            req, timeout=10, context=_build_ssl_context()
+        ) as response:
             # Get the final URL after redirect
             final_url = response.geturl()
 
@@ -215,7 +237,9 @@ def download_file(
         req = urllib.request.Request(url)
         req.add_header("User-Agent", "Talks-Reducer-Update-Checker/1.0")
 
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(
+            req, timeout=30, context=_build_ssl_context()
+        ) as response:
             # Get file size if available
             total_bytes = int(response.headers.get("Content-Length", -1))
 

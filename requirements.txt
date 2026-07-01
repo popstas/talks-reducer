@@ -10,3 +10,5 @@ Pillow>=9.0.0
 pystray>=0.19.5
 static-ffmpeg>=2.13
 gradio>=4.0.0
+# CA bundle for the update checker's HTTPS request in frozen builds.
+certifi>=2023.7.22

@@ -24,6 +24,9 @@ dependencies = [
     "pystray>=0.19.5",
     "static-ffmpeg>=2.13",
     "gradio>=4.0.0",
+    # Provides the CA bundle the update checker needs so HTTPS verification
+    # works in frozen builds that lack the system certificates.
+    "certifi>=2023.7.22",
 ]
 
 [project.optional-dependencies]

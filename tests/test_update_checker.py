@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import ssl
 import sys
-from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 
@@ -119,10 +120,30 @@ class _FakeResponse:
         return self._body
 
 
+def test_build_ssl_context_uses_certifi(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The SSL context should be seeded from certifi's CA bundle when present."""
+
+    captured: dict[str, object] = {}
+
+    def fake_create_default_context(*, cafile=None):  # noqa: ANN001
+        captured["cafile"] = cafile
+        return "context-sentinel"
+
+    monkeypatch.setattr(ssl, "create_default_context", fake_create_default_context)
+
+    fake_certifi = SimpleNamespace(where=lambda: "/path/to/cacert.pem")
+    monkeypatch.setitem(sys.modules, "certifi", fake_certifi)
+
+    context = update_checker._build_ssl_context()
+
+    assert context == "context-sentinel"
+    assert captured["cafile"] == "/path/to/cacert.pem"
+
+
 def test_fetch_latest_version_on_macos(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "darwin")
 
-    def fake_urlopen(req, timeout=10):  # noqa: ANN001
+    def fake_urlopen(req, timeout=10, context=None):  # noqa: ANN001
         return _FakeResponse(
             "https://github.com/popstas/talks-reducer/releases/tag/v9.9.9"
         )
@@ -132,6 +153,49 @@ def test_fetch_latest_version_on_macos(monkeypatch: pytest.MonkeyPatch) -> None:
     version, error = update_checker.fetch_latest_version()
     assert version == "9.9.9"
     assert error is None
+
+
+def test_fetch_latest_version_forwards_ssl_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The certifi-backed SSL context must reach urlopen."""
+
+    seen: dict[str, object] = {}
+
+    def fake_urlopen(req, timeout=10, context=None):  # noqa: ANN001
+        seen["context"] = context
+        return _FakeResponse(
+            "https://github.com/popstas/talks-reducer/releases/tag/v1.2.3"
+        )
+
+    monkeypatch.setattr(update_checker, "is_update_check_supported", lambda: True)
+    monkeypatch.setattr(update_checker.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(update_checker, "_build_ssl_context", lambda: "ctx")
+
+    version, error = update_checker.fetch_latest_version()
+
+    assert version == "1.2.3"
+    assert error is None
+    assert seen["context"] == "ctx"
+
+
+def test_fetch_latest_version_reports_network_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Network failures surface as a formatted error string, not an exception."""
+
+    def fake_urlopen(req, timeout=10, context=None):  # noqa: ANN001
+        raise update_checker.urllib.error.URLError("boom")
+
+    monkeypatch.setattr(update_checker, "is_update_check_supported", lambda: True)
+    monkeypatch.setattr(update_checker.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(update_checker, "_build_ssl_context", lambda: None)
+
+    version, error = update_checker.fetch_latest_version()
+
+    assert version is None
+    assert error is not None
+    assert "Network error" in error
 
 
 def test_fetch_latest_version_unsupported_platform(
