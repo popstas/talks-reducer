@@ -513,15 +513,16 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.advanced_button.grid(row=0, column=0, sticky="w")
 
-    # Check updates button, Create lnk button, and status label (Windows only)
-    if sys.platform == "win32":
-        gui.check_updates_button = gui.ttk.Button(
-            gui.button_frame,
-            text="Check updates",
-            command=gui._check_for_updates,
-        )
-        gui.check_updates_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
+    # Check updates button (all platforms), Create lnk button (Windows only),
+    # and the one-line update status label.
+    gui.check_updates_button = gui.ttk.Button(
+        gui.button_frame,
+        text="Check updates",
+        command=gui._check_for_updates,
+    )
+    gui.check_updates_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
 
+    if sys.platform == "win32":
         gui.lnk_button = gui.ttk.Button(
             gui.button_frame,
             text="Create lnk",
@@ -529,15 +530,15 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         )
         gui.lnk_button.grid(row=0, column=2, sticky="w", padx=(8, 0))
 
-        # Update status label (one-line)
-        gui.button_frame.columnconfigure(2, weight=0)
-        gui.button_frame.columnconfigure(3, weight=1)
-        gui.update_status_label = gui.ttk.Label(
-            gui.button_frame,
-            text="",
-            foreground="gray",
-        )
-        gui.update_status_label.grid(row=0, column=3, sticky="w", padx=(8, 0))
+    # Update status label (one-line)
+    gui.button_frame.columnconfigure(2, weight=0)
+    gui.button_frame.columnconfigure(3, weight=1)
+    gui.update_status_label = gui.ttk.Label(
+        gui.button_frame,
+        text="",
+        foreground="gray",
+    )
+    gui.update_status_label.grid(row=0, column=3, sticky="w", padx=(8, 0))
 
     gui.advanced_frame = gui.ttk.Frame(gui.options_frame, padding=0)
     gui.advanced_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")

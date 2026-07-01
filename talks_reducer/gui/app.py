@@ -836,9 +836,6 @@ class TalksReducerGUI:
 
     def _check_for_updates(self) -> None:
         """Check for updates from GitHub releases."""
-        if not sys.platform == "win32":
-            return
-
         if not hasattr(self, "check_updates_button"):
             return
 
@@ -872,8 +869,15 @@ class TalksReducerGUI:
                 )
 
                 if is_newer:
-                    installer_url = update_checker.get_installer_url(latest_version)
-                    portable_url = update_checker.get_portable_url(latest_version)
+                    # Only Windows ships an installer/portable build that the GUI
+                    # can download and launch; elsewhere point users at the
+                    # releases page instead of a Windows ``.exe``.
+                    if sys.platform == "win32":
+                        installer_url = update_checker.get_installer_url(latest_version)
+                        portable_url = update_checker.get_portable_url(latest_version)
+                    else:
+                        installer_url = None
+                        portable_url = None
                     self._schedule_on_ui_thread(
                         lambda: self._on_update_check_complete(
                             latest_version, None, installer_url, portable_url
@@ -921,19 +925,25 @@ class TalksReducerGUI:
             self._installer_url = installer_url
             self._portable_url = portable_url
 
-            # Change button to download
-            self.check_updates_button.configure(
-                text=f"Download {latest_version}",
-                command=self._download_and_install_update,
-            )
-
-            # Show status and links
             self._clear_update_status()
             status_text = f"New version {latest_version} is available!"
-            links = [
-                ("Download portable", portable_url or ""),
-                ("Releases page", update_checker.get_releases_page_url()),
-            ]
+
+            if installer_url:
+                # Windows: offer an in-app download that launches the installer.
+                self.check_updates_button.configure(
+                    text=f"Download {latest_version}",
+                    command=self._download_and_install_update,
+                )
+                links = [
+                    ("Download portable", portable_url or ""),
+                    ("Releases page", update_checker.get_releases_page_url()),
+                ]
+            else:
+                # Other platforms: no bundled installer to launch, so keep the
+                # button as-is and link to the releases page.
+                self.check_updates_button.configure(text="Check updates")
+                links = [("Releases page", update_checker.get_releases_page_url())]
+
             self._set_update_status_with_links(status_text, links)
 
     def _download_and_install_update(self) -> None:
