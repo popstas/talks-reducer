@@ -699,6 +699,26 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         row=7, column=0, columnspan=3, sticky="w", pady=4
     )
 
+    # Check updates button + status label (macOS only) live under Advanced so
+    # they mirror the Windows button while pointing macOS users at Homebrew.
+    # The Windows branch keeps its button in the always-visible button_frame.
+    if sys.platform == "darwin":
+        gui.check_updates_button = gui.ttk.Button(
+            gui.advanced_frame,
+            text="Check updates",
+            command=gui._check_for_updates,
+        )
+        gui.check_updates_button.grid(row=8, column=0, sticky="w", pady=(8, 0))
+
+        gui.update_status_label = gui.ttk.Label(
+            gui.advanced_frame,
+            text="",
+            foreground="gray",
+        )
+        gui.update_status_label.grid(
+            row=8, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0)
+        )
+
     gui._toggle_advanced(initial=True)
     gui._update_processing_mode_state()
     update_basic_reset_state(gui)
