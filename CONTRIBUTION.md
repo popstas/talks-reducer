@@ -40,24 +40,24 @@ interactions so the pipeline can be exercised without launching external
 processes.
 
 ## Publishing a Release
-1. Update `pyproject.toml` with the new version number or pass a bump rule to the deploy script.
-2. Regenerate the changelog so it reflects the upcoming tag: `git-cliff -o CHANGELOG.md` (installed via the `dev` extras).
-3. Ensure development dependencies are installed: `pip install build twine bumpversion pytest git-cliff`.
-4. Run `python scripts/deploy.py` (optionally with `patch`, `minor`, or `major` to bump the version).
 
-The deploy helper automatically runs the test suite, rebuilds the distribution artifacts, validates them with `twine check`, and uploads the release. Provide `TWINE_REPOSITORY_URL` to target TestPyPI instead of PyPI. Ensure you have valid credentials configured in `~/.pypirc` before running the publish step.
+Releases are issued by CI: pushing a version tag (`v*`) runs the full pipeline — tests, PyInstaller bundles, the Inno installer, the **GitHub release**, and the **PyPI upload** (see the next section). The recommended flow is therefore:
 
-### Publish to PyPI after the GitHub release
+1. Bump the version with `bump-my-version bump {patch|minor|major}` (updates `talks_reducer/__about__.py`, `version.txt`, and `.bumpversion.toml`).
+2. Commit the bump (`Bump version: <old> → <new>`).
+3. Tag it `v<new-version>` and push both the commit and the tag: `git push origin master --tags`.
 
-Pushing a version tag (`v*`) triggers the CI workflow, which builds the PyInstaller bundles and Inno installer, generates release notes with git-cliff, and creates the **GitHub release** with those binaries attached. CI does **not** publish to PyPI. Once the GitHub release is live, publish the Python package separately so `pip install -U talks-reducer` picks up the new version:
+CI takes over from the tag — no manual build or upload step is needed. (The committed `CHANGELOG.md` is optional; CI generates the release notes with git-cliff at build time. Regenerate it with `git-cliff -o CHANGELOG.md` only if you want the in-repo changelog refreshed.)
 
-```bash
-python -m build
-twine check dist/*
-twine upload dist/talks_reducer-<version>*
-```
+**Manual alternative.** If you need to build and publish by hand, run `python scripts/deploy.py` (optionally with `patch`, `minor`, or `major` to bump the version). The deploy helper runs the test suite, rebuilds the distribution artifacts, validates them with `twine check`, and uploads the release. Provide `TWINE_REPOSITORY_URL` to target TestPyPI instead of PyPI, and ensure you have valid credentials configured in `~/.pypirc` before running the publish step. Install the dev dependencies first: `pip install build twine bump-my-version pytest git-cliff`.
 
-(or run `python scripts/deploy.py`, which performs the same build-check-upload steps). Verify the upload at `https://pypi.org/project/talks-reducer/<version>/` — note the main `/json` endpoint is CDN-cached for a few minutes, so check the version-specific page or the simple index to confirm.
+### PyPI publishing (automated by CI)
+
+Pushing a version tag (`v*`) triggers the CI workflow, which builds the PyInstaller bundles and Inno installer, generates release notes with git-cliff, creates the **GitHub release** with those binaries attached, **and publishes the Python package to PyPI**. The `pypi-publish` job runs `python -m build`, `twine check`, and `twine upload` automatically (authenticating with the `PYPI_API_TOKEN` repository secret), so `pip install -U talks-reducer` picks up the new version once the tag build finishes — no manual upload step is needed.
+
+Verify the upload at `https://pypi.org/project/talks-reducer/<version>/` — note the main `/json` endpoint is CDN-cached for a few minutes, so check the version-specific page or the simple index to confirm.
+
+If you ever need to publish by hand (e.g. the `PYPI_API_TOKEN` secret is missing or the job fails), run `python scripts/deploy.py` — or `python -m build && twine check dist/* && twine upload dist/talks_reducer-<version>*` — with valid credentials in `~/.pypirc`.
 
 Feel free to open pull requests with enhancements or bug fixes.
 
