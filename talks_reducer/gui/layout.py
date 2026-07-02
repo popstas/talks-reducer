@@ -699,6 +699,28 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         row=7, column=0, columnspan=3, sticky="w", pady=4
     )
 
+    # Watch-directory chooser: enables polling a folder for new videos to
+    # auto-convert. Rows 9-10 avoid colliding with the macOS row-8 widgets.
+    gui.watch_check = gui.ttk.Checkbutton(
+        gui.advanced_frame,
+        text="Watch directory",
+        variable=gui.watch_enabled_var,
+    )
+    gui.watch_check.grid(row=9, column=0, columnspan=3, sticky="w", pady=4)
+
+    gui.watch_directory_entry = gui.ttk.Entry(
+        gui.advanced_frame,
+        textvariable=gui.watch_directory_var,
+    )
+    gui.watch_directory_entry.grid(row=10, column=0, columnspan=2, sticky="ew", pady=4)
+
+    gui.watch_browse_button = gui.ttk.Button(
+        gui.advanced_frame,
+        text="Browse…",
+        command=lambda: gui.inputs.browse_path(gui.watch_directory_var, "watch folder"),
+    )
+    gui.watch_browse_button.grid(row=10, column=2, sticky="e", padx=(8, 0), pady=4)
+
     # Check updates button + status label (macOS only) live under Advanced so
     # they mirror the Windows button while pointing macOS users at Homebrew.
     # The Windows branch keeps its button in the always-visible button_frame.
@@ -774,6 +796,15 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.drop_hint_button.grid_remove()  # Hidden by default
     gui._configure_drop_targets(gui.drop_hint_button)
 
+    # Dynamic watch-directory action button. It shares the status_frame slot with
+    # the Stop/Open/Drop buttons; WatchController owns its visibility and label.
+    gui.watch_button = gui.ttk.Button(
+        status_frame,
+        text="Convert",
+    )
+    gui.watch_button.grid(row=2, column=0, columnspan=3, sticky="ew", pady=gui.PADDING)
+    gui.watch_button.grid_remove()  # Hidden until a candidate appears
+
     gui.log_frame = gui.ttk.Frame(main, padding=gui.PADDING)
     gui.log_frame.grid(row=3, column=0, pady=(16, 0), sticky="nsew")
     main.rowconfigure(3, weight=1)
@@ -812,6 +843,11 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     if not bool(getattr(gui, "server_managed", False)):
         gui.activity_frame.grid_remove()
+
+    # Resume watching a persisted directory as soon as the layout is ready.
+    watch = getattr(gui, "watch", None)
+    if watch is not None and gui.watch_enabled_var.get():
+        watch.start()
 
 
 def add_entry(

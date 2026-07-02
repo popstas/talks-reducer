@@ -247,6 +247,8 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         add_codec_suffix_var=BooleanVarStub(value=False),
         use_global_ffmpeg_var=BooleanVarStub(value=True),
         start_in_server_tray_var=BooleanVarStub(value=False),
+        watch_enabled_var=BooleanVarStub(value=False),
+        watch_directory_var=StringVarStub(value=""),
         global_ffmpeg_available=True,
     )
     for key, value in overrides.items():
@@ -350,6 +352,22 @@ def test_build_layout_hides_local_server_url_in_standalone_mode(monkeypatch):
     assert label.kwargs["text"] == ""
     # Hidden in standalone mode: grid_remove() called after creation.
     assert label.grid_remove_calls
+
+
+def test_build_layout_creates_watch_widgets(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    gui = _make_layout_gui()
+
+    layout.build_layout(gui)
+
+    assert hasattr(gui, "watch_button")
+    assert hasattr(gui, "watch_check")
+    assert hasattr(gui, "watch_directory_entry")
+    assert hasattr(gui, "watch_browse_button")
 
 
 def test_build_layout_aligns_server_entry_and_discover_button(monkeypatch):
@@ -471,6 +489,8 @@ def test_build_layout_initializes_widgets(monkeypatch):
         add_codec_suffix_var=BooleanVarStub(value=False),
         use_global_ffmpeg_var=BooleanVarStub(value=False),
         start_in_server_tray_var=BooleanVarStub(value=False),
+        watch_enabled_var=BooleanVarStub(value=False),
+        watch_directory_var=StringVarStub(value=""),
         global_ffmpeg_available=True,
     )
 
@@ -703,6 +723,8 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         add_codec_suffix_var=BooleanVarStub(value=False),
         use_global_ffmpeg_var=BooleanVarStub(value=True),
         start_in_server_tray_var=BooleanVarStub(value=False),
+        watch_enabled_var=BooleanVarStub(value=False),
+        watch_directory_var=StringVarStub(value=""),
         global_ffmpeg_available=False,
     )
 
