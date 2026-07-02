@@ -543,13 +543,36 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.advanced_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
     gui.advanced_frame.columnconfigure(1, weight=1)
 
+    # Watch-directory chooser on a single row (checkbox + path + Browse), placed
+    # first so it sits above the Output file field. The button that acts on the
+    # newest video lives in ``status_frame`` and is owned by ``WatchController``.
+    gui.watch_check = gui.ttk.Checkbutton(
+        gui.advanced_frame,
+        text="Watch directory",
+        variable=gui.watch_enabled_var,
+    )
+    gui.watch_check.grid(row=0, column=0, sticky="w", pady=4)
+
+    gui.watch_directory_entry = gui.ttk.Entry(
+        gui.advanced_frame,
+        textvariable=gui.watch_directory_var,
+    )
+    gui.watch_directory_entry.grid(row=0, column=1, sticky="ew", pady=4)
+
+    gui.watch_browse_button = gui.ttk.Button(
+        gui.advanced_frame,
+        text="Browse…",
+        command=lambda: gui.inputs.browse_path(gui.watch_directory_var, "watch folder"),
+    )
+    gui.watch_browse_button.grid(row=0, column=2, sticky="e", padx=(8, 0), pady=4)
+
     gui.output_var = gui.tk.StringVar()
     add_entry(
         gui,
         gui.advanced_frame,
         "Output file",
         gui.output_var,
-        row=0,
+        row=1,
         browse=True,
     )
 
@@ -559,7 +582,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.advanced_frame,
         "Temp folder",
         gui.temp_var,
-        row=1,
+        row=2,
         browse=True,
     )
 
@@ -568,7 +591,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text="Optimized encoding",
         variable=gui.optimize_var,
     )
-    gui.optimize_check.grid(row=2, column=0, columnspan=3, sticky="w", pady=4)
+    gui.optimize_check.grid(row=3, column=0, columnspan=3, sticky="w", pady=4)
 
     global_ffmpeg_available = getattr(gui, "global_ffmpeg_available", True)
     gui.use_global_ffmpeg_check = gui.ttk.Checkbutton(
@@ -579,10 +602,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     if not global_ffmpeg_available:
         gui.use_global_ffmpeg_var.set(False)
-    gui.use_global_ffmpeg_check.grid(row=3, column=0, columnspan=3, sticky="w", pady=4)
+    gui.use_global_ffmpeg_check.grid(row=4, column=0, columnspan=3, sticky="w", pady=4)
 
     gui.sample_rate_var = gui.tk.StringVar(value="48000")
-    add_entry(gui, gui.advanced_frame, "Sample rate", gui.sample_rate_var, row=4)
+    add_entry(gui, gui.advanced_frame, "Sample rate", gui.sample_rate_var, row=5)
 
     frame_margin_setting = gui.preferences.get("frame_margin", 2)
     try:
@@ -592,7 +615,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.preferences.update("frame_margin", frame_margin_default)
 
     gui.frame_margin_var = gui.tk.StringVar(value=str(frame_margin_default))
-    add_entry(gui, gui.advanced_frame, "Frame margin", gui.frame_margin_var, row=5)
+    add_entry(gui, gui.advanced_frame, "Frame margin", gui.frame_margin_var, row=6)
 
     min_interval = 1.0
     max_interval = 60.0
@@ -612,13 +635,13 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         )
 
     gui.ttk.Label(gui.advanced_frame, text="Keyframe interval").grid(
-        row=6, column=0, sticky="w", pady=4
+        row=7, column=0, sticky="w", pady=4
     )
 
     gui.keyframe_interval_var = gui.tk.DoubleVar(value=validated_interval)
 
     gui.keyframe_interval_value_label = gui.ttk.Label(gui.advanced_frame)
-    gui.keyframe_interval_value_label.grid(row=6, column=2, sticky="e", pady=4)
+    gui.keyframe_interval_value_label.grid(row=7, column=2, sticky="e", pady=4)
 
     keyframe_percent_samples = [
         (60.0, 0.5),
@@ -683,7 +706,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         length=240,
         highlightthickness=0,
     )
-    gui.keyframe_interval_slider.grid(row=6, column=1, sticky="ew", pady=4, padx=(0, 8))
+    gui.keyframe_interval_slider.grid(row=7, column=1, sticky="ew", pady=4, padx=(0, 8))
 
     update_keyframe_interval(str(validated_interval))
     sliders = getattr(gui, "_sliders", None)
@@ -696,30 +719,8 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=gui.start_in_server_tray_var,
     )
     gui.start_in_server_tray_check.grid(
-        row=7, column=0, columnspan=3, sticky="w", pady=4
+        row=8, column=0, columnspan=3, sticky="w", pady=4
     )
-
-    # Watch-directory chooser: enables polling a folder for new videos to
-    # auto-convert. Rows 9-10 avoid colliding with the macOS row-8 widgets.
-    gui.watch_check = gui.ttk.Checkbutton(
-        gui.advanced_frame,
-        text="Watch directory",
-        variable=gui.watch_enabled_var,
-    )
-    gui.watch_check.grid(row=9, column=0, columnspan=3, sticky="w", pady=4)
-
-    gui.watch_directory_entry = gui.ttk.Entry(
-        gui.advanced_frame,
-        textvariable=gui.watch_directory_var,
-    )
-    gui.watch_directory_entry.grid(row=10, column=0, columnspan=2, sticky="ew", pady=4)
-
-    gui.watch_browse_button = gui.ttk.Button(
-        gui.advanced_frame,
-        text="Browse…",
-        command=lambda: gui.inputs.browse_path(gui.watch_directory_var, "watch folder"),
-    )
-    gui.watch_browse_button.grid(row=10, column=2, sticky="e", padx=(8, 0), pady=4)
 
     # Check updates button + status label (macOS only) live under Advanced so
     # they mirror the Windows button while pointing macOS users at Homebrew.
@@ -730,7 +731,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             text="Check updates",
             command=gui._check_for_updates,
         )
-        gui.check_updates_button.grid(row=8, column=0, sticky="w", pady=(8, 0))
+        gui.check_updates_button.grid(row=9, column=0, sticky="w", pady=(8, 0))
 
         gui.update_status_label = gui.ttk.Label(
             gui.advanced_frame,
@@ -738,7 +739,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             foreground="gray",
         )
         gui.update_status_label.grid(
-            row=8, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0)
+            row=9, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0)
         )
 
     gui._toggle_advanced(initial=True)
