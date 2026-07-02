@@ -349,3 +349,49 @@ def test_on_cut_change_handles_invalid_values(tmp_path):
     assert loaded["cut_enabled"] is False
     assert loaded["cut_start"] == pytest.approx(0.0)
     assert loaded["cut_end"] == pytest.approx(0.0)
+
+
+def test_on_watch_change_persists_and_starts(tmp_path):
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    events: list[str] = []
+    watch = SimpleNamespace(
+        start=lambda: events.append("start"),
+        stop=lambda: events.append("stop"),
+        refresh_candidate=lambda: events.append("refresh"),
+    )
+    gui = SimpleNamespace(
+        preferences=prefs,
+        watch_enabled_var=SimpleNamespace(get=lambda: True),
+        watch_directory_var=SimpleNamespace(get=lambda: "/videos/in"),
+        watch=watch,
+    )
+
+    PreferenceController(gui).on_watch_change()
+
+    loaded = load_settings(config_path)
+    assert loaded["watch_enabled"] is True
+    assert loaded["watch_directory"] == "/videos/in"
+    assert events == ["start"]
+
+
+def test_on_watch_change_stops_when_disabled(tmp_path):
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    events: list[str] = []
+    watch = SimpleNamespace(
+        start=lambda: events.append("start"),
+        stop=lambda: events.append("stop"),
+        refresh_candidate=lambda: events.append("refresh"),
+    )
+    gui = SimpleNamespace(
+        preferences=prefs,
+        watch_enabled_var=SimpleNamespace(get=lambda: False),
+        watch_directory_var=SimpleNamespace(get=lambda: "/videos/in"),
+        watch=watch,
+    )
+
+    PreferenceController(gui).on_watch_change()
+
+    assert load_settings(config_path)["watch_enabled"] is False
+    assert events == ["stop", "refresh"]
