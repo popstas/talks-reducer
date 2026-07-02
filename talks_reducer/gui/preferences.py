@@ -186,6 +186,23 @@ class PreferenceController:
         self.gui.preferences.update("cut_start", cut_start)
         self.gui.preferences.update("cut_end", cut_end)
 
+    def on_watch_change(self, *_: object) -> None:
+        """Persist the watch-directory settings and toggle the poller."""
+
+        enabled = bool(self.gui.watch_enabled_var.get())
+        self.gui.preferences.update("watch_enabled", enabled)
+        self.gui.preferences.update(
+            "watch_directory", str(self.gui.watch_directory_var.get())
+        )
+        watch = getattr(self.gui, "watch", None)
+        if watch is None:
+            return
+        if enabled:
+            watch.start()
+        else:
+            watch.stop()
+            watch.refresh_candidate()
+
     def on_video_codec_change(self, *_: object) -> None:
         value = self.gui.video_codec_var.get().strip().lower()
         if value not in {"h264", "hevc", "av1", "mp3"}:

@@ -49,6 +49,17 @@ the same keep-range used by the `--cut-start`/`--cut-end` CLI flags as
 path; when off the trim args are omitted. The enabled flag plus the last
 start/end values persist via `GUIPreferences` (`cut_enabled`, `cut_start`,
 `cut_end`).
+- **Watch directory** — an **Advanced** setting (`watch_check`,
+`watch_directory_entry`, `watch_browse_button` in `advanced_frame`, auto-hidden
+in Simple mode) that lets you pick a folder for `WatchController`
+(`talks_reducer/gui/watch.py`) to poll (~2s) for its most-recently-modified
+video. The controller owns a dynamic `watch_button` in `status_frame`, sharing
+that slot with the Stop/Open/Drop button via `refresh_button`: it reads
+**"Convert `<filename>`"** for a raw recording, or **"Open last"** when the
+newest file's name already contains a processed marker (`_speedup` or
+`_small`). The button itself is visible in both Simple and Advanced modes even
+though the folder chooser is Advanced-only. The enabled flag and chosen path
+persist via `GUIPreferences` (`watch_enabled`, `watch_directory`).
 - **Advanced** — reveals optional controls for the output path, temp folder,
 timing/audio knobs mirrored from the command line, and an appearance picker
 that can force dark or light mode or follow your operating system.

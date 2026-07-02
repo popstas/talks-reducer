@@ -1969,3 +1969,29 @@ def test_set_update_status_with_links_places_links_on_status_row():
     assert link.grid_calls[0]["row"] == 8
     assert link.grid_calls[0]["column"] == 3
     assert link.args[0] is status_label.master
+
+
+def test_restore_default_action_button_prefers_open_when_output_exists():
+    """When a session output exists the Open-last button should be restored
+    instead of the Simple-mode drop hint."""
+
+    open_btn = SimpleNamespace(visible=False)
+    open_btn.grid = lambda: setattr(open_btn, "visible", True)
+    open_btn.grid_remove = lambda: setattr(open_btn, "visible", False)
+    open_btn.lift = lambda: None
+    stop_btn = SimpleNamespace(winfo_viewable=lambda: False)
+    drop_btn = SimpleNamespace(visible=False)
+    drop_btn.grid = lambda: setattr(drop_btn, "visible", True)
+
+    gui = SimpleNamespace(
+        stop_button=stop_btn,
+        open_button=open_btn,
+        drop_hint_button=drop_btn,
+        _last_output="out.mp4",
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+    )
+
+    app.TalksReducerGUI._restore_default_action_button(gui)
+
+    assert open_btn.visible is True
+    assert drop_btn.visible is False

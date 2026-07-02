@@ -71,6 +71,7 @@ try:
         read_windows_theme_registry,
         run_defaults_command,
     )
+    from .watch import WatchController
 except ImportError:  # pragma: no cover - handled at runtime
     if __package__ not in (None, ""):
         raise
@@ -117,6 +118,7 @@ except ImportError:  # pragma: no cover - handled at runtime
         read_windows_theme_registry,
         run_defaults_command,
     )
+    from talks_reducer.gui.watch import WatchController
     from talks_reducer.models import ProcessingOptions
     from talks_reducer.pipeline import ProcessingAborted, speed_up_video
     from talks_reducer.progress import ProgressHandle
@@ -271,6 +273,7 @@ class TalksReducerGUI:
         self.DND_FILES = DND_FILES
 
         self.inputs = InputController(self)
+        self.watch = WatchController(self)
         self.remote_controller = RemoteController(self)
         self.summary_manager = SummaryManager(self)
         self.preference_controller = PreferenceController(self)
@@ -303,6 +306,12 @@ class TalksReducerGUI:
         )
         self.cut_end_text_var = tk.StringVar(
             value=format_timecode(self.cut_end_var.get(), milliseconds=True)
+        )
+        self.watch_enabled_var = tk.BooleanVar(
+            value=bool(self.preferences.get("watch_enabled", False))
+        )
+        self.watch_directory_var = tk.StringVar(
+            value=str(self.preferences.get("watch_directory", ""))
         )
         stored_codec = str(self.preferences.get("video_codec", "h264")).lower()
         if stored_codec not in {"h264", "hevc", "av1", "mp3"}:
@@ -339,6 +348,8 @@ class TalksReducerGUI:
         self.cut_enabled_var.trace_add("write", self._on_cut_change)
         self.cut_start_var.trace_add("write", self._on_cut_change)
         self.cut_end_var.trace_add("write", self._on_cut_change)
+        self.watch_enabled_var.trace_add("write", self._on_watch_change)
+        self.watch_directory_var.trace_add("write", self._on_watch_change)
         self.video_codec_var.trace_add("write", self._on_video_codec_change)
         self.add_codec_suffix_var.trace_add("write", self._on_add_codec_suffix_change)
         self.optimize_var.trace_add("write", self._on_optimize_change)
@@ -1155,6 +1166,9 @@ class TalksReducerGUI:
     def _on_cut_change(self, *_: object) -> None:
         self.preference_controller.on_cut_change(*_)
 
+    def _on_watch_change(self, *_: object) -> None:
+        self.preference_controller.on_watch_change(*_)
+
     def _on_video_codec_change(self, *_: object) -> None:
         self.preference_controller.on_video_codec_change(*_)
 
@@ -1394,6 +1408,10 @@ class TalksReducerGUI:
         ):
             self.drop_hint_button.grid()
 
+        watch = getattr(self, "watch", None)
+        if watch is not None:
+            watch.refresh_button()
+
     def _collect_arguments(self) -> dict[str, object]:
         args: dict[str, object] = {}
 
@@ -1490,6 +1508,28 @@ class TalksReducerGUI:
     def _open_last_output(self) -> None:
         if self._last_output is not None:
             self._open_in_file_manager(self._last_output)
+
+    def _is_run_active(self) -> bool:
+        """Return ``True`` while a processing job thread is alive."""
+
+        thread = getattr(self, "_processing_thread", None)
+        return bool(thread is not None and thread.is_alive())
+
+    def _restore_default_action_button(self) -> None:
+        """Show the normal action button after the watch button hides itself.
+
+        The watch button shares the ``status_frame`` slot with the Stop/Open/Drop
+        buttons; when watching is inactive this restores the Open-last button (when
+        a session output exists) or the Simple-mode drop hint.
+        """
+
+        if self.stop_button.winfo_viewable():
+            return
+        if getattr(self, "_last_output", None) is not None:
+            self.open_button.grid()
+            self.open_button.lift()
+        elif hasattr(self, "drop_hint_button") and self.simple_mode_var.get():
+            self.drop_hint_button.grid()
 
     def _open_in_file_manager(self, path: Path) -> None:
         target = Path(path)
@@ -1795,6 +1835,9 @@ class TalksReducerGUI:
         self._closing = True
         self._stop_activity_log()
         self._cancel_download_wait()
+        watch = getattr(self, "watch", None)
+        if watch is not None:
+            watch.stop()
         self.root.destroy()
 
     def _get_status_style(self, status: str) -> str | None:
@@ -1863,6 +1906,14 @@ class TalksReducerGUI:
                     # Show drop hint when no other buttons are visible
                     if hasattr(self, "drop_hint_button"):
                         self.drop_hint_button.grid()
+
+            # Refresh unconditionally: during a run ``refresh_button`` yields the
+            # slot via ``_run_active`` (grid_remove), so it is safe and lets the
+            # frequent progress ticks hide the watch button immediately rather
+            # than waiting for the next 2s poll.
+            watch = getattr(self, "watch", None)
+            if watch is not None:
+                watch.refresh_button()
 
         self.root.after(0, apply)
 

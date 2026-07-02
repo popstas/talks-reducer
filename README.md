@@ -310,6 +310,14 @@ the trim entirely. The **Advanced** panel also exposes a **Run as server in
 tray** checkbox (default off) that relaunches the app into the tray-managed
 server mode described above and persists the choice for the next launch.
 
+- **Watch directory** — an Advanced setting: choose a folder and Talks Reducer
+  polls it (~2s) for the most-recently-modified video. The main action button
+  then shows **"Convert `<filename>`"** for a raw recording, or **"Open last"**
+  when the newest file is already processed (its name contains `_speedup` or
+  `_small`). The button is available in both Simple and Advanced modes; the
+  folder chooser lives under Advanced. The choice persists across launches
+  (`watch_enabled`, `watch_directory`).
+
 On Windows, the full (non-Simple) layout shows a **Create lnk** button next to
 the **Advanced** button (hidden on other platforms). It opens a small dialog
 where you tick the presets you want—

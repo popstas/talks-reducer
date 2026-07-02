@@ -247,6 +247,8 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         add_codec_suffix_var=BooleanVarStub(value=False),
         use_global_ffmpeg_var=BooleanVarStub(value=True),
         start_in_server_tray_var=BooleanVarStub(value=False),
+        watch_enabled_var=BooleanVarStub(value=False),
+        watch_directory_var=StringVarStub(value=""),
         global_ffmpeg_available=True,
     )
     for key, value in overrides.items():
@@ -350,6 +352,22 @@ def test_build_layout_hides_local_server_url_in_standalone_mode(monkeypatch):
     assert label.kwargs["text"] == ""
     # Hidden in standalone mode: grid_remove() called after creation.
     assert label.grid_remove_calls
+
+
+def test_build_layout_creates_watch_widgets(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    gui = _make_layout_gui()
+
+    layout.build_layout(gui)
+
+    assert hasattr(gui, "watch_button")
+    assert hasattr(gui, "watch_check")
+    assert hasattr(gui, "watch_directory_entry")
+    assert hasattr(gui, "watch_browse_button")
 
 
 def test_build_layout_aligns_server_entry_and_discover_button(monkeypatch):
@@ -471,6 +489,8 @@ def test_build_layout_initializes_widgets(monkeypatch):
         add_codec_suffix_var=BooleanVarStub(value=False),
         use_global_ffmpeg_var=BooleanVarStub(value=False),
         start_in_server_tray_var=BooleanVarStub(value=False),
+        watch_enabled_var=BooleanVarStub(value=False),
+        watch_directory_var=StringVarStub(value=""),
         global_ffmpeg_available=True,
     )
 
@@ -540,11 +560,12 @@ def test_build_layout_adds_macos_update_button_under_advanced(monkeypatch):
     # button frame, so they appear under Advanced settings.
     assert gui.check_updates_button.args[0] is gui.advanced_frame
     assert gui.update_status_label.args[0] is gui.advanced_frame
-    # Both must sit on row 8 (rows 0-7 are taken by existing Advanced controls),
-    # so a future edit that collides with another row is caught here. The status
-    # label sits in a later column than the button so the two never overlap.
-    assert gui.check_updates_button.grid_calls[0][1]["row"] == 8
-    assert gui.update_status_label.grid_calls[0][1]["row"] == 8
+    # Both must sit on row 9 (rows 0-8 are taken by existing Advanced controls:
+    # the watch-directory line at row 0 pushes the rest down), so a future edit
+    # that collides with another row is caught here. The status label sits in a
+    # later column than the button so the two never overlap.
+    assert gui.check_updates_button.grid_calls[0][1]["row"] == 9
+    assert gui.update_status_label.grid_calls[0][1]["row"] == 9
     assert (
         gui.update_status_label.grid_calls[0][1]["column"]
         > gui.check_updates_button.grid_calls[0][1]["column"]
@@ -703,6 +724,8 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         add_codec_suffix_var=BooleanVarStub(value=False),
         use_global_ffmpeg_var=BooleanVarStub(value=True),
         start_in_server_tray_var=BooleanVarStub(value=False),
+        watch_enabled_var=BooleanVarStub(value=False),
+        watch_directory_var=StringVarStub(value=""),
         global_ffmpeg_available=False,
     )
 
