@@ -10,9 +10,9 @@ button** in the main button area (the slot currently used by **Open last**),
 **visible in both Simple and Advanced modes**. The button reflects the
 most-recently-modified *video* file in the watched folder:
 
-- If that file's name contains **`_speedup`** (i.e. it is already a processed
-  output), the button acts as **"Open last"** and reveals that file in the system
-  file manager.
+- If that file's name contains a processed-output marker (**`_speedup`** or
+  **`_small`**), the button acts as **"Open last"** and reveals that file in the
+  system file manager.
 - Otherwise (a raw/unprocessed recording), the button acts as
   **"Convert `<filename>`"** and converts that file with the current GUI options.
 
@@ -27,11 +27,13 @@ click → the processed `_speedup` file becomes the newest file → button flips
    folder is small (a recordings dir), so polling cost is negligible.
 2. **Candidate files: video only.** Reuse the extension set already used by the
    file picker in `gui/inputs.py`: `.mp4 .mkv .mov .avi .m4v` (case-insensitive).
-3. **Processed-vs-raw marker: `_speedup` substring** (case-insensitive) in the
-   filename. This matches the pipeline's default output suffix token (`speedup`,
-   emitted as `_speedup[...]` by `_input_to_output_filename`). A file whose name
-   contains `_speedup` is treated as an already-processed output → **Open last**;
-   anything else → **Convert**.
+3. **Processed-vs-raw marker: `_speedup` or `_small` substring**
+   (case-insensitive) in the filename. These match the pipeline's default output
+   suffix tokens emitted by `_input_to_output_filename` (`_speedup` for
+   non-neutral speeds, `_small` for the small preset — `--small` with neutral
+   speeds yields `_small` and no `_speedup`, so both are needed). A file whose
+   name contains either marker is treated as an already-processed output →
+   **Open last**; anything else → **Convert**.
 4. **One dynamic button in the shared action slot, both modes.** The button lives
    in `status_frame` at the same grid cell as `stop_button` / `open_button` /
    `drop_hint_button` (row 2, columnspan 3) and is shown in Simple *and*
@@ -79,7 +81,8 @@ New module `talks_reducer/gui/watch.py` with a `WatchController` (mirrors the
 - `_latest_video(directory) -> Optional[Path]` — pure helper: list files, filter
   by extension, return the greatest `st_mtime` (ties broken by name). Tk-free,
   unit-testable.
-- `_is_processed(path) -> bool` — pure helper: `"_speedup" in name.lower()`.
+- `_is_processed(path) -> bool` — pure helper: name (lowercased) contains
+  `"_speedup"` or `"_small"`.
 - `refresh_button()` — apply the current candidate to `watch_button`
   (text/command/visibility); also called on enable-toggle and simple/advanced
   switches so state is consistent without waiting a poll tick.
@@ -168,8 +171,8 @@ exist).
 
 - **Unit (no Tk):** `_latest_video` — newest-by-mtime, extension filtering, empty
   dir → `None`, missing dir → `None`, tie-break by name (use `tmp_path` +
-  `os.utime`). `_is_processed` — `_speedup`, `_speedup_small`, mixed case → True;
-  raw name → False.
+  `os.utime`). `_is_processed` — `_speedup`, `_small`, `_speedup_small`, mixed
+  case → True; raw name → False.
 - **Preferences:** `watch_enabled`/`watch_directory` round-trip through
   `GUIPreferences` (defaults, update, failed-write rollback).
 - **Controller logic (light, mocked GUI):** `refresh_button` picks the right
