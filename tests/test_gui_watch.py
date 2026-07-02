@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 from talks_reducer.gui.watch import (
     POLL_INTERVAL_MS,
     PROCESSED_MARKERS,
     VIDEO_EXTENSIONS,
+    WatchController,
     is_processed,
     latest_video,
 )
@@ -57,11 +59,6 @@ def test_constants_match_contract():
     assert POLL_INTERVAL_MS == 2000
 
 
-from types import SimpleNamespace
-
-from talks_reducer.gui.watch import WatchController
-
-
 class _FakeButton:
     def __init__(self):
         self.visible = False
@@ -102,6 +99,7 @@ def _make_watch_gui(tmp_path, *, enabled=True):
         _start_run=lambda: started.append(True),
         _open_in_file_manager=lambda path: opened.append(path),
         _restore_default_action_button=lambda: restored.append(True),
+        _is_run_active=lambda: False,
     )
     gui._started = started
     gui._opened = opened
@@ -166,6 +164,7 @@ def test_refresh_button_yields_slot_to_active_run(tmp_path):
     _touch(tmp_path / "raw.mp4", 1000)
     gui = _make_watch_gui(tmp_path)
     gui.stop_button.grid()  # a run is active
+    gui._is_run_active = lambda: True
 
     WatchController(gui).refresh_candidate()
 

@@ -107,6 +107,14 @@ class WatchController:
             return name
         return "…" + name[-(_MAX_LABEL_CHARS - 1) :]
 
+    def _run_active(self) -> bool:
+        """Return ``True`` when a processing run currently owns the button slot."""
+
+        is_active = getattr(self.gui, "_is_run_active", None)
+        if callable(is_active):
+            return bool(is_active())
+        return bool(self.gui.stop_button.winfo_viewable())
+
     def refresh_button(self) -> None:
         """Apply the current candidate to the shared action-button slot."""
 
@@ -119,7 +127,7 @@ class WatchController:
             self.gui._restore_default_action_button()
             return
 
-        if self.gui.stop_button.winfo_viewable():
+        if self._run_active():
             button.grid_remove()
             return
 

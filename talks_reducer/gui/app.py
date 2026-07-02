@@ -1509,6 +1509,12 @@ class TalksReducerGUI:
         if self._last_output is not None:
             self._open_in_file_manager(self._last_output)
 
+    def _is_run_active(self) -> bool:
+        """Return ``True`` while a processing job thread is alive."""
+
+        thread = getattr(self, "_processing_thread", None)
+        return bool(thread is not None and thread.is_alive())
+
     def _restore_default_action_button(self) -> None:
         """Show the normal action button after the watch button hides itself.
 
@@ -1829,6 +1835,9 @@ class TalksReducerGUI:
         self._closing = True
         self._stop_activity_log()
         self._cancel_download_wait()
+        watch = getattr(self, "watch", None)
+        if watch is not None:
+            watch.stop()
         self.root.destroy()
 
     def _get_status_style(self, status: str) -> str | None:
@@ -1898,9 +1907,10 @@ class TalksReducerGUI:
                     if hasattr(self, "drop_hint_button"):
                         self.drop_hint_button.grid()
 
-            watch = getattr(self, "watch", None)
-            if watch is not None:
-                watch.refresh_button()
+            if not is_processing:
+                watch = getattr(self, "watch", None)
+                if watch is not None:
+                    watch.refresh_button()
 
         self.root.after(0, apply)
 
