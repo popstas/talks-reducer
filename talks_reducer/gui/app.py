@@ -1907,10 +1907,13 @@ class TalksReducerGUI:
                     if hasattr(self, "drop_hint_button"):
                         self.drop_hint_button.grid()
 
-            if not is_processing:
-                watch = getattr(self, "watch", None)
-                if watch is not None:
-                    watch.refresh_button()
+            # Refresh unconditionally: during a run ``refresh_button`` yields the
+            # slot via ``_run_active`` (grid_remove), so it is safe and lets the
+            # frequent progress ticks hide the watch button immediately rather
+            # than waiting for the next 2s poll.
+            watch = getattr(self, "watch", None)
+            if watch is not None:
+                watch.refresh_button()
 
         self.root.after(0, apply)
 
