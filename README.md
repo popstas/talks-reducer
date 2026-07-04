@@ -42,6 +42,32 @@ When extracted on Windows the bundled `talks-reducer.exe` behaves like running
 and passing a video file path (for example via *Open with…* or drag-and-drop
 onto the executable) automatically queues that recording for processing.
 
+## OBS Processing Dock (Windows)
+
+For OBS Studio recordings, a Custom Browser Dock can start Talks Reducer right
+after you stop a take — pick resolution (1080p / 720p / 480p), silent speed
+(1× / 5× / 10×), and codec, then click a button. The dock connects to OBS over
+obs-websocket, reads the last recording path from `RecordStateChanged`, and
+sends jobs to a small local Node.js helper that spawns `talks-reducer.exe` with
+the matching CLI flags.
+
+**Requirements:** OBS WebSocket server enabled, [Node.js](https://nodejs.org/),
+and Talks Reducer installed (default exe:
+`%LOCALAPPDATA%\Programs\talks-reducer\talks-reducer.exe`).
+
+1. Start the helper (keep it running while streaming):
+
+```powershell
+.\scripts\obs-processing-dock\obs-talks-reducer.ps1
+```
+
+2. In OBS: **Docks → Custom Browser Docks** → add a dock pointing at
+   `file:///…/scripts/obs-processing-dock/dock.html`.
+
+Full setup, Task Scheduler (headless logon via `conhost.exe --headless
+powershell.exe …`), payload format, and troubleshooting:
+[scripts/obs-processing-dock/README.md](scripts/obs-processing-dock/README.md).
+
 ## Install CLI (Linux, Windows, macOS)
 
 ### pipx / pip
