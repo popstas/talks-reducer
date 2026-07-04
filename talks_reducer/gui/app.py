@@ -423,6 +423,12 @@ class TalksReducerGUI:
                 "Drag and drop requires the tkinterdnd2 package. Install it to enable the drop zone."
             )
 
+        # GUI-only post-convert actions seeded by CLI flags (no GUI checkboxes).
+        # ``--open-location`` forces revealing each output in the file manager and
+        # ``--auto-close`` closes the window once every job succeeds.
+        self._open_location_after_convert = False
+        self._auto_close_after_convert = False
+
         if cli_settings:
             self._apply_cli_settings(cli_settings)
 
@@ -463,6 +469,8 @@ class TalksReducerGUI:
         self._run_start_time = time.monotonic()
         self._ping_worker_stop_requested = True
         open_after_convert = bool(self.open_after_convert_var.get())
+        # ``--open-location`` forces the reveal without touching the saved checkbox.
+        open_after_convert = open_after_convert or self._open_location_after_convert
         server_url = self.server_url_var.get().strip()
         remote_mode = self.processing_mode_var.get() == "remote"
         if remote_mode and not server_url:
@@ -503,6 +511,7 @@ class TalksReducerGUI:
                     )
                     if success:
                         self._schedule_on_ui_thread(self._hide_stop_button)
+                        self._schedule_auto_close_if_requested()
                         return
                     # If server processing failed, fall back to local processing
                     # The _process_files_via_server function already switched to local mode
@@ -549,6 +558,7 @@ class TalksReducerGUI:
                     lambda: self.open_button.configure(state=self.tk.NORMAL)
                 )
                 self._schedule_on_ui_thread(self._clear_input_files)
+                self._schedule_auto_close_if_requested()
             except FFmpegNotFoundError as exc:
                 self._schedule_on_ui_thread(
                     lambda: self.messagebox.showerror("FFmpeg not found", str(exc))
@@ -1333,6 +1343,21 @@ class TalksReducerGUI:
         if "server_url" in settings:
             self.server_url_var.set(str(settings["server_url"]))
             self.processing_mode_var.set("remote")
+        if "open_location" in settings:
+            self._open_location_after_convert = bool(settings["open_location"])
+        if "auto_close" in settings:
+            self._auto_close_after_convert = bool(settings["auto_close"])
+
+    def _schedule_auto_close_if_requested(self) -> None:
+        """Close the window on the UI thread when ``--auto-close`` was requested.
+
+        Only reached from the success paths, so a failed or aborted run leaves the
+        window open for the user to inspect the log.
+        """
+
+        if not self._auto_close_after_convert:
+            return
+        self._schedule_on_ui_thread(self._on_close)
 
     def _populate_initial_inputs(
         self, inputs: Sequence[str], *, auto_run: bool = False

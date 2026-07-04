@@ -89,6 +89,39 @@ def test_parse_seeded_launch_accepts_hyphenated_flags(tmp_path) -> None:
     assert settings["silent_speed"] == 5.0
 
 
+def test_parse_seeded_launch_seeds_open_location_and_auto_close(tmp_path) -> None:
+    """The GUI-only post-convert flags flow into the seeded settings."""
+
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch(
+        ["--open-location", "--auto-close", str(video)]
+    )
+
+    assert seeded is not None
+    input_files, settings = seeded
+    assert input_files == [str(video)]
+    assert settings["open_location"] is True
+    assert settings["auto_close"] is True
+
+
+def test_parse_seeded_launch_omits_post_convert_flags_when_unspecified(
+    tmp_path,
+) -> None:
+    """Unspecified post-convert flags are not seeded so preferences persist."""
+
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch([str(video)])
+
+    assert seeded is not None
+    _, settings = seeded
+    assert "open_location" not in settings
+    assert "auto_close" not in settings
+
+
 def test_parse_seeded_launch_720_unchecks_480(tmp_path) -> None:
     """``--720`` seeds ``small_480=False`` so the GUI 480p box is unchecked."""
 

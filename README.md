@@ -185,6 +185,14 @@ starts automatically. Flag names accept either hyphens or underscores
 those settings applied so you can drop files in. Only the flags you pass are
 applied; your stored preferences are preserved for everything else.
 
+Two GUI-only flags control what happens *after* a seeded conversion finishes,
+without adding any checkbox to the window: `--open-location` reveals each
+exported file in the system file manager (regardless of the saved "Open after
+convert" setting), and `--auto-close` closes the window once every queued file
+finishes successfully (it stays open on error so you can read the log). For
+example, a shortcut carrying `--small --open-location --auto-close` converts a
+dropped recording, shows the result in Explorer, and closes itself.
+
 Pass `--debug` to print verbose logs about the tray icon lifecycle, and
 `--tray-mode pystray-detached` to try pystray's alternate detached runner. If
 the icon backend refuses to appear, fall back to `--tray-mode headless` to keep

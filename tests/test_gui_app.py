@@ -14,6 +14,45 @@ from talks_reducer.gui import app, summaries
 from talks_reducer.gui.theme import STATUS_COLORS
 
 
+def test_apply_cli_settings_seeds_post_convert_flags():
+    gui = SimpleNamespace(
+        _open_location_after_convert=False,
+        _auto_close_after_convert=False,
+    )
+
+    app.TalksReducerGUI._apply_cli_settings(
+        gui, {"open_location": True, "auto_close": True}
+    )
+
+    assert gui._open_location_after_convert is True
+    assert gui._auto_close_after_convert is True
+
+
+def test_schedule_auto_close_when_requested():
+    scheduled = []
+    gui = SimpleNamespace(
+        _auto_close_after_convert=True,
+        _on_close=lambda: None,
+        _schedule_on_ui_thread=lambda callback: scheduled.append(callback),
+    )
+
+    app.TalksReducerGUI._schedule_auto_close_if_requested(gui)
+
+    assert scheduled == [gui._on_close]
+
+
+def test_schedule_auto_close_noop_when_not_requested():
+    scheduled = []
+    gui = SimpleNamespace(
+        _auto_close_after_convert=False,
+        _schedule_on_ui_thread=lambda callback: scheduled.append(callback),
+    )
+
+    app.TalksReducerGUI._schedule_auto_close_if_requested(gui)
+
+    assert scheduled == []
+
+
 def test_default_remote_destination_with_suffix(tmp_path):
     input_path = tmp_path / "video.mp4"
     input_path.write_text("data")

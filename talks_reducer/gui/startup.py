@@ -160,6 +160,8 @@ def _gui_settings_from_namespace(parsed: argparse.Namespace) -> Dict[str, object
         "optimize",
         "output_file",
         "temp_folder",
+        "open_location",
+        "auto_close",
     ):
         if key in provided:
             settings[key] = provided[key]

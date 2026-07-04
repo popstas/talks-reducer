@@ -192,6 +192,21 @@ def _build_parser() -> argparse.ArgumentParser:
             "Accepts seconds (12.5) or HH:MM:SS[.ms] (00:01:45). Defaults to 0 (until end of video)."
         ),
     )
+    parser.add_argument(
+        "--open-location",
+        dest="open_location",
+        action="store_true",
+        help=(
+            "GUI only: reveal each exported file in the system file manager after "
+            "it finishes, regardless of the saved 'Open after convert' setting."
+        ),
+    )
+    parser.add_argument(
+        "--auto-close",
+        dest="auto_close",
+        action="store_true",
+        help="GUI only: close the window after all queued files finish successfully.",
+    )
     return parser
 
 
