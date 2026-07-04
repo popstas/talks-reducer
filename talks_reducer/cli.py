@@ -130,6 +130,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Apply small file optimizations: resize video to 720p (or 480p with --480), audio to 128k bitrate, best compression (uses CUDA if available).",
     )
     parser.add_argument(
+        "--no-small",
+        dest="small",
+        action="store_false",
+        default=False,
+        help="Force-disable the small preset, overriding a stored --small preference (unchecks the GUI Small video box on a seeded launch).",
+    )
+    parser.add_argument(
         "--480",
         dest="small_480",
         action="store_true",

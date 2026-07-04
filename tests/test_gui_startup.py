@@ -103,6 +103,19 @@ def test_parse_seeded_launch_720_unchecks_480(tmp_path) -> None:
     assert settings["small_480"] is False
 
 
+def test_parse_seeded_launch_no_small_unchecks_small(tmp_path) -> None:
+    """``--no-small`` seeds ``small=False`` so the GUI Small video box is unchecked."""
+
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch(["--no-small", str(video)])
+
+    assert seeded is not None
+    _, settings = seeded
+    assert settings["small"] is False
+
+
 def test_parse_seeded_launch_480_checks_480(tmp_path) -> None:
     """``--480`` still seeds ``small_480=True`` so the GUI 480p box is checked."""
 
