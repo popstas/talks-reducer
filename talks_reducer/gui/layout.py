@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import math
+import re
 import sys
 import time
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Optional
 
 from ..icons import find_icon_path
 from ..models import default_temp_folder
@@ -1063,6 +1064,53 @@ def apply_window_icon(gui: "TalksReducerGUI") -> None:
     except (gui.tk.TclError, Exception):
         # Missing Tk image support or invalid icon format - fail silently.
         return
+
+
+_GEOMETRY_RE = re.compile(r"^(?P<w>\d+)x(?P<h>\d+)\+(?P<x>-?\d+)\+(?P<y>-?\d+)$")
+
+
+def parse_window_position(geometry: str) -> Optional[tuple[int, int]]:
+    """Return the ``(x, y)`` screen offsets from a Tk ``geometry`` string.
+
+    ``geometry`` is the ``"WxH+X+Y"`` value reported by ``root.geometry()``.
+    Returns ``None`` when the string lacks position offsets (``"WxH"`` only) or
+    cannot be parsed, so a window that has not been mapped yet is ignored.
+    """
+
+    match = _GEOMETRY_RE.match(geometry.strip())
+    if match is None:
+        return None
+    return int(match.group("x")), int(match.group("y"))
+
+
+def clamp_window_position(
+    position: tuple[int, int],
+    window_size: tuple[int, int],
+    screen_size: tuple[int, int],
+) -> Optional[tuple[int, int]]:
+    """Clamp a persisted window *position* onto the visible screen.
+
+    ``position`` is the saved ``(x, y)`` top-left offset, ``window_size`` the
+    ``(width, height)`` the window will open at, and ``screen_size`` the
+    ``(width, height)`` of the current screen. Returns the clamped ``(x, y)``
+    keeping the window fully on-screen when it fits, or ``None`` when the saved
+    position lands entirely off-screen (e.g. a disconnected monitor) so the
+    caller can fall back to letting the OS place the window.
+    """
+
+    x, y = position
+    width, height = window_size
+    screen_width, screen_height = screen_size
+
+    fully_offscreen = (
+        x >= screen_width or y >= screen_height or x + width <= 0 or y + height <= 0
+    )
+    if fully_offscreen:
+        return None
+
+    clamped_x = max(0, min(x, max(0, screen_width - width)))
+    clamped_y = max(0, min(y, max(0, screen_height - height)))
+    return clamped_x, clamped_y
 
 
 def apply_window_size(gui: "TalksReducerGUI", *, simple: bool) -> None:

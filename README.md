@@ -319,6 +319,13 @@ server mode described above and persists the choice for the next launch.
   folder chooser lives under Advanced. The choice persists across launches
   (`watch_enabled`, `watch_directory`).
 
+The GUI also remembers **where you last placed the window**. On close it saves
+the window's screen position (`window_x`, `window_y` in `settings.json`) and
+reopens there on the next launch; the width/height still follow the Simple/Full
+layout as before. A position saved on a monitor that is no longer connected is
+ignored so the window never reopens off-screen—the operating system places it
+instead.
+
 On Windows, the full (non-Simple) layout shows a **Create lnk** button next to
 the **Advanced** button (hidden on other platforms). It opens a small dialog
 where you tick the presets you want—
