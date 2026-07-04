@@ -1232,3 +1232,49 @@ def test_apply_simple_mode_full_branch_hides_advanced_when_not_visible(monkeypat
 
     gui.advanced_frame.grid.assert_not_called()
     apply_size.assert_called_once_with(gui, simple=False)
+
+
+class TestParseWindowPosition:
+    def test_parses_positive_offsets(self) -> None:
+        assert layout.parse_window_position("1200x900+105+50") == (105, 50)
+
+    def test_parses_negative_offsets(self) -> None:
+        assert layout.parse_window_position("470x300+-5+-10") == (-5, -10)
+
+    def test_returns_none_without_offsets(self) -> None:
+        assert layout.parse_window_position("1200x900") is None
+
+    def test_returns_none_for_garbage(self) -> None:
+        assert layout.parse_window_position("not-a-geometry") is None
+
+
+class TestClampWindowPosition:
+    def test_keeps_fully_visible_position(self) -> None:
+        assert layout.clamp_window_position((100, 80), (470, 300), (1920, 1080)) == (
+            100,
+            80,
+        )
+
+    def test_pulls_partially_offscreen_window_back(self) -> None:
+        # Window overhangs the right/bottom edges but still overlaps the screen.
+        assert layout.clamp_window_position((1900, 1050), (470, 300), (1920, 1080)) == (
+            1920 - 470,
+            1080 - 300,
+        )
+
+    def test_clamps_negative_position_to_origin(self) -> None:
+        assert layout.clamp_window_position((-20, -15), (470, 300), (1920, 1080)) == (
+            0,
+            0,
+        )
+
+    def test_returns_none_when_fully_offscreen(self) -> None:
+        # Saved on a monitor that is no longer connected.
+        assert (
+            layout.clamp_window_position((3000, 80), (470, 300), (1920, 1080)) is None
+        )
+
+    def test_returns_none_when_above_screen(self) -> None:
+        assert (
+            layout.clamp_window_position((100, -400), (470, 300), (1920, 1080)) is None
+        )

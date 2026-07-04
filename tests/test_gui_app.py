@@ -1697,6 +1697,68 @@ def test_on_close_cancels_timers_and_destroys():
     gui.root.destroy.assert_called_once_with()
 
 
+def test_on_close_saves_window_position():
+    gui = _make_activity_gui()
+    gui._stop_activity_log = MagicMock()
+    gui._cancel_download_wait = MagicMock()
+    updates: dict[str, object] = {}
+    gui.preferences = SimpleNamespace(
+        update=lambda key, value: updates.__setitem__(key, value)
+    )
+    gui.root = SimpleNamespace(geometry=lambda: "1200x900+340+128", destroy=MagicMock())
+
+    app.TalksReducerGUI._on_close(gui)
+
+    assert updates == {"window_x": 340, "window_y": 128}
+    gui.root.destroy.assert_called_once_with()
+
+
+def test_save_window_position_ignores_unmapped_geometry():
+    gui = object.__new__(app.TalksReducerGUI)
+    updates: dict[str, object] = {}
+    gui.preferences = SimpleNamespace(
+        update=lambda key, value: updates.__setitem__(key, value)
+    )
+    gui.root = SimpleNamespace(geometry=lambda: "1200x900")
+
+    app.TalksReducerGUI._save_window_position(gui)
+
+    assert updates == {}
+
+
+def test_resolve_initial_window_position_clamps_to_screen():
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.preferences = SimpleNamespace(data={"window_x": 100, "window_y": 80})
+    gui.root = SimpleNamespace(
+        winfo_screenwidth=lambda: 1920, winfo_screenheight=lambda: 1080
+    )
+
+    assert app.TalksReducerGUI._resolve_initial_window_position(gui, (470, 300)) == (
+        100,
+        80,
+    )
+
+
+def test_resolve_initial_window_position_missing_returns_none():
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.preferences = SimpleNamespace(data={})
+    gui.root = SimpleNamespace(
+        winfo_screenwidth=lambda: 1920, winfo_screenheight=lambda: 1080
+    )
+
+    assert app.TalksReducerGUI._resolve_initial_window_position(gui, (470, 300)) is None
+
+
+def test_resolve_initial_window_position_offscreen_returns_none():
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.preferences = SimpleNamespace(data={"window_x": 5000, "window_y": 80})
+    gui.root = SimpleNamespace(
+        winfo_screenwidth=lambda: 1920, winfo_screenheight=lambda: 1080
+    )
+
+    assert app.TalksReducerGUI._resolve_initial_window_position(gui, (470, 300)) is None
+
+
 def _make_server_tray_gui(**overrides):
     """Build a minimal stand-in GUI for ``_apply_server_tray_toggle`` tests."""
 

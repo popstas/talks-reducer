@@ -226,7 +226,13 @@ class TalksReducerGUI:
         initial_width, initial_height = (
             self._simple_size if initial_simple else self._full_size
         )
-        self.root.geometry(f"{initial_width}x{initial_height}")
+        geometry = f"{initial_width}x{initial_height}"
+        position = self._resolve_initial_window_position(
+            (initial_width, initial_height)
+        )
+        if position is not None:
+            geometry += f"+{position[0]}+{position[1]}"
+        self.root.geometry(geometry)
         self.style = self.ttk.Style(self.root)
 
         self._processing_thread: Optional[threading.Thread] = None
@@ -423,8 +429,11 @@ class TalksReducerGUI:
         if initial_inputs:
             self._populate_initial_inputs(initial_inputs, auto_run=auto_run)
 
+        # Persist the window position on close in every mode, so the window
+        # reopens where the user left it. ``_on_close`` also tears down the
+        # server-managed activity log started below.
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         if self.server_managed:
-            self.root.protocol("WM_DELETE_WINDOW", self._on_close)
             self._start_activity_log()
 
         # Reveal the window now that the layout is built and the geometry is
@@ -1829,10 +1838,48 @@ class TalksReducerGUI:
             pass
         self._activity_poll_job = None
 
+    def _resolve_initial_window_position(
+        self, window_size: tuple[int, int]
+    ) -> Optional[tuple[int, int]]:
+        """Return the clamped persisted window position, or ``None``.
+
+        Reads the last saved ``window_x``/``window_y`` without persisting a
+        default, then clamps them onto the current screen so a window saved on a
+        now-disconnected monitor falls back to OS placement.
+        """
+
+        saved_x = self.preferences.data.get("window_x")
+        saved_y = self.preferences.data.get("window_y")
+        if not isinstance(saved_x, int) or not isinstance(saved_y, int):
+            return None
+        if isinstance(saved_x, bool) or isinstance(saved_y, bool):
+            return None
+        screen_size = (
+            self.root.winfo_screenwidth(),
+            self.root.winfo_screenheight(),
+        )
+        return layout_helpers.clamp_window_position(
+            (saved_x, saved_y), window_size, screen_size
+        )
+
+    def _save_window_position(self) -> None:
+        """Persist the current window position for the next launch."""
+
+        try:
+            geometry = self.root.geometry()
+        except Exception:  # pragma: no cover - defensive, root is destroyed
+            return
+        position = layout_helpers.parse_window_position(geometry)
+        if position is None:
+            return
+        self.preferences.update("window_x", position[0])
+        self.preferences.update("window_y", position[1])
+
     def _on_close(self) -> None:
         """Cancel background timers before destroying the window."""
 
         self._closing = True
+        self._save_window_position()
         self._stop_activity_log()
         self._cancel_download_wait()
         watch = getattr(self, "watch", None)
