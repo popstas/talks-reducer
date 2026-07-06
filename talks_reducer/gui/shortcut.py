@@ -46,12 +46,14 @@ def build_shortcut_args(
     """Map the checked dialog options to CLI flags using live GUI values.
 
     ``selections`` keys: ``small``, ``small_720``, ``small_480``,
-    ``silent_speed``, ``sounded_speed``, ``silent_threshold`` and ``codec``.
-    ``gui_values`` supplies the live values: ``silent_speed``,
+    ``silent_speed``, ``sounded_speed``, ``silent_threshold``, ``codec`` and
+    ``auto_close``. ``gui_values`` supplies the live values: ``silent_speed``,
     ``sounded_speed``, ``silent_threshold`` (numbers) and ``video_codec`` (str).
 
     Checking ``small_720`` or ``small_480`` implies ``--small``; the two are
     mutually exclusive with ``small_480`` taking precedence when both are set.
+    Checking ``auto_close`` emits ``--auto-close`` and ``--open-location`` so the
+    seeded GUI closes itself and reveals the exported file after each convert.
     Numeric values are trimmed of trailing zeros.
     """
 
@@ -95,6 +97,9 @@ def build_shortcut_args(
     if selections.get("codec"):
         codec = str(gui_values.get("video_codec", DEFAULT_VIDEO_CODEC))
         args.extend(["--video-codec", codec])
+
+    if selections.get("auto_close"):
+        args.extend(["--auto-close", "--open-location"])
 
     return args
 
@@ -229,6 +234,8 @@ def _dialog_initial_selections(gui: "TalksReducerGUI") -> dict[str, bool]:
         # Codec defaults to unchecked: the seeded GUI already restores the user's
         # codec preference, so the shortcut omits it unless explicitly added.
         "codec": False,
+        # Auto-close defaults to unchecked: opt-in behavior for the shortcut.
+        "auto_close": False,
     }
 
 
@@ -297,7 +304,7 @@ def open_create_lnk_dialog(gui: "TalksReducerGUI") -> None:
     """Open the **Create lnk** modal dialog and write the chosen shortcut.
 
     Mirrors the modal pattern in :mod:`talks_reducer.gui.discovery`
-    (``transient``/``grab_set``/``WM_DELETE_WINDOW``). Seven checkboxes seed the
+    (``transient``/``grab_set``/``WM_DELETE_WINDOW``). Eight checkboxes seed the
     CLI flags; a live preview label echoes the resulting command line; **Create**
     writes the ``.lnk`` to the Desktop via :func:`write_shortcut`.
     """
@@ -320,6 +327,7 @@ def open_create_lnk_dialog(gui: "TalksReducerGUI") -> None:
             "sounded_speed",
             "silent_threshold",
             "codec",
+            "auto_close",
         )
     }
 
@@ -368,6 +376,7 @@ def open_create_lnk_dialog(gui: "TalksReducerGUI") -> None:
         ("sounded_speed", "Sounded speed"),
         ("silent_threshold", "Silent threshold"),
         ("codec", "Codec"),
+        ("auto_close", "Auto close and open file location"),
     ]
     for key, label in checkbox_specs:
         gui.ttk.Checkbutton(

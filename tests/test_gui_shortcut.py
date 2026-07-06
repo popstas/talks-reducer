@@ -69,6 +69,11 @@ def test_build_shortcut_args_codec_default_still_emitted_when_selected():
     assert args == ["--video-codec", "h264"]
 
 
+def test_build_shortcut_args_auto_close_emits_both_flags():
+    args = shortcut.build_shortcut_args({"auto_close": True}, _gui_values())
+    assert args == ["--auto-close", "--open-location"]
+
+
 def test_build_shortcut_args_full_combination_order():
     args = shortcut.build_shortcut_args(
         {
@@ -77,6 +82,7 @@ def test_build_shortcut_args_full_combination_order():
             "sounded_speed": True,
             "silent_threshold": True,
             "codec": True,
+            "auto_close": True,
         },
         _gui_values(
             silent_speed=10.0,
@@ -96,6 +102,8 @@ def test_build_shortcut_args_full_combination_order():
         "0.02",
         "--video-codec",
         "h264",
+        "--auto-close",
+        "--open-location",
     ]
 
 
@@ -193,6 +201,7 @@ def test_dialog_initial_selections_defaults_all_unchecked():
         "sounded_speed": False,
         "silent_threshold": False,
         "codec": False,
+        "auto_close": False,
     }
 
 

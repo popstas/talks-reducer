@@ -364,8 +364,10 @@ On Windows, the full (non-Simple) layout shows a **Create lnk** button next to
 the **Advanced** button (hidden on other platforms). It opens a small dialog
 where you tick the presets you want—
 **Small**, **720** or **480** (these imply Small), **Silent speed**, **Sounded
-speed**, **Silent threshold**, and **Codec**—each pre-checked to match your
-current GUI state. A live preview shows the resulting command line as you toggle
+speed**, **Silent threshold**, **Codec**, and **Auto close and open file
+location** (adds `--auto-close --open-location` so the shortcut closes the GUI
+and reveals the exported file when each convert finishes)—each pre-checked to
+match your current GUI state. A live preview shows the resulting command line as you toggle
 options, and clicking **Create** writes a `.lnk` shortcut to your Desktop seeded
 with those CLI flags. The shortcut doubles as a drop-target: drag a video onto it
 to launch the GUI with the chosen presets and auto-convert the file.
