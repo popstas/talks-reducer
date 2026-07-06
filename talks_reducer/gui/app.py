@@ -1080,6 +1080,11 @@ class TalksReducerGUI:
                 # Reset state
                 self._latest_version = None
                 self._installer_url = None
+
+                if sys.platform == "win32":
+                    # Close the app so the installer can replace the running
+                    # executable without a file-in-use conflict.
+                    self._schedule_on_ui_thread(self._on_close)
             except Exception as exc:
                 self._clear_update_status()
                 self._set_update_status(f"Failed to launch installer: {str(exc)}")

@@ -65,7 +65,9 @@ timing/audio knobs mirrored from the command line, and an appearance picker
 that can force dark or light mode or follow your operating system.
 - **Check updates** — a platform-gated button (`update_checker.is_update_check_supported()`
 returns `True` on Windows and macOS). On **Windows** the button lives in the
-always-visible `button_frame` and downloads/launches the release installer. On
+always-visible `button_frame` and downloads/launches the release installer, then
+closes the GUI (`_on_download_complete` schedules `_on_close` when
+`sys.platform == "win32"`) so the installer can overwrite the running exe. On
 **macOS** `layout.py` instead places `check_updates_button` +
 `update_status_label` inside `advanced_frame` (under Advanced settings); when a
 newer release is found `_on_update_check_complete` uses

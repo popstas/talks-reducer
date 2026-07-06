@@ -380,7 +380,8 @@ builds are unsigned and distributed through the
 [`popstas/homebrew-talks-reducer`](https://github.com/popstas/homebrew-talks-reducer)
 tap, so the button never downloads or installs anything automatically—you upgrade
 with Homebrew. The Windows build keeps its own **Check updates** button (next to
-the run controls) that downloads and launches the installer.
+the run controls) that downloads and launches the installer, then closes the app
+automatically so the installer can replace the running executable.
 
 ### Uploading and retrieving a processed video
 

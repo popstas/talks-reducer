@@ -53,6 +53,48 @@ def test_schedule_auto_close_noop_when_not_requested():
     assert scheduled == []
 
 
+def _download_complete_gui(scheduled):
+    return SimpleNamespace(
+        check_updates_button=SimpleNamespace(configure=lambda **kwargs: None),
+        tk=SimpleNamespace(NORMAL="normal"),
+        _clear_update_status=lambda: None,
+        _set_update_status=lambda text: None,
+        _check_for_updates=lambda: None,
+        _on_close=lambda: None,
+        _schedule_on_ui_thread=lambda callback: scheduled.append(callback),
+        _latest_version="1.0.0",
+        _installer_url="https://example/installer.exe",
+    )
+
+
+def test_on_download_complete_closes_app_on_windows(monkeypatch, tmp_path):
+    installer = tmp_path / "installer.exe"
+    installer.write_text("stub")
+    scheduled = []
+    gui = _download_complete_gui(scheduled)
+
+    monkeypatch.setattr(app.sys, "platform", "win32")
+    monkeypatch.setattr(app.os, "startfile", lambda path: None, raising=False)
+
+    app.TalksReducerGUI._on_download_complete(gui, installer, None)
+
+    assert scheduled == [gui._on_close]
+
+
+def test_on_download_complete_does_not_close_on_non_windows(monkeypatch, tmp_path):
+    installer = tmp_path / "installer.AppImage"
+    installer.write_text("stub")
+    scheduled = []
+    gui = _download_complete_gui(scheduled)
+
+    monkeypatch.setattr(app.sys, "platform", "linux")
+    monkeypatch.setattr(app.subprocess, "Popen", lambda args: None)
+
+    app.TalksReducerGUI._on_download_complete(gui, installer, None)
+
+    assert scheduled == []
+
+
 def test_default_remote_destination_with_suffix(tmp_path):
     input_path = tmp_path / "video.mp4"
     input_path.write_text("data")
