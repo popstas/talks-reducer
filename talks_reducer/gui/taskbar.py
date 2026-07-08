@@ -55,10 +55,17 @@ class TaskbarProgress:
     hold: later :meth:`set_value` calls are dropped so a stray progress callback
     cannot erase the result, and the indicator survives until the window regains
     focus (:meth:`on_focus`) or a new run calls :meth:`begin`.
+
+    A cleared indicator goes *inactive* rather than merely unheld. The GUI reports
+    a run's completion as ``_set_status("success")`` immediately followed by
+    ``_set_progress(100)``, so a clear triggered by the first call would otherwise
+    be undone by the second, leaving a full bar on the taskbar forever. Only
+    :meth:`begin` reactivates value updates.
     """
 
     def __init__(self, backend: Any) -> None:
         self._backend = backend
+        self._active = False
         self._held = False
         self._value = 0.0
 
@@ -68,18 +75,29 @@ class TaskbarProgress:
 
         return self._held
 
+    @property
+    def active(self) -> bool:
+        """Return whether value updates currently reach the taskbar."""
+
+        return self._active
+
     def begin(self) -> None:
         """Start a fresh run: release any hold and show an empty normal bar."""
 
+        self._active = True
         self._held = False
         self._value = 0.0
         self._backend.set_state("normal")
         self._backend.set_value(0.0)
 
     def set_value(self, percent: float) -> None:
-        """Show *percent* (clamped to 0-100) unless a terminal state is held."""
+        """Show *percent* (clamped to 0-100) while a run owns the indicator.
 
-        if self._held:
+        Dropped once the indicator is held or cleared, so a progress callback
+        arriving after the run's terminal state cannot repaint the bar.
+        """
+
+        if self._held or not self._active:
             return
         self._value = max(0.0, min(100.0, float(percent)))
         self._backend.set_value(self._value)
@@ -87,6 +105,7 @@ class TaskbarProgress:
     def finish(self) -> None:
         """Hold a completed indicator at 100%."""
 
+        self._active = True
         self._held = True
         self._value = 100.0
         self._backend.set_state("normal")
@@ -95,6 +114,7 @@ class TaskbarProgress:
     def set_error(self) -> None:
         """Hold a red indicator at the current value."""
 
+        self._active = True
         self._held = True
         if self._value <= 0.0:
             # A red bar is only visible when it has some length; a run that fails
@@ -104,8 +124,9 @@ class TaskbarProgress:
         self._backend.set_state("error")
 
     def clear(self) -> None:
-        """Remove the indicator and release the hold."""
+        """Remove the indicator and stop tracking until the next :meth:`begin`."""
 
+        self._active = False
         self._held = False
         self._value = 0.0
         self._backend.set_state("none")

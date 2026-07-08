@@ -40,6 +40,9 @@ def test_begin_shows_an_empty_normal_bar(progress, backend):
 
 
 def test_set_value_clamps_to_the_zero_to_hundred_range(progress, backend):
+    progress.begin()
+    backend.calls.clear()
+
     progress.set_value(-5)
     progress.set_value(42.5)
     progress.set_value(140)
@@ -47,7 +50,33 @@ def test_set_value_clamps_to_the_zero_to_hundred_range(progress, backend):
     assert backend.calls == [("value", 0.0), ("value", 42.5), ("value", 100.0)]
 
 
+def test_set_value_is_ignored_before_a_run_begins(progress, backend):
+    progress.set_value(50)
+
+    assert backend.calls == []
+    assert not progress.active
+
+
+def test_cleared_indicator_ignores_later_progress_until_the_next_run(progress, backend):
+    """A trailing ``_set_progress(100)`` must not resurrect a cleared indicator."""
+
+    progress.begin()
+    progress.clear()
+    backend.calls.clear()
+
+    progress.set_value(100)
+
+    assert backend.calls == []
+    assert not progress.active
+
+    # The next run takes ownership of the indicator again.
+    progress.begin()
+    progress.set_value(30)
+    assert backend.calls[-1] == ("value", 30.0)
+
+
 def test_finish_holds_the_bar_at_full(progress, backend):
+    progress.begin()
     progress.set_value(30)
     backend.calls.clear()
 
@@ -68,6 +97,7 @@ def test_held_state_ignores_stray_progress_updates(progress, backend):
 
 
 def test_set_error_keeps_the_current_value(progress, backend):
+    progress.begin()
     progress.set_value(60)
     backend.calls.clear()
 
@@ -94,6 +124,7 @@ def test_clear_removes_the_indicator_and_the_hold(progress, backend):
 
 
 def test_on_focus_clears_only_while_held(progress, backend):
+    progress.begin()
     progress.set_value(20)
     backend.calls.clear()
 
@@ -116,6 +147,16 @@ def test_begin_releases_a_previous_hold(progress, backend):
     progress.set_value(10)
 
     assert backend.calls == [("state", "normal"), ("value", 0.0), ("value", 10.0)]
+
+
+def test_held_state_ignores_stray_progress_after_error(progress, backend):
+    progress.begin()
+    progress.set_error()
+    backend.calls.clear()
+
+    progress.set_value(100)
+
+    assert backend.calls == []
 
 
 def test_create_taskbar_progress_is_a_no_op_off_windows(monkeypatch):

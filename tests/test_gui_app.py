@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from talks_reducer.gui import app, summaries
+from talks_reducer.gui import app, summaries, taskbar
 from talks_reducer.gui.theme import STATUS_COLORS
 
 
@@ -1347,12 +1347,14 @@ def test_success_status_holds_the_taskbar_when_window_is_unfocused():
 
 
 def test_success_status_clears_the_taskbar_when_window_is_focused():
+    """A focused window never paints the bar green just to wipe it a tick later."""
+
     gui = _make_taskbar_gui(focused=True)
 
     app.TalksReducerGUI._update_taskbar_for_status(gui, "success", is_success=True)
 
-    gui._taskbar.finish.assert_called_once_with()
     gui._taskbar.clear.assert_called_once_with()
+    gui._taskbar.finish.assert_not_called()
 
 
 def test_error_status_paints_the_taskbar_red():
@@ -1362,6 +1364,15 @@ def test_error_status_paints_the_taskbar_red():
 
     gui._taskbar.set_error.assert_called_once_with()
     gui._taskbar.clear.assert_not_called()
+
+
+def test_error_status_clears_the_taskbar_when_window_is_focused():
+    gui = _make_taskbar_gui(focused=True)
+
+    app.TalksReducerGUI._update_taskbar_for_status(gui, "error", is_success=False)
+
+    gui._taskbar.clear.assert_called_once_with()
+    gui._taskbar.set_error.assert_not_called()
 
 
 def test_aborted_status_clears_the_taskbar_immediately():
@@ -1384,13 +1395,36 @@ def test_non_terminal_status_leaves_the_taskbar_alone():
     gui._taskbar.clear.assert_not_called()
 
 
-def test_clear_taskbar_if_focused_survives_a_broken_root():
+def test_terminal_status_holds_when_the_focus_state_is_unreadable():
+    """An unnameable focus window means "not us", so the outcome is still shown."""
+
     gui = _make_taskbar_gui()
     gui.root = SimpleNamespace(focus_displayof=MagicMock(side_effect=RuntimeError))
 
-    app.TalksReducerGUI._clear_taskbar_if_focused(gui)
+    app.TalksReducerGUI._update_taskbar_for_status(gui, "success", is_success=True)
 
+    gui._taskbar.finish.assert_called_once_with()
     gui._taskbar.clear.assert_not_called()
+
+
+def test_completion_progress_cannot_repaint_a_cleared_indicator():
+    """Regression: ``_set_status("success")`` is followed by ``_set_progress(100)``.
+
+    The status clears the indicator on a focused window; the trailing progress
+    update must not paint it full again, or the taskbar keeps a 100% bar forever.
+    """
+
+    backend = MagicMock()
+    progress = taskbar.TaskbarProgress(backend)
+    progress.begin()
+    progress.set_value(80)
+
+    progress.clear()  # what a focused success status does
+    backend.reset_mock()
+    progress.set_value(100)  # the trailing _set_progress(100)
+
+    backend.set_value.assert_not_called()
+    assert not progress.active
 
 
 def _make_bell_gui(focused: bool = False) -> app.TalksReducerGUI:

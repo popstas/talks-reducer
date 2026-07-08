@@ -1963,22 +1963,26 @@ class TalksReducerGUI:
     def _update_taskbar_for_status(self, lowered: str, *, is_success: bool) -> None:
         """Reflect a terminal *lowered* status on the taskbar indicator.
 
-        A finished or failed run leaves the indicator on hold so a user working
-        in another window still sees the outcome. An aborted run clears it
-        immediately: the user pressed Stop and is already watching the window.
+        A finished or failed run leaves the indicator on hold so a user working in
+        another window still sees the outcome. Three cases clear it outright: an
+        aborted run, because the user pressed Stop, and a success or failure that
+        lands while the window is focused, because the user is already watching.
+        Clearing without painting first avoids a green flash on the taskbar.
         """
 
-        if is_success:
-            self._taskbar.finish()
-        elif lowered == "error":
-            self._taskbar.set_error()
-        elif lowered == "aborted":
+        if lowered == "aborted":
             self._taskbar.clear()
             return
-        else:
+
+        if not is_success and lowered != "error":
             return
 
-        self._clear_taskbar_if_focused()
+        if self._is_window_focused():
+            self._taskbar.clear()
+        elif is_success:
+            self._taskbar.finish()
+        else:
+            self._taskbar.set_error()
 
     def _is_window_focused(self) -> bool:
         """Return whether this application currently holds the keyboard focus.
@@ -1992,16 +1996,6 @@ class TalksReducerGUI:
         with suppress(Exception):
             return self.root.focus_displayof() is not None
         return False
-
-    def _clear_taskbar_if_focused(self) -> None:
-        """Drop a freshly held indicator when the window already has focus.
-
-        Holding the outcome only helps a user who has to come back to the window;
-        when it is the active window there is nothing to notify them about.
-        """
-
-        if self._is_window_focused():
-            self._taskbar.clear()
 
     def _ring_completion_bell(self, lowered: str, *, is_success: bool) -> None:
         """Ring the system bell once a run reaches a terminal state.

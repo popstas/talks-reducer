@@ -1041,8 +1041,7 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
     )
 
     with gr.Blocks(title=f"Talks Reducer Web UI{version_suffix}") as demo:
-        gr.Markdown(
-            f"""
+        gr.Markdown(f"""
             ## Talks Reducer Web UI{version_suffix}
             Drop a video into the zone below or click to browse. **Small video** is enabled
             by default to apply the 720p/128k preset before processing starts—clear it to
@@ -1054,8 +1053,7 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
             bundled build lacks.
 
             Video will be rendered on server **{server_identity}**.
-            """.strip()
-        )
+            """.strip())
 
         with gr.Column():
             file_input = gr.File(
