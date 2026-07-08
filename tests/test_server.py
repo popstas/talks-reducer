@@ -10,7 +10,6 @@ from typing import Iterator
 
 import gradio as gr
 import pytest
-import pytest as _pytest
 from PIL import Image
 
 from talks_reducer import server, server_tray
@@ -1775,7 +1774,7 @@ def test_process_video_still_yields_four_tuples(tmp_path: Path) -> None:
     assert all(isinstance(o, tuple) and len(o) == 4 for o in outputs)
 
 
-@_pytest.mark.parametrize(
+@pytest.mark.parametrize(
     "resolution, expected",
     [("No change", (False, False)), ("720p", (True, False)), ("480p", (True, True))],
 )
@@ -1783,7 +1782,7 @@ def test_resolution_to_flags(resolution, expected) -> None:
     assert server._resolution_to_flags(resolution) == expected
 
 
-@_pytest.mark.parametrize(
+@pytest.mark.parametrize(
     "label, expected", [("1×", 1.0), ("5×", 5.0), ("10×", 10.0), ("???", 10.0)]
 )
 def test_speedup_to_silent_speed(label, expected) -> None:

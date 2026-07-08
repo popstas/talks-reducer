@@ -56,14 +56,14 @@ def parse_ratios_from_summary(summary: str) -> Tuple[Optional[float], Optional[f
 
     for line in summary.splitlines():
         if "**Duration:**" in line:
-            match = re.search(r"—\s*([0-9]+(?:\.[0-9]+)?)% of the original", line)
+            match = re.search(r"\(([0-9]+(?:\.[0-9]+)?)%\)", line)
             if match:
                 try:
                     time_ratio = float(match.group(1)) / 100
                 except ValueError:
                     time_ratio = None
         elif "**Size:**" in line:
-            match = re.search(r"\*\*Size:\*\*\s*([0-9]+(?:\.[0-9]+)?)%", line)
+            match = re.search(r"\(([0-9]+(?:\.[0-9]+)?)%\)", line)
             if match:
                 try:
                     size_ratio = float(match.group(1)) / 100

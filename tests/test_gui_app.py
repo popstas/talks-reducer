@@ -163,7 +163,7 @@ def test_default_remote_destination_small_without_speedup(tmp_path):
 
 
 def test_parse_ratios_from_summary_extracts_values():
-    summary = "**Duration:** — 42.5% of the original\n" "**Size:** 17.25%\n"
+    summary = "**Duration:** 40s -> 17s (42.5%)\n" "**Size:** 4.0M -> 0.7M (17.25%)\n"
 
     time_ratio, size_ratio = app._parse_ratios_from_summary(summary)
 
@@ -172,7 +172,7 @@ def test_parse_ratios_from_summary_extracts_values():
 
 
 def test_parse_ratios_from_summary_handles_invalid_numbers():
-    summary = "**Duration:** — not-a-number% of the original\n" "**Size:** 10 percent\n"
+    summary = "**Duration:** not-a-number% of the original\n" "**Size:** 10 percent\n"
 
     time_ratio, size_ratio = app._parse_ratios_from_summary(summary)
 
