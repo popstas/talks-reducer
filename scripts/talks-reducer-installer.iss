@@ -60,6 +60,9 @@ SetupIconFile={#APP_ICON}
 WizardStyle=modern
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
+; Remember the task selections (shortcuts, dock-server options) from the previous
+; install and pre-select them on the next install/upgrade.
+UsePreviousTasks=yes
 Compression=lzma
 SolidCompression=yes
 UninstallDisplayIcon={app}\talks-reducer.exe
@@ -99,6 +102,7 @@ Root: HKCU; Subkey: "Software\Classes\Directory\shell\OpenWithTalksReducer\comma
 
 [Run]
 Filename: "{app}\talks-reducer.exe"; Description: "Launch Talks Reducer"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\talks-reducer.exe"; Parameters: "dock-server"; Description: "Launch OBS dock server"; Tasks: dockserver_startup; Flags: nowait postinstall skipifsilent
 
 [Code]
 function PrepareToInstall(var NeedsRestart: Boolean): String;
