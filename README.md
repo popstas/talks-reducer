@@ -48,24 +48,26 @@ For OBS Studio recordings, a Custom Browser Dock can start Talks Reducer right
 after you stop a take — pick resolution (1080p / 720p / 480p), silent speed
 (1× / 5× / 10×), and codec, then click a button. The dock connects to OBS over
 obs-websocket, reads the last recording path from `RecordStateChanged`, and
-sends jobs to a small local Node.js helper that spawns `talks-reducer.exe` with
-the matching CLI flags.
+sends jobs to the built-in `talks-reducer dock-server`, which spawns a Talks
+Reducer job with the matching CLI flags. The server also hosts the dock UI, so no
+separate Node.js runtime or window-hiding wrapper is required.
 
-**Requirements:** OBS WebSocket server enabled, [Node.js](https://nodejs.org/),
-and Talks Reducer installed (default exe:
-`%LOCALAPPDATA%\Programs\talks-reducer\talks-reducer.exe`).
+**Requirements:** OBS WebSocket server enabled and Talks Reducer installed
+(default exe: `%LOCALAPPDATA%\Programs\talks-reducer\talks-reducer.exe`).
 
-1. Start the helper (keep it running while streaming):
+1. Start the dock server (keep it running while streaming):
 
 ```powershell
-.\scripts\obs-processing-dock\obs-talks-reducer.ps1
+talks-reducer dock-server
 ```
 
 2. In OBS: **Docks → Custom Browser Docks** → add a dock pointing at
-   `file:///…/scripts/obs-processing-dock/dock.html`.
+   `http://127.0.0.1:17890/`.
 
-Full setup, Task Scheduler (headless logon via `conhost.exe --headless
-powershell.exe …`), payload format, and troubleshooting:
+Because the executable is windowless, you can schedule `talks-reducer dock-server`
+at logon directly and stop it cleanly from Task Scheduler. Full setup, the
+`--port`/`--host`/`--exe` options, payload format, the legacy Node.js server, and
+troubleshooting:
 [scripts/obs-processing-dock/README.md](scripts/obs-processing-dock/README.md).
 
 ## Install CLI (Linux, Windows, macOS)
