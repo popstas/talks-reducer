@@ -43,6 +43,7 @@ try:
     from . import layout as layout_helpers
     from . import relaunch
     from . import shortcut as shortcut_helpers
+    from . import taskbar as taskbar_helpers
     from . import update_checker
     from .inputs import InputController
     from .preferences import GUIPreferences, PreferenceController, determine_config_path
@@ -86,6 +87,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.gui import layout as layout_helpers
     from talks_reducer.gui import relaunch
     from talks_reducer.gui import shortcut as shortcut_helpers
+    from talks_reducer.gui import taskbar as taskbar_helpers
     from talks_reducer.gui import update_checker
     from talks_reducer.gui.inputs import InputController
     from talks_reducer.gui.preferences import (
@@ -261,6 +263,9 @@ class TalksReducerGUI:
         self._closing = False
         self.progress_var = tk.DoubleVar(value=0.0)
         self._progress_floor: float = 0.0
+        # Mirrors the progress bar onto the Windows taskbar button; a no-op
+        # everywhere else, so the call sites below never need a platform guard.
+        self._taskbar = taskbar_helpers.create_taskbar_progress(self.root)
         self._ffmpeg_process: Optional[subprocess.Popen] = None
         self._stop_requested = False
         self._ping_worker_stop_requested = False
@@ -439,6 +444,9 @@ class TalksReducerGUI:
         # reopens where the user left it. ``_on_close`` also tears down the
         # server-managed activity log started below.
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        # A finished run holds its taskbar indicator until the user looks at the
+        # window again; focusing it is that acknowledgement.
+        self.root.bind("<FocusIn>", self._on_window_focus, add="+")
         if self.server_managed:
             self._start_activity_log()
 
@@ -465,6 +473,7 @@ class TalksReducerGUI:
 
         self._append_log("Starting processing…")
         self._stop_requested = False
+        self._taskbar.begin()
         self.stop_button.configure(text="Stop")
         self._run_start_time = time.monotonic()
         self._ping_worker_stop_requested = True
@@ -1909,6 +1918,7 @@ class TalksReducerGUI:
         """Cancel background timers before destroying the window."""
 
         self._closing = True
+        self._taskbar.clear()
         self._save_window_position()
         self._stop_activity_log()
         self._cancel_download_wait()
@@ -1945,6 +1955,42 @@ class TalksReducerGUI:
         if color:
             self.status_label.configure(fg=color)
 
+    def _update_taskbar_for_status(self, lowered: str, *, is_success: bool) -> None:
+        """Reflect a terminal *lowered* status on the taskbar indicator.
+
+        A finished or failed run leaves the indicator on hold so a user working
+        in another window still sees the outcome. An aborted run clears it
+        immediately: the user pressed Stop and is already watching the window.
+        """
+
+        if is_success:
+            self._taskbar.finish()
+        elif lowered == "error":
+            self._taskbar.set_error()
+        elif lowered == "aborted":
+            self._taskbar.clear()
+            return
+        else:
+            return
+
+        self._clear_taskbar_if_focused()
+
+    def _clear_taskbar_if_focused(self) -> None:
+        """Drop a freshly held indicator when the window already has focus.
+
+        Holding the outcome only helps a user who has to come back to the window;
+        when it is the active window there is nothing to notify them about.
+        """
+
+        with suppress(Exception):
+            if self.root.focus_displayof() is not None:
+                self._taskbar.clear()
+
+    def _on_window_focus(self, _event: Any = None) -> None:
+        """Clear a held taskbar indicator once the user returns to the window."""
+
+        self._taskbar.on_focus()
+
     def _set_status(self, status: str, status_msg: str = "") -> None:
         def apply() -> None:
             self._status_state = status
@@ -1957,6 +2003,10 @@ class TalksReducerGUI:
             self._set_progress_bar_style(status)
             lowered = status.lower()
             is_processing = lowered == "processing" or "extracting audio" in lowered
+            is_success = lowered == "success" or (
+                "time:" in lowered and "size:" in lowered
+            )
+            self._update_taskbar_for_status(lowered, is_success=is_success)
 
             if is_processing:
                 # Show stop button during processing
@@ -1967,7 +2017,7 @@ class TalksReducerGUI:
             else:
                 self._reset_audio_progress_state(clear_source=True)
 
-            if lowered == "success" or "time:" in lowered and "size:" in lowered:
+            if is_success:
                 if self.simple_mode_var.get() and hasattr(self, "status_frame"):
                     self.status_frame.grid()
                     self.stop_button.grid_remove()
@@ -2040,6 +2090,8 @@ class TalksReducerGUI:
         def updater() -> None:
             value = max(0.0, min(100.0, float(percentage)))
             self.progress_var.set(value)
+            # Runs on the Tk main thread, the thread that initialized COM.
+            self._taskbar.set_value(value)
             # Update color based on percentage gradient
             color = self._calculate_gradient_color(value, 0.5)
             palette = (
@@ -2100,6 +2152,11 @@ class TalksReducerGUI:
         """
 
         self._progress_floor = 0.0
+        # Release the previous file's held taskbar state, otherwise the batch's
+        # remaining files would report progress into an indicator pinned at 100%.
+        # Callers run on the worker thread, so hop to the Tk thread that owns the
+        # COM apartment; the queued ``_set_progress`` call lands right after it.
+        self._schedule_on_ui_thread(self._taskbar.begin)
         self._set_progress(0.0)
 
     def _set_progress_bar_style(self, status: str) -> None:

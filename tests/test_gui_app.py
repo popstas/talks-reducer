@@ -1313,15 +1313,103 @@ def test_reset_progress_baseline_clears_floor_for_next_file():
     gui = object.__new__(app.TalksReducerGUI)
     gui._progress_floor = 100.0
     gui._set_progress = MagicMock()
+    gui._taskbar = MagicMock()
+    gui._schedule_on_ui_thread = lambda callback: callback()
 
     app.TalksReducerGUI._reset_progress_baseline(gui)
 
     assert gui._progress_floor == pytest.approx(0.0)
     gui._set_progress.assert_called_once_with(0.0)
+    # The previous file's held taskbar state must be released for the next file.
+    gui._taskbar.begin.assert_called_once_with()
 
     # After re-basing, a lower mapped value from the next file is honored.
     app.TalksReducerGUI._set_progress_monotonic(gui, 12.0)
     assert gui._set_progress.call_args[0][0] == pytest.approx(12.0)
+
+
+def _make_taskbar_gui(focused: bool = False) -> app.TalksReducerGUI:
+    """Build a bare GUI whose taskbar indicator and focus state are observable."""
+
+    gui = object.__new__(app.TalksReducerGUI)
+    gui._taskbar = MagicMock()
+    gui.root = SimpleNamespace(focus_displayof=lambda: object() if focused else None)
+    return gui
+
+
+def test_success_status_holds_the_taskbar_when_window_is_unfocused():
+    gui = _make_taskbar_gui(focused=False)
+
+    app.TalksReducerGUI._update_taskbar_for_status(gui, "success", is_success=True)
+
+    gui._taskbar.finish.assert_called_once_with()
+    gui._taskbar.clear.assert_not_called()
+
+
+def test_success_status_clears_the_taskbar_when_window_is_focused():
+    gui = _make_taskbar_gui(focused=True)
+
+    app.TalksReducerGUI._update_taskbar_for_status(gui, "success", is_success=True)
+
+    gui._taskbar.finish.assert_called_once_with()
+    gui._taskbar.clear.assert_called_once_with()
+
+
+def test_error_status_paints_the_taskbar_red():
+    gui = _make_taskbar_gui(focused=False)
+
+    app.TalksReducerGUI._update_taskbar_for_status(gui, "error", is_success=False)
+
+    gui._taskbar.set_error.assert_called_once_with()
+    gui._taskbar.clear.assert_not_called()
+
+
+def test_aborted_status_clears_the_taskbar_immediately():
+    gui = _make_taskbar_gui(focused=False)
+
+    app.TalksReducerGUI._update_taskbar_for_status(gui, "aborted", is_success=False)
+
+    gui._taskbar.clear.assert_called_once_with()
+    gui._taskbar.finish.assert_not_called()
+    gui._taskbar.set_error.assert_not_called()
+
+
+def test_non_terminal_status_leaves_the_taskbar_alone():
+    gui = _make_taskbar_gui(focused=True)
+
+    app.TalksReducerGUI._update_taskbar_for_status(gui, "processing", is_success=False)
+
+    gui._taskbar.finish.assert_not_called()
+    gui._taskbar.set_error.assert_not_called()
+    gui._taskbar.clear.assert_not_called()
+
+
+def test_clear_taskbar_if_focused_survives_a_broken_root():
+    gui = _make_taskbar_gui()
+    gui.root = SimpleNamespace(focus_displayof=MagicMock(side_effect=RuntimeError))
+
+    app.TalksReducerGUI._clear_taskbar_if_focused(gui)
+
+    gui._taskbar.clear.assert_not_called()
+
+
+def test_window_focus_defers_to_the_taskbar_hold():
+    gui = _make_taskbar_gui()
+
+    app.TalksReducerGUI._on_window_focus(gui)
+
+    gui._taskbar.on_focus.assert_called_once_with()
+
+
+def test_on_close_clears_the_taskbar():
+    gui = _make_activity_gui()
+    gui._stop_activity_log = MagicMock()
+    gui._cancel_download_wait = MagicMock()
+    gui.root = SimpleNamespace(destroy=MagicMock())
+
+    app.TalksReducerGUI._on_close(gui)
+
+    gui._taskbar.clear.assert_called_once_with()
 
 
 def _make_download_wait_gui() -> app.TalksReducerGUI:
@@ -1524,6 +1612,7 @@ def _make_activity_gui(server_managed: bool = True, url: str = "http://1.2.3.4:9
     gui.local_server_url = url
     gui._activity_poll_job = None
     gui.tk = SimpleNamespace(NORMAL="normal", DISABLED="disabled", END="end")
+    gui._taskbar = MagicMock()
     gui._schedule_on_ui_thread = lambda callback: callback()
     gui.root = SimpleNamespace(
         after=MagicMock(return_value="job"),
