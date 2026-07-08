@@ -359,6 +359,10 @@ When the run ends the taskbar keeps showing the result—full green on success,
 red on failure—until you focus the window again; pressing **Stop** clears it
 right away. Other platforms have no equivalent indicator and simply skip it.
 
+On every platform the GUI also **rings the system bell** when a run finishes or
+fails, so you hear the result without watching the window. Stopping a run stays
+silent.
+
 The GUI also remembers **where you last placed the window**. On close it saves
 the window's screen position (`window_x`, `window_y` in `settings.json`) and
 reopens there on the next launch; the width/height still follow the Simple/Full

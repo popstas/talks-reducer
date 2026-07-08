@@ -1986,6 +1986,21 @@ class TalksReducerGUI:
             if self.root.focus_displayof() is not None:
                 self._taskbar.clear()
 
+    def _ring_completion_bell(self, lowered: str, *, is_success: bool) -> None:
+        """Ring the system bell once a run reaches a terminal state.
+
+        Success and failure both deserve an audible cue for a user who switched
+        away, matching the taskbar indicator. An aborted run stays silent: the
+        user pressed Stop and already knows the run is over. Tk's ``bell`` is a
+        best-effort call — a display without a bell simply makes no sound.
+        """
+
+        if not is_success and lowered != "error":
+            return
+
+        with suppress(Exception):
+            self.root.bell()
+
     def _on_window_focus(self, _event: Any = None) -> None:
         """Clear a held taskbar indicator once the user returns to the window."""
 
@@ -2007,6 +2022,7 @@ class TalksReducerGUI:
                 "time:" in lowered and "size:" in lowered
             )
             self._update_taskbar_for_status(lowered, is_success=is_success)
+            self._ring_completion_bell(lowered, is_success=is_success)
 
             if is_processing:
                 # Show stop button during processing

@@ -1393,6 +1393,55 @@ def test_clear_taskbar_if_focused_survives_a_broken_root():
     gui._taskbar.clear.assert_not_called()
 
 
+def _make_bell_gui() -> app.TalksReducerGUI:
+    """Build a bare GUI whose ``root.bell`` calls are observable."""
+
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.root = SimpleNamespace(bell=MagicMock())
+    return gui
+
+
+def test_success_rings_the_completion_bell():
+    gui = _make_bell_gui()
+
+    app.TalksReducerGUI._ring_completion_bell(gui, "success", is_success=True)
+
+    gui.root.bell.assert_called_once_with()
+
+
+def test_error_rings_the_completion_bell():
+    gui = _make_bell_gui()
+
+    app.TalksReducerGUI._ring_completion_bell(gui, "error", is_success=False)
+
+    gui.root.bell.assert_called_once_with()
+
+
+def test_aborted_run_stays_silent():
+    gui = _make_bell_gui()
+
+    app.TalksReducerGUI._ring_completion_bell(gui, "aborted", is_success=False)
+
+    gui.root.bell.assert_not_called()
+
+
+def test_progress_updates_stay_silent():
+    gui = _make_bell_gui()
+
+    app.TalksReducerGUI._ring_completion_bell(gui, "processing", is_success=False)
+
+    gui.root.bell.assert_not_called()
+
+
+def test_completion_bell_survives_a_bell_less_display():
+    gui = _make_bell_gui()
+    gui.root.bell.side_effect = RuntimeError("no bell")
+
+    app.TalksReducerGUI._ring_completion_bell(gui, "success", is_success=True)
+
+    gui.root.bell.assert_called_once_with()
+
+
 def test_window_focus_defers_to_the_taskbar_hold():
     gui = _make_taskbar_gui()
 
