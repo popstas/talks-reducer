@@ -44,30 +44,34 @@ onto the executable) automatically queues that recording for processing.
 
 ## OBS Processing Dock (Windows)
 
-For OBS Studio recordings, a Custom Browser Dock can start Talks Reducer right
-after you stop a take — pick resolution (1080p / 720p / 480p), silent speed
-(1× / 5× / 10×), and codec, then click a button. The dock connects to OBS over
-obs-websocket, reads the last recording path from `RecordStateChanged`, and
-sends jobs to the built-in `talks-reducer dock-server`, which spawns a Talks
-Reducer job with the matching CLI flags. The server also hosts the dock UI, so no
-separate Node.js runtime or window-hiding wrapper is required.
+For OBS Studio recordings, a Custom Browser Dock starts Talks Reducer right after
+you stop a take — pick resolution (1080p / 720p / 480p), silent speed
+(1× / 5× / 10×), and codec, then click a button. The built-in
+`talks-reducer dock-server` hosts the dock UI and runs the jobs, so no extra
+runtime is required.
 
-**Requirements:** OBS WebSocket server enabled and Talks Reducer installed
-(default exe: `%LOCALAPPDATA%\Programs\talks-reducer\talks-reducer.exe`).
+![OBS Processing Dock](docs/assets/obs-dock.png)
 
-1. Start the dock server (keep it running while streaming):
+**Set it up in OBS:**
 
-```powershell
-talks-reducer dock-server
-```
+1. Start the dock server (keep it running while recording) — or let the Windows
+   installer add it to autostart:
 
-2. In OBS: **Docks → Custom Browser Docks** → add a dock pointing at
+   ```powershell
+   talks-reducer dock-server
+   ```
+
+2. In OBS, enable **Tools → WebSocket Server Settings → Enable WebSocket server**
+   and note the password.
+3. In OBS, open **Docks → Custom Browser Docks…** and add a dock with URL
    `http://127.0.0.1:17890/`.
+4. In the dock's **Settings**, enter the OBS WebSocket password and press
+   **Enter** (or click Connect). When the status turns green, stop a recording and
+   the speed buttons light up.
 
-Because the executable is windowless, you can schedule `talks-reducer dock-server`
-at logon directly and stop it cleanly from Task Scheduler. Full setup, the
-`--port`/`--host`/`--exe` options, payload format, the legacy Node.js server, and
-troubleshooting:
+Because the executable is windowless, you can autostart it at logon (installer
+checkbox or Task Scheduler) and stop it cleanly. Full setup, the
+`--port`/`--host`/`--exe` options, and troubleshooting:
 [scripts/obs-processing-dock/README.md](scripts/obs-processing-dock/README.md).
 
 ## Install CLI (Linux, Windows, macOS)
