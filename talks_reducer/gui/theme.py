@@ -291,9 +291,11 @@ def apply_theme(
         fieldbackground=palette["background"],
         foreground=palette["foreground"],
     )
+    combobox_hover = palette.get("hover", palette["surface"])
     style.configure(
         "TCombobox",
         fieldbackground=palette["background"],
+        background=palette["surface"],
         foreground=palette["foreground"],
         arrowcolor=palette["foreground"],
     )
@@ -303,9 +305,28 @@ def apply_theme(
             ("readonly", palette["background"]),
             ("readonly", "focus", palette["background"]),
         ],
+        # The readonly combobox draws its face (behind the text and the arrow)
+        # with ``background`` rather than ``fieldbackground``. Without these
+        # entries clam lightens that face on hover/press, so a dark theme would
+        # flash a pale button while the dropdown expands.
+        background=[
+            ("readonly", "hover", combobox_hover),
+            ("readonly", "active", combobox_hover),
+            ("readonly", "pressed", combobox_hover),
+            ("hover", combobox_hover),
+            ("active", combobox_hover),
+            ("pressed", combobox_hover),
+            ("readonly", palette["surface"]),
+            ("disabled", palette["surface"]),
+        ],
         foreground=[
             ("readonly", palette["foreground"]),
             ("readonly", "focus", palette["foreground"]),
+        ],
+        arrowcolor=[
+            ("active", palette["foreground"]),
+            ("pressed", palette["foreground"]),
+            ("disabled", palette["border"]),
         ],
     )
 
