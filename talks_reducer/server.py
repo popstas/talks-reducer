@@ -743,30 +743,88 @@ def _format_file_size(num_bytes: int) -> str:
     return f"{size:.1f} TB"
 
 
-def _format_summary(result: ProcessingResult) -> str:
-    """Produce a Markdown summary of the processing result."""
+def _format_duration_compact(seconds: float) -> str:
+    """Return a no-space compact duration like ``1h12m12s`` or ``59m34s``."""
 
-    lines = [
-        f"**Input:** `{result.input_file.name}`",
-        f"**Output:** `{result.output_file.name}`",
-    ]
+    if seconds <= 0:
+        return "0s"
+    total_seconds = int(round(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    parts: list[str] = []
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or hours:
+        parts.append(f"{minutes}m")
+    parts.append(f"{secs}s")
+    return "".join(parts)
 
-    duration_line = (
-        f"**Duration:** {_format_duration(result.output_duration)}"
-        f" ({_format_duration(result.original_duration)} original)"
+
+def _format_size_compact(num_bytes: int) -> str:
+    """Return a compact single-letter size like ``506M`` or ``1.2G``."""
+
+    size = float(max(0, int(num_bytes)))
+    for unit in ("B", "K", "M", "G"):
+        if size < 1024.0:
+            if unit == "B":
+                return f"{int(size)}{unit}"
+            if size >= 10:
+                return f"{int(round(size))}{unit}"
+            return f"{size:.1f}{unit}"
+        size /= 1024.0
+    return f"{size:.1f}T"
+
+
+def _format_summary_compact(result: ProcessingResult) -> str:
+    """Produce the two headline result lines (duration + size)."""
+
+    lines: list[str] = []
+
+    duration_suffix = ""
+    if result.original_duration > 0:
+        pct = round(result.output_duration / result.original_duration * 100)
+        duration_suffix = f" ({pct}%)"
+    lines.append(
+        "**Duration:** "
+        f"{_format_duration_compact(result.original_duration)} -> "
+        f"{_format_duration_compact(result.output_duration)}{duration_suffix}"
     )
-    if result.time_ratio is not None:
-        duration_line += f" — {result.time_ratio * 100:.1f}% of the original"
-    lines.append(duration_line)
 
-    if result.size_ratio is not None:
-        size_percent = result.size_ratio * 100
-        lines.append(f"**Size:** {size_percent:.1f}% of the original file")
-
-    lines.append(f"**Chunks merged:** {result.chunk_count}")
-    lines.append(f"**Encoder:** {'CUDA' if result.used_cuda else 'CPU'}")
+    try:
+        input_bytes = result.input_file.stat().st_size
+        output_bytes = result.output_file.stat().st_size
+    except OSError:
+        input_bytes = output_bytes = 0
+    if input_bytes > 0 and output_bytes > 0:
+        size_pct = round(output_bytes / input_bytes * 100)
+        lines.append(
+            "**Size:** "
+            f"{_format_size_compact(input_bytes)} -> "
+            f"{_format_size_compact(output_bytes)} ({size_pct}%)"
+        )
 
     return "\n".join(lines)
+
+
+def _format_details(result: ProcessingResult) -> str:
+    """Produce the collapsible detail lines shown under the summary."""
+
+    return "\n".join(
+        [
+            f"**Input:** `{result.input_file.name}`",
+            f"**Output:** `{result.output_file.name}`",
+            f"**Chunks merged:** {result.chunk_count}",
+            f"**Encoder:** {'CUDA' if result.used_cuda else 'CPU'}",
+        ]
+    )
+
+
+def _format_summary(result: ProcessingResult) -> str:
+    """Full summary for the API path: compact headline plus detail lines."""
+
+    compact = _format_summary_compact(result)
+    details = _format_details(result)
+    return f"{compact}\n{details}" if compact else details
 
 
 PipelineEvent = tuple[str, object]

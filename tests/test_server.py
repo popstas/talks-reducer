@@ -287,9 +287,57 @@ def test_format_summary_includes_ratios() -> None:
 
     summary = server._format_summary(result)
 
-    assert "75.0%" in summary
-    assert "50.0%" in summary
+    assert "75%" in summary
     assert "CUDA" in summary
+    assert "Chunks merged" in summary
+
+
+def test_format_duration_compact_has_no_spaces() -> None:
+    assert server._format_duration_compact(0) == "0s"
+    assert server._format_duration_compact(12) == "12s"
+    assert server._format_duration_compact(3574) == "59m34s"
+    assert server._format_duration_compact(4332) == "1h12m12s"
+
+
+def test_format_size_compact() -> None:
+    assert server._format_size_compact(0) == "0B"
+    assert server._format_size_compact(506 * 1024 * 1024) == "506M"
+    assert server._format_size_compact(int(1.2 * 1024 * 1024 * 1024)) == "1.2G"
+
+
+def test_format_summary_compact_and_details(tmp_path: Path) -> None:
+    import os
+
+    input_file = tmp_path / "in.mp4"
+    output_file = tmp_path / "out.mp4"
+    # Sparse files: set apparent size without writing hundreds of MB.
+    input_file.write_bytes(b"")
+    output_file.write_bytes(b"")
+    os.truncate(input_file, 500 * 1024 * 1024)
+    os.truncate(output_file, 250 * 1024 * 1024)
+    result = ProcessingResult(
+        input_file=input_file,
+        output_file=output_file,
+        frame_rate=30.0,
+        original_duration=4332.0,
+        output_duration=3574.0,
+        chunk_count=7,
+        used_cuda=True,
+        max_audio_volume=0.5,
+        time_ratio=0.825,
+        size_ratio=0.5,
+    )
+    compact = server._format_summary_compact(result)
+    assert "Duration:" in compact and "1h12m12s -> 59m34s (83%)" in compact
+    assert "Size:" in compact and "500M -> 250M (50%)" in compact
+
+    details = server._format_details(result)
+    assert "`in.mp4`" in details and "`out.mp4`" in details
+    assert "Chunks merged:** 7" in details
+    assert "Encoder:** CUDA" in details
+
+    full = server._format_summary(result)
+    assert compact in full and "Chunks merged:** 7" in full
 
 
 def test_cleanup_workspaces_removes_temporary_directories(tmp_path: Path) -> None:
@@ -385,8 +433,8 @@ def test_process_video_streams_events_and_returns_result(tmp_path: Path) -> None
     assert Path(final[0]).name.endswith("_speedup.mp4")
     assert "Halfway done" in final[1]
     assert "Processing complete." in final[1]
-    assert "25.0%" in final[2]
-    assert "30.0%" in final[2]
+    assert "25%" in final[2]
+    assert "Chunks merged:** 5" in final[2]
     assert final[3] == final[0]
 
     assert progress_widget.calls
