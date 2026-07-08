@@ -929,25 +929,28 @@ class ProcessVideoDependencies:
     start_in_thread: bool = True
 
 
-def process_video(
+def _stream_pipeline(
     file_path: Optional[str],
     small_video: bool,
-    small_480: bool = False,
-    optimize: bool = True,
-    video_codec: str = "h264",
-    add_codec_suffix: bool = False,
-    use_global_ffmpeg: bool = False,
-    silent_threshold: Optional[float] = None,
-    sounded_speed: Optional[float] = None,
-    silent_speed: Optional[float] = None,
-    cut_enabled: bool = False,
-    cut_start_seconds: Optional[float] = None,
-    cut_end_seconds: Optional[float] = None,
-    progress: Optional[gr.Progress] = gr.Progress(track_tqdm=False),
-    *,
-    dependencies: Optional[ProcessVideoDependencies] = None,
-) -> Iterator[tuple[Optional[str], str, str, Optional[str]]]:
-    """Run the Talks Reducer pipeline for a single uploaded file."""
+    small_480: bool,
+    optimize: bool,
+    video_codec: str,
+    add_codec_suffix: bool,
+    use_global_ffmpeg: bool,
+    silent_threshold: Optional[float],
+    sounded_speed: Optional[float],
+    silent_speed: Optional[float],
+    cut_enabled: bool,
+    cut_start_seconds: Optional[float],
+    cut_end_seconds: Optional[float],
+    dependencies: Optional["ProcessVideoDependencies"],
+) -> Iterator[tuple[str, object]]:
+    """Run the pipeline, yielding semantic events shared by both handlers.
+
+    Yields ``("log", full_log)`` on each log update (including the initial
+    upload receipt), ``("progress", (current, total, desc))`` for progress, and
+    finally ``("done", (result, full_log))``. Raises ``gr.Error`` on failure.
+    """
 
     if not file_path:
         raise gr.Error("Please upload a video file to begin processing.")
@@ -1002,10 +1005,8 @@ def process_video(
         option_kwargs["sounded_speed"] = normalized_sounded_speed
     if normalized_silent_speed is not None:
         option_kwargs["silent_speed"] = normalized_silent_speed
-
     if small_video and small_480:
         option_kwargs["small_target_height"] = 480
-
     if cut_enabled:
         option_kwargs["cut_start_seconds"] = float(cut_start_seconds or 0.0)
         option_kwargs["cut_end_seconds"] = float(cut_end_seconds or 0.0)
@@ -1023,7 +1024,7 @@ def process_video(
         speed_up=deps.speed_up,
         reporter_factory=deps.reporter_factory,
         events=events,
-        enable_progress=progress is not None,
+        enable_progress=True,
         start_in_thread=deps.start_in_thread,
     )
 
@@ -1031,29 +1032,16 @@ def process_video(
     final_result: Optional[ProcessingResult] = None
     error: Optional[gr.Error] = None
 
-    yield (
-        gr.update(),
-        "\n".join(collected_logs),
-        gr.update(),
-        gr.update(),
-    )
+    yield ("log", "\n".join(collected_logs))
 
     for kind, payload in event_stream:
         if kind == "log":
             text = str(payload).strip()
             if text:
                 collected_logs.append(text)
-                yield (
-                    gr.update(),
-                    "\n".join(collected_logs),
-                    gr.update(),
-                    gr.update(),
-                )
+                yield ("log", "\n".join(collected_logs))
         elif kind == "progress":
-            if progress is not None:
-                current, total, desc = cast(tuple[int, int, str], payload)
-                percent = current / total if total > 0 else 0
-                progress(percent, total=total, desc=desc)
+            yield ("progress", payload)
         elif kind == "result":
             final_result = payload  # type: ignore[assignment]
         elif kind == "error":
@@ -1061,24 +1049,66 @@ def process_video(
 
     if error is not None:
         raise error
-
     if final_result is None:
         raise gr.Error("Failed to process the video.")
 
-    log_text = "\n".join(collected_logs)
-    summary = _format_summary(final_result)
+    yield ("done", (final_result, "\n".join(collected_logs)))
 
-    output_path = str(final_result.output_file)
-    # Audio-only ``.mp3`` results have no video stream, so the ``gr.Video``
-    # preview cannot render them; leave it empty and rely on the download slot.
-    is_audio_only = Path(final_result.output_file).suffix.lower() == ".mp3"
 
-    yield (
-        None if is_audio_only else output_path,
-        log_text,
-        summary,
-        output_path,
-    )
+def process_video(
+    file_path: Optional[str],
+    small_video: bool,
+    small_480: bool = False,
+    optimize: bool = True,
+    video_codec: str = "h264",
+    add_codec_suffix: bool = False,
+    use_global_ffmpeg: bool = False,
+    silent_threshold: Optional[float] = None,
+    sounded_speed: Optional[float] = None,
+    silent_speed: Optional[float] = None,
+    cut_enabled: bool = False,
+    cut_start_seconds: Optional[float] = None,
+    cut_end_seconds: Optional[float] = None,
+    progress: Optional[gr.Progress] = gr.Progress(track_tqdm=False),
+    *,
+    dependencies: Optional[ProcessVideoDependencies] = None,
+) -> Iterator[tuple[Optional[str], str, str, Optional[str]]]:
+    """Run the Talks Reducer pipeline for a single uploaded file."""
+
+    for kind, payload in _stream_pipeline(
+        file_path,
+        small_video,
+        small_480,
+        optimize,
+        video_codec,
+        add_codec_suffix,
+        use_global_ffmpeg,
+        silent_threshold,
+        sounded_speed,
+        silent_speed,
+        cut_enabled,
+        cut_start_seconds,
+        cut_end_seconds,
+        dependencies,
+    ):
+        if kind == "log":
+            yield (gr.update(), cast(str, payload), gr.update(), gr.update())
+        elif kind == "progress":
+            if progress is not None:
+                current, total, desc = cast(tuple[int, int, str], payload)
+                percent = current / total if total > 0 else 0
+                progress(percent, total=total, desc=desc)
+        elif kind == "done":
+            final_result, log_text = cast(tuple[ProcessingResult, str], payload)
+            summary = _format_summary(final_result)
+            output_path = str(final_result.output_file)
+            is_audio_only = Path(final_result.output_file).suffix.lower() == ".mp3"
+            yield (
+                None if is_audio_only else output_path,
+                log_text,
+                summary,
+                output_path,
+            )
 
 
 def build_interface(concurrency_limit: int = 1) -> gr.Blocks:

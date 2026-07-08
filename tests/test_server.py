@@ -1707,3 +1707,45 @@ def test_activity_endpoint_handles_empty_recorder() -> None:
     assert payload["server"]["identity"] == "talks-host"
     # No scope["server"] → URL is omitted rather than guessed incorrectly.
     assert payload["server"]["url"] is None
+
+
+def test_process_video_still_yields_four_tuples(tmp_path: Path) -> None:
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        reporter.log("working")
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or input_file,
+            frame_rate=24.0,
+            original_duration=100.0,
+            output_duration=50.0,
+            chunk_count=2,
+            used_cuda=False,
+            max_audio_volume=0.6,
+            time_ratio=0.5,
+            size_ratio=0.5,
+        )
+
+    dependencies = server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+    try:
+        outputs = list(
+            server.process_video(
+                str(input_file),
+                small_video=False,
+                progress=None,
+                dependencies=dependencies,
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+
+    assert outputs, "process_video should yield at least once"
+    assert all(isinstance(o, tuple) and len(o) == 4 for o in outputs)
