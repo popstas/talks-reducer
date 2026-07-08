@@ -151,6 +151,26 @@ def _format_seed_number(value: object) -> str:
     return str(number)
 
 
+def _resolve_prefer_global_ffmpeg(
+    preferences: "GUIPreferences", global_ffmpeg_available: bool
+) -> bool:
+    """Return the initial ``use_global_ffmpeg`` preference for the GUI.
+
+    On first start the setting is absent, so default it to whether a system
+    FFmpeg was detected and persist that choice. On later launches the stored
+    value wins, including a user's explicit opt-out. A stored preference that
+    wants the global binary is cleared when none is available.
+    """
+
+    first_start = "use_global_ffmpeg" not in preferences.data
+    default = global_ffmpeg_available if first_start else False
+    prefer_global = bool(preferences.get("use_global_ffmpeg", default))
+    if prefer_global and not global_ffmpeg_available:
+        prefer_global = False
+        preferences.update("use_global_ffmpeg", False)
+    return prefer_global
+
+
 class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
 
@@ -328,11 +348,10 @@ class TalksReducerGUI:
         if stored_codec not in {"h264", "hevc", "av1", "mp3"}:
             stored_codec = "h264"
             self.preferences.update("video_codec", stored_codec)
-        prefer_global = bool(self.preferences.get("use_global_ffmpeg", False))
         self.global_ffmpeg_available = is_global_ffmpeg_available()
-        if prefer_global and not self.global_ffmpeg_available:
-            prefer_global = False
-            self.preferences.update("use_global_ffmpeg", False)
+        prefer_global = _resolve_prefer_global_ffmpeg(
+            self.preferences, self.global_ffmpeg_available
+        )
         self.video_codec_var = tk.StringVar(value=stored_codec)
         self.add_codec_suffix_var = tk.BooleanVar(
             value=bool(self.preferences.get("add_codec_suffix", False))
