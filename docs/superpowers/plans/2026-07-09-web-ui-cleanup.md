@@ -46,10 +46,15 @@ def test_format_size_compact() -> None:
 
 
 def test_format_summary_compact_and_details(tmp_path: Path) -> None:
+    import os
+
     input_file = tmp_path / "in.mp4"
     output_file = tmp_path / "out.mp4"
-    input_file.write_bytes(b"x" * (506 * 1024 * 1024 // 1))  # 506 "units"
-    output_file.write_bytes(b"x" * (258 * 1024 * 1024))
+    # Sparse files: set apparent size without writing hundreds of MB.
+    input_file.write_bytes(b"")
+    output_file.write_bytes(b"")
+    os.truncate(input_file, 500 * 1024 * 1024)
+    os.truncate(output_file, 250 * 1024 * 1024)
     result = ProcessingResult(
         input_file=input_file,
         output_file=output_file,
@@ -64,7 +69,7 @@ def test_format_summary_compact_and_details(tmp_path: Path) -> None:
     )
     compact = server._format_summary_compact(result)
     assert "Duration:" in compact and "1h12m12s -> 59m34s (82%)" in compact
-    assert "Size:" in compact and "506M -> 258M (50%)" in compact
+    assert "Size:" in compact and "500M -> 250M (50%)" in compact
 
     details = server._format_details(result)
     assert "`in.mp4`" in details and "`out.mp4`" in details
