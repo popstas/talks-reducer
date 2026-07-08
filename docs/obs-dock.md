@@ -18,8 +18,7 @@ arguments you would use from a terminal or shortcut.
 Because the server is part of the (windowless) Talks Reducer executable, there is
 **no separate Node.js runtime and no PowerShell/VBS window-hiding wrapper**. The
 scheduled task runs a single process, so stopping it (Task Scheduler → **End**)
-closes everything cleanly. The standalone Node.js server is still available as a
-[legacy option](#legacy-nodejs-server).
+closes everything cleanly.
 
 ## Requirements
 
@@ -50,7 +49,7 @@ address. Options:
 | `--exe` | `%LOCALAPPDATA%\...\talks-reducer.exe` (env `OBS_DOCK_EXE`) | Fallback executable when a request omits `exe` |
 
 To start automatically at logon with no window, see
-[Run at logon (Task Scheduler)](#run-at-logon-task-scheduler).
+[Run at logon](#run-at-logon).
 
 2. In OBS, add a Custom Browser Dock:
 
@@ -64,8 +63,6 @@ Docks → Custom Browser Docks
 | URL | `http://127.0.0.1:17890/` |
 
 The dock UI is served by `dock-server`, so the URL follows `--host`/`--port`.
-(You can still point OBS at a local `file:///…/dock.html` if you prefer; the page
-falls back to `http://127.0.0.1:17890/process` when opened that way.)
 
 3. Open **Settings** in the dock and confirm:
 
@@ -213,34 +210,6 @@ To remove the task:
 ```cmd
 schtasks /Delete /TN "OBS Talks Reducer" /F
 ```
-
-## Legacy Node.js server
-
-The original standalone server is still in this folder if you prefer not to use
-the bundled executable (for example when running from source without a build):
-
-| File | Role |
-| --- | --- |
-| `process-server.js` | Local HTTP server that spawns Talks Reducer |
-| `obs-talks-reducer.ps1` | PowerShell launcher for the Node server |
-
-Run it with [Node.js](https://nodejs.org/):
-
-```powershell
-.\obs-talks-reducer.ps1
-```
-
-It reads the same `OBS_DOCK_PORT` / `OBS_DOCK_EXE` environment variables and
-serves the identical `/process` API, but requires Node.js on your `PATH` and does
-**not** serve the dock UI (point OBS at the local `dock.html` file instead).
-
-## Files
-
-| File | Role |
-| --- | --- |
-| `dock.html` | Reference copy of the OBS browser dock UI (the served copy lives in `talks_reducer/resources/dock.html`) |
-| `process-server.js` | Legacy standalone HTTP server (see [above](#legacy-nodejs-server)) |
-| `obs-talks-reducer.ps1` | Legacy PowerShell launcher for the Node server |
 
 ## Troubleshooting
 

@@ -72,7 +72,7 @@ runtime is required.
 Because the executable is windowless, you can autostart it at logon (installer
 checkbox or Task Scheduler) and stop it cleanly. Full setup, the
 `--port`/`--host`/`--exe` options, and troubleshooting:
-[scripts/obs-processing-dock/README.md](scripts/obs-processing-dock/README.md).
+[docs/obs-dock.md](docs/obs-dock.md).
 
 ## Install CLI (Linux, Windows, macOS)
 
