@@ -160,7 +160,23 @@ talks-reducer.exe recording.mkv --small --silent-speed 5 --video-codec hevc
 Output files follow normal Talks Reducer naming (for example `_speedup` /
 `_small` suffixes) next to the source recording.
 
-## Run at logon (Task Scheduler)
+## Run at logon
+
+### Windows installer (easiest)
+
+The Talks Reducer Windows installer offers two **OBS Processing Dock** checkboxes
+(both **off by default**):
+
+- **Add "OBS Dock Server" to the Start menu** — a shortcut that runs
+  `talks-reducer dock-server`.
+- **Start the OBS Dock Server automatically at logon** — adds the same shortcut
+  to your per-user Startup folder.
+
+The installer also closes any running Talks Reducer instances (including the dock
+server) before updating, so the executable can be replaced; enable the Startup
+checkbox to have it relaunch on the next logon.
+
+### Task Scheduler (manual)
 
 Because `talks-reducer.exe` is windowless, no wrapper is needed — schedule the
 executable directly. Stopping the task (**End**) terminates the single process
