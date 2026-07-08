@@ -157,6 +157,7 @@ def test_headless_mode_runs_and_opens_browser(
         "inbrowser": False,
         "prevent_thread_lock": True,
         "show_error": True,
+        "pwa": True,
     }
     # The tray-launched server installs the transfer-progress middleware too.
     middleware = (app_kwargs or {}).get("middleware", [])
