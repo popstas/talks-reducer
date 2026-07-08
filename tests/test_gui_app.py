@@ -1393,16 +1393,19 @@ def test_clear_taskbar_if_focused_survives_a_broken_root():
     gui._taskbar.clear.assert_not_called()
 
 
-def _make_bell_gui() -> app.TalksReducerGUI:
-    """Build a bare GUI whose ``root.bell`` calls are observable."""
+def _make_bell_gui(focused: bool = False) -> app.TalksReducerGUI:
+    """Build a bare GUI whose ``root.bell`` calls and focus state are observable."""
 
     gui = object.__new__(app.TalksReducerGUI)
-    gui.root = SimpleNamespace(bell=MagicMock())
+    gui.root = SimpleNamespace(
+        bell=MagicMock(),
+        focus_displayof=lambda: object() if focused else None,
+    )
     return gui
 
 
 def test_success_rings_the_completion_bell():
-    gui = _make_bell_gui()
+    gui = _make_bell_gui(focused=False)
 
     app.TalksReducerGUI._ring_completion_bell(gui, "success", is_success=True)
 
@@ -1410,15 +1413,31 @@ def test_success_rings_the_completion_bell():
 
 
 def test_error_rings_the_completion_bell():
-    gui = _make_bell_gui()
+    gui = _make_bell_gui(focused=False)
 
     app.TalksReducerGUI._ring_completion_bell(gui, "error", is_success=False)
 
     gui.root.bell.assert_called_once_with()
 
 
+def test_focused_window_stays_silent_on_success():
+    gui = _make_bell_gui(focused=True)
+
+    app.TalksReducerGUI._ring_completion_bell(gui, "success", is_success=True)
+
+    gui.root.bell.assert_not_called()
+
+
+def test_focused_window_stays_silent_on_error():
+    gui = _make_bell_gui(focused=True)
+
+    app.TalksReducerGUI._ring_completion_bell(gui, "error", is_success=False)
+
+    gui.root.bell.assert_not_called()
+
+
 def test_aborted_run_stays_silent():
-    gui = _make_bell_gui()
+    gui = _make_bell_gui(focused=False)
 
     app.TalksReducerGUI._ring_completion_bell(gui, "aborted", is_success=False)
 
@@ -1426,7 +1445,7 @@ def test_aborted_run_stays_silent():
 
 
 def test_progress_updates_stay_silent():
-    gui = _make_bell_gui()
+    gui = _make_bell_gui(focused=False)
 
     app.TalksReducerGUI._ring_completion_bell(gui, "processing", is_success=False)
 
@@ -1434,8 +1453,19 @@ def test_progress_updates_stay_silent():
 
 
 def test_completion_bell_survives_a_bell_less_display():
-    gui = _make_bell_gui()
+    gui = _make_bell_gui(focused=False)
     gui.root.bell.side_effect = RuntimeError("no bell")
+
+    app.TalksReducerGUI._ring_completion_bell(gui, "success", is_success=True)
+
+    gui.root.bell.assert_called_once_with()
+
+
+def test_unreadable_focus_state_still_announces_the_outcome():
+    """A focus probe that raises must not swallow the completion cue."""
+
+    gui = _make_bell_gui()
+    gui.root.focus_displayof = MagicMock(side_effect=KeyError("foreign window"))
 
     app.TalksReducerGUI._ring_completion_bell(gui, "success", is_success=True)
 

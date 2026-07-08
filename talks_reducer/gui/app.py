@@ -445,8 +445,13 @@ class TalksReducerGUI:
         # server-managed activity log started below.
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         # A finished run holds its taskbar indicator until the user looks at the
-        # window again; focusing it is that acknowledgement.
+        # window again; focusing it is that acknowledgement. ``<FocusIn>`` is
+        # delivered to whichever widget takes the keyboard focus, while
+        # ``<Activate>`` reaches the toplevel whenever Windows or macOS makes the
+        # window active — bind both so neither route is missed. ``on_focus`` is
+        # idempotent, so a double delivery is harmless.
         self.root.bind("<FocusIn>", self._on_window_focus, add="+")
+        self.root.bind("<Activate>", self._on_window_focus, add="+")
         if self.server_managed:
             self._start_activity_log()
 
@@ -1975,6 +1980,19 @@ class TalksReducerGUI:
 
         self._clear_taskbar_if_focused()
 
+    def _is_window_focused(self) -> bool:
+        """Return whether this application currently holds the keyboard focus.
+
+        ``focus_displayof`` returns ``None`` when the focused window belongs to
+        another application, and raises when it belongs to a foreign window Tk
+        cannot name. Both mean "not us"; a failure is reported as unfocused so a
+        run's outcome is announced rather than silently swallowed.
+        """
+
+        with suppress(Exception):
+            return self.root.focus_displayof() is not None
+        return False
+
     def _clear_taskbar_if_focused(self) -> None:
         """Drop a freshly held indicator when the window already has focus.
 
@@ -1982,20 +2000,23 @@ class TalksReducerGUI:
         when it is the active window there is nothing to notify them about.
         """
 
-        with suppress(Exception):
-            if self.root.focus_displayof() is not None:
-                self._taskbar.clear()
+        if self._is_window_focused():
+            self._taskbar.clear()
 
     def _ring_completion_bell(self, lowered: str, *, is_success: bool) -> None:
         """Ring the system bell once a run reaches a terminal state.
 
         Success and failure both deserve an audible cue for a user who switched
-        away, matching the taskbar indicator. An aborted run stays silent: the
-        user pressed Stop and already knows the run is over. Tk's ``bell`` is a
-        best-effort call — a display without a bell simply makes no sound.
+        away, matching the taskbar indicator. Two cases stay silent: an aborted
+        run, because the user pressed Stop and already knows, and a run that ends
+        while the window is focused, because the user is watching it happen. Tk's
+        ``bell`` is a best-effort call — a display without a bell makes no sound.
         """
 
         if not is_success and lowered != "error":
+            return
+
+        if self._is_window_focused():
             return
 
         with suppress(Exception):

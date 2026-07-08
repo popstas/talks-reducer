@@ -360,8 +360,9 @@ red on failure—until you focus the window again; pressing **Stop** clears it
 right away. Other platforms have no equivalent indicator and simply skip it.
 
 On every platform the GUI also **rings the system bell** when a run finishes or
-fails, so you hear the result without watching the window. Stopping a run stays
-silent.
+fails, so you hear the result without watching the window. It stays silent when
+the window is already focused—you can see the result—and when you stop a run
+yourself.
 
 The GUI also remembers **where you last placed the window**. On close it saves
 the window's screen position (`window_x`, `window_y` in `settings.json`) and
