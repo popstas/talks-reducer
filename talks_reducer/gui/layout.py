@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 from ..icons import find_icon_path
 from ..models import default_temp_folder
+from .tooltips import add_tooltip
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     import tkinter as tk
@@ -593,6 +594,11 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=gui.optimize_var,
     )
     gui.optimize_check.grid(row=3, column=0, columnspan=3, sticky="w", pady=4)
+    add_tooltip(
+        gui.optimize_check,
+        "Larger size, but supports seeking",
+        tk_module=gui.tk,
+    )
 
     global_ffmpeg_available = getattr(gui, "global_ffmpeg_available", True)
     gui.use_global_ffmpeg_check = gui.ttk.Checkbutton(

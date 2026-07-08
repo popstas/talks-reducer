@@ -1,6 +1,5 @@
 # TODO
 
-- [ ] Set optimized encoding as the default, with tooltip "Larger size, but supports seeking"
 - [ ] On first start, detect global (system) ffmpeg and enable the corresponding checkbox if found
 - [ ] Use a dark title bar when dark mode is active on Windows
 - [ ] Clean up the PWA mode interface

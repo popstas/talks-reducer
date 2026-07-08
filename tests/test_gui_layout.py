@@ -370,6 +370,21 @@ def test_build_layout_creates_watch_widgets(monkeypatch):
     assert hasattr(gui, "watch_browse_button")
 
 
+def test_build_layout_adds_optimize_tooltip(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    gui = _make_layout_gui()
+
+    layout.build_layout(gui)
+
+    bound_events = {event for event, _ in gui.optimize_check.bind_calls}
+    assert "<Enter>" in bound_events
+    assert "<Leave>" in bound_events
+
+
 def test_build_layout_aligns_server_entry_and_discover_button(monkeypatch):
     monkeypatch.setattr(layout, "add_slider", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
