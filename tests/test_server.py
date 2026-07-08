@@ -961,13 +961,20 @@ def test_process_video_ignores_trim_when_disabled(tmp_path: Path) -> None:
 
 
 def test_build_interface_exposes_cut_video_components() -> None:
-    """The web UI should expose the Cut video checkbox and start/end inputs."""
+    """The web UI should expose the Cut video checkbox and start/end inputs.
+
+    ``process_video`` is no longer bound directly to ``file_input.upload``
+    (that role now belongs to ``process_video_ui``; ``process_video`` is only
+    reachable through the headless ``gr.api`` registration, whose synthetic
+    ``Api`` inputs carry no labels), so this checks the handler that actually
+    receives the browser's Gradio components.
+    """
 
     demo = server.build_interface()
     process_fns = [
-        fn for fn in demo.fns.values() if getattr(fn, "name", "") == "process_video"
+        fn for fn in demo.fns.values() if getattr(fn, "name", "") == "process_video_ui"
     ]
-    assert process_fns, "process_video handler not registered on demo"
+    assert process_fns, "process_video_ui handler not registered on demo"
     registered_inputs = list(process_fns[0].inputs or [])
     labels = [getattr(component, "label", None) for component in registered_inputs]
 
@@ -978,14 +985,19 @@ def test_build_interface_exposes_cut_video_components() -> None:
 
 def test_build_interface_inputs_align_with_process_video_signature() -> None:
     """Guard against positional mismatch between the Gradio inputs list and
-    ``process_video``'s signature. A missing component would shift every
+    ``process_video_ui``'s signature. A missing component would shift every
     subsequent argument by one slot and cause values to be validated against
     the wrong component's constraints (e.g. silent_threshold=0.01 rejected by
-    sounded_speed slider with minimum=0.5)."""
+    sounded_speed slider with minimum=0.5).
+
+    ``process_video_ui`` (not ``process_video``) is the handler bound to
+    ``file_input.upload`` with the real Gradio components in positional
+    order, so it is the one whose signature must stay aligned.
+    """
 
     import inspect
 
-    sig = inspect.signature(server.process_video)
+    sig = inspect.signature(server.process_video_ui)
     expected_params = [
         name
         for name, param in sig.parameters.items()
@@ -999,15 +1011,15 @@ def test_build_interface_inputs_align_with_process_video_signature() -> None:
 
     demo = server.build_interface()
     process_fns = [
-        fn for fn in demo.fns.values() if getattr(fn, "name", "") == "process_video"
+        fn for fn in demo.fns.values() if getattr(fn, "name", "") == "process_video_ui"
     ]
-    assert process_fns, "process_video handler not registered on demo"
+    assert process_fns, "process_video_ui handler not registered on demo"
     handler = process_fns[0]
     registered_inputs = list(handler.inputs or [])
 
     assert len(registered_inputs) == len(expected_params), (
         f"Gradio inputs list has {len(registered_inputs)} components but "
-        f"process_video expects {len(expected_params)} positional parameters "
+        f"process_video_ui expects {len(expected_params)} positional parameters "
         f"({expected_params})."
     )
 

@@ -1255,76 +1255,79 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
         f" v{app_version}" if app_version and app_version != "unknown" else ""
     )
 
-    with gr.Blocks(title=f"Talks Reducer Web UI{version_suffix}") as demo:
-        gr.Markdown(f"""
-            ## Talks Reducer Web UI{version_suffix}
-            Drop a video into the zone below or click to browse. **Small video** is enabled
-            by default to apply the 720p/128k preset before processing starts—clear it to
-            keep the original resolution or pair it with **Target 480p** to downscale
-            further. Choose **Video codec** to switch between h.265 (≈25% smaller),
-            h.264 (≈10% faster), av1 (no advantages) compression, and mp3
-            (audio-only output), and enable
-            **Use global FFmpeg** when your system install offers hardware encoders that the
-            bundled build lacks.
+    with gr.Blocks(
+        title=f"Talks Reducer Web UI{version_suffix}",
+        css=".tr-codec { max-width: 22rem; } .tr-codec .wrap { min-height: 0; }",
+    ) as demo:
+        gr.Markdown(f"## Talks Reducer Web UI{version_suffix}")
+        with gr.Accordion("About", open=False):
+            gr.Markdown(f"""
+                Drop a video or audio file below. Pick a **Resolution** and
+                **Speedup**, choose the **Video codec**, and processing starts on
+                upload. Open **Advanced** for encoder toggles and fine-grained
+                speed/threshold controls.
 
-            Video will be rendered on server **{server_identity}**.
-            """.strip())
+                Video will be rendered on server **{server_identity}**.
+                """.strip())
 
-        with gr.Column():
-            file_input = gr.File(
-                label="Video or audio file",
-                file_types=["video", "audio"],
-                type="filepath",
-            )
+        file_input = gr.File(
+            label="Video or audio file",
+            file_types=["video", "audio"],
+            type="filepath",
+        )
 
-        with gr.Row():
-            small_checkbox = gr.Checkbox(label="Small video", value=True)
-            small_480_checkbox = gr.Checkbox(label="Target 480p", value=False)
-            optimize_checkbox = gr.Checkbox(label="Optimized encoding", value=True)
-
+        resolution_radio = gr.Radio(
+            choices=["No change", "720p", "480p"],
+            value="720p",
+            label="Resolution",
+        )
+        speedup_radio = gr.Radio(
+            choices=["1×", "5×", "10×"],
+            value="10×",
+            label="Speedup",
+        )
         codec_dropdown = gr.Dropdown(
             choices=[
-                ("h.264 (10% faster)", "h264"),
                 ("h.265 (25% smaller)", "hevc"),
+                ("h.264 (10% faster)", "h264"),
                 ("av1 (no advantages)", "av1"),
                 ("mp3 (audio only)", "mp3"),
             ],
-            value="h264",
+            value="hevc",
             label="Video codec",
+            elem_classes=["tr-codec"],
         )
+
+        cut_enabled_checkbox = gr.Checkbox(label="Cut video", value=False)
+        with gr.Row(visible=False) as cut_row:
+            cut_start_input = gr.Number(
+                value=0.0, minimum=0.0, label="Cut start (seconds)"
+            )
+            cut_end_input = gr.Number(value=0.0, minimum=0.0, label="Cut end (seconds)")
 
         global_ffmpeg_info = (
             "Prefer the FFmpeg binary from PATH instead of the bundled build."
             if global_ffmpeg_available
             else "Global FFmpeg not detected; the bundled build will be used."
         )
-        add_codec_suffix_checkbox = gr.Checkbox(
-            label="Append codec to filename",
-            value=False,
-            info="Append the selected codec (e.g. _h264) to the output filename.",
-        )
-
-        use_global_ffmpeg_checkbox = gr.Checkbox(
-            label="Use global FFmpeg",
-            value=False,
-            info=global_ffmpeg_info,
-            interactive=global_ffmpeg_available,
-        )
-
-        with gr.Column():
+        with gr.Accordion("Advanced", open=False):
+            optimize_checkbox = gr.Checkbox(label="Optimized encoding", value=True)
+            use_global_ffmpeg_checkbox = gr.Checkbox(
+                label="Use global FFmpeg",
+                value=False,
+                info=global_ffmpeg_info,
+                interactive=global_ffmpeg_available,
+            )
+            add_codec_suffix_checkbox = gr.Checkbox(
+                label="Append codec to filename",
+                value=False,
+                info="Append the selected codec (e.g. _h264) to the output filename.",
+            )
             silent_speed_input = gr.Slider(
-                minimum=1.0,
-                maximum=10.0,
-                value=4.0,
-                step=0.1,
-                label="Silent speed",
+                minimum=1.0, maximum=10.0, value=10.0, step=0.1, label="Silent speed"
             )
             sounded_speed_input = gr.Slider(
-                minimum=0.5,
-                maximum=3.0,
-                value=1.0,
-                step=0.01,
-                label="Sounded speed",
+                minimum=0.5, maximum=3.0, value=1.0, step=0.01, label="Sounded speed"
             )
             silent_threshold_input = gr.Slider(
                 minimum=0.0,
@@ -1334,53 +1337,52 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
                 label="Silent threshold",
             )
 
-        cut_enabled_checkbox = gr.Checkbox(
-            label="Cut video",
-            value=False,
-            info=(
-                "Keep only the [start, end] fragment before processing. "
-                "Enter start/end timestamps in seconds below."
-            ),
-        )
-        with gr.Row():
-            cut_start_input = gr.Number(
-                value=0.0,
-                minimum=0.0,
-                label="Cut start (seconds)",
-            )
-            cut_end_input = gr.Number(
-                value=0.0,
-                minimum=0.0,
-                label="Cut end (seconds)",
-                info="0 keeps the video until its end.",
-            )
-
         video_output = gr.Video(label="Processed video")
         summary_output = gr.Markdown()
+        with gr.Accordion("Details", open=False):
+            details_output = gr.Markdown()
         download_output = gr.File(label="Download processed file", interactive=False)
-        log_output = gr.Textbox(label="Log", lines=12, interactive=False)
+        with gr.Accordion("Log", open=False):
+            log_output = gr.Textbox(label="Log", lines=12, interactive=False)
+
+        speedup_radio.change(
+            lambda label: gr.update(value=_speedup_to_silent_speed(label)),
+            inputs=speedup_radio,
+            outputs=silent_speed_input,
+        )
+        cut_enabled_checkbox.change(
+            lambda enabled: gr.update(visible=bool(enabled)),
+            inputs=cut_enabled_checkbox,
+            outputs=cut_row,
+        )
 
         file_input.upload(
-            process_video,
+            process_video_ui,
             inputs=[
                 file_input,
-                small_checkbox,
-                small_480_checkbox,
-                optimize_checkbox,
+                resolution_radio,
+                silent_speed_input,
                 codec_dropdown,
+                optimize_checkbox,
                 add_codec_suffix_checkbox,
                 use_global_ffmpeg_checkbox,
-                silent_threshold_input,
                 sounded_speed_input,
-                silent_speed_input,
+                silent_threshold_input,
                 cut_enabled_checkbox,
                 cut_start_input,
                 cut_end_input,
             ],
-            outputs=[video_output, log_output, summary_output, download_output],
+            outputs=[
+                video_output,
+                log_output,
+                summary_output,
+                details_output,
+                download_output,
+            ],
             queue=True,
-            api_name="process_video",
         )
+
+        gr.api(process_video_api, api_name="process_video")
 
     demo.queue(default_concurrency_limit=max(1, concurrency_limit))
     return demo
