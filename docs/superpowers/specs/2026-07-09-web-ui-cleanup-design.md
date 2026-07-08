@@ -5,7 +5,9 @@
 Reduce clutter and improve mobile/installed-app fit of the Gradio web UI
 (`build_interface` in `talks_reducer/server.py`). The default view should show
 only the essentials; advanced knobs and verbose result details collapse into
-accordions. The result summary becomes a compact one-glance format.
+accordions. The result summary becomes a compact one-glance format. Also enable
+Gradio's built-in PWA support so the installed app is a real PWA (service
+worker + manifest wiring), not just a browser "add to home screen" shortcut.
 
 Constraint: `talks_reducer/service_client.py` consumes the server response as
 **exactly four outputs** (it skips stream frames whose length != 4 and unpacks
@@ -110,6 +112,26 @@ Manual/visual (Gradio layout, can't be asserted headlessly): launch
 `talks-reducer server`, confirm the accordions collapse, the cut row toggles
 with the checkbox, the radios drive processing, and the summary renders in the
 new format. This is called out because it is not covered by automated tests.
+
+## Enable Gradio PWA
+
+Both `demo.launch(...)` calls omit `pwa=True`, so Gradio never registers a
+service worker or its PWA wiring and its Settings panel reports "Progressive Web
+App is not enabled" — even inside an Android install obtained via the browser's
+generic "add to home screen." The custom `PWAManifestMiddleware` still serves
+`/manifest.json` + the branded icon regardless.
+
+Change:
+- Pass `pwa=True` to `demo.launch(...)` in `talks_reducer/server.py` (`main`)
+  and in `talks_reducer/server_tray.py` (the tray launch).
+- The `PWAManifestMiddleware` continues to override the manifest content at the
+  ASGI layer, so Gradio supplies the service worker + wiring and Talks Reducer
+  keeps its branding/icon. No manifest logic changes.
+
+Verified: `pwa` is a valid `Blocks.launch` parameter in the pinned Gradio
+(6.6.0). This is server launch configuration, exercised manually (the Settings
+panel should stop showing the warning and offer install); no unit test asserts
+a live service worker.
 
 ## Out of scope
 
