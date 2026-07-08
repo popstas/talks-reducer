@@ -1055,6 +1055,133 @@ def _stream_pipeline(
     yield ("done", (final_result, "\n".join(collected_logs)))
 
 
+def _resolution_to_flags(resolution: str) -> tuple[bool, bool]:
+    """Map the Resolution radio to ``(small, small_480)``."""
+
+    if resolution == "480p":
+        return True, True
+    if resolution == "720p":
+        return True, False
+    return False, False
+
+
+_SPEEDUP_SILENT_SPEEDS: dict[str, float] = {"1×": 1.0, "5×": 5.0, "10×": 10.0}
+
+
+def _speedup_to_silent_speed(label: str) -> float:
+    """Map the Speedup radio label to a silent-speed multiplier."""
+
+    return _SPEEDUP_SILENT_SPEEDS.get(label, 10.0)
+
+
+def process_video_ui(
+    file_path: Optional[str],
+    resolution: str,
+    silent_speed: Optional[float],
+    video_codec: str,
+    optimize: bool,
+    add_codec_suffix: bool,
+    use_global_ffmpeg: bool,
+    sounded_speed: Optional[float],
+    silent_threshold: Optional[float],
+    cut_enabled: bool,
+    cut_start_seconds: Optional[float],
+    cut_end_seconds: Optional[float],
+    progress: Optional[gr.Progress] = gr.Progress(track_tqdm=False),
+    *,
+    dependencies: Optional[ProcessVideoDependencies] = None,
+) -> Iterator[tuple[Optional[str], str, str, str, Optional[str]]]:
+    """Browser handler: map the new controls and yield 5-tuples.
+
+    The 5-tuple is ``(video, log, summary_compact, details, download)``.
+    ``silent_speed`` is the Advanced slider value (the Speedup radio writes into
+    that slider), so a custom slider value is honored.
+    """
+
+    small_video, small_480 = _resolution_to_flags(resolution)
+
+    for kind, payload in _stream_pipeline(
+        file_path,
+        small_video,
+        small_480,
+        optimize,
+        video_codec,
+        add_codec_suffix,
+        use_global_ffmpeg,
+        silent_threshold,
+        sounded_speed,
+        silent_speed,
+        cut_enabled,
+        cut_start_seconds,
+        cut_end_seconds,
+        dependencies,
+    ):
+        if kind == "log":
+            yield (
+                gr.update(),
+                cast(str, payload),
+                gr.update(),
+                gr.update(),
+                gr.update(),
+            )
+        elif kind == "progress":
+            if progress is not None:
+                current, total, desc = cast(tuple[int, int, str], payload)
+                percent = current / total if total > 0 else 0
+                progress(percent, total=total, desc=desc)
+        elif kind == "done":
+            final_result, log_text = cast(tuple[ProcessingResult, str], payload)
+            compact = _format_summary_compact(final_result)
+            details = _format_details(final_result)
+            output_path = str(final_result.output_file)
+            is_audio_only = Path(final_result.output_file).suffix.lower() == ".mp3"
+            yield (
+                None if is_audio_only else output_path,
+                log_text,
+                compact,
+                details,
+                output_path,
+            )
+
+
+def process_video_api(
+    file_path: Optional[str],
+    small_video: bool,
+    small_480: bool = False,
+    optimize: bool = True,
+    video_codec: str = "h264",
+    add_codec_suffix: bool = False,
+    use_global_ffmpeg: bool = False,
+    silent_threshold: Optional[float] = None,
+    sounded_speed: Optional[float] = None,
+    silent_speed: Optional[float] = None,
+    cut_enabled: bool = False,
+    cut_start_seconds: Optional[float] = None,
+    cut_end_seconds: Optional[float] = None,
+) -> Iterator[tuple[Optional[str], str, str, Optional[str]]]:
+    """Clean-signature wrapper registered via ``gr.api`` (requires type hints).
+
+    Preserves the 13-arg positional contract and 4-tuple output that
+    ``service_client`` depends on.
+    """
+
+    yield from process_video(
+        file_path,
+        small_video,
+        small_480,
+        optimize,
+        video_codec,
+        add_codec_suffix,
+        use_global_ffmpeg,
+        silent_threshold,
+        sounded_speed,
+        silent_speed,
+        cut_enabled,
+        cut_start_seconds,
+        cut_end_seconds,
+    )
+
+
 def process_video(
     file_path: Optional[str],
     small_video: bool,
@@ -1292,6 +1419,8 @@ __all__ = [
     "build_launch_app_kwargs",
     "main",
     "process_video",
+    "process_video_api",
+    "process_video_ui",
 ]
 
 

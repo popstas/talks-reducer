@@ -10,6 +10,7 @@ from typing import Iterator
 
 import gradio as gr
 import pytest
+import pytest as _pytest
 from PIL import Image
 
 from talks_reducer import server, server_tray
@@ -1749,3 +1750,72 @@ def test_process_video_still_yields_four_tuples(tmp_path: Path) -> None:
 
     assert outputs, "process_video should yield at least once"
     assert all(isinstance(o, tuple) and len(o) == 4 for o in outputs)
+
+
+@_pytest.mark.parametrize(
+    "resolution, expected",
+    [("No change", (False, False)), ("720p", (True, False)), ("480p", (True, True))],
+)
+def test_resolution_to_flags(resolution, expected) -> None:
+    assert server._resolution_to_flags(resolution) == expected
+
+
+@_pytest.mark.parametrize(
+    "label, expected", [("1×", 1.0), ("5×", 5.0), ("10×", 10.0), ("???", 10.0)]
+)
+def test_speedup_to_silent_speed(label, expected) -> None:
+    assert server._speedup_to_silent_speed(label) == expected
+
+
+def test_process_video_ui_yields_five_tuples(tmp_path: Path) -> None:
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        assert options.small is True and options.small_target_height != 480
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or input_file,
+            frame_rate=24.0,
+            original_duration=100.0,
+            output_duration=50.0,
+            chunk_count=2,
+            used_cuda=False,
+            max_audio_volume=0.6,
+            time_ratio=0.5,
+            size_ratio=0.5,
+        )
+
+    dependencies = server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+    try:
+        outputs = list(
+            server.process_video_ui(
+                str(input_file),
+                "720p",
+                10.0,
+                "hevc",
+                True,
+                False,
+                False,
+                1.0,
+                0.01,
+                False,
+                0.0,
+                0.0,
+                progress=None,
+                dependencies=dependencies,
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+
+    assert outputs and all(len(o) == 5 for o in outputs)
+    final = outputs[-1]
+    assert "Duration:" in final[2]  # compact summary
+    assert "Chunks merged:** 2" in final[3]  # details slot
