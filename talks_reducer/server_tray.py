@@ -354,6 +354,7 @@ class _ServerTrayApplication:
             prevent_thread_lock=True,
             show_error=True,
             app_kwargs=_build_launch_app_kwargs(),
+            pwa=True,
         )
 
         self._server_handle = server

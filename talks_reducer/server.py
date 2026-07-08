@@ -1404,6 +1404,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         inbrowser=args.open_browser,
         favicon_path=_FAVICON_PATH_STR,
         app_kwargs=build_launch_app_kwargs(),
+        pwa=True,
     )
 
 
