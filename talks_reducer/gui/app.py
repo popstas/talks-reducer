@@ -445,13 +445,8 @@ class TalksReducerGUI:
         # server-managed activity log started below.
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         # A finished run holds its taskbar indicator until the user looks at the
-        # window again; focusing it is that acknowledgement. ``<FocusIn>`` is
-        # delivered to whichever widget takes the keyboard focus, while
-        # ``<Activate>`` reaches the toplevel whenever Windows or macOS makes the
-        # window active — bind both so neither route is missed. ``on_focus`` is
-        # idempotent, so a double delivery is harmless.
+        # window again; focusing it is that acknowledgement.
         self.root.bind("<FocusIn>", self._on_window_focus, add="+")
-        self.root.bind("<Activate>", self._on_window_focus, add="+")
         if self.server_managed:
             self._start_activity_log()
 
