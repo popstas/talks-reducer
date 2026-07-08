@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import subprocess
-from typing import Any, Callable, Mapping, Sequence
+import sys
+from typing import Any, Callable, Mapping, Optional, Sequence
+
+# Desktop Window Manager attributes that toggle the native dark title bar.
+# Windows 10 20H1+ uses attribute 20; earlier 10 builds used 19.
+DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19
 
 STATUS_COLORS = {
     "idle": "#9ca3af",
@@ -90,6 +96,74 @@ def detect_system_theme(
     if "dark" in theme:
         return "dark"
     return "light"
+
+
+TitleBarSetter = Callable[[int, bool], bool]
+
+
+def _default_title_bar_setter(hwnd: int, dark: bool) -> bool:
+    """Toggle the native Windows title bar via the DWM API using ``ctypes``.
+
+    Returns ``True`` when the attribute is accepted. Safe to call only on
+    Windows; any missing library or API error yields ``False``.
+    """
+
+    import ctypes  # imported lazily so non-Windows platforms never load it
+    import ctypes.wintypes as wintypes
+
+    try:
+        dwmapi = ctypes.windll.dwmapi  # type: ignore[attr-defined]
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        return False
+
+    # Tk wraps its top-level in a frame; the titled window is usually the
+    # parent, so prefer it and fall back to the reported handle.
+    top_hwnd = user32.GetParent(hwnd) or hwnd
+    value = ctypes.c_int(1 if dark else 0)
+    for attribute in (
+        DWMWA_USE_IMMERSIVE_DARK_MODE,
+        DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1,
+    ):
+        result = dwmapi.DwmSetWindowAttribute(
+            wintypes.HWND(top_hwnd),
+            ctypes.c_int(attribute),
+            ctypes.byref(value),
+            ctypes.sizeof(value),
+        )
+        if result == 0:
+            return True
+    return False
+
+
+def apply_windows_title_bar_theme(
+    window: Any,
+    *,
+    dark: bool,
+    platform: Optional[str] = None,
+    dwm_setter: Optional[TitleBarSetter] = None,
+) -> bool:
+    """Match the native window title bar to the active theme on Windows.
+
+    This is a no-op on non-Windows platforms and whenever the window handle or
+    the DWM API is unavailable, returning ``False`` in those cases and ``True``
+    when the title bar attribute was applied.
+    """
+
+    resolved_platform = sys.platform if platform is None else platform
+    if not resolved_platform.startswith("win"):
+        return False
+
+    try:
+        hwnd = window.winfo_id()
+    except Exception:
+        return False
+
+    setter = dwm_setter or _default_title_bar_setter
+    try:
+        return bool(setter(hwnd, bool(dark)))
+    except Exception:
+        return False
 
 
 def apply_theme(

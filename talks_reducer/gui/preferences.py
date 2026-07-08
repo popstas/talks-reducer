@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Mapping, MutableMapping, Optional
 
 from . import layout as layout_helpers
-from .theme import DARK_THEME, LIGHT_THEME, apply_theme, detect_system_theme
+from .theme import (
+    DARK_THEME,
+    LIGHT_THEME,
+    apply_theme,
+    apply_windows_title_bar_theme,
+    detect_system_theme,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from .app import TalksReducerGUI
@@ -348,6 +354,7 @@ class PreferenceController:
                 "status_state": self.gui._status_state,
             },
         )
+        apply_windows_title_bar_theme(self.gui.root, dark=mode == "dark")
 
     def toggle_simple_mode(self) -> None:
         self.gui.preferences.update("simple_mode", self.gui.simple_mode_var.get())
