@@ -501,6 +501,17 @@ def test_format_file_size_uses_human_readable_units() -> None:
     assert server._format_file_size(5 * 1024 * 1024) == "5.0 MB"
 
 
+def test_coerce_file_path_extracts_path_from_filedata_dict() -> None:
+    assert server._coerce_file_path("/tmp/clip.mp4") == "/tmp/clip.mp4"
+    assert server._coerce_file_path(None) is None
+    assert (
+        server._coerce_file_path({"path": "/tmp/x.mp4", "orig_name": "x.mp4"})
+        == "/tmp/x.mp4"
+    )
+    # falls back to "name" if "path" absent/empty
+    assert server._coerce_file_path({"path": "", "name": "/tmp/y.mp4"}) == "/tmp/y.mp4"
+
+
 def test_process_video_honors_small_480_flag(tmp_path: Path) -> None:
     input_file = tmp_path / "clip.mp4"
     input_file.write_bytes(b"data")

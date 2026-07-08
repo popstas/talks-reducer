@@ -929,6 +929,22 @@ class ProcessVideoDependencies:
     start_in_thread: bool = True
 
 
+def _coerce_file_path(value: object) -> Optional[str]:
+    """Normalize a Gradio file input to a local filepath string.
+
+    The ``gr.api`` endpoint delivers uploads as a FileData dict (with a
+    ``path`` key) rather than the filepath string the ``gr.File`` UI component
+    resolves, so accept either form.
+    """
+
+    if isinstance(value, dict):
+        path = value.get("path") or value.get("name")
+        return str(path) if path else None
+    if value is None:
+        return None
+    return str(value)
+
+
 def _stream_pipeline(
     file_path: Optional[str],
     small_video: bool,
@@ -952,6 +968,7 @@ def _stream_pipeline(
     finally ``("done", (result, full_log))``. Raises ``gr.Error`` on failure.
     """
 
+    file_path = _coerce_file_path(file_path)
     if not file_path:
         raise gr.Error("Please upload a video file to begin processing.")
 
