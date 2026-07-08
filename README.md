@@ -44,29 +44,35 @@ onto the executable) automatically queues that recording for processing.
 
 ## OBS Processing Dock (Windows)
 
-For OBS Studio recordings, a Custom Browser Dock can start Talks Reducer right
-after you stop a take — pick resolution (1080p / 720p / 480p), silent speed
-(1× / 5× / 10×), and codec, then click a button. The dock connects to OBS over
-obs-websocket, reads the last recording path from `RecordStateChanged`, and
-sends jobs to a small local Node.js helper that spawns `talks-reducer.exe` with
-the matching CLI flags.
+For OBS Studio recordings, a Custom Browser Dock starts Talks Reducer right after
+you stop a take — pick resolution (1080p / 720p / 480p), silent speed
+(1× / 5× / 10×), and codec, then click a button. The built-in
+`talks-reducer dock-server` hosts the dock UI and runs the jobs, so no extra
+runtime is required.
 
-**Requirements:** OBS WebSocket server enabled, [Node.js](https://nodejs.org/),
-and Talks Reducer installed (default exe:
-`%LOCALAPPDATA%\Programs\talks-reducer\talks-reducer.exe`).
+![OBS Processing Dock](docs/assets/obs-dock.png)
 
-1. Start the helper (keep it running while streaming):
+**Set it up in OBS:**
 
-```powershell
-.\scripts\obs-processing-dock\obs-talks-reducer.ps1
-```
+1. Start the dock server (keep it running while recording) — or let the Windows
+   installer add it to autostart:
 
-2. In OBS: **Docks → Custom Browser Docks** → add a dock pointing at
-   `file:///…/scripts/obs-processing-dock/dock.html`.
+   ```powershell
+   talks-reducer dock-server
+   ```
 
-Full setup, Task Scheduler (headless logon via `conhost.exe --headless
-powershell.exe …`), payload format, and troubleshooting:
-[scripts/obs-processing-dock/README.md](scripts/obs-processing-dock/README.md).
+2. In OBS, enable **Tools → WebSocket Server Settings → Enable WebSocket server**
+   and note the password.
+3. In OBS, open **Docks → Custom Browser Docks…** and add a dock with URL
+   `http://127.0.0.1:17890/`.
+4. In the dock's **Settings**, enter the OBS WebSocket password and press
+   **Enter** (or click Connect). When the status turns green, stop a recording and
+   the speed buttons light up.
+
+Because the executable is windowless, you can autostart it at logon (installer
+checkbox or Task Scheduler) and stop it cleanly. Full setup, the
+`--port`/`--host`/`--exe` options, and troubleshooting:
+[docs/obs-dock.md](docs/obs-dock.md).
 
 ## Install CLI (Linux, Windows, macOS)
 

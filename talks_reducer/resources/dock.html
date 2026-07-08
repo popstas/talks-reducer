@@ -141,6 +141,17 @@
       min-width: 3.5em;
     }
 
+    #processingControls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #processingControls.hidden {
+      display: none;
+    }
+
     button {
       border: 0;
       border-radius: 3px;
@@ -203,6 +214,28 @@
       margin-bottom: 8px;
     }
 
+    .connection-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .connection-actions button {
+      flex: 1 1 auto;
+    }
+
+    .toolbar-connect {
+      min-width: 8em;
+    }
+
+    .toolbar-notice {
+      color: var(--bad);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .toolbar-notice.warn { color: var(--warn); }
+
     .hidden { display: none; }
 
     @media (min-width: 301px) {
@@ -236,17 +269,22 @@
   <div class="wrap">
     <div class="card">
       <div class="toolbar">
-        <div class="radio-group">
-          <label class="radio-pill"><input type="radio" name="resolution" value="1080p" /> 1080p</label>
-          <label class="radio-pill"><input type="radio" name="resolution" value="720p" checked /> 720p</label>
-          <label class="radio-pill"><input type="radio" name="resolution" value="480p" /> 480p</label>
+        <div id="processingControls" class="hidden">
+          <div class="radio-group">
+            <label class="radio-pill"><input type="radio" name="resolution" value="1080p" /> 1080p</label>
+            <label class="radio-pill"><input type="radio" name="resolution" value="720p" checked /> 720p</label>
+            <label class="radio-pill"><input type="radio" name="resolution" value="480p" /> 480p</label>
+          </div>
+
+          <div class="buttons">
+            <button data-speed="1" disabled>1x</button>
+            <button data-speed="5" disabled>5x</button>
+            <button data-speed="10" disabled>10x</button>
+          </div>
         </div>
 
-        <div class="buttons">
-          <button data-speed="1" disabled>1x</button>
-          <button data-speed="5" disabled>5x</button>
-          <button data-speed="10" disabled>10x</button>
-        </div>
+        <button id="toolbarConnectBtn" class="toolbar-connect">Connect</button>
+        <span id="toolbarNotice" class="toolbar-notice hidden"></span>
 
         <details class="settings">
           <summary>Settings</summary>
@@ -282,7 +320,10 @@
                 <input id="obsPassword" type="password" placeholder="optional" />
               </div>
             </div>
-            <button id="connectBtn">Connect to OBS</button>
+            <div class="connection-actions">
+              <button id="connectBtn">Connect to OBS</button>
+              <button id="disconnectBtn" class="hidden">Disconnect</button>
+            </div>
           </div>
         </details>
       </div>
@@ -291,10 +332,17 @@
 
 <script>
 (() => {
-  const PROCESS_URL = 'http://127.0.0.1:17890/process';
+  // Prefer the origin the page was served from (so any --port works and the
+  // dock can be opened straight from the dock-server). Fall back to the default
+  // port when loaded as a local file:// document inside OBS.
+  const PROCESS_URL = location.origin && location.origin.startsWith('http')
+    ? location.origin + '/process'
+    : 'http://127.0.0.1:17890/process';
   const DEFAULT_EXE = '%LOCALAPPDATA%\\Programs\\talks-reducer\\talks-reducer.exe';
   const DEFAULT_CODEC = 'hevc';
   const ALLOWED_CODECS = new Set(['h264', 'hevc', 'av1', 'mp3']);
+  const INITIAL_RETRY_DELAY_MS = 1000;
+  const MAX_RETRY_DELAY_MS = 60000;
 
   const $ = (id) => document.getElementById(id);
   const obsUrl = $('obsUrl');
@@ -305,11 +353,24 @@
   const obsStatus = $('obsStatus');
   const obsStatusWrap = $('obsStatusWrap');
   const connectBtn = $('connectBtn');
+  const disconnectBtn = $('disconnectBtn');
+  const toolbarConnectBtn = $('toolbarConnectBtn');
+  const toolbarNotice = $('toolbarNotice');
+  const processingControls = $('processingControls');
+  const settings = document.querySelector('.settings');
   const logEl = $('log');
   const speedButtons = document.querySelectorAll('button[data-speed]');
 
   let ws = null;
   let connected = false;
+  let authFailed = false;
+  let manualDisconnect = false;
+  let autoConnectEnabled = true;
+  let retryAttempt = 0;
+  let retryTimer = null;
+  let connectTimeoutTimer = null;
+  let connectGeneration = 0;
+  let connectSettled = false;
   let lastRecordingPath = '';
 
   obsUrl.value = localStorage.getItem('obsDock.obsUrl') || obsUrl.value;
@@ -327,14 +388,105 @@
     logEl.textContent = `[${time}] ${message}\n` + logEl.textContent;
   }
 
-  function setObsStatus(kind, text) {
-    obsDot.className = 'dot' + (kind ? ` ${kind}` : '');
-    obsStatus.textContent = text;
-    obsStatusWrap.classList.toggle('hidden', kind === 'ok');
-    connectBtn.textContent = kind === 'ok' ? 'Connected to OBS' : 'Connect to OBS';
-    connectBtn.disabled = kind === 'ok';
+  function setNotice(text, kind) {
+    toolbarNotice.textContent = text || '';
+    toolbarNotice.className = 'toolbar-notice' + (kind ? ` ${kind}` : '');
+    toolbarNotice.classList.toggle('hidden', !text);
   }
 
+  function clearNotice() {
+    setNotice('', '');
+  }
+
+  function notifyAuthRequired(message) {
+    log(message);
+    setNotice(message, 'bad');
+    setObsStatus('', 'OBS: password required');
+    if (settings) settings.open = true;
+    try { obsPassword.focus(); } catch (_) {}
+  }
+
+  function setObsStatus(kind, text) {
+    const isConnected = kind === 'ok';
+    const isConnecting = kind === 'warn';
+
+    obsDot.className = 'dot' + (kind ? ` ${kind}` : '');
+    obsStatus.textContent = text;
+    obsStatusWrap.classList.toggle('hidden', isConnected);
+
+    processingControls.classList.toggle('hidden', !isConnected);
+    toolbarConnectBtn.classList.toggle('hidden', isConnected);
+    toolbarConnectBtn.disabled = isConnecting;
+    toolbarConnectBtn.textContent = isConnecting ? 'Connecting…' : 'Connect';
+
+    connectBtn.classList.toggle('hidden', isConnected);
+    connectBtn.disabled = isConnecting;
+    disconnectBtn.classList.toggle('hidden', !isConnected);
+  }
+
+  function getRetryDelayMs(attempt) {
+    return Math.min(INITIAL_RETRY_DELAY_MS * (2 ** attempt), MAX_RETRY_DELAY_MS);
+  }
+
+  function clearConnectTimers() {
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    if (connectTimeoutTimer) {
+      clearTimeout(connectTimeoutTimer);
+      connectTimeoutTimer = null;
+    }
+  }
+
+  function stopAutoConnect() {
+    autoConnectEnabled = false;
+    clearConnectTimers();
+    connectGeneration += 1;
+  }
+
+  function scheduleAutoConnectRetry(reason) {
+    if (!autoConnectEnabled) return;
+
+    clearConnectTimers();
+    const delayMs = getRetryDelayMs(retryAttempt);
+    const nextAttempt = retryAttempt + 1;
+    retryAttempt += 1;
+
+    const delaySec = delayMs / 1000;
+    setObsStatus('', `OBS: retry in ${delaySec}s`);
+    log(`${reason} Retrying in ${delaySec}s (attempt ${nextAttempt}).`);
+
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (autoConnectEnabled) connectObs();
+    }, delayMs);
+  }
+
+  function settleConnectAttempt(generation, reason, retry = true) {
+    if (generation !== connectGeneration || connectSettled) return;
+
+    connectSettled = true;
+    clearConnectTimers();
+    connected = false;
+
+    if (retry && autoConnectEnabled && !manualDisconnect) {
+      scheduleAutoConnectRetry(reason);
+      return;
+    }
+
+    setObsStatus('', 'OBS: disconnected');
+  }
+
+  function closeWebSocket() {
+    if (!ws) return;
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
+    ws.close();
+    ws = null;
+  }
   function setLastFile(path) {
     lastRecordingPath = path || '';
     updateProcessButtons();
@@ -377,7 +529,7 @@
     if (data.authentication) {
       const password = obsPassword.value;
       if (!password) {
-        log('OBS требует пароль. Введи пароль и нажми Connect again.');
+        authFailed = true;
         ws.close();
         return;
       }
@@ -387,12 +539,35 @@
     ws.send(JSON.stringify({ op: 1, d: identify }));
   }
 
-  function connectObs() {
-    if (ws) ws.close();
+  function disconnectObs() {
+    manualDisconnect = true;
+    stopAutoConnect();
+    closeWebSocket();
+    connected = false;
+    setLastFile('');
+    setObsStatus('', 'OBS: disconnected');
+    log('Disconnected from OBS.');
+  }
+
+  function connectObs({ manual = false } = {}) {
+    if (manual) {
+      autoConnectEnabled = true;
+      manualDisconnect = false;
+      authFailed = false;
+      retryAttempt = 0;
+      clearConnectTimers();
+      clearNotice();
+    }
+
+    closeWebSocket();
+    connectGeneration += 1;
+    connectSettled = false;
+    const generation = connectGeneration;
 
     localStorage.setItem('obsDock.obsUrl', obsUrl.value);
     localStorage.setItem('obsDock.obsPassword', obsPassword.value);
 
+    const attemptTimeoutMs = getRetryDelayMs(retryAttempt);
     setObsStatus('warn', 'OBS: connecting');
     log(`Connecting to ${obsUrl.value}`);
 
@@ -400,13 +575,25 @@
       ws = new WebSocket(obsUrl.value, 'obswebsocket.json');
     } catch (e) {
       log(`WebSocket error: ${e.message}`);
-      setObsStatus('', 'OBS: error');
+      settleConnectAttempt(generation, 'Connect failed.');
       return;
     }
 
-    ws.onopen = () => log('WebSocket opened, waiting for Hello...');
+    connectTimeoutTimer = setTimeout(() => {
+      if (generation !== connectGeneration || connectSettled || connected) return;
+      log(`Connection timed out after ${attemptTimeoutMs / 1000}s.`);
+      closeWebSocket();
+      settleConnectAttempt(generation, 'Connection timed out.');
+    }, attemptTimeoutMs);
+
+    ws.onopen = () => {
+      if (generation !== connectGeneration) return;
+      log('WebSocket opened, waiting for Hello...');
+    };
 
     ws.onmessage = async (event) => {
+      if (generation !== connectGeneration) return;
+
       const msg = JSON.parse(event.data);
 
       if (msg.op === 0) {
@@ -415,7 +602,14 @@
       }
 
       if (msg.op === 2) {
+        clearConnectTimers();
+        connectSettled = true;
+        authFailed = false;
+        retryAttempt = 0;
         connected = true;
+        manualDisconnect = false;
+        clearNotice();
+        if (settings) settings.open = false;
         setObsStatus('ok', 'OBS: connected');
         log('OBS identified. Waiting for recording stop event.');
         return;
@@ -433,14 +627,50 @@
     };
 
     ws.onerror = () => {
-      setObsStatus('', 'OBS: websocket error');
+      if (generation !== connectGeneration) return;
       log('OBS WebSocket error. Проверь Tools → WebSocket Server Settings.');
     };
 
     ws.onclose = (event) => {
+      if (generation !== connectGeneration) return;
+
+      const wasConnected = connected;
       connected = false;
-      setObsStatus('', 'OBS: disconnected');
-      log(`OBS WebSocket closed: ${event.code || ''} ${event.reason || ''}`.trim());
+      ws = null;
+      clearConnectTimers();
+
+      if (manualDisconnect) {
+        connectSettled = true;
+        manualDisconnect = false;
+        setObsStatus('', 'OBS: disconnected');
+        return;
+      }
+
+      // OBS closes with 4009 (AuthenticationFailed) on a wrong password; our
+      // own authFailed flag covers a missing password. Stop the retry loop and
+      // prompt for the password instead of hammering OBS with bad credentials.
+      if (authFailed || event.code === 4009) {
+        connectSettled = true;
+        stopAutoConnect();
+        notifyAuthRequired(
+          event.code === 4009
+            ? 'Неверный пароль OBS. Введите пароль и нажмите Connect.'
+            : 'OBS требует пароль. Введите пароль и нажмите Connect.'
+        );
+        return;
+      }
+
+      if (wasConnected) {
+        log(`OBS WebSocket closed: ${event.code || ''} ${event.reason || ''}`.trim());
+        setLastFile('');
+        settleConnectAttempt(generation, 'OBS disconnected.');
+        return;
+      }
+
+      if (!connectSettled) {
+        log(`OBS WebSocket closed: ${event.code || ''} ${event.reason || ''}`.trim());
+        settleConnectAttempt(generation, 'Connect failed.');
+      }
     };
   }
 
@@ -478,11 +708,19 @@
       log(text);
     } catch (e) {
       log(`Processing server error: ${e.message}`);
-      log('Запусти obs-talks-reducer.ps1 из папки dock.');
+      log('Запусти talks-reducer dock-server.');
     }
   }
 
-  connectBtn.addEventListener('click', connectObs);
+  connectBtn.addEventListener('click', () => connectObs({ manual: true }));
+  toolbarConnectBtn.addEventListener('click', () => connectObs({ manual: true }));
+  disconnectBtn.addEventListener('click', disconnectObs);
+  obsPassword.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      connectObs({ manual: true });
+    }
+  });
   talksReducerExe.addEventListener('change', () => {
     localStorage.setItem('obsDock.talksReducerExe', talksReducerExe.value.trim() || DEFAULT_EXE);
   });
@@ -500,6 +738,7 @@
   });
 
   updateProcessButtons();
+  setObsStatus('', 'OBS: disconnected');
   connectObs();
 })();
 </script>

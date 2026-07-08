@@ -7,17 +7,22 @@ Talks Reducer processing with one click.
 
 The dock connects to OBS over obs-websocket, captures the path of the last
 stopped recording, and exposes quick controls for resolution, silent-speed, and
-codec. A small local Node.js server (`process-server.js`) receives HTTP requests
-from the dock and spawns `talks-reducer.exe` with the matching CLI flags.
+codec. Talks Reducer ships a built-in local HTTP server —
+`talks-reducer dock-server` — that hosts the dock UI and receives its requests,
+spawning a Talks Reducer job with the matching CLI flags.
 
 This keeps OBS and Talks Reducer loosely coupled: OBS only needs the browser
-dock and WebSocket server; Talks Reducer runs as a normal CLI process with the
-same arguments you would use from a terminal or shortcut.
+dock and WebSocket server; Talks Reducer runs as a normal process with the same
+arguments you would use from a terminal or shortcut.
+
+Because the server is part of the (windowless) Talks Reducer executable, there is
+**no separate Node.js runtime and no PowerShell/VBS window-hiding wrapper**. The
+scheduled task runs a single process, so stopping it (Task Scheduler → **End**)
+closes everything cleanly.
 
 ## Requirements
 
 - OBS Studio with **WebSocket server** enabled (`Tools → WebSocket Server Settings`)
-- [Node.js](https://nodejs.org/) (for `process-server.js`)
 - Installed **Talks Reducer** executable (Windows installer or local build)
 
 Default executable path:
@@ -28,16 +33,23 @@ Default executable path:
 
 ## Setup
 
-1. Start the local processing server:
+1. Start the dock server:
 
 ```powershell
-.\obs-talks-reducer.ps1
+talks-reducer dock-server
 ```
 
-To start automatically at logon with no window, see
-[Run at logon (Task Scheduler)](#run-at-logon-task-scheduler).
+It listens on `http://127.0.0.1:17890` by default and serves the dock UI at that
+address. Options:
 
-The server listens on `http://127.0.0.1:17890` by default.
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--port` | `17890` (env `OBS_DOCK_PORT`) | HTTP listen port |
+| `--host` | `127.0.0.1` | Interface to bind |
+| `--exe` | `%LOCALAPPDATA%\...\talks-reducer.exe` (env `OBS_DOCK_EXE`) | Fallback executable when a request omits `exe` |
+
+To start automatically at logon with no window, see
+[Run at logon](#run-at-logon).
 
 2. In OBS, add a Custom Browser Dock:
 
@@ -48,9 +60,9 @@ Docks → Custom Browser Docks
 | Field | Value |
 | --- | --- |
 | Name | `Processing` (or any label) |
-| URL | `file:///D:/path/to/scripts/obs-processing-dock/dock.html` |
+| URL | `http://127.0.0.1:17890/` |
 
-Replace the path with the real location of `dock.html` on your machine.
+The dock UI is served by `dock-server`, so the URL follows `--host`/`--port`.
 
 3. Open **Settings** in the dock and confirm:
 
@@ -99,8 +111,8 @@ Settings are stored in the browser `localStorage` under keys prefixed with
    `outputPath` as the last recording.
 3. Clicking **1x**, **5x**, or **10x** sends a JSON `POST` to `/process` on the
    local server.
-4. `process-server.js` validates the payload, resolves the executable path, and
-   spawns Talks Reducer in the background.
+4. The server validates the payload, resolves the executable path, and spawns
+   Talks Reducer in the background.
 
 ### HTTP payload
 
@@ -145,59 +157,53 @@ talks-reducer.exe recording.mkv --small --silent-speed 5 --video-codec hevc
 Output files follow normal Talks Reducer naming (for example `_speedup` /
 `_small` suffixes) next to the source recording.
 
-## Server configuration
+## Run at logon
 
-Environment variables read by `process-server.js`:
+### Windows installer (easiest)
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `OBS_DOCK_PORT` | `17890` | HTTP listen port |
-| `OBS_DOCK_EXE` | `%LOCALAPPDATA%\Programs\talks-reducer\talks-reducer.exe` | Fallback executable when the dock does not send `exe` |
+The Talks Reducer Windows installer offers two **OBS Processing Dock** checkboxes
+(both **off by default**):
 
-Example:
+- **Add "OBS Dock Server" to the Start menu** — a shortcut that runs
+  `talks-reducer dock-server`.
+- **Start the OBS Dock Server automatically at logon** — adds the same shortcut
+  to your per-user Startup folder.
 
-```cmd
-set OBS_DOCK_PORT=17891
-set OBS_DOCK_EXE=D:\tools\talks-reducer.exe
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File obs-talks-reducer.ps1
-```
+The installer also closes any running Talks Reducer instances (including the dock
+server) before updating, so the executable can be replaced; enable the Startup
+checkbox to have it relaunch on the next logon.
 
-## Run at logon (Task Scheduler)
+### Task Scheduler (manual)
 
-Use Task Scheduler to start the HTTP server when you sign in, with no visible
-console. The task runs PowerShell headlessly via `conhost.exe --headless`.
+Because `talks-reducer.exe` is windowless, no wrapper is needed — schedule the
+executable directly. Stopping the task (**End**) terminates the single process
+cleanly.
 
 1. Open **Task Scheduler** (`taskschd.msc`).
 2. **Create Task…** (not “Create Basic Task”).
 3. **General** tab:
    - Name: `OBS Talks Reducer`
-   - Select **Run only when user is logged on**
-   - Check **Hidden**
+   - Select **Run only when user is logged on** (the dock's `--open-location`
+     reveals output in Explorer on your desktop, which requires your session)
 4. **Triggers** tab → **New…** → **At log on** → OK.
 5. **Actions** tab → **New…**:
    - Action: **Start a program**
-   - Program/script: `conhost.exe`
-   - Add arguments:
-
-```text
---headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "D:\path\to\scripts\obs-processing-dock\obs-talks-reducer.ps1"
-```
-
-   Replace the path with your real folder.
+   - Program/script: `%LOCALAPPDATA%\Programs\talks-reducer\talks-reducer.exe`
+   - Add arguments: `dock-server`
 6. **Conditions** tab — uncheck **Start the task only if the computer is on AC power** if you use a laptop on battery.
 7. OK and enter your Windows password if prompted.
 
 ### `schtasks` one-liner
 
 ```cmd
-schtasks /Create /TN "OBS Talks Reducer" /SC ONLOGON /RL LIMITED /F /TR "conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"D:\path\to\scripts\obs-processing-dock\obs-talks-reducer.ps1\""
+schtasks /Create /TN "OBS Talks Reducer" /SC ONLOGON /RL LIMITED /F /TR "\"%LOCALAPPDATA%\Programs\talks-reducer\talks-reducer.exe\" dock-server"
 ```
 
 ### Verify
 
-After logon, the dock should reach `http://127.0.0.1:17890/process`. If jobs
-fail with “Processing server error”, check that Node.js is on your user `PATH`
-(the scheduled task runs in your account, not as a service).
+After logon, browse to `http://127.0.0.1:17890/` — the dock UI should load. If
+jobs fail with “Executable not found”, check the **Talks Reducer** path in
+Settings.
 
 To remove the task:
 
@@ -205,20 +211,12 @@ To remove the task:
 schtasks /Delete /TN "OBS Talks Reducer" /F
 ```
 
-## Files
-
-| File | Role |
-| --- | --- |
-| `dock.html` | OBS browser dock UI and OBS WebSocket client |
-| `process-server.js` | Local HTTP server that spawns Talks Reducer |
-| `obs-talks-reducer.ps1` | PowerShell launcher for the Node server |
-
 ## Troubleshooting
 
 - **Speed buttons stay disabled** — stop a recording while the dock is open; OBS
   must emit `RecordStateChanged` with `outputPath`.
-- **Processing server error** — ensure `obs-talks-reducer.ps1` is running (or the
-  Task Scheduler job is active) and the port matches (`17890` by default).
+- **Processing server error** — ensure `talks-reducer dock-server` is running (or
+  the Task Scheduler job is active) and the port matches (`17890` by default).
 - **Executable not found** — check the path in Settings; use `%LOCALAPPDATA%` for
   the standard per-user install location.
 - **OBS WebSocket errors** — verify WebSocket is enabled in OBS and the password

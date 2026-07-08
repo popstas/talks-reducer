@@ -60,9 +60,18 @@ SetupIconFile={#APP_ICON}
 WizardStyle=modern
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
+; Remember the task selections (shortcuts, dock-server options) from the previous
+; install and pre-select them on the next install/upgrade.
+UsePreviousTasks=yes
 Compression=lzma
 SolidCompression=yes
 UninstallDisplayIcon={app}\talks-reducer.exe
+; Close running Talks Reducer instances (GUI, tray, dock-server) via the Restart
+; Manager so their locked files can be replaced during an update. A taskkill
+; fallback in [Code] force-closes anything the Restart Manager cannot.
+CloseApplications=yes
+CloseApplicationsFilter=talks-reducer.exe
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -70,6 +79,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 Name: "addcontext"; Description: "Register ""Open with Talks Reducer"" in Explorer"; GroupDescription: "Shell integration:"; Flags: unchecked
+Name: "dockserver_startmenu"; Description: "Add ""OBS Dock Server"" to the Start menu"; GroupDescription: "OBS Processing Dock:"; Flags: unchecked
+Name: "dockserver_startup"; Description: "Start the OBS Dock Server automatically at logon"; GroupDescription: "OBS Processing Dock:"; Flags: unchecked
 
 [Files]
 Source: "{#SOURCE_DIR}*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -78,6 +89,8 @@ Source: "{#SOURCE_DIR}*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdi
 Name: "{group}\Talks Reducer"; Filename: "{app}\talks-reducer.exe"; WorkingDir: "{app}"; IconFilename: "{app}\talks-reducer.exe"
 Name: "{group}\Uninstall Talks Reducer"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\Talks Reducer"; Filename: "{app}\talks-reducer.exe"; Tasks: desktopicon; WorkingDir: "{app}"; IconFilename: "{app}\talks-reducer.exe"
+Name: "{group}\OBS Dock Server"; Filename: "{app}\talks-reducer.exe"; Parameters: "dock-server"; Tasks: dockserver_startmenu; WorkingDir: "{app}"; IconFilename: "{app}\talks-reducer.exe"
+Name: "{userstartup}\Talks Reducer OBS Dock Server"; Filename: "{app}\talks-reducer.exe"; Parameters: "dock-server"; Tasks: dockserver_startup; WorkingDir: "{app}"; IconFilename: "{app}\talks-reducer.exe"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\*\shell\OpenWithTalksReducer"; ValueType: string; ValueName: ""; ValueData: "Open with Talks Reducer"; Tasks: addcontext; Flags: uninsdeletekeyifempty
@@ -89,4 +102,19 @@ Root: HKCU; Subkey: "Software\Classes\Directory\shell\OpenWithTalksReducer\comma
 
 [Run]
 Filename: "{app}\talks-reducer.exe"; Description: "Launch Talks Reducer"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\talks-reducer.exe"; Parameters: "dock-server"; Description: "Launch OBS dock server"; Tasks: dockserver_startup; Flags: nowait postinstall skipifsilent
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  { Fallback for CloseApplications: force-close any Talks Reducer instance the
+    Restart Manager could not (e.g. the windowless dock-server) so the files can
+    be overwritten during an update. Best-effort: a non-zero exit code (nothing
+    running) is ignored. }
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM talks-reducer.exe /F /T',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
+end;
 

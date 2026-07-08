@@ -611,6 +611,22 @@ def _launch_server(argv: Sequence[str]) -> bool:
     return True
 
 
+def _launch_dock_server(argv: Sequence[str]) -> bool:
+    """Launch the OBS processing dock HTTP server in-process."""
+
+    try:
+        dock_module = import_module(".dock_server", __package__)
+    except ImportError:
+        return False
+
+    dock_main = getattr(dock_module, "main", None)
+    if dock_main is None:
+        return False
+
+    dock_main(list(argv))
+    return True
+
+
 def _find_server_tray_binary() -> Optional[Path]:
     """Return the best available path to the server tray executable."""
 
@@ -736,6 +752,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if argv_list and argv_list[0] in {"server", "serve"}:
         if not _launch_server(argv_list[1:]):
             print("Gradio server mode is unavailable.", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if argv_list and argv_list[0] in {"dock-server", "obs-dock"}:
+        if not _launch_dock_server(argv_list[1:]):
+            print("Dock server mode is unavailable.", file=sys.stderr)
             sys.exit(1)
         return
 
