@@ -1255,6 +1255,9 @@ def process_video(
             )
 
 
+_WEB_UI_CSS = ".tr-codec { max-width: 22rem; } .tr-codec .wrap { min-height: 0; }"
+
+
 def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
     """Construct the Gradio Blocks application for the simple web UI.
 
@@ -1272,10 +1275,7 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
         f" v{app_version}" if app_version and app_version != "unknown" else ""
     )
 
-    with gr.Blocks(
-        title=f"Talks Reducer Web UI{version_suffix}",
-        css=".tr-codec { max-width: 22rem; } .tr-codec .wrap { min-height: 0; }",
-    ) as demo:
+    with gr.Blocks(title=f"Talks Reducer Web UI{version_suffix}") as demo:
         gr.Markdown(f"## Talks Reducer Web UI{version_suffix}")
         with gr.Accordion("About", open=False):
             gr.Markdown(f"""
@@ -1422,6 +1422,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         favicon_path=_FAVICON_PATH_STR,
         app_kwargs=build_launch_app_kwargs(),
         pwa=True,
+        css=_WEB_UI_CSS,
     )
 
 

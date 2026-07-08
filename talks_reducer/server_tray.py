@@ -17,7 +17,7 @@ from urllib.parse import urlsplit, urlunsplit
 from PIL import Image, ImageChops
 
 from .icons import iter_icon_candidates
-from .server import build_interface
+from .server import _WEB_UI_CSS, build_interface
 from .server import build_launch_app_kwargs as _build_launch_app_kwargs
 from .server_args import build_server_parser
 from .version_utils import resolve_version
@@ -355,6 +355,7 @@ class _ServerTrayApplication:
             show_error=True,
             app_kwargs=_build_launch_app_kwargs(),
             pwa=True,
+            css=_WEB_UI_CSS,
         )
 
         self._server_handle = server
