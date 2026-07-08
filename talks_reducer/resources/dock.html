@@ -228,6 +228,14 @@
       min-width: 8em;
     }
 
+    .toolbar-notice {
+      color: var(--bad);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .toolbar-notice.warn { color: var(--warn); }
+
     .hidden { display: none; }
 
     @media (min-width: 301px) {
@@ -276,6 +284,7 @@
         </div>
 
         <button id="toolbarConnectBtn" class="toolbar-connect">Connect</button>
+        <span id="toolbarNotice" class="toolbar-notice hidden"></span>
 
         <details class="settings">
           <summary>Settings</summary>
@@ -346,12 +355,15 @@
   const connectBtn = $('connectBtn');
   const disconnectBtn = $('disconnectBtn');
   const toolbarConnectBtn = $('toolbarConnectBtn');
+  const toolbarNotice = $('toolbarNotice');
   const processingControls = $('processingControls');
+  const settings = document.querySelector('.settings');
   const logEl = $('log');
   const speedButtons = document.querySelectorAll('button[data-speed]');
 
   let ws = null;
   let connected = false;
+  let authFailed = false;
   let manualDisconnect = false;
   let autoConnectEnabled = true;
   let retryAttempt = 0;
@@ -374,6 +386,24 @@
   function log(message) {
     const time = new Date().toLocaleTimeString();
     logEl.textContent = `[${time}] ${message}\n` + logEl.textContent;
+  }
+
+  function setNotice(text, kind) {
+    toolbarNotice.textContent = text || '';
+    toolbarNotice.className = 'toolbar-notice' + (kind ? ` ${kind}` : '');
+    toolbarNotice.classList.toggle('hidden', !text);
+  }
+
+  function clearNotice() {
+    setNotice('', '');
+  }
+
+  function notifyAuthRequired(message) {
+    log(message);
+    setNotice(message, 'bad');
+    setObsStatus('', 'OBS: password required');
+    if (settings) settings.open = true;
+    try { obsPassword.focus(); } catch (_) {}
   }
 
   function setObsStatus(kind, text) {
@@ -499,7 +529,7 @@
     if (data.authentication) {
       const password = obsPassword.value;
       if (!password) {
-        log('OBS требует пароль. Введи пароль и нажми Connect again.');
+        authFailed = true;
         ws.close();
         return;
       }
@@ -523,8 +553,10 @@
     if (manual) {
       autoConnectEnabled = true;
       manualDisconnect = false;
+      authFailed = false;
       retryAttempt = 0;
       clearConnectTimers();
+      clearNotice();
     }
 
     closeWebSocket();
@@ -572,9 +604,12 @@
       if (msg.op === 2) {
         clearConnectTimers();
         connectSettled = true;
+        authFailed = false;
         retryAttempt = 0;
         connected = true;
         manualDisconnect = false;
+        clearNotice();
+        if (settings) settings.open = false;
         setObsStatus('ok', 'OBS: connected');
         log('OBS identified. Waiting for recording stop event.');
         return;
@@ -608,6 +643,20 @@
         connectSettled = true;
         manualDisconnect = false;
         setObsStatus('', 'OBS: disconnected');
+        return;
+      }
+
+      // OBS closes with 4009 (AuthenticationFailed) on a wrong password; our
+      // own authFailed flag covers a missing password. Stop the retry loop and
+      // prompt for the password instead of hammering OBS with bad credentials.
+      if (authFailed || event.code === 4009) {
+        connectSettled = true;
+        stopAutoConnect();
+        notifyAuthRequired(
+          event.code === 4009
+            ? 'Неверный пароль OBS. Введите пароль и нажмите Connect.'
+            : 'OBS требует пароль. Введите пароль и нажмите Connect.'
+        );
         return;
       }
 
@@ -666,6 +715,12 @@
   connectBtn.addEventListener('click', () => connectObs({ manual: true }));
   toolbarConnectBtn.addEventListener('click', () => connectObs({ manual: true }));
   disconnectBtn.addEventListener('click', disconnectObs);
+  obsPassword.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      connectObs({ manual: true });
+    }
+  });
   talksReducerExe.addEventListener('change', () => {
     localStorage.setItem('obsDock.talksReducerExe', talksReducerExe.value.trim() || DEFAULT_EXE);
   });
