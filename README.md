@@ -1,22 +1,37 @@
 # Talks Reducer [![Coverage Status](https://coveralls.io/repos/github/popstas/talks-reducer/badge.svg?branch=master)](https://coveralls.io/github/popstas/talks-reducer?branch=master)
 
-Talks Reducer shortens long-form presentations by removing silent gaps and optionally re-encoding them to smaller files. The
-project was renamed from **jumpcutter** to emphasize its focus on conference talks and screencasts.
+Talks Reducer shortens long-form videos by removing silent gaps and optionally
+re-encoding them to much smaller files.
 
 ![Main demo](docs/assets/screencast-main.gif)
 
 ## Example
+
 - 1h 37m, 571 MB — Original OBS video recording
 - 1h 19m, 751 MB — Talks Reducer
 - 1h 19m, 171 MB — Talks Reducer `--small`
 
-## Changelog
+## Features
 
-See [CHANGELOG.md](CHANGELOG.md).
+- **Speeds up the silence** — no montage editing.
+- **Shrinks the file** — typically 8–10× smaller, web-friendly.
+- **Fast** — in-memory audio/video processing, auto GPU encoding.
+- **Extract audio** — export an audio-only `.mp3` instead of video.
+- **Simple mode** — one drop zone, minimum settings.
+- **Remote mode** — offload to your fastest machine.
+- **Watch mode** — convert the latest video from a recordings folder.
+- **OBS integration** — convert buttons inside an OBS dock.
+- **LNK presets** — drag a video onto a preset shortcut to convert.
+- **Mobile app / WebUI** — use a remote server from your phone.
+- **CLI mode** — batch files and directories from the terminal.
 
-## Install GUI (Windows, macOS)
+## Install
 
-### macOS (Homebrew)
+### Windows
+
+Download the installer from the [releases page](https://github.com/popstas/talks-reducer/releases)
+
+### macOS
 
 ```sh
 brew tap popstas/talks-reducer
@@ -24,459 +39,109 @@ brew trust --cask popstas/talks-reducer/talks-reducer
 brew install --cask talks-reducer
 ```
 
-> Homebrew 6.0.0+ requires `brew trust --cask` to approve a cask from a
-> third-party tap before it can be installed. Without it, the install fails with
-> a "Refusing to load cask from untrusted tap" error.
+> Homebrew 6.0.0+ requires `brew trust --cask` to approve a cask from a third-party tap
+> before it can be installed. Without it, the install fails with a "Refusing to load cask
+> from untrusted tap" error.
 
-### Manual download
+### pip / pipx / uv (Linux, Windows, macOS)
 
-Go to the [releases page](https://github.com/popstas/talks-reducer/releases) and download the appropriate artifact:
-
-- **Windows** — `talks-reducer-windows-0.4.0.zip`
-- **macOS** — `talks-reducer.app.zip`
-
-  > **Troubleshooting:** If launching the bundle (or running `python -m talks_reducer.gui`) prints `macOS 26 (2600) or later required, have instead 16 (1600)!`, make sure you're using a Python build that ships a modern Tk. The stock [python.org 3.13.5 installer](https://www.python.org/downloads/release/python-3135/) includes Tk 8.6 and has been verified to work.
-
-When extracted on Windows the bundled `talks-reducer.exe` behaves like running
-`python -m talks_reducer.gui`: double-clicking it launches the GUI
-and passing a video file path (for example via *Open with…* or drag-and-drop
-onto the executable) automatically queues that recording for processing.
+```sh
+pip install talks-reducer      # install the CLI and GUI
+pipx install talks-reducer     # or into an isolated environment
+uv tool install talks-reducer  # or with uv
+```
 
 ## OBS Processing Dock (Windows)
 
-For OBS Studio recordings, a Custom Browser Dock starts Talks Reducer right after
-you stop a take — pick resolution (1080p / 720p / 480p), silent speed
-(1× / 5× / 10×), and codec, then click a button. The built-in
-`talks-reducer dock-server` hosts the dock UI and runs the jobs, so no extra
-runtime is required.
+For OBS Studio recordings, a Custom Browser Dock starts Talks Reducer right after you stop
+a take — pick resolution, silent speed, and codec, then click a button.
 
 ![OBS Processing Dock](docs/assets/obs-dock.png)
 
 **Set it up in OBS:**
 
-1. Start the dock server (keep it running while recording) — or let the Windows
+1. Start the dock server and keep it running while you record — or let the Windows
    installer add it to autostart:
 
    ```powershell
    talks-reducer dock-server
    ```
 
-2. In OBS, enable **Tools → WebSocket Server Settings → Enable WebSocket server**
-   and note the password.
+2. In OBS, enable **Tools → WebSocket Server Settings → Enable WebSocket server** and note
+   the password.
 3. In OBS, open **Docks → Custom Browser Docks…** and add a dock with URL
    `http://127.0.0.1:17890/`.
-4. In the dock's **Settings**, enter the OBS WebSocket password and press
-   **Enter** (or click Connect). When the status turns green, stop a recording and
-   the speed buttons light up.
+4. In the dock's **Settings**, enter the OBS WebSocket password and press **Enter**. When
+   the status turns green, stop a recording and the speed buttons light up.
 
-Because the executable is windowless, you can autostart it at logon (installer
-checkbox or Task Scheduler) and stop it cleanly. Full setup, the
-`--port`/`--host`/`--exe` options, and troubleshooting:
-[docs/obs-dock.md](docs/obs-dock.md).
+Full setup, options, and troubleshooting: [docs/obs-dock.md](docs/obs-dock.md).
 
-## Install CLI (Linux, Windows, macOS)
-
-### pipx / pip
-
-```
-pip install talks-reducer
-```
-
-**Note:** FFmpeg is now bundled automatically with the package, so you don't need to install it separately.
-
-By default the CLI applies the same tuned encoder settings everywhere: adaptive keyframes, 128 kbps AAC audio, and NVENC fallbacks that previously lived behind `--small`. The `--small` preset now layers on a 720p scale (or 480p with `--480`) for a smaller output, while `--no-optimize` switches to a speed-focused CUDA preset that prioritizes turnaround time over compression efficiency. Pass `--720` to force the 720p scale explicitly — handy on a seeded GUI launch, where it unchecks the **Target 480p** box even if your stored preference enabled it. Likewise `--no-small` force-disables the preset, overriding a stored `--small` preference and unchecking the **Small video** box on a seeded launch.
-
-Example CLI usage:
+## Command line
 
 ```sh
-talks-reducer input.mp4  # optimized encoding at the source resolution
-talks-reducer --small input.mp4  # optimized encoding plus 720p scaling
-talks-reducer --no-small input.mp4  # force the small preset off, overriding a stored preference
-talks-reducer --no-optimize input.mp4  # fastest CUDA preset with a _fast suffix when applicable
+talks-reducer input.mp4                                    # tuned encode at the source resolution
+talks-reducer --small input.mp4                            # same, scaled down to 720p
+talks-reducer --480 input.mp4                              # scale down to 480p instead
+talks-reducer --video-codec mp3 talk.mp4                   # export audio only, as .mp3
+talks-reducer --cut-start 00:00:10 --cut-end 00:01:00 demo.mp4  # keep only 10s–60s
+talks-reducer --url http://localhost:9005 demo.mp4         # process on a remote server
 ```
 
-Need to offload work to a remote Talks Reducer server? Pass `--url` with the
-server address and the CLI will upload the input, wait for processing to finish,
-and download the rendered video. You can also provide `--host` to expand to the
-default Talks Reducer port (`http://<host>:9005`):
+Every input can also be a directory, and you can pass as many as you like in one run.
+
+→ Full flag reference — codecs, keyframes, silence thresholds, trimming, remote options:
+[docs/cli.md](docs/cli.md).
+
+## Remote server
+
+Run Talks Reducer on the machine with the fast GPU and send jobs to it from anywhere on
+your network — laptops, phones, or other desktops.
 
 ```sh
-talks-reducer --url http://localhost:9005 demo.mp4
-talks-reducer --host 192.168.1.42 demo.mp4
+talks-reducer server        # browser interface in the terminal
+talks-reducer server-tray   # same server, tucked into the system tray
 ```
 
-Remote jobs respect the same timing controls as the local CLI. Provide
-`--silent_threshold`, `--sounded_speed`, or `--silent_speed` to tweak how the
-server trims and accelerates segments without falling back to local mode.
-
-Need a different compression target? HEVC (`--video-codec hevc`) is now the
-default and targets roughly 25% smaller files with tuned presets, adaptive
-quantization, and multipass lookahead. Switch to `--video-codec h264` when you
-need the quickest NVENC path or `--video-codec av1` to experiment with modern
-AV1 output. Choose `--video-codec mp3` to skip video entirely and export an
-**audio-only `.mp3`** (encoded with `libmp3lame -q:a 2`, ~190 kbps VBR): the talk
-is still silence-trimmed and speed-adjusted exactly as usual, but the result is a
-`<name>.mp3` file instead of `<name>.mp4`. When the mp3 codec is selected you can
-also feed **audio-only inputs** (for example `.m4a`, `.wav`, or `.aac`) — files
-without a video stream are accepted only in this mode; the other codecs still
-require a video stream.
-Every interface—the CLI, GUI, and browser UI—shares the same encoder choices so
-you can pick once and get consistent results everywhere.
-
-Bundled FFmpeg builds prioritise compatibility, but they may lack newer GPU
-encoders such as `av1_nvenc`. When your local FFmpeg install exposes additional
-hardware options, add `--prefer-global-ffmpeg` so the CLI and GUI prefer the
-binary on your `PATH` before falling back to the static package.
-
-Tuned the jumpiness of the new scrolling-friendly preset in commit
-`c25a8f7b2dcb2735782bff71b02ee6a30445fa9e` and want to claw some bitrate back?
-Pass `--keyframe-interval 15` (or any other positive number of seconds) to space
-keyframes further apart when using `--small`, trading seek responsiveness for a
-smaller output file. The advanced GUI slider defaults to 30 seconds and lets you
-pick anywhere between snappy one-second GOPs and ultra-light 60-second spacing.
-
-Only need a fragment of a recording? Trim it down before the speed-up encode
-with `--cut-start` and `--cut-end`. Both accept either seconds (`12.5`) or a
-timecode (`HH:MM:SS[.ms]`, `MM:SS`, or `SS`) and define a *keep range* like a
-video editor: `--cut-start` is the timestamp to start keeping and `--cut-end` is
-the timestamp to stop keeping. Leave `--cut-end` at its `0` default to keep
-everything to the end of the file. Both default to `0`, so omitting them leaves
-the input untouched (no `-ss`/`-t` is added to FFmpeg). The trimmed span is what
-drives progress and target-duration reporting, so the bars stay accurate.
+Open the printed `http://localhost:9005` address, drop a video on the page, and download
+the result when it finishes. Use `--host` and `--port` to bind somewhere else:
 
 ```sh
-talks-reducer --cut-start 00:00:10 --cut-end 00:01:00 demo.mp4  # keep 10s–60s
-talks-reducer --cut-start 90 demo.mp4  # drop the first 90 seconds, keep to EOF
+talks-reducer server --host 0.0.0.0 --port 7860
 ```
 
-Want to see progress as the remote server works? Add `--server-stream` so the
-CLI prints live progress bars and log lines while you wait for the download. The
-stream walks through every stage of the job: an `Uploading:` bar that advances
-incrementally with the bytes sent (instead of jumping straight to 100%) while the
-file is sent to the server, an `Extracting audio:` bar once the upload is
-received, an `Audio processing:` bar driven by the real phase-vocoder work
-(instead of a synthetic estimate), and a `Generating final:` bar for the encode.
-Progress keeps advancing after audio processing finishes rather than stalling
-until the encode completes. Once processing is done a `Downloading:` bar reports
-the finished file being fetched back from the server. The client now fetches the
-processed file exactly once (it previously downloaded it twice, since the server
-exposes the same file as both a preview and a download), so downloads finish in
-about half the time.
+Prefer not to touch the terminal? The desktop GUI's **Advanced** panel has a **Run as
+server in tray** checkbox that starts the same tray-managed server (and keeps the setting
+for next launch).
 
-### Speech detection
+To send work from another machine, point the CLI or the desktop GUI at the server with
+`--url http://<server>:9005` (or `--host <server>`).
 
-Talks Reducer now relies on its built-in volume thresholding to detect speech. Adjust `--silent_threshold` if you need to fine-tune when segments count as silence. Dropping the optional Silero VAD integration keeps the install lightweight and avoids pulling in PyTorch.
+→ Server and tray options, the operator view, and scripted uploads:
+[docs/server.md](docs/server.md).
 
-When CUDA-capable hardware is available the pipeline leans on GPU encoders to keep export times low, but it still runs great on
-CPUs.
+## Install as an app (PWA)
 
-## Simple web server
+The web interface is an installable Progressive Web App. Open it in a Chromium-based
+browser and choose **Install app** to get a standalone Talks Reducer window with its own
+icon.
 
-Prefer a lightweight browser interface? Launch the Gradio-powered simple mode with:
+Browsers only offer installation over `https://` or `http://localhost`, so put a TLS proxy
+in front of a LAN server if the install prompt does not appear.
 
-```sh
-talks-reducer server
-```
+This also works from a phone: install the page served by a Talks Reducer server on your
+network, then upload recordings to it like any other app.
 
-The browser UI mirrors the CLI timing controls with sliders for the silent
-threshold and playback speeds, so you can tune exports without leaving the
-remote workflow.
+## Changelog
 
-The web UI is also an installable Progressive Web App (PWA): open it in a
-Chromium-based browser and use **Install app** to add a standalone Talks Reducer
-window with the app's own icon (served from `/manifest.json` and
-`/talks-reducer-icon.png`). Browsers only offer installation over `https://` or
-`http://localhost`, so reach a LAN server through a TLS proxy if the install
-prompt does not appear.
-
-By default the server processes one job at a time. Pass `--concurrency N` to let
-several clients process simultaneously (each concurrent job runs its own FFmpeg,
-so keep `N` small). Note this only affects concurrent *processing* — file
-uploads and downloads are served outside the queue, so it does not speed up a
-single client's transfer.
-
-Want the server to live in your system tray instead of a terminal window? Use:
-
-```sh
-talks-reducer server-tray
-```
-
-Bundled Windows builds include the same behaviour: run
-`talks-reducer.exe --server` to launch the tray-managed server directly from the
-desktop shortcut without opening the GUI first.
-
-On Windows you can also create a desktop shortcut to `talks-reducer.exe` with
-preset flags (for example `talks-reducer.exe --small --silent-speed 5`) and drop
-a video file onto it in Explorer. Instead of doing nothing, the GUI opens
-pre-seeded with the dropped file and the shortcut's flags applied to the matching
-controls (Small video, silent speed, codec, output/temp paths, and — via
-`--host` — the remote server URL with Remote mode enabled), then processing
-starts automatically. Flag names accept either hyphens or underscores
-(`--silent-speed` and `--silent_speed` both work). Launching such a shortcut
-*without* a file (for example by double-clicking it) simply opens the GUI with
-those settings applied so you can drop files in. Only the flags you pass are
-applied; your stored preferences are preserved for everything else.
-
-Two GUI-only flags control what happens *after* a seeded conversion finishes,
-without adding any checkbox to the window: `--open-location` reveals each
-exported file in the system file manager (regardless of the saved "Open after
-convert" setting), and `--auto-close` closes the window once every queued file
-finishes successfully (it stays open on error so you can read the log). For
-example, a shortcut carrying `--small --open-location --auto-close` converts a
-dropped recording, shows the result in Explorer, and closes itself.
-
-Pass `--debug` to print verbose logs about the tray icon lifecycle, and
-`--tray-mode pystray-detached` to try pystray's alternate detached runner. If
-the icon backend refuses to appear, fall back to `--tray-mode headless` to keep
-the web server running without a tray process.
-
-On macOS the tray icon must run on the process' main thread because pystray's
-AppKit backend drives the Cocoa run loop there. The default `--tray-mode
-pystray` already does this, so launch the tray with `talks-reducer server-tray`
-(the bundled pip app's `--server` entry point) and the icon appears in the menu
-bar as a monochrome template image that automatically follows the light or dark
-menu bar. `--tray-mode pystray-detached` cannot render on macOS—it runs the icon on a
-worker thread—so the launcher automatically downgrades it to the blocking
-`pystray` runner and logs a warning. When you only need the web server (for
-example over SSH or in a headless build), pass `--tray-mode headless` to skip
-the icon entirely and reach the server at its printed URL. The tray menu
-highlights the
-running Talks Reducer version and includes an **Open GUI**
-item (also triggered by double-clicking the icon) that launches the desktop
-Talks Reducer interface alongside an **Open WebUI** entry that opens the Gradio
-page in your browser. Close the GUI window to return to the tray without
-stopping the server. Launch the tray explicitly whenever you need it—either run
-`talks-reducer server-tray` directly or start the GUI with
-`python -m talks_reducer.gui --server` to boot the tray-managed server instead
-of the desktop window. The GUI now runs standalone and no longer spawns the tray
-automatically; the deprecated `--no-tray` flag is ignored for compatibility.
-The tray command itself never launches the GUI automatically, so use the menu
-item (or relaunch the GUI separately) whenever you want to reopen it. The tray
-no longer opens a browser automatically—pass `--open-browser` if you prefer the
-web page to launch as soon as the server is ready.
-
-Want both the server and the desktop GUI to appear together (handy for the
-macOS pip app)? Add `--with-gui` to start the GUI window alongside the
-tray-managed server in one launch:
-
-```sh
-talks-reducer server-tray --with-gui
-```
-
-The same flag works through the GUI launcher—`python -m talks_reducer.gui
---server --with-gui` boots the tray-managed server and opens the desktop window
-together. The GUI runs in its own process and is shut down cleanly when the
-server stops.
-
-You no longer need the terminal to reach this mode. The desktop GUI's
-**Advanced** panel now has a persisted **Run as server in tray** checkbox that
-switches into the tray-managed experience with one click—handy on macOS, where
-double-clicking the `.app` previously only opened the plain window. Ticking it
-relaunches the app into `server-tray --with-gui` mode (a detached process) and
-closes the current window; the menu-bar/system-tray icon appears and the window
-returns as a `--server-managed` child. Unticking it from that managed window
-relaunches the plain desktop GUI and stops the parent tray (and its server). The
-preference lives in the same `settings.json` as the other GUI toggles, so the
-next cold start boots straight into server-tray mode when it is left enabled.
-Because pystray's tray icon and Tkinter's event loop both require the process
-main thread on macOS and cannot share one process, the tray always runs as the
-parent and the GUI as a child—the toggle simply relaunches the app in whichever
-arrangement you asked for. The default is off, so existing standalone launches
-are unchanged.
-
-When the desktop window is launched this way, the tray passes it
-`--server-managed` and `--server-url <local url>` so the GUI knows it is running
-alongside a managed server. In this mode the window gains two extra pieces of
-server-operator feedback:
-
-- A **Server:** label next to the **Processing mode** controls shows the
-  LAN-reachable address (for example `Server: http://192.168.1.42:9005`) so you
-  can read off the URL other machines on your network should open. The label is
-  hidden when the GUI runs standalone (without `--server-managed`).
-- A **Connected clients** panel lists recent client activity—each line shows
-  `HH:MM:SS  <client IP>  <action>` for the uploads, downloads, and processing
-  jobs other users send to the server. The GUI polls the server's read-only
-  `GET /activity` endpoint about every 5 seconds and tolerates the server being
-  temporarily unreachable without crashing or spamming the log.
-
-These controls only appear in server-managed mode; the standalone GUI
-(`python -m talks_reducer.gui` without `--server-managed`) is unchanged.
-
-The read-only `GET /activity` endpoint is mounted on **every** server launch
-(not only when a managed GUI is attached). It returns
-`{"server": {"identity", "url"}, "entries": [{"timestamp", "client_ip",
-"action"}]}`, where `action` is `upload`, `download`, or `process` and `url` is
-the LAN-reachable address other machines should open. The recorder keeps the
-last 100 requests in memory (process-local, not persisted). Because the
-endpoint is unauthenticated, anyone who can reach the server port can read which
-client IPs have used it.
-
-This opens a local web page featuring a drag-and-drop upload zone, **Small video**, **Target 480p**, and **Optimized encoding** checkboxes that mirror the CLI presets, a **Video codec** dropdown that switches between h.265 (25% smaller), h.264 (10% faster), av1 (no advantages), and mp3 (audio only), a **Use global FFmpeg** toggle (disabled automatically when no system binary is detected) to prioritise the system binary when you need encoders the bundled build lacks, a **Cut video** checkbox plus always-visible **Cut start**/**Cut end** number inputs (in seconds); the keep range is applied only when the checkbox is ticked—scrub with the embedded player to find the timestamps—a live
-progress indicator, and automatic previews of the processed output. The page header and browser tab title include the current
-Talks Reducer version so you can confirm which build the server is running. Once the job completes you can inspect the resulting
-compression ratio and download the rendered video directly from the page.
-The desktop GUI mirrors this behaviour. A **Video codec** picker in the
-basic options lets you swap between h.265 (25% smaller), h.264 (10% faster), av1 (no advantages), and mp3 (audio only) without touching the CLI. Open **Advanced** settings to provide a
-server URL and click **Discover** to scan your local network for Talks Reducer
-instances listening on port `9005`. The button now updates with the discovery
-progress, showing the scanned/total host count as `scanned / total`. A new
-**Processing mode** toggle lets you decide whether work stays local or uploads
-to the configured server—the **Remote** option becomes available as soon as a
-URL is supplied. Leave the toggle on **Local** to keep rendering on this
-machine even if a server is saved; switch to **Remote** to hand jobs off while
-the GUI downloads the finished files automatically. Whether you render locally
-or stream from a remote server, the desktop progress bar advances through stable
-ranges as the job moves between stages—upload (0–5%), audio extraction (5–20%),
-audio processing (20–35%), and final encoding (35–100%)—so it keeps moving after
-audio processing instead of stalling until the encode finishes. The bar only ever
-moves forward within a file, so a GPU→CPU encoder fallback no longer snaps it
-backward. When a remote job finishes encoding, the GUI shows a refreshing
-**Waiting for download…** status during the short gap before the file transfer
-begins, so the window never sits silently at 100% while the server prepares the
-result. The download bar itself now advances to 100% exactly once instead of
-cycling through 100% several times. While a remote upload or download is in
-flight the status also shows the live transfer rate next to the percentage, e.g.
-`Uploading: 55%, 5.5 MB/s`. While you're there, enable
-**Use global FFmpeg** whenever your PATH provides newer GPU encoders—the toggle disables itself when no system binary is available—and adjust
-**Keyframe interval (s)** under **Advanced** to balance scroll smoothness and
-output size without touching the CLI. Tick **Cut video** (an **Advanced-only**
-control—it is hidden in Simple mode) to reveal two linked start/end range
-sliders, each paired with an editable time field that accepts manual
-`HH:MM:SS.mmm` input (millisecond precision), plus a tall **Convert** button
-spanning both rows. After you pick a file the slider range is set from the video
-duration, and conversion does not start automatically: adjust the keep range and
-click **Convert** when you are ready. The checkbox state and last start/end
-values persist across launches; clearing it (or switching to Simple mode) omits
-the trim entirely. The **Advanced** panel also exposes a **Run as server in
-tray** checkbox (default off) that relaunches the app into the tray-managed
-server mode described above and persists the choice for the next launch.
-
-- **Watch directory** — an Advanced setting: choose a folder and Talks Reducer
-  polls it (~2s) for the most-recently-modified video. The main action button
-  then shows **"Convert `<filename>`"** for a raw recording, or **"Open last"**
-  when the newest file is already processed (its name contains `_speedup` or
-  `_small`). The button is available in both Simple and Advanced modes; the
-  folder chooser lives under Advanced. The choice persists across launches
-  (`watch_enabled`, `watch_directory`).
-
-On **Windows** the taskbar button mirrors the in-window progress bar while a
-conversion runs, so you can minimize the app and still watch the job advance.
-When the run ends the taskbar keeps showing the result—full green on success,
-red on failure—until you focus the window again; pressing **Stop** clears it
-right away. Other platforms have no equivalent indicator and simply skip it.
-
-On every platform the GUI also **rings the system bell** when a run finishes or
-fails, so you hear the result without watching the window. It stays silent when
-the window is already focused—you can see the result—and when you stop a run
-yourself.
-
-The GUI also remembers **where you last placed the window**. On close it saves
-the window's screen position (`window_x`, `window_y` in `settings.json`) and
-reopens there on the next launch; the width/height still follow the Simple/Full
-layout as before. A position saved on a monitor that is no longer connected is
-ignored so the window never reopens off-screen—the operating system places it
-instead.
-
-On Windows, the full (non-Simple) layout shows a **Create lnk** button next to
-the **Advanced** button (hidden on other platforms). It opens a small dialog
-where you tick the presets you want—
-**Small**, **720** or **480** (these imply Small), **Silent speed**, **Sounded
-speed**, **Silent threshold**, **Codec**, and **Auto close and open file
-location** (adds `--auto-close --open-location` so the shortcut closes the GUI
-and reveals the exported file when each convert finishes)—each pre-checked to
-match your current GUI state. A live preview shows the resulting command line as you toggle
-options, and clicking **Create** writes a `.lnk` shortcut to your Desktop seeded
-with those CLI flags. The shortcut doubles as a drop-target: drag a video onto it
-to launch the GUI with the chosen presets and auto-convert the file.
-
-On macOS, the **Advanced** panel adds a **Check updates** button that queries the
-latest GitHub release and compares it against the running version. When a newer
-release is found it reports the available version with the command to apply it,
-`brew upgrade --cask talks-reducer`, alongside a link to the Releases page. macOS
-builds are unsigned and distributed through the
-[`popstas/homebrew-talks-reducer`](https://github.com/popstas/homebrew-talks-reducer)
-tap, so the button never downloads or installs anything automatically—you upgrade
-with Homebrew. The Windows build keeps its own **Check updates** button (next to
-the run controls) that downloads and launches the installer, then closes the app
-automatically so the installer can replace the running executable.
-
-### Uploading and retrieving a processed video
-
-1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
-2. Drag a video onto the **Video file** drop zone or click to browse and select one from disk.
-3. **Optimized encoding** stays enabled to apply the tuned codec arguments, and **Small video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to downscale further or clear the checkboxes before the upload finishes to keep the original resolution and bitrate. Use the **Video codec** dropdown to decide between the default h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) compression profiles, or pick **mp3 (audio only)** to export an audio-only `.mp3` instead of a video, and enable **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the bundled build omits before you submit. Disable **Optimized encoding** or pass `--no-optimize` when you want the fastest CUDA-oriented preset.
-4. Wait for the progress bar and log to report completion—the interface queues work automatically after the file arrives. While the file uploads the server console streams `Receiving upload: …%` lines as the bytes arrive, then logs an `Upload received:` line with the filename and size, then streams the `Extracting audio:`, `Audio processing:`, and `Generating final:` stages back to the browser so you can watch real progress for each phase. As the finished file is sent back to the client the console streams matching `Sending download <filename>: …%` lines.
-5. Watch the processed preview in the **Processed video** player and click **Download processed file** to save the result locally. When you choose the **mp3 (audio only)** codec the result has no video stream, so the preview stays empty and you simply use **Download processed file** to grab the `.mp3`.
-
-Need to change where the server listens? Run `talks-reducer server --host 0.0.0.0 --port 7860` (or any other port) to bind to a
-different address.
-
-### Automating uploads from the command line
-
-Prefer to script uploads instead of using the browser UI? Start the server and use the bundled helper to submit a job and save
-the processed video locally:
-
-```sh
-python -m talks_reducer.service_client --server http://127.0.0.1:9005/ --input demo.mp4 --output output/demo_processed.mp4
-```
-
-The helper wraps the Gradio API exposed by `server.py`, waits for processing to complete, then copies the rendered file to the
-path you provide. Pass `--small` (and optionally `--480`) to mirror the **Small video**/**Target 480p** checkboxes, toggle `--no-optimize` to disable the optimized encoding preset, `--video-codec hevc`, `--video-codec h264`, `--video-codec av1`, or `--video-codec mp3` (audio-only `.mp3` output) to match the codec radio buttons, `--add-codec-suffix` to append the selected codec to the default output filename, `--prefer-global-ffmpeg` to reuse the system FFmpeg before the bundled copy, or `--print-log` to stream the server log after the
-download finishes.
-
-## Windows installer packaging
-
-The repository ships an Inno Setup script that wraps the PyInstaller GUI bundle
-into a per-user installer named `talks-reducer-<version>-setup.exe`.
-
-1. Build the PyInstaller distribution so that `dist/talks-reducer` contains
-   `talks-reducer.exe` and its support files (for example by running
-   `scripts\build-gui.sh`).
-2. Install [Inno Setup](https://jrsoftware.org/isinfo.php) on a Windows machine.
-3. Compile the installer with:
-   ```powershell
-   iscc /DAPP_VERSION=$(python -c "import talks_reducer.__about__ as a; print(a.__version__)") `
-        /DSOURCE_DIR=..\dist\talks-reducer `
-        /DAPP_ICON=..\talks_reducer\resources\icons\app.ico `
-        scripts\talks-reducer-installer.iss
-   ```
-   or use the convenience wrapper on Windows runners:
-   ```bash
-   bash scripts/build-installer.sh
-   ```
-   Override `/DAPP_ICON=...` or `/DAPP_PUBLISHER=...` (or set `APP_ICON`/`APP_PUBLISHER`
-   when calling the wrapper) if you need custom branding.
-
-The installer defaults to `C:\Users\%USERNAME%\AppData\Local\Programs\talks-reducer`,
-creates Start Menu and desktop shortcuts, and registers an **Open with Talks
-Reducer** shell entry for files and folders so that you can launch the GUI with a
-dropped path. Use the Additional Tasks page at install time to skip the optional
-shortcuts or shell integration.
-
-## Faster PyInstaller builds
-
-PyInstaller spends most of its time walking imports. To keep GUI builds snappy:
-
-- Create a dedicated virtual environment for packaging the GUI and install only
-  the runtime dependencies you need (for example `pip install -r
-  requirements.txt -r scripts/requirements-pyinstaller.txt`). Avoid installing
-  heavy ML stacks such as Torch or TensorFlow in that environment so PyInstaller
-  never attempts to analyze them.
-- Use the committed `talks-reducer.spec` file via `./scripts/build-gui.sh`.
-  The spec excludes Torch, TensorFlow, TensorBoard, torchvision/torchaudio,
-  Pandas, Qt bindings, setuptools' vendored helpers, and other bulky modules
-  that previously slowed the analysis stage. Set
-  `PYINSTALLER_EXTRA_EXCLUDES=module1,module2` if you need to drop additional
-  imports for an experimental build.
-- Keep optional imports in the codebase lazy (wrapped in `try/except` or moved
-  inside functions) so the analyzer only sees the dependencies required for the
-  shipping GUI.
-
-The script keeps incremental build artifacts in `build/` between runs. Pass
-`--clean` to `scripts/build-gui.sh` when you want a full rebuild.
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
-See `CONTRIBUTION.md` for development setup details and guidance on sharing improvements.
+
+See [CONTRIBUTION.md](CONTRIBUTION.md) for development setup details and guidance on sharing improvements.
 
 ## License
+
+It grew out of [gegell/jumpcutter](https://github.com/gegell/jumpcutter)
+and was renamed from **jumpcutter** to emphasize its focus on conference talks and screencasts.
+
 Talks Reducer is released under the MIT License. See `LICENSE` for the full text.

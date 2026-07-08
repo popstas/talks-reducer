@@ -13,6 +13,9 @@ For reproducible GUI bundles, also install the pinned PyInstaller toolchain:
 pip install -r scripts/requirements-pyinstaller.txt
 ```
 
+See [docs/build.md](docs/build.md) for the Windows installer packaging steps and tips on
+keeping PyInstaller builds fast.
+
 Ensure FFmpeg is installed and available on your command line. Visit [ffmpeg.org](https://ffmpeg.org) for platform-specific guidance.
 
 ## Running the Tool from Source
