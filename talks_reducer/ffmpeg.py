@@ -720,7 +720,7 @@ def build_video_commands(
     small: bool,
     frame_rate: Optional[float] = None,
     keyframe_interval_seconds: float = 30.0,
-    video_codec: str = "hevc",
+    video_codec: str = "h264",
     keep_input_audio: bool = False,
     cut_start_seconds: float = 0.0,
     cut_end_seconds: float = 0.0,
@@ -764,9 +764,9 @@ def build_video_commands(
     if filter_script:
         output_parts.append(f'-filter_script:v "{filter_script}"')
 
-    codec_choice = (video_codec or "hevc").strip().lower()
+    codec_choice = (video_codec or "h264").strip().lower()
     if codec_choice not in {"h264", "hevc", "av1"}:
-        codec_choice = "hevc"
+        codec_choice = "h264"
 
     video_encoder_args: List[str]
     fallback_encoder_args: List[str] = []

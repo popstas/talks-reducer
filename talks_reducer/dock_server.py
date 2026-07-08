@@ -132,7 +132,7 @@ def handle_process(payload: dict, default_exe: Optional[str] = None) -> Tuple[in
 
     input_file = str(payload.get("file") or "").strip()
     resolution = str(payload.get("resolution") or "").strip()
-    codec = str(payload.get("codec") or "hevc").strip()
+    codec = str(payload.get("codec") or "h264").strip()
     auto_close = bool(payload.get("autoClose"))
     exe_path = resolve_exe_path(payload.get("exe") or default_exe)
 

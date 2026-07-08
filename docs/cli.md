@@ -26,10 +26,10 @@ talks-reducer --no-optimize input.mp4  # fastest CUDA preset with a _fast suffix
 
 ## Video codec
 
-Need a different compression target? HEVC (`--video-codec hevc`) is the default and targets
-roughly 25% smaller files with tuned presets, adaptive quantization, and multipass
-lookahead. Switch to `--video-codec h264` when you need the quickest NVENC path or
-`--video-codec av1` to experiment with modern AV1 output.
+Need a different compression target? H.264 (`--video-codec h264`) is the default: it is
+about 10% faster and the most widely compatible option. Switch to `--video-codec hevc`
+(H.265) to target roughly 25% smaller files with tuned presets, adaptive quantization, and
+multipass lookahead, or `--video-codec av1` to experiment with modern AV1 output.
 
 Choose `--video-codec mp3` to skip video entirely and export an **audio-only `.mp3`**
 (encoded with `libmp3lame -q:a 2`, ~190 kbps VBR): the talk is still silence-trimmed and

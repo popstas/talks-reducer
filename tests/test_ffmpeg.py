@@ -608,6 +608,7 @@ def test_build_video_commands_small_cuda(monkeypatch):
         optimize=True,
         small=True,
         frame_rate=30.0,
+        video_codec="hevc",
     )
 
     assert "-c:v libx265" in command
@@ -635,7 +636,7 @@ def test_build_video_commands_small_cpu(monkeypatch):
         frame_rate=30.0,
     )
 
-    assert "-c:v libx265" in command
+    assert "-c:v libx264" in command
     assert "-g 900" in command
     assert "-keyint_min 900" in command
     assert "-force_key_frames expr:gte(t,n_forced*30)" in command
@@ -681,6 +682,7 @@ def test_build_video_commands_large_cuda(monkeypatch):
         optimize=True,
         small=False,
         frame_rate=30.0,
+        video_codec="hevc",
     )
 
     assert "-hwaccel cuda" in command
@@ -709,7 +711,7 @@ def test_build_video_commands_large_cpu(monkeypatch):
         frame_rate=30.0,
     )
 
-    assert "-c:v libx265" in command
+    assert "-c:v libx264" in command
     assert "-g 900" in command
     assert "-keyint_min 900" in command
     assert fallback is None

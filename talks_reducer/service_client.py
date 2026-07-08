@@ -486,7 +486,7 @@ def send_video(
     small: bool = False,
     small_480: bool = False,
     optimize: bool = True,
-    video_codec: str = "hevc",
+    video_codec: str = "h264",
     add_codec_suffix: bool = False,
     prefer_global_ffmpeg: bool = False,
     *,
@@ -895,12 +895,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--video-codec",
         choices=["h264", "hevc", "av1", "mp3"],
-        default="hevc",
+        default="h264",
         help=(
-            "Select the video encoder used for the render (default: hevc — "
-            "h.265 for roughly 25%% smaller files). Switch to h264 (about 10%% "
-            "faster) or av1 (no advantages) when you want different trade-offs, "
-            "or mp3 to export an audio-only file."
+            "Select the video encoder used for the render (default: h264 — "
+            "about 10%% faster and widely compatible). Switch to hevc (h.265, "
+            "roughly 25%% smaller files) or av1 (no advantages) when you want "
+            "different trade-offs, or mp3 to export an audio-only file."
         ),
     )
     parser.add_argument(

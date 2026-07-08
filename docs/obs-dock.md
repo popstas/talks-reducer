@@ -94,7 +94,7 @@ panels, items wrap to the next line.
 
 | Setting | Description |
 | --- | --- |
-| **Codec** | `h264`, `hevc` (default), `av1`, or `mp3` |
+| **Codec** | `h264` (default), `hevc`, `av1`, or `mp3` |
 | **Auto close** | When enabled, adds `--open-location --auto-close` |
 | **Talks Reducer** | Path to `talks-reducer.exe`; `%LOCALAPPDATA%` and other `%VAR%` forms are expanded on the server |
 | **Log** | Recent dock and processing messages |

@@ -361,7 +361,7 @@ def test_send_video_downloads_file(monkeypatch, tmp_path):
     assert submission_args[1] is True
     assert submission_args[2] is False
     assert submission_args[3] is True
-    assert submission_args[4] == "hevc"
+    assert submission_args[4] == "h264"
     assert submission_args[5] is False
     assert submission_args[6] is False
     assert submission_args[7:10] == (None, None, None)
@@ -592,7 +592,7 @@ def test_main_prints_summary(monkeypatch, tmp_path, capsys):
         assert kwargs["small"] is False
         assert kwargs["small_480"] is False
         assert kwargs["stream_updates"] is False
-        assert kwargs["video_codec"] == "hevc"
+        assert kwargs["video_codec"] == "h264"
         if log_callback is not None:
             log_callback("log")
         return destination_file, "summary", "log"
@@ -649,7 +649,7 @@ def test_main_stream_option(monkeypatch, tmp_path, capsys):
     def fake_send_video(*, progress_callback=None, **kwargs):
         assert kwargs["stream_updates"] is True
         assert kwargs["small_480"] is False
-        assert kwargs["video_codec"] == "hevc"
+        assert kwargs["video_codec"] == "h264"
         assert callable(progress_callback)
         if progress_callback is not None:
             progress_callback("Processing", 2, 4, "frames")
@@ -679,7 +679,7 @@ def test_main_small_480_option(monkeypatch, tmp_path, capsys):
     def fake_send_video(**kwargs):
         assert kwargs["small"] is True
         assert kwargs["small_480"] is True
-        assert kwargs["video_codec"] == "hevc"
+        assert kwargs["video_codec"] == "h264"
         return destination_file, "summary", "log"
 
     monkeypatch.setattr(service_client, "send_video", fake_send_video)
@@ -708,7 +708,7 @@ def test_main_warns_when_480_without_small(monkeypatch, tmp_path, capsys):
     def fake_send_video(**kwargs):
         assert kwargs["small"] is False
         assert kwargs["small_480"] is False
-        assert kwargs["video_codec"] == "hevc"
+        assert kwargs["video_codec"] == "h264"
         return destination_file, "summary", "log"
 
     monkeypatch.setattr(service_client, "send_video", fake_send_video)

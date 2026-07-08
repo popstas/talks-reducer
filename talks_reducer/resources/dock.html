@@ -291,8 +291,8 @@
           <div class="row">
             <label class="small">Codec</label>
             <div class="radio-group">
-              <label class="radio-pill"><input type="radio" name="codec" value="h264" /> h264</label>
-              <label class="radio-pill"><input type="radio" name="codec" value="hevc" checked /> hevc</label>
+              <label class="radio-pill"><input type="radio" name="codec" value="h264" checked /> h264</label>
+              <label class="radio-pill"><input type="radio" name="codec" value="hevc" /> hevc</label>
               <label class="radio-pill"><input type="radio" name="codec" value="av1" /> av1</label>
               <label class="radio-pill"><input type="radio" name="codec" value="mp3" /> mp3</label>
             </div>
@@ -339,7 +339,7 @@
     ? location.origin + '/process'
     : 'http://127.0.0.1:17890/process';
   const DEFAULT_EXE = '%LOCALAPPDATA%\\Programs\\talks-reducer\\talks-reducer.exe';
-  const DEFAULT_CODEC = 'hevc';
+  const DEFAULT_CODEC = 'h264';
   const ALLOWED_CODECS = new Set(['h264', 'hevc', 'av1', 'mp3']);
   const INITIAL_RETRY_DELAY_MS = 1000;
   const MAX_RETRY_DELAY_MS = 60000;

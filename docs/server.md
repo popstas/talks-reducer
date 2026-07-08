@@ -34,7 +34,7 @@ talks-reducer server --host 0.0.0.0 --port 7860
 
 The page features a drag-and-drop upload zone with **Small video**, **Target 480p**, and
 **Optimized encoding** checkboxes that mirror the CLI presets; a **Video codec** dropdown that
-switches between h.265 (25% smaller), h.264 (10% faster), av1 (no advantages), and mp3 (audio
+switches between h.264 (10% faster), h.265 (25% smaller), av1 (no advantages), and mp3 (audio
 only); a **Use global FFmpeg** toggle (disabled automatically when no system binary is
 detected) to prioritise the system binary when you need encoders the bundled build lacks; and
 a **Cut video** checkbox plus always-visible **Cut start**/**Cut end** number inputs (in
@@ -58,7 +58,7 @@ resulting compression ratio and download the rendered video directly from the pa
    video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to
    downscale further or clear the checkboxes before the upload finishes to keep the original
    resolution and bitrate. Use the **Video codec** dropdown to decide between the default
-   h.265 (25% smaller), h.264 (10% faster), and av1 (no advantages) compression profiles, or
+   h.264 (10% faster), h.265 (25% smaller), and av1 (no advantages) compression profiles, or
    pick **mp3 (audio only)** to export an audio-only `.mp3` instead of a video, and enable
    **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the
    bundled build omits before you submit. Disable **Optimized encoding** or pass

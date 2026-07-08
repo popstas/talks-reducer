@@ -693,13 +693,13 @@ def _build_output_path(
     *,
     small_480: bool = False,
     add_codec_suffix: bool = False,
-    video_codec: str = "hevc",
+    video_codec: str = "h264",
     silent_speed: float | None = None,
     sounded_speed: float | None = None,
 ) -> Path:
     """Mirror the CLI output naming scheme inside the workspace directory."""
 
-    normalized_codec = str(video_codec or "hevc").strip().lower()
+    normalized_codec = str(video_codec or "h264").strip().lower()
     target_height = 480 if small and small_480 else None
     output_name = _input_to_output_filename(
         input_path,
@@ -876,7 +876,7 @@ def process_video(
     small_video: bool,
     small_480: bool = False,
     optimize: bool = True,
-    video_codec: str = "hevc",
+    video_codec: str = "h264",
     add_codec_suffix: bool = False,
     use_global_ffmpeg: bool = False,
     silent_threshold: Optional[float] = None,
@@ -903,9 +903,9 @@ def process_video(
         f"Upload received: {input_path.name} ({_format_file_size(upload_size)})"
     )
 
-    codec_value = (video_codec or "hevc").strip().lower()
+    codec_value = (video_codec or "h264").strip().lower()
     if codec_value not in {"h264", "hevc", "av1", "mp3"}:
-        codec_value = "hevc"
+        codec_value = "h264"
 
     normalized_sounded_speed: Optional[float] = None
     if sounded_speed is not None:
@@ -1041,8 +1041,7 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
     )
 
     with gr.Blocks(title=f"Talks Reducer Web UI{version_suffix}") as demo:
-        gr.Markdown(
-            f"""
+        gr.Markdown(f"""
             ## Talks Reducer Web UI{version_suffix}
             Drop a video into the zone below or click to browse. **Small video** is enabled
             by default to apply the 720p/128k preset before processing starts—clear it to
@@ -1054,8 +1053,7 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
             bundled build lacks.
 
             Video will be rendered on server **{server_identity}**.
-            """.strip()
-        )
+            """.strip())
 
         with gr.Column():
             file_input = gr.File(
@@ -1071,12 +1069,12 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
 
         codec_dropdown = gr.Dropdown(
             choices=[
-                ("h.265 (25% smaller)", "hevc"),
                 ("h.264 (10% faster)", "h264"),
+                ("h.265 (25% smaller)", "hevc"),
                 ("av1 (no advantages)", "av1"),
                 ("mp3 (audio only)", "mp3"),
             ],
-            value="hevc",
+            value="h264",
             label="Video codec",
         )
 

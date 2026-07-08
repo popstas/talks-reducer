@@ -60,7 +60,7 @@ class ProcessingOptions:
     optimize: bool = True
     small: bool = False
     small_target_height: Optional[int] = None
-    video_codec: str = "hevc"
+    video_codec: str = "h264"
     keyframe_interval_seconds: float = 30.0
     prefer_global_ffmpeg: bool = False
     add_codec_suffix: bool = False

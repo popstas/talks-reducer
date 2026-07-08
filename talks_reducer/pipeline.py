@@ -707,7 +707,7 @@ def _input_to_output_filename(
     neutral_sounded = math.isclose(normalized_sounded, 1.0, rel_tol=1e-9, abs_tol=1e-9)
     include_speed_marker = not (neutral_silent and neutral_sounded)
 
-    normalized_codec = str(video_codec or "hevc").strip().lower()
+    normalized_codec = str(video_codec or "h264").strip().lower()
     is_audio_only = normalized_codec == "mp3"
     force_codec_suffix = not include_speed_marker and not small
     include_codec_suffix = (
