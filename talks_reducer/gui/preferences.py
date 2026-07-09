@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, MutableMapping, Optional
 
 from ..config import determine_config_path, load_settings, save_settings
+from ..presets import PRESETS_KEY, SELECTED_PRESET_KEY
 from . import layout as layout_helpers
 from .theme import (
     DARK_THEME,
@@ -20,6 +21,13 @@ from .theme import (
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from .app import TalksReducerGUI
+
+# Keys written independently by :mod:`talks_reducer.presets` through its own
+# read-modify-write cycle. ``GUIPreferences`` snapshots ``settings.json`` once at
+# construction and rewrites the whole file on every ``save()``, so it must not
+# clobber these keys with its stale snapshot when a preset was authored after the
+# snapshot was taken.
+_EXTERNALLY_OWNED_KEYS = (PRESETS_KEY, SELECTED_PRESET_KEY)
 
 __all__ = [
     "determine_config_path",
@@ -98,10 +106,20 @@ class GUIPreferences:
     def save(self) -> bool:
         """Write the current settings to disk, creating parent directories.
 
-        Returns ``True`` when the file is written and ``False`` when an
-        ``OSError`` prevents persistence, so callers that must not act on a
-        stale ``settings.json`` can detect the failure.
+        Before writing, the keys owned by :mod:`talks_reducer.presets`
+        (:data:`_EXTERNALLY_OWNED_KEYS`) are re-read from disk into the in-memory
+        snapshot so a preset authored after construction is not clobbered by this
+        wholesale rewrite. Returns ``True`` when the file is written and
+        ``False`` when an ``OSError`` prevents persistence, so callers that must
+        not act on a stale ``settings.json`` can detect the failure.
         """
+
+        on_disk = load_settings(self._config_path)
+        for key in _EXTERNALLY_OWNED_KEYS:
+            if key in on_disk:
+                self._settings[key] = on_disk[key]
+            else:
+                self._settings.pop(key, None)
 
         return save_settings(self._config_path, self._settings)
 
