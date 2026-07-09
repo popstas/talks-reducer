@@ -175,6 +175,18 @@ def refresh_advanced_preset_selection(gui: "TalksReducerGUI") -> None:
 
     if not hasattr(gui, "advanced_preset_var"):
         return
+    required_vars = (
+        "small_var",
+        "small_480_var",
+        "silent_speed_var",
+        "sounded_speed_var",
+        "silent_threshold_var",
+        "video_codec_var",
+    )
+    if not all(hasattr(gui, name) for name in required_vars):
+        # ``add_slider`` runs its build-time ``update()`` before every knob var
+        # exists, so skip the reverse-match until the layout is fully built.
+        return
     values = advanced_preset_values(gui)
     name = presets.match_preset(values, getattr(gui, "_simple_presets", []))
     gui.advanced_preset_var.set(name or presets.CUSTOM_LABEL)

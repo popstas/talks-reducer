@@ -1559,6 +1559,29 @@ def test_refresh_advanced_preset_selection_flips_to_custom():
     assert gui.advanced_preset_var.get() == layout.presets.CUSTOM_LABEL
 
 
+def test_refresh_advanced_preset_selection_skips_before_knobs_exist():
+    """``add_slider`` builds sliders before every knob var exists.
+
+    The first slider's build-time ``update()`` reaches this helper while
+    ``sounded_speed_var``/``silent_threshold_var`` are still missing, so the
+    reverse-match must no-op instead of raising ``AttributeError``.
+    """
+
+    gui = SimpleNamespace(
+        advanced_preset_var=StringVarStub(value=""),
+        small_var=BooleanVarStub(value=True),
+        small_480_var=BooleanVarStub(value=False),
+        video_codec_var=StringVarStub(value="h264"),
+        silent_speed_var=DummyVar(10.0),
+        _simple_presets=list(_TEST_PRESETS),
+    )
+
+    layout.refresh_advanced_preset_selection(gui)
+
+    # No reverse-match ran, so the seeded value is left untouched.
+    assert gui.advanced_preset_var.get() == ""
+
+
 def test_apply_advanced_preset_applies_and_persists(monkeypatch):
     persisted: list[str] = []
     monkeypatch.setattr(
