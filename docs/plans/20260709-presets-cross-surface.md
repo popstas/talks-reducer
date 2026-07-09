@@ -163,14 +163,14 @@ Dependencies identified: `argparse`, Tk/ttk, Gradio, stdlib `http.server`.
 - [x] run `black`, `isort`, tests — must pass before Task 6
 
 ### Task 6: Web UI preset dropdown (Gradio)
-- [ ] add a `Preset` dropdown near the top of `server.build_interface`,
+- [x] add a `Preset` dropdown near the top of `server.build_interface`,
       populated from `load_presets()` at build time
-- [ ] add a change handler that sets the resolution / speedup / codec / threshold
+- [x] add a change handler that sets the resolution / speedup / codec / threshold
       controls to the selected preset's values
-- [ ] write `tests/test_server.py` cases: dropdown is populated from the store;
+- [x] write `tests/test_server.py` cases: dropdown is populated from the store;
       the change handler maps a preset to the expected control values (incl. the
       1080p/no-small case)
-- [ ] run `black`, `isort`, tests — must pass before Task 7
+- [x] run `black`, `isort`, tests — must pass before Task 7
 
 ### Task 7: OBS dock presets
 - [ ] add `GET /presets` to `dock_server.py` returning the preset list from

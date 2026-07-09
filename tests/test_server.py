@@ -1841,3 +1841,134 @@ def test_process_video_ui_yields_five_tuples(tmp_path: Path) -> None:
     final = outputs[-1]
     assert "Duration:" in final[2]  # compact summary
     assert "Chunks merged:** 2" in final[3]  # details slot
+
+
+def _preset(**overrides: object) -> "server.Preset":
+    """Build a preset with sensible defaults, applying *overrides*."""
+
+    from talks_reducer.presets import Preset
+
+    defaults = dict(
+        name="Sample",
+        resolution="720p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="h264",
+    )
+    defaults.update(overrides)
+    return Preset(**defaults)
+
+
+def test_preset_to_web_controls_maps_resolution_tristate() -> None:
+    """Each resolution tri-state maps onto the correct Resolution radio label."""
+
+    assert (
+        server.preset_to_web_controls(_preset(resolution="1080p"))["resolution"]
+        == "No change"
+    )
+    assert (
+        server.preset_to_web_controls(_preset(resolution="720p"))["resolution"]
+        == "720p"
+    )
+    assert (
+        server.preset_to_web_controls(_preset(resolution="480p"))["resolution"]
+        == "480p"
+    )
+
+
+def test_preset_to_web_controls_maps_speed_codec_threshold() -> None:
+    """Speeds, threshold, and codec are surfaced as concrete control values."""
+
+    controls = server.preset_to_web_controls(
+        _preset(
+            resolution="480p",
+            silent_speed=5.0,
+            sounded_speed=1.5,
+            silent_threshold=0.04,
+            video_codec="hevc",
+        )
+    )
+
+    assert controls["speedup"] == "5×"
+    assert controls["silent_speed"] == pytest.approx(5.0)
+    assert controls["sounded_speed"] == pytest.approx(1.5)
+    assert controls["silent_threshold"] == pytest.approx(0.04)
+    assert controls["video_codec"] == "hevc"
+
+
+def test_preset_to_web_controls_custom_speed_has_no_speedup_label() -> None:
+    """A silent speed the radio cannot represent leaves the Speedup label unset."""
+
+    controls = server.preset_to_web_controls(_preset(silent_speed=7.0))
+
+    assert controls["speedup"] is None
+    assert controls["silent_speed"] == pytest.approx(7.0)
+
+
+def test_build_interface_preset_dropdown_populated_from_store() -> None:
+    """The Preset dropdown lists the presets passed into ``build_interface``."""
+
+    presets = [
+        _preset(name="Alpha", resolution="720p"),
+        _preset(name="Beta", resolution="480p", video_codec="hevc"),
+    ]
+    demo = server.build_interface(presets=presets)
+
+    dropdown = None
+    for component in demo.blocks.values():
+        if getattr(component, "label", None) == "Preset" and hasattr(
+            component, "choices"
+        ):
+            dropdown = component
+            break
+
+    assert dropdown is not None, "Preset dropdown not found in the web UI"
+    choice_values = [
+        choice[1] if isinstance(choice, tuple) else choice
+        for choice in dropdown.choices
+    ]
+    assert choice_values == ["Alpha", "Beta"]
+    assert dropdown.visible is True
+
+
+def test_build_interface_preset_dropdown_hidden_when_empty() -> None:
+    """With no presets the dropdown is hidden rather than showing an empty list."""
+
+    demo = server.build_interface(presets=[])
+
+    dropdown = None
+    for component in demo.blocks.values():
+        if getattr(component, "label", None) == "Preset" and hasattr(
+            component, "choices"
+        ):
+            dropdown = component
+            break
+
+    assert dropdown is not None
+    assert list(dropdown.choices) == []
+    assert dropdown.visible is False
+
+
+def test_build_interface_preset_change_handler_registered() -> None:
+    """Selecting a preset updates the resolution/speed/codec/threshold controls."""
+
+    presets = [_preset(name="Alpha", resolution="1080p", silent_speed=5.0)]
+    demo = server.build_interface(presets=presets)
+
+    preset_fns = [
+        fn for fn in demo.fns.values() if getattr(fn, "name", "") == "_apply_preset"
+    ]
+    assert preset_fns, "preset change handler not registered on demo"
+    handler = preset_fns[0]
+    output_labels = [
+        getattr(component, "label", None) for component in (handler.outputs or [])
+    ]
+    assert output_labels == [
+        "Resolution",
+        "Speedup",
+        "Silent speed",
+        "Video codec",
+        "Silent threshold",
+        "Sounded speed",
+    ]

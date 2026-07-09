@@ -27,6 +27,7 @@ from talks_reducer.pipeline import (
     _input_to_output_filename,
     speed_up_video,
 )
+from talks_reducer.presets import Preset, find_preset, load_presets
 from talks_reducer.progress import (
     CallbackProgressHandle,
     ProgressHandle,
@@ -1091,6 +1092,56 @@ def _speedup_to_silent_speed(label: str) -> float:
     return _SPEEDUP_SILENT_SPEEDS.get(label, 10.0)
 
 
+def _preset_resolution_to_radio(resolution: str) -> str:
+    """Map a preset's resolution tri-state onto the Resolution radio label.
+
+    A ``1080p`` preset (and any unexpected value) selects ``"No change"`` — the
+    radio label whose ``(small, small_480)`` flags are ``(False, False)`` — so
+    the preset forces full resolution rather than inheriting a persisted
+    ``--small`` default.
+    """
+
+    if resolution == "480p":
+        return "480p"
+    if resolution == "720p":
+        return "720p"
+    return "No change"
+
+
+def _silent_speed_to_speedup_label(speed: float) -> Optional[str]:
+    """Return the Speedup radio label matching *speed*, or ``None`` when custom.
+
+    Presets may carry a silent speed the three-option radio cannot represent
+    (e.g. ``7.0``); in that case the caller leaves the radio untouched and relies
+    on the Silent speed slider, which is the value the pipeline actually reads.
+    """
+
+    for label, value in _SPEEDUP_SILENT_SPEEDS.items():
+        if abs(value - float(speed)) < 1e-9:
+            return label
+    return None
+
+
+def preset_to_web_controls(preset: Preset) -> dict[str, object]:
+    """Map *preset* to the Web UI control values it should apply.
+
+    Returns the ``resolution`` radio label (``"No change"`` for a ``1080p``
+    preset), the matching ``speedup`` radio label (``None`` when the preset's
+    silent speed is not one of the radio's presets), the ``video_codec`` dropdown
+    value, and the numeric ``silent_speed`` / ``silent_threshold`` /
+    ``sounded_speed`` slider values.
+    """
+
+    return {
+        "resolution": _preset_resolution_to_radio(preset.resolution),
+        "speedup": _silent_speed_to_speedup_label(preset.silent_speed),
+        "silent_speed": float(preset.silent_speed),
+        "video_codec": str(preset.video_codec),
+        "silent_threshold": float(preset.silent_threshold),
+        "sounded_speed": float(preset.sounded_speed),
+    }
+
+
 def process_video_ui(
     file_path: Optional[str],
     resolution: str,
@@ -1258,14 +1309,23 @@ def process_video(
 _WEB_UI_CSS = ".tr-codec { max-width: 22rem; } .tr-codec .wrap { min-height: 0; }"
 
 
-def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
+def build_interface(
+    concurrency_limit: int = 1,
+    presets: Optional[Sequence[Preset]] = None,
+) -> gr.Blocks:
     """Construct the Gradio Blocks application for the simple web UI.
 
     *concurrency_limit* sets how many ``process_video`` jobs the queue runs at
     once. It only affects concurrent clients' processing — file downloads are
     served on a direct route outside the queue, so it does not change a single
     transfer's speed.
+
+    *presets* supplies the named presets shown in the Preset dropdown; when
+    ``None`` they are loaded (and seeded on first run) from the shared
+    ``settings.json`` via :func:`talks_reducer.presets.load_presets`.
     """
+
+    preset_list = list(presets) if presets is not None else load_presets()
 
     server_identity = _describe_server_host()
     global_ffmpeg_available = is_global_ffmpeg_available()
@@ -1291,6 +1351,14 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
             label="Video or audio file",
             file_types=["video", "audio"],
             type="filepath",
+        )
+
+        preset_choices = [preset.name for preset in preset_list]
+        preset_dropdown = gr.Dropdown(
+            choices=preset_choices,
+            value=None,
+            label="Preset",
+            visible=bool(preset_choices),
         )
 
         resolution_radio = gr.Radio(
@@ -1367,6 +1435,45 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
             inputs=speedup_radio,
             outputs=silent_speed_input,
         )
+
+        def _apply_preset(
+            name: Optional[str],
+        ) -> tuple[object, object, object, object, object, object]:
+            """Fan the selected preset onto the resolution/speed/codec controls."""
+
+            preset = find_preset(name, preset_list) if name else None
+            if preset is None:
+                return (
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                )
+            controls = preset_to_web_controls(preset)
+            speedup = controls["speedup"]
+            return (
+                gr.update(value=controls["resolution"]),
+                gr.update() if speedup is None else gr.update(value=speedup),
+                gr.update(value=controls["silent_speed"]),
+                gr.update(value=controls["video_codec"]),
+                gr.update(value=controls["silent_threshold"]),
+                gr.update(value=controls["sounded_speed"]),
+            )
+
+        preset_dropdown.change(
+            _apply_preset,
+            inputs=preset_dropdown,
+            outputs=[
+                resolution_radio,
+                speedup_radio,
+                silent_speed_input,
+                codec_dropdown,
+                silent_threshold_input,
+                sounded_speed_input,
+            ],
+        )
         cut_enabled_checkbox.change(
             lambda enabled: gr.update(visible=bool(enabled)),
             inputs=cut_enabled_checkbox,
@@ -1439,6 +1546,7 @@ __all__ = [
     "build_interface",
     "build_launch_app_kwargs",
     "main",
+    "preset_to_web_controls",
     "process_video",
     "process_video_api",
     "process_video_ui",
