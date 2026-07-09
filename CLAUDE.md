@@ -26,6 +26,44 @@ with file pickers, the Run button, and detailed logging.
 - **Input drop zone** — drag files or folders from your desktop, click to open
 the system file picker, or add them via the Explorer/Finder dialog; duplicates
 are ignored.
+- **Presets** — user-named bundles of processing settings (`resolution`,
+`silent_speed`, `sounded_speed`, `silent_threshold`, `video_codec`) stored in the
+shared `settings.json` (`presets` key) via `talks_reducer/presets.py` and applied
+read-only on every surface (Simple mode, Web UI, OBS dock, CLI `--preset`). Presets
+are **sparse**: every value field on `Preset` is `Optional`, `to_dict()` stores only
+the fields that are set, and `preset.present_fields()` reports them. Apply/CLI/match
+all skip absent fields (`apply_preset_to_gui`, `_apply_preset_to_args`,
+`preset_to_web_controls` return sparse control maps, `match_preset` compares only
+present fields — a zero-field preset never matches). `load_presets()` seeds three
+fully-populated `DEFAULT_PRESETS` on first run when the key is absent; an emptied
+list persists as `[]`. Each surface opens on the remembered `selected_preset`, else
+the first preset (`layout.seed_initial_preset`, `server.resolve_initial_web_preset`,
+dock `populatePresetDropdown`). **Simple mode** replaces the old
+`simple_speedup_frame`/`simple_codec_frame` with a single `Preset` dropdown
+(`simple_preset_var`) plus a preset-row **Open output** checkbox
+(`simple_open_output_check`, shares `open_after_convert_var`); selecting a preset
+fans its fields onto the underlying vars via `layout.apply_preset_to_gui` and
+persists the choice via `set_selected_preset`. The selector is hidden when
+`load_presets()` returns `[]` (manual resolution checkboxes return). **Advanced
+mode** adds a management strip (`Preset` dropdown + **Save as… / Update / Delete**):
+editing any knob flips the dropdown to **"Custom"** via `presets.match_preset`.
+Save/Update open `preset_dialog.open_save_preset_dialog` — a name field plus a
+checkbox per param (Create-link style) returning `(name, selected_fields)`;
+`layout.build_sparse_preset` captures only the checked fields, so presets can be
+partial. Update pre-checks the existing preset's `present_fields()`. **↑/↓** buttons
+reorder the selected preset via `presets.move_preset`/`layout.move_advanced_preset`
+(order is shared and decides the first-default). Persistence routes through
+`presets.save_presets` (pure `add_preset`/`update_preset`/`delete_preset`/`move_preset`)
+and refreshes every dropdown. The CLI applies `--preset NAME` before explicit flags
+(`cli._apply_preset_to_args`, precedence explicit > preset > default), resolution
+expanded to `--no-small`/`--small --720`/`--small --480`; `--list-presets` prints
+names. The Web UI `Preset` dropdown (`server.build_interface`) inits its controls
+from the default preset and persists selection on change. The OBS dock serves
+`GET /presets` and, when presets exist, shows the dropdown as the primary control,
+**moving** the resolution/speed selects into the ⚙️ settings panel and back on
+**Custom** (`dock.html`, `obsDock.preset` `localStorage`), sending a `preset` field
+that `dock_server.build_args` maps to `--preset NAME`. The dock's controls use
+squared 4px corners to match OBS and cap the preset select width for a single-line row.
 - **Small video** — toggles the `--small` preset used by the CLI.
 - **Open after convert** — controls whether the exported file is revealed in
 your system file manager as soon as each job finishes.

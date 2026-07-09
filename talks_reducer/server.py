@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import inspect
 import json
 import shutil
 import socket
@@ -26,6 +27,13 @@ from talks_reducer.pipeline import (
     ProcessingAborted,
     _input_to_output_filename,
     speed_up_video,
+)
+from talks_reducer.presets import (
+    Preset,
+    find_preset,
+    get_selected_preset,
+    load_presets,
+    set_selected_preset,
 )
 from talks_reducer.progress import (
     CallbackProgressHandle,
@@ -1091,6 +1099,78 @@ def _speedup_to_silent_speed(label: str) -> float:
     return _SPEEDUP_SILENT_SPEEDS.get(label, 10.0)
 
 
+def _preset_resolution_to_radio(resolution: str) -> str:
+    """Map a preset's resolution tri-state onto the Resolution radio label.
+
+    A ``1080p`` preset (and any unexpected value) selects ``"No change"`` — the
+    radio label whose ``(small, small_480)`` flags are ``(False, False)`` — so
+    the preset forces full resolution rather than inheriting a persisted
+    ``--small`` default.
+    """
+
+    if resolution == "480p":
+        return "480p"
+    if resolution == "720p":
+        return "720p"
+    return "No change"
+
+
+def _silent_speed_to_speedup_label(speed: float) -> Optional[str]:
+    """Return the Speedup radio label matching *speed*, or ``None`` when custom.
+
+    Presets may carry a silent speed the three-option radio cannot represent
+    (e.g. ``7.0``); in that case the caller leaves the radio untouched and relies
+    on the Silent speed slider, which is the value the pipeline actually reads.
+    """
+
+    for label, value in _SPEEDUP_SILENT_SPEEDS.items():
+        if abs(value - float(speed)) < 1e-9:
+            return label
+    return None
+
+
+def preset_to_web_controls(preset: Preset) -> dict[str, object]:
+    """Map *preset* to the Web UI control values it should apply.
+
+    Presets are sparse, so only the params the preset defines appear in the
+    returned mapping; a caller leaves every other control untouched. When present,
+    keys are the ``resolution`` radio label (``"No change"`` for a ``1080p``
+    preset), the matching ``speedup`` radio label (``None`` when the silent speed
+    is not one of the radio's presets), the ``video_codec`` dropdown value, and
+    the numeric ``silent_speed`` / ``silent_threshold`` / ``sounded_speed`` slider
+    values.
+    """
+
+    controls: dict[str, object] = {}
+    if preset.resolution is not None:
+        controls["resolution"] = _preset_resolution_to_radio(preset.resolution)
+    if preset.silent_speed is not None:
+        controls["speedup"] = _silent_speed_to_speedup_label(preset.silent_speed)
+        controls["silent_speed"] = float(preset.silent_speed)
+    if preset.video_codec is not None:
+        controls["video_codec"] = str(preset.video_codec)
+    if preset.silent_threshold is not None:
+        controls["silent_threshold"] = float(preset.silent_threshold)
+    if preset.sounded_speed is not None:
+        controls["sounded_speed"] = float(preset.sounded_speed)
+    return controls
+
+
+def resolve_initial_web_preset(preset_list: Sequence[Preset]) -> Optional[Preset]:
+    """Return the preset the Web UI should open on: remembered, else the first.
+
+    Restores the persisted ``selected_preset`` when it still exists in
+    *preset_list*; otherwise defaults to the first preset so the dropdown opens on
+    a concrete selection instead of blank. Returns ``None`` when no presets exist.
+    """
+
+    remembered = get_selected_preset()
+    preset = find_preset(remembered, preset_list) if remembered else None
+    if preset is None and preset_list:
+        preset = preset_list[0]
+    return preset
+
+
 def process_video_ui(
     file_path: Optional[str],
     resolution: str,
@@ -1257,15 +1337,30 @@ def process_video(
 
 _WEB_UI_CSS = ".tr-codec { max-width: 22rem; } .tr-codec .wrap { min-height: 0; }"
 
+# Gradio moved the ``css`` argument between ``Blocks(css=...)`` (older releases)
+# and ``Blocks.launch(css=...)`` (newer ones). Introspect where it is accepted so
+# the web UI styles apply — and no ``TypeError`` is raised — across versions.
+_BLOCKS_SUPPORTS_CSS = "css" in inspect.signature(gr.Blocks.__init__).parameters
+_LAUNCH_SUPPORTS_CSS = "css" in inspect.signature(gr.Blocks.launch).parameters
 
-def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
+
+def build_interface(
+    concurrency_limit: int = 1,
+    presets: Optional[Sequence[Preset]] = None,
+) -> gr.Blocks:
     """Construct the Gradio Blocks application for the simple web UI.
 
     *concurrency_limit* sets how many ``process_video`` jobs the queue runs at
     once. It only affects concurrent clients' processing — file downloads are
     served on a direct route outside the queue, so it does not change a single
     transfer's speed.
+
+    *presets* supplies the named presets shown in the Preset dropdown; when
+    ``None`` they are loaded (and seeded on first run) from the shared
+    ``settings.json`` via :func:`talks_reducer.presets.load_presets`.
     """
+
+    preset_list = list(presets) if presets is not None else load_presets()
 
     server_identity = _describe_server_host()
     global_ffmpeg_available = is_global_ffmpeg_available()
@@ -1275,7 +1370,15 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
         f" v{app_version}" if app_version and app_version != "unknown" else ""
     )
 
-    with gr.Blocks(title=f"Talks Reducer Web UI{version_suffix}") as demo:
+    blocks_kwargs: dict = {"title": f"Talks Reducer Web UI{version_suffix}"}
+    if _BLOCKS_SUPPORTS_CSS:
+        blocks_kwargs["css"] = _WEB_UI_CSS
+
+    with gr.Blocks(**blocks_kwargs) as demo:
+        # When neither Blocks() nor launch() accepts a ``css`` argument, inject the
+        # stylesheet directly so the UI is styled on every Gradio version.
+        if not _BLOCKS_SUPPORTS_CSS and not _LAUNCH_SUPPORTS_CSS:
+            gr.HTML(f"<style>{_WEB_UI_CSS}</style>")
         gr.Markdown(f"## Talks Reducer Web UI{version_suffix}")
         with gr.Accordion("About", open=False):
             gr.Markdown(f"""
@@ -1293,14 +1396,31 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
             type="filepath",
         )
 
+        preset_choices = [preset.name for preset in preset_list]
+        default_preset = resolve_initial_web_preset(preset_list)
+        initial_controls = (
+            preset_to_web_controls(default_preset) if default_preset is not None else {}
+        )
+
+        def _initial(key: str, fallback: object) -> object:
+            value = initial_controls.get(key, fallback)
+            return fallback if value is None else value
+
+        preset_dropdown = gr.Dropdown(
+            choices=preset_choices,
+            value=default_preset.name if default_preset is not None else None,
+            label="Preset",
+            visible=bool(preset_choices),
+        )
+
         resolution_radio = gr.Radio(
             choices=["No change", "720p", "480p"],
-            value="720p",
+            value=_initial("resolution", "720p"),
             label="Resolution",
         )
         speedup_radio = gr.Radio(
             choices=["1×", "5×", "10×"],
-            value="10×",
+            value=_initial("speedup", "10×"),
             label="Speedup",
         )
         codec_dropdown = gr.Dropdown(
@@ -1310,7 +1430,7 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
                 ("av1 (no advantages)", "av1"),
                 ("mp3 (audio only)", "mp3"),
             ],
-            value="hevc",
+            value=_initial("video_codec", "hevc"),
             label="Video codec",
             elem_classes=["tr-codec"],
         )
@@ -1341,15 +1461,23 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
                 info="Append the selected codec (e.g. _h264) to the output filename.",
             )
             silent_speed_input = gr.Slider(
-                minimum=1.0, maximum=10.0, value=10.0, step=0.1, label="Silent speed"
+                minimum=1.0,
+                maximum=10.0,
+                value=_initial("silent_speed", 10.0),
+                step=0.1,
+                label="Silent speed",
             )
             sounded_speed_input = gr.Slider(
-                minimum=0.5, maximum=3.0, value=1.0, step=0.01, label="Sounded speed"
+                minimum=0.5,
+                maximum=3.0,
+                value=_initial("sounded_speed", 1.0),
+                step=0.01,
+                label="Sounded speed",
             )
             silent_threshold_input = gr.Slider(
                 minimum=0.0,
                 maximum=1.0,
-                value=0.01,
+                value=_initial("silent_threshold", 0.01),
                 step=0.01,
                 label="Silent threshold",
             )
@@ -1366,6 +1494,56 @@ def build_interface(concurrency_limit: int = 1) -> gr.Blocks:
             lambda label: gr.update(value=_speedup_to_silent_speed(label)),
             inputs=speedup_radio,
             outputs=silent_speed_input,
+        )
+
+        def _apply_preset(
+            name: Optional[str],
+        ) -> tuple[object, object, object, object, object, object]:
+            """Fan the selected preset onto the resolution/speed/codec controls."""
+
+            preset = find_preset(name, preset_list) if name else None
+            if preset is None:
+                return (
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                )
+            # Persist the choice so the dropdown reopens on it (shared with the
+            # desktop GUI via ``settings.json``). Best-effort: a read-only config
+            # must not break applying the preset to the controls.
+            with suppress(Exception):
+                set_selected_preset(preset.name)
+            controls = preset_to_web_controls(preset)
+
+            def _upd(key: str) -> object:
+                return (
+                    gr.update(value=controls[key]) if key in controls else gr.update()
+                )
+
+            speedup = controls.get("speedup")
+            return (
+                _upd("resolution"),
+                gr.update() if speedup is None else gr.update(value=speedup),
+                _upd("silent_speed"),
+                _upd("video_codec"),
+                _upd("silent_threshold"),
+                _upd("sounded_speed"),
+            )
+
+        preset_dropdown.change(
+            _apply_preset,
+            inputs=preset_dropdown,
+            outputs=[
+                resolution_radio,
+                speedup_radio,
+                silent_speed_input,
+                codec_dropdown,
+                silent_threshold_input,
+                sounded_speed_input,
+            ],
         )
         cut_enabled_checkbox.change(
             lambda enabled: gr.update(visible=bool(enabled)),
@@ -1414,7 +1592,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parser.parse_args(argv)
 
     demo = build_interface(concurrency_limit=getattr(args, "concurrency", 1))
-    demo.launch(
+    launch_kwargs: dict = dict(
         server_name=args.host,
         server_port=args.port,
         share=args.share,
@@ -1422,8 +1600,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         favicon_path=_FAVICON_PATH_STR,
         app_kwargs=build_launch_app_kwargs(),
         pwa=True,
-        css=_WEB_UI_CSS,
     )
+    # Pass ``css`` to launch() only on versions that accept it there and not on
+    # Blocks(); otherwise it was already applied in build_interface.
+    if _LAUNCH_SUPPORTS_CSS and not _BLOCKS_SUPPORTS_CSS:
+        launch_kwargs["css"] = _WEB_UI_CSS
+    demo.launch(**launch_kwargs)
 
 
 atexit.register(_cleanup_workspaces)
@@ -1439,6 +1621,7 @@ __all__ = [
     "build_interface",
     "build_launch_app_kwargs",
     "main",
+    "preset_to_web_controls",
     "process_video",
     "process_video_api",
     "process_video_ui",

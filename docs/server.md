@@ -41,6 +41,13 @@ a **Cut video** checkbox plus always-visible **Cut start**/**Cut end** number in
 seconds) — the keep range is applied only when the checkbox is ticked, and you can scrub with
 the embedded player to find the timestamps.
 
+A **Preset** dropdown near the top lists the saved presets from the shared `settings.json`
+(the same list the desktop GUI authors). Selecting a preset sets the resolution, speedup,
+silent/sounded speed sliders, silent threshold, and codec controls to its values (when a
+preset's silent speed is not one of the speedup radio's presets, only the slider is set);
+the dropdown is hidden when no presets are defined. See [gui.md](gui.md#presets) for how
+presets are created.
+
 Sliders for the silent threshold and playback speeds mirror the CLI timing controls, so you
 can tune exports without leaving the remote workflow.
 

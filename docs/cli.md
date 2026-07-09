@@ -3,6 +3,38 @@
 Full flag reference for the `talks-reducer` command. See the
 [README](../README.md#command-line) for the common invocations.
 
+## Named presets
+
+A **preset** is a saved bundle of processing settings — resolution, silent/sounded speed,
+silent threshold, and video codec — authored once in the desktop GUI (Advanced mode) and
+applied read-only on every other surface, including the CLI. Presets live in the shared
+`settings.json` (the same file the GUI, Web UI, and OBS dock read), so one canonical list
+appears everywhere.
+
+- `--list-presets` prints the stored preset names, one per line, and exits (no input file
+  required). On a fresh install the three seeded defaults are printed:
+
+  ```sh
+  talks-reducer --list-presets
+  # 720p 10x speedup H.264
+  # 480p 10x speedup H.265
+  # 720p no speedup H.264
+  ```
+
+- `--preset "NAME"` loads that preset and applies its fields as the **base configuration**
+  before any explicit flags. Explicit flags still win, so precedence is
+  **explicit flag > preset > default**:
+
+  ```sh
+  talks-reducer --preset "480p 10x speedup H.265" talk.mp4          # apply the whole preset
+  talks-reducer --preset "480p 10x speedup H.265" --silent-speed 8 talk.mp4  # override just the speed
+  ```
+
+The preset's resolution is expanded to the explicit tri-state (`1080p` → `--no-small`,
+`720p` → `--small --720`, `480p` → `--small --480`) so a 1080p preset overrides a stored
+`--small` preference rather than inheriting it. An unknown `--preset NAME` errors and lists
+the valid names.
+
 ## Encoding presets
 
 By default the CLI applies the same tuned encoder settings everywhere: adaptive keyframes,

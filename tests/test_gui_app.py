@@ -2340,3 +2340,48 @@ def test_restore_default_action_button_prefers_open_when_output_exists():
 
     assert open_btn.visible is True
     assert drop_btn.visible is False
+
+
+def test_update_selected_preset_opens_dialog(monkeypatch):
+    """Regression: _update_selected_preset must not raise ImportError.
+
+    It previously did ``from . import presets`` (the gui package, which has no
+    ``presets``); the module-level ``presets`` is the correct reference.
+    """
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        app.preset_dialog,
+        "open_save_preset_dialog",
+        lambda gui, on_submit, **kwargs: captured.update(kwargs, called=True),
+    )
+
+    preset = app.presets.Preset(name="My preset", video_codec="hevc")
+    gui = SimpleNamespace(
+        advanced_preset_var=SimpleNamespace(get=lambda: "My preset"),
+        _simple_presets=[preset],
+        _preset_field_values=lambda: {"video_codec": "hevc"},
+    )
+
+    app.TalksReducerGUI._update_selected_preset(gui)
+
+    assert captured.get("called") is True
+    assert captured["initial"] == "My preset"
+    assert captured["initial_fields"] == {"video_codec"}
+
+
+def test_update_selected_preset_noop_on_custom(monkeypatch):
+    called: list = []
+    monkeypatch.setattr(
+        app.preset_dialog,
+        "open_save_preset_dialog",
+        lambda *a, **k: called.append(True),
+    )
+
+    gui = SimpleNamespace(
+        advanced_preset_var=SimpleNamespace(get=lambda: app.presets.CUSTOM_LABEL),
+    )
+
+    app.TalksReducerGUI._update_selected_preset(gui)
+
+    assert called == []

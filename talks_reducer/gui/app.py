@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from tkinter import filedialog, messagebox, ttk
 
 try:
+    from .. import presets
     from ..cli import gather_input_files
     from ..ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from ..models import ProcessingOptions
@@ -41,7 +42,7 @@ try:
     from ..version_utils import resolve_version
     from . import discovery as discovery_helpers
     from . import layout as layout_helpers
-    from . import relaunch
+    from . import preset_dialog, relaunch
     from . import shortcut as shortcut_helpers
     from . import taskbar as taskbar_helpers
     from . import update_checker
@@ -81,11 +82,12 @@ except ImportError:  # pragma: no cover - handled at runtime
     if str(PACKAGE_ROOT) not in sys.path:
         sys.path.insert(0, str(PACKAGE_ROOT))
 
+    from talks_reducer import presets
     from talks_reducer.cli import gather_input_files
     from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from talks_reducer.gui import discovery as discovery_helpers
     from talks_reducer.gui import layout as layout_helpers
-    from talks_reducer.gui import relaunch
+    from talks_reducer.gui import preset_dialog, relaunch
     from talks_reducer.gui import shortcut as shortcut_helpers
     from talks_reducer.gui import taskbar as taskbar_helpers
     from talks_reducer.gui import update_checker
@@ -312,8 +314,13 @@ class TalksReducerGUI:
         self.simple_mode_var = tk.BooleanVar(
             value=self.preferences.get("simple_mode", True)
         )
-        self.simple_preset_var = tk.StringVar(value="")
-        self.simple_codec_var = tk.StringVar(value="")
+        self.simple_preset_var = tk.StringVar(value=presets.get_selected_preset() or "")
+        # The Advanced management strip re-derives its selection from the live
+        # knobs (via ``refresh_advanced_preset_selection``); seed it with the
+        # persisted choice so the first render is not empty.
+        self.advanced_preset_var = tk.StringVar(
+            value=presets.get_selected_preset() or presets.CUSTOM_LABEL
+        )
         self.run_after_drop_var = tk.BooleanVar(value=True)
         self.small_var = tk.BooleanVar(value=self.preferences.get("small_video", True))
         self.small_480_var = tk.BooleanVar(
@@ -400,12 +407,7 @@ class TalksReducerGUI:
         self._cut_duration: float = 0.0
 
         self._build_layout()
-        self._sync_simple_preset()
-        self.silent_speed_var.trace_add("write", self._sync_simple_preset)
-        self.sounded_speed_var.trace_add("write", self._sync_simple_preset)
-        self.silent_threshold_var.trace_add("write", self._sync_simple_preset)
-        self._sync_simple_codec()
-        self.video_codec_var.trace_add("write", self._sync_simple_codec)
+        layout_helpers.seed_initial_preset(self)
         self._update_small_variant_state()
         self._apply_simple_mode(initial=True)
         self._apply_status_style(self._status_state)
@@ -732,18 +734,50 @@ class TalksReducerGUI:
         """Open the Windows-only **Create lnk** desktop-shortcut dialog."""
         shortcut_helpers.open_create_lnk_dialog(self)
 
-    def _sync_simple_preset(self, *_: object) -> None:
-        """Update the simple-mode speedup dropdown to reflect current speed vars."""
-        key = layout_helpers.get_current_preset(self)
-        if key == "custom":
-            self.simple_preset_var.set("custom")
-        else:
-            self.simple_preset_var.set(layout_helpers.PRESET_LABELS[key])
+    def _preset_field_values(self) -> dict:
+        """Return the live Advanced knobs as display strings keyed by field."""
+        values = layout_helpers.advanced_preset_values(self)
+        return {key: values[key] for key in values}
 
-    def _sync_simple_codec(self, *_: object) -> None:
-        """Update the simple-mode codec dropdown to reflect the current video codec var."""
-        key = self.video_codec_var.get()
-        self.simple_codec_var.set(layout_helpers.CODEC_LABELS.get(key, key))
+    def _open_save_preset_dialog(self) -> None:
+        """Prompt for a name and which params to save as a new preset."""
+        preset_dialog.open_save_preset_dialog(
+            self,
+            lambda name, fields: layout_helpers.save_advanced_preset(
+                self, name, fields
+            ),
+            field_values=self._preset_field_values(),
+        )
+
+    def _update_selected_preset(self) -> None:
+        """Open the dialog pre-filled with the selection and overwrite it."""
+        name = self.advanced_preset_var.get()
+        if not name or name == presets.CUSTOM_LABEL:
+            return
+        preset = presets.find_preset(name, getattr(self, "_simple_presets", []))
+        initial_fields = preset.present_fields() if preset is not None else None
+        preset_dialog.open_save_preset_dialog(
+            self,
+            lambda new_name, fields: layout_helpers.update_advanced_preset(
+                self, new_name, fields
+            ),
+            initial=name,
+            initial_fields=initial_fields,
+            field_values=self._preset_field_values(),
+            title="Update preset",
+        )
+
+    def _delete_selected_preset(self) -> None:
+        """Delete the selected preset and refresh every preset dropdown."""
+        layout_helpers.delete_advanced_preset(self)
+
+    def _move_selected_preset_up(self) -> None:
+        """Move the selected preset one slot earlier in the shared order."""
+        layout_helpers.move_advanced_preset(self, -1)
+
+    def _move_selected_preset_down(self) -> None:
+        """Move the selected preset one slot later in the shared order."""
+        layout_helpers.move_advanced_preset(self, 1)
 
     def _toggle_simple_mode(self) -> None:
         self.preference_controller.toggle_simple_mode()

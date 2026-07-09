@@ -8,6 +8,7 @@ import sys
 import time
 from typing import TYPE_CHECKING, Callable, Optional
 
+from .. import presets
 from ..icons import find_icon_path
 from ..models import default_temp_folder
 from .tooltips import add_tooltip
@@ -71,51 +72,354 @@ BASIC_PRESETS: dict[str, dict[str, float]] = {
 
 BASIC_PRESET_TOLERANCE = 1e-9
 
-PRESET_LABELS: dict[str, str] = {
-    "compress_only": "No speedup",
-    "defaults": "×5 (default)",
-    "silence_x10": "×10",
-}
 
-CODEC_LABELS: dict[str, str] = {
-    "h264": "H.264",
-    "hevc": "H.265",
-    "av1": "AV1",
-    "mp3": "mp3 (audio only)",
-}
+def apply_preset_to_gui(gui: "TalksReducerGUI", preset: "presets.Preset") -> None:
+    """Fan a stored :class:`~talks_reducer.presets.Preset` onto the GUI vars.
 
+    Presets are sparse: only the fields the preset defines are applied, so a
+    preset that stores just a codec leaves the resolution and speeds untouched.
+    When present, the resolution tri-state maps onto
+    ``small_var``/``small_480_var`` explicitly (``1080p`` → both off, ``720p`` →
+    small only, ``480p`` → small + 480p) so a preset always wins over a persisted
+    ``--small`` default. Speeds and the threshold route through the basic-slider
+    updaters when they exist so the slider labels and persisted preferences stay
+    in sync; the codec updates the shared ``video_codec_var``.
+    """
 
-def get_current_preset(gui: "TalksReducerGUI") -> str:
-    """Return the preset key matching current speed var values, or 'custom'."""
-    vals = {
-        "silent_speed": gui.silent_speed_var.get(),
-        "sounded_speed": gui.sounded_speed_var.get(),
-        "silent_threshold": gui.silent_threshold_var.get(),
-    }
-    for key, preset in BASIC_PRESETS.items():
-        if all(abs(vals[k] - v) < BASIC_PRESET_TOLERANCE for k, v in preset.items()):
-            return key
-    return "custom"
+    if preset.resolution is not None:
+        if preset.resolution == "1080p":
+            gui.small_var.set(False)
+            gui.small_480_var.set(False)
+        elif preset.resolution == "480p":
+            gui.small_var.set(True)
+            gui.small_480_var.set(True)
+        else:  # "720p" and any unexpected value map to the 720p small preset.
+            gui.small_var.set(True)
+            gui.small_480_var.set(False)
+
+    updaters = getattr(gui, "_slider_updaters", {})
+    variables = getattr(gui, "_basic_variables", {})
+    for key, value in (
+        ("silent_speed", preset.silent_speed),
+        ("sounded_speed", preset.sounded_speed),
+        ("silent_threshold", preset.silent_threshold),
+    ):
+        if value is None:
+            continue
+        updater: Callable[[str], None] | None = updaters.get(key)
+        if updater is not None:
+            updater(str(value))
+        else:
+            variable = variables.get(key)
+            if variable is not None:
+                variable.set(value)
+
+    if preset.video_codec is not None:
+        gui.video_codec_var.set(preset.video_codec)
 
 
 def _apply_simple_preset(gui: "TalksReducerGUI") -> None:
-    """Apply the preset selected in the simple-mode speedup dropdown."""
-    label = gui.simple_preset_var.get()
-    if label == "custom":
+    """Apply the user-named preset selected in the simple-mode dropdown.
+
+    The chosen name is looked up in the cached preset list, fanned onto the GUI
+    vars, and persisted via ``selected_preset`` so the choice survives relaunch.
+    """
+
+    name = gui.simple_preset_var.get()
+    preset = presets.find_preset(name, getattr(gui, "_simple_presets", []))
+    if preset is None:
         return
-    for key, display in PRESET_LABELS.items():
-        if display == label:
-            apply_basic_preset(gui, key)
-            break
+    apply_preset_to_gui(gui, preset)
+    presets.set_selected_preset(name)
 
 
-def _apply_simple_codec(gui: "TalksReducerGUI") -> None:
-    """Apply the codec selected in the simple-mode codec dropdown."""
-    label = gui.simple_codec_var.get()
-    for key, display in CODEC_LABELS.items():
-        if display == label:
-            gui.video_codec_var.set(key)
-            break
+def advanced_preset_values(gui: "TalksReducerGUI") -> dict:
+    """Snapshot the live Advanced knobs as a preset-comparable mapping.
+
+    ``small_var``/``small_480_var`` collapse back into the resolution tri-state
+    (``1080p``/``720p``/``480p``) and the speeds, threshold, and codec read from
+    their shared GUI vars so the result can be fed straight to
+    :func:`~talks_reducer.presets.match_preset` or
+    :func:`~talks_reducer.presets.Preset`.
+    """
+
+    if gui.small_var.get():
+        resolution = "480p" if gui.small_480_var.get() else "720p"
+    else:
+        resolution = "1080p"
+
+    return {
+        "resolution": resolution,
+        "silent_speed": gui.silent_speed_var.get(),
+        "sounded_speed": gui.sounded_speed_var.get(),
+        "silent_threshold": gui.silent_threshold_var.get(),
+        "video_codec": gui.video_codec_var.get(),
+    }
+
+
+def preset_from_gui(gui: "TalksReducerGUI", name: str) -> "presets.Preset":
+    """Build a full :class:`~talks_reducer.presets.Preset` named *name*."""
+
+    return build_sparse_preset(
+        name,
+        advanced_preset_values(gui),
+        set(presets.PRESET_VALUE_FIELDS),
+    )
+
+
+def build_sparse_preset(name: str, values: dict, selected_fields) -> "presets.Preset":
+    """Build a sparse preset from a *values* mapping and a *selected_fields* set.
+
+    Only the fields named in *selected_fields* are copied off *values* into the
+    resulting preset; every other field is left ``None`` so the preset controls
+    just the checked params. Pure (no Tk) so it is unit-testable.
+    """
+
+    float_fields = {"silent_speed", "sounded_speed", "silent_threshold"}
+    kwargs: dict = {"name": name}
+    for field in presets.PRESET_VALUE_FIELDS:
+        if field not in selected_fields or field not in values:
+            continue
+        raw = values[field]
+        kwargs[field] = float(raw) if field in float_fields else str(raw)
+    return presets.Preset(**kwargs)
+
+
+def preset_from_gui_selection(
+    gui: "TalksReducerGUI", name: str, selected_fields
+) -> "presets.Preset":
+    """Snapshot the Advanced knobs into a sparse preset for the checked fields."""
+
+    return build_sparse_preset(name, advanced_preset_values(gui), selected_fields)
+
+
+def refresh_advanced_preset_selection(gui: "TalksReducerGUI") -> None:
+    """Flip the Advanced dropdown to the matching preset or ``"Custom"``.
+
+    Reverse-matches the live knobs against the cached preset list and writes the
+    result into ``advanced_preset_var`` so any manual edit that no longer matches
+    a stored preset shows :data:`~talks_reducer.presets.CUSTOM_LABEL`.
+    """
+
+    if not hasattr(gui, "advanced_preset_var"):
+        return
+    required_vars = (
+        "small_var",
+        "small_480_var",
+        "silent_speed_var",
+        "sounded_speed_var",
+        "silent_threshold_var",
+        "video_codec_var",
+    )
+    if not all(hasattr(gui, name) for name in required_vars):
+        # ``add_slider`` runs its build-time ``update()`` before every knob var
+        # exists, so skip the reverse-match until the layout is fully built.
+        return
+    values = advanced_preset_values(gui)
+    name = presets.match_preset(values, getattr(gui, "_simple_presets", []))
+    gui.advanced_preset_var.set(name or presets.CUSTOM_LABEL)
+
+    # Keep the Simple-mode dropdown and the persisted ``selected_preset`` in
+    # step with the live knobs. Simple mode hides the manual controls but
+    # processing still reads the underlying vars, so an Advanced edit that flips
+    # to "Custom" must not leave a stale preset selected in Simple mode (which
+    # would show one preset while converting with different values). The
+    # equality guard keeps a slider drag that stays "Custom" from rewriting
+    # ``settings.json`` on every tick.
+    simple_var = getattr(gui, "simple_preset_var", None)
+    if simple_var is not None:
+        desired = name or ""
+        if simple_var.get() != desired:
+            simple_var.set(desired)
+            presets.set_selected_preset(name)
+
+
+def refresh_preset_dropdowns(gui: "TalksReducerGUI") -> None:
+    """Reload the preset store and repopulate both surface dropdowns.
+
+    Called after any Save as… / Update / Delete so the Simple and Advanced
+    combos stay in sync. The Simple selector is hidden whenever the list is
+    empty (or the GUI is not in Simple mode); the Advanced selection is
+    re-derived from the current knobs.
+    """
+
+    loaded = presets.load_presets()
+    gui._simple_presets = loaded
+    names = [preset.name for preset in loaded]
+
+    if hasattr(gui, "simple_preset_combo"):
+        gui.simple_preset_combo.configure(values=names)
+    if hasattr(gui, "advanced_preset_combo"):
+        gui.advanced_preset_combo.configure(values=names)
+
+    if hasattr(gui, "simple_preset_frame"):
+        if loaded and gui.simple_mode_var.get():
+            gui.simple_preset_frame.grid()
+        else:
+            gui.simple_preset_frame.grid_remove()
+
+    refresh_advanced_preset_selection(gui)
+
+
+def apply_advanced_preset(gui: "TalksReducerGUI") -> None:
+    """Apply the preset chosen in the Advanced dropdown to the live knobs."""
+
+    name = gui.advanced_preset_var.get()
+    if not name or name == presets.CUSTOM_LABEL:
+        return
+    preset = presets.find_preset(name, getattr(gui, "_simple_presets", []))
+    if preset is None:
+        return
+    apply_preset_to_gui(gui, preset)
+    presets.set_selected_preset(name)
+    # Pre-sync the Simple selector so ``refresh_advanced_preset_selection`` sees
+    # the choice already persisted and does not write ``settings.json`` twice.
+    simple_var = getattr(gui, "simple_preset_var", None)
+    if simple_var is not None:
+        simple_var.set(name)
+    refresh_advanced_preset_selection(gui)
+
+
+def seed_initial_preset(gui: "TalksReducerGUI") -> None:
+    """Select and apply a preset on startup: the remembered one, else the first.
+
+    Restores the persisted ``selected_preset`` when it still exists; otherwise
+    defaults to the first stored preset so Simple mode always opens on a concrete
+    preset rather than a blank selection. The chosen preset's values are applied
+    so the live knobs match what the dropdown shows. A no-op when no presets exist.
+    """
+
+    presets_list = getattr(gui, "_simple_presets", [])
+    if not presets_list:
+        return
+    remembered = presets.get_selected_preset()
+    preset = presets.find_preset(remembered or "", presets_list)
+    if preset is None:
+        preset = presets_list[0]
+    simple_var = getattr(gui, "simple_preset_var", None)
+    if simple_var is not None:
+        simple_var.set(preset.name)
+    apply_preset_to_gui(gui, preset)
+    presets.set_selected_preset(preset.name)
+    refresh_advanced_preset_selection(gui)
+
+
+def _report_preset_write_failure(gui: "TalksReducerGUI", message: str) -> None:
+    """Surface a failed ``settings.json`` write instead of silently reverting.
+
+    A read-only or unwritable config would otherwise let the dropdown roll back on
+    the next reload with no feedback, so the user is told the change was not saved.
+    """
+
+    messagebox = getattr(gui, "messagebox", None)
+    if messagebox is not None:
+        messagebox.showerror(
+            "Presets", f"{message} The settings file could not be written."
+        )
+
+
+def save_advanced_preset(
+    gui: "TalksReducerGUI", name: str, selected_fields=None
+) -> None:
+    """Capture the checked knobs into a new preset named *name* and persist it.
+
+    *selected_fields* is the set of param keys the Save dialog checked; ``None``
+    captures every field (a full preset).
+    """
+
+    name = str(name).strip()
+    if not name:
+        return
+    if name == presets.CUSTOM_LABEL:
+        # "Custom" is the sentinel the dropdown shows when the knobs match no
+        # stored preset; a preset saved under that name would be unmanageable
+        # (apply/update/delete all treat it as the sentinel and no-op).
+        messagebox = getattr(gui, "messagebox", None)
+        if messagebox is not None:
+            messagebox.showerror(
+                "Presets",
+                f"'{presets.CUSTOM_LABEL}' is a reserved preset name. "
+                "Please choose a different name.",
+            )
+        return
+    if selected_fields is None:
+        selected_fields = set(presets.PRESET_VALUE_FIELDS)
+    preset = preset_from_gui_selection(gui, name, selected_fields)
+    updated = presets.add_preset(getattr(gui, "_simple_presets", []), preset)
+    if not presets.save_presets(updated):
+        _report_preset_write_failure(gui, f"Could not save preset '{name}'.")
+        return
+    presets.set_selected_preset(name)
+    refresh_preset_dropdowns(gui)
+    gui.advanced_preset_var.set(name)
+
+
+def update_advanced_preset(
+    gui: "TalksReducerGUI",
+    name: Optional[str] = None,
+    selected_fields=None,
+) -> None:
+    """Overwrite the selected preset with the checked knobs and persist it.
+
+    The currently selected preset name is the update target. When *name* is
+    provided it becomes the (possibly renamed) new name; *selected_fields* limits
+    the capture to the checked params. Both default to a full overwrite of the
+    selection, preserving the pre-dialog behavior for callers that pass nothing.
+    """
+
+    target = gui.advanced_preset_var.get()
+    if not target or target == presets.CUSTOM_LABEL:
+        return
+    new_name = str(name).strip() if name else target
+    if not new_name or new_name == presets.CUSTOM_LABEL:
+        return
+    if selected_fields is None:
+        selected_fields = set(presets.PRESET_VALUE_FIELDS)
+    preset = preset_from_gui_selection(gui, new_name, selected_fields)
+    updated = presets.update_preset(getattr(gui, "_simple_presets", []), target, preset)
+    if not presets.save_presets(updated):
+        _report_preset_write_failure(gui, f"Could not update preset '{new_name}'.")
+        return
+    presets.set_selected_preset(new_name)
+    refresh_preset_dropdowns(gui)
+    gui.advanced_preset_var.set(new_name)
+
+
+def delete_advanced_preset(gui: "TalksReducerGUI") -> None:
+    """Remove the selected preset from the store and refresh the dropdowns."""
+
+    name = gui.advanced_preset_var.get()
+    if not name or name == presets.CUSTOM_LABEL:
+        return
+    updated = presets.delete_preset(getattr(gui, "_simple_presets", []), name)
+    if not presets.save_presets(updated):
+        _report_preset_write_failure(gui, f"Could not delete preset '{name}'.")
+        return
+    presets.set_selected_preset(None)
+    refresh_preset_dropdowns(gui)
+    gui.advanced_preset_var.set(presets.CUSTOM_LABEL)
+
+
+def move_advanced_preset(gui: "TalksReducerGUI", delta: int) -> None:
+    """Shift the selected preset by *delta* slots and persist the new order.
+
+    The reorder is written to ``settings.json`` (shared across surfaces) and the
+    dropdowns refresh; the moved preset stays selected. ``delta`` is ``-1`` for up
+    and ``+1`` for down.
+    """
+
+    name = gui.advanced_preset_var.get()
+    if not name or name == presets.CUSTOM_LABEL:
+        return
+    updated = presets.move_preset(getattr(gui, "_simple_presets", []), name, delta)
+    if not presets.save_presets(updated):
+        _report_preset_write_failure(gui, f"Could not reorder preset '{name}'.")
+        return
+    refresh_preset_dropdowns(gui)
+    gui.advanced_preset_var.set(name)
+    simple_var = getattr(gui, "simple_preset_var", None)
+    if simple_var is not None:
+        simple_var.set(name)
 
 
 def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> None:
@@ -235,57 +539,67 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.options_frame.columnconfigure(0, weight=1)
 
     checkbox_frame = gui.ttk.Frame(gui.options_frame)
-    checkbox_frame.grid(row=0, column=0, columnspan=2, sticky="w")
+    checkbox_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
+    # Column 0 fills the width so the Simple-mode preset row can stretch and
+    # right-align Open output to the content margin.
+    checkbox_frame.columnconfigure(0, weight=1)
 
-    # Speedup preset and video codec dropdowns (visible in simple mode only)
-    speedup_frame = gui.ttk.Frame(checkbox_frame)
-    speedup_label = gui.ttk.Label(speedup_frame, text="Speedup:")
-    speedup_label.pack(side=gui.tk.LEFT, padx=(0, 2))
-    preset_values = [PRESET_LABELS[k] for k in BASIC_PRESETS] + ["custom"]
-    speedup_combo = gui.ttk.Combobox(
-        speedup_frame,
+    # Simple-mode preset row: the dropdown packs on the left and Open output packs
+    # on the right so its right edge lines up with the full-width controls (drop
+    # zone / "Open last"). It is its own frame (packed internally), so it never
+    # shares grid columns with the manual ``checkbox_row1`` — sharing them let the
+    # wide manual row inflate the columns and push Open output off-screen after a
+    # Simple-mode toggle. Populated from the shared store and hidden (with Open
+    # output) when no presets exist, where the manual ``checkbox_row1`` copy is
+    # used instead.
+    gui._simple_presets = presets.load_presets()
+    simple_row = gui.ttk.Frame(checkbox_frame)
+    simple_row.grid(row=0, column=0, columnspan=3, sticky="ew")
+
+    preset_frame = gui.ttk.Frame(simple_row)
+    preset_label = gui.ttk.Label(preset_frame, text="Preset:")
+    preset_label.pack(side=gui.tk.LEFT, padx=(0, 2))
+    preset_combo = gui.ttk.Combobox(
+        preset_frame,
         textvariable=gui.simple_preset_var,
-        values=preset_values,
+        values=[preset.name for preset in gui._simple_presets],
         state="readonly",
-        width=14,
+        width=28,
     )
-    speedup_combo.pack(side=gui.tk.LEFT)
-    speedup_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_preset(gui))
-    speedup_frame.grid(row=0, column=0, sticky="w")
+    preset_combo.pack(side=gui.tk.LEFT)
+    preset_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_preset(gui))
+    preset_frame.pack(side=gui.tk.LEFT)
 
-    codec_frame = gui.ttk.Frame(checkbox_frame)
-    codec_label = gui.ttk.Label(codec_frame, text="Video codec:")
-    codec_label.pack(side=gui.tk.LEFT, padx=(0, 2))
-    codec_values = list(CODEC_LABELS.values())
-    simple_codec_combo = gui.ttk.Combobox(
-        codec_frame,
-        textvariable=gui.simple_codec_var,
-        values=codec_values,
-        state="readonly",
-        width=14,
+    gui.simple_open_output_check = gui.ttk.Checkbutton(
+        simple_row,
+        text="Open output",
+        variable=gui.open_after_convert_var,
     )
-    simple_codec_combo.pack(side=gui.tk.LEFT)
-    simple_codec_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_codec(gui))
-    codec_frame.grid(row=0, column=1, sticky="w", padx=(8, 0))
+    gui.simple_open_output_check.pack(side=gui.tk.RIGHT, padx=(0, 2))
+
+    if not gui._simple_presets:
+        simple_row.grid_remove()
 
     checkbox_row1 = gui.ttk.Frame(checkbox_frame)
     checkbox_row1.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
-    gui.ttk.Checkbutton(
+    gui.small_check = gui.ttk.Checkbutton(
         checkbox_row1,
         text="Small video",
         variable=gui.small_var,
-    ).pack(side=gui.tk.LEFT)
+    )
+    gui.small_check.pack(side=gui.tk.LEFT)
     gui.small_480_check = gui.ttk.Checkbutton(
         checkbox_row1,
         text="480p",
         variable=gui.small_480_var,
     )
     gui.small_480_check.pack(side=gui.tk.LEFT, padx=(65, 0))
-    gui.ttk.Checkbutton(
+    gui.open_output_check = gui.ttk.Checkbutton(
         checkbox_row1,
         text="Open output",
         variable=gui.open_after_convert_var,
-    ).pack(side=gui.tk.LEFT, padx=(65, 0))
+    )
+    gui.open_output_check.pack(side=gui.tk.LEFT, padx=(65, 0))
 
     gui.cut_check = gui.ttk.Checkbutton(
         checkbox_row1,
@@ -305,14 +619,74 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.simple_mode_check.grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
-    gui.simple_speedup_frame = speedup_frame
-    gui.simple_speedup_label = speedup_label
-    gui.simple_speedup_combo = speedup_combo
-    gui.simple_codec_frame = codec_frame
-    gui.simple_codec_label = codec_label
-    gui.simple_codec_combo = simple_codec_combo
+    # The whole simple row (dropdown + Open output) shows/hides together.
+    gui.simple_preset_frame = simple_row
+    gui.simple_preset_label = preset_label
+    gui.simple_preset_combo = preset_combo
 
     gui.advanced_visible = gui.tk.BooleanVar(value=False)
+
+    # Advanced-mode preset management strip: a Preset dropdown plus
+    # Save as… / Update / Delete. It authors the shared preset store and is
+    # hidden in Simple mode (where the read-only Simple dropdown applies instead).
+    advanced_preset_frame = gui.ttk.Frame(gui.options_frame)
+    advanced_preset_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
+    gui.ttk.Label(advanced_preset_frame, text="Preset:").pack(
+        side=gui.tk.LEFT, padx=(0, 2)
+    )
+    gui.advanced_preset_combo = gui.ttk.Combobox(
+        advanced_preset_frame,
+        textvariable=gui.advanced_preset_var,
+        values=[preset.name for preset in gui._simple_presets],
+        state="readonly",
+        width=28,
+    )
+    gui.advanced_preset_combo.pack(side=gui.tk.LEFT)
+    gui.advanced_preset_combo.bind(
+        "<<ComboboxSelected>>", lambda e: apply_advanced_preset(gui)
+    )
+    gui.advanced_preset_save_button = gui.ttk.Button(
+        advanced_preset_frame,
+        text="Save as…",
+        command=gui._open_save_preset_dialog,
+    )
+    gui.advanced_preset_save_button.pack(side=gui.tk.LEFT, padx=(8, 0))
+    gui.advanced_preset_update_button = gui.ttk.Button(
+        advanced_preset_frame,
+        text="Update",
+        command=gui._update_selected_preset,
+    )
+    gui.advanced_preset_update_button.pack(side=gui.tk.LEFT, padx=(4, 0))
+    gui.advanced_preset_delete_button = gui.ttk.Button(
+        advanced_preset_frame,
+        text="Delete",
+        command=gui._delete_selected_preset,
+    )
+    gui.advanced_preset_delete_button.pack(side=gui.tk.LEFT, padx=(4, 0))
+    # Reorder the selected preset within the shared list (also decides which preset
+    # is the "first" default on every surface).
+    gui.advanced_preset_up_button = gui.ttk.Button(
+        advanced_preset_frame,
+        text="↑",
+        width=2,
+        command=gui._move_selected_preset_up,
+    )
+    gui.advanced_preset_up_button.pack(side=gui.tk.LEFT, padx=(8, 0))
+    gui.advanced_preset_down_button = gui.ttk.Button(
+        advanced_preset_frame,
+        text="↓",
+        width=2,
+        command=gui._move_selected_preset_down,
+    )
+    gui.advanced_preset_down_button.pack(side=gui.tk.LEFT, padx=(4, 0))
+    gui.advanced_preset_frame = advanced_preset_frame
+
+    # Editing any knob flips the Advanced dropdown to "Custom"; slider vars route
+    # through ``update_basic_reset_state`` while the small/codec vars trace here.
+    for _preset_var in (gui.small_var, gui.small_480_var, gui.video_codec_var):
+        _preset_var.trace_add(
+            "write", lambda *_: refresh_advanced_preset_selection(gui)
+        )
 
     basic_label_container = gui.ttk.Frame(gui.options_frame)
     basic_label = gui.ttk.Label(basic_label_container, text="Basic options")
@@ -355,7 +729,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.options_frame, padding=0, labelwidget=basic_label_container
     )
     gui.basic_options_frame.grid(
-        row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0)
     )
     gui.basic_options_frame.columnconfigure(1, weight=1)
 
@@ -505,7 +879,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     # Button frame for Advanced, Check updates button, and status label
     gui.button_frame = gui.ttk.Frame(gui.options_frame)
-    gui.button_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+    gui.button_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
     gui.button_frame.columnconfigure(2, weight=1)
 
     gui.advanced_button = gui.ttk.Button(
@@ -542,7 +916,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.update_status_label.grid(row=0, column=3, sticky="w", padx=(8, 0))
 
     gui.advanced_frame = gui.ttk.Frame(gui.options_frame, padding=0)
-    gui.advanced_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
+    gui.advanced_frame.grid(row=4, column=0, columnspan=2, sticky="nsew")
     gui.advanced_frame.columnconfigure(1, weight=1)
 
     # Watch-directory chooser on a single row (checkbox + path + Browse), placed
@@ -960,6 +1334,7 @@ def update_basic_reset_state(gui: "TalksReducerGUI") -> None:
     state = gui.tk.NORMAL if should_enable else gui.tk.DISABLED
     gui.reset_basic_button.configure(state=state)
     update_basic_preset_highlight(gui)
+    refresh_advanced_preset_selection(gui)
 
 
 def update_basic_preset_highlight(gui: "TalksReducerGUI") -> None:
@@ -1140,6 +1515,9 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
     simple = gui.simple_mode_var.get()
     if simple:
         gui.basic_options_frame.grid_remove()
+        # The Advanced-only preset management strip has no place in Simple mode.
+        if hasattr(gui, "advanced_preset_frame"):
+            gui.advanced_preset_frame.grid_remove()
         gui.log_frame.grid_remove()
         # The Connected clients panel is a server-managed-only detail that has no
         # place in the minimal Simple layout.
@@ -1149,10 +1527,38 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.button_frame.grid_remove()
         gui.advanced_frame.grid_remove()
         gui.run_after_drop_var.set(True)
-        if hasattr(gui, "simple_speedup_frame"):
-            gui.simple_speedup_frame.grid()
-        if hasattr(gui, "simple_codec_frame"):
-            gui.simple_codec_frame.grid()
+        # Show the preset selector only when at least one preset exists.
+        if hasattr(gui, "simple_preset_frame") and getattr(
+            gui, "_simple_presets", None
+        ):
+            gui.simple_preset_frame.grid()
+        # Resolution is driven read-only by the selected preset in Simple mode,
+        # so the manual Small video / 480p checkboxes are hidden while a preset
+        # exists (they would otherwise silently override the preset while it still
+        # shows selected). When ``load_presets()`` returns an empty list the
+        # selector is hidden, so the checkboxes must stay visible as the only
+        # resolution control Simple mode has left.
+        if getattr(gui, "_simple_presets", None):
+            if hasattr(gui, "small_check"):
+                gui.small_check.pack_forget()
+            if hasattr(gui, "small_480_check"):
+                gui.small_480_check.pack_forget()
+            # Open output rides inside the preset row (shown via
+            # ``simple_preset_frame``); hide the full-layout copy so it does not
+            # also appear on its own line.
+            if hasattr(gui, "open_output_check"):
+                gui.open_output_check.pack_forget()
+        else:
+            # No preset selector, so the preset row is hidden; keep Open output in
+            # its full-layout row alongside the manual resolution checkboxes.
+            if hasattr(gui, "open_output_check"):
+                gui.open_output_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+            if hasattr(gui, "small_check") and hasattr(gui, "open_output_check"):
+                gui.small_check.pack(side=gui.tk.LEFT, before=gui.open_output_check)
+            if hasattr(gui, "small_480_check") and hasattr(gui, "open_output_check"):
+                gui.small_480_check.pack(
+                    side=gui.tk.LEFT, padx=(65, 0), before=gui.open_output_check
+                )
         # Cut video is an Advanced-only feature: hide its checkbox and panel.
         if hasattr(gui, "cut_check"):
             gui.cut_check.pack_forget()
@@ -1161,6 +1567,9 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
         apply_window_size(gui, simple=True)
     else:
         gui.basic_options_frame.grid()
+        # Restore the Advanced-only preset management strip in the full layout.
+        if hasattr(gui, "advanced_preset_frame"):
+            gui.advanced_preset_frame.grid()
         gui.log_frame.grid()
         # Restore the Connected clients panel only when the GUI is managed by the
         # server tray; standalone GUIs never show it.
@@ -1173,10 +1582,20 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.button_frame.grid()
         if gui.advanced_visible.get():
             gui.advanced_frame.grid()
-        if hasattr(gui, "simple_speedup_frame"):
-            gui.simple_speedup_frame.grid_remove()
-        if hasattr(gui, "simple_codec_frame"):
-            gui.simple_codec_frame.grid_remove()
+        if hasattr(gui, "simple_preset_frame"):
+            # Hides the whole preset row, including its Open output copy.
+            gui.simple_preset_frame.grid_remove()
+        # Restore the full-layout Open output (Simple mode may have forgotten it)
+        # then pack the manual resolution checkboxes ahead of it so the full layout
+        # keeps its original Small video / 480p / Open output order.
+        if hasattr(gui, "open_output_check"):
+            gui.open_output_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+        if hasattr(gui, "small_check") and hasattr(gui, "open_output_check"):
+            gui.small_check.pack(side=gui.tk.LEFT, before=gui.open_output_check)
+        if hasattr(gui, "small_480_check") and hasattr(gui, "open_output_check"):
+            gui.small_480_check.pack(
+                side=gui.tk.LEFT, padx=(65, 0), before=gui.open_output_check
+            )
         # Restore the Advanced-only Cut video checkbox and (if enabled) its panel.
         if hasattr(gui, "cut_check"):
             gui.cut_check.pack(side=gui.tk.LEFT, padx=(65, 0))

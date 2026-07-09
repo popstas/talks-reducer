@@ -71,6 +71,53 @@ def test_save_and_load_round_trip(tmp_path):
     assert reloaded["threshold"] == pytest.approx(0.75)
 
 
+def test_save_preserves_externally_written_presets(tmp_path):
+    """A preference save must not clobber presets written by ``presets`` module.
+
+    ``GUIPreferences`` snapshots ``settings.json`` once at construction; a preset
+    authored afterward through the ``presets`` module writes the ``presets`` /
+    ``selected_preset`` keys directly. The next ordinary preference save must
+    merge those keys back from disk rather than overwrite them with the stale
+    snapshot.
+    """
+
+    from talks_reducer import presets
+
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    # Seed some existing preferences so the snapshot is non-empty.
+    prefs.update("small_video", False)
+
+    # Author a preset out-of-band, exactly as the layout helpers do.
+    my_preset = presets.Preset(
+        name="MyPreset",
+        resolution="480p",
+        silent_speed=8.0,
+        sounded_speed=1.25,
+        silent_threshold=0.02,
+        video_codec="hevc",
+    )
+    assert presets.save_presets([my_preset], config_path=config_path)
+    assert presets.set_selected_preset("MyPreset", config_path=config_path)
+
+    # An ordinary preference toggle must not erase the freshly authored preset.
+    prefs.update("small_video", True)
+
+    loaded = load_settings(config_path)
+    assert loaded["small_video"] is True
+    assert loaded["selected_preset"] == "MyPreset"
+    assert [entry["name"] for entry in loaded["presets"]] == ["MyPreset"]
+
+    # An out-of-band deletion of all presets must likewise survive.
+    assert presets.save_presets([], config_path=config_path)
+    assert presets.set_selected_preset(None, config_path=config_path)
+    prefs.update("small_video", False)
+
+    reloaded = load_settings(config_path)
+    assert reloaded["presets"] == []
+    assert "selected_preset" not in reloaded
+
+
 def test_on_cut_change_persists_values(tmp_path):
     config_path = tmp_path / "settings.json"
     prefs = GUIPreferences(config_path)

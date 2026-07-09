@@ -1,5 +1,4 @@
 audiotsm>=0.1.2
-scipy>=1.10.0
 numpy>=1.22.0
 tqdm>=4.65.0
 # Cap below 0.4.4: newer releases ship a Tcl 9 tkdnd build for macOS arm64

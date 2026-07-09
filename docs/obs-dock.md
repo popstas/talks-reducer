@@ -64,7 +64,7 @@ Docks → Custom Browser Docks
 
 The dock UI is served by `dock-server`, so the URL follows `--host`/`--port`.
 
-3. Open **Settings** in the dock and confirm:
+3. Open **Settings** (the ⚙️ gear in the toolbar) in the dock and confirm:
 
 - **Talks Reducer** points to your `talks-reducer.exe`
 - **OBS WebSocket** URL matches OBS (default `ws://127.0.0.1:4455`)
@@ -79,9 +79,20 @@ The dock connects to OBS automatically on load. When connected, the button shows
 
 | Control | Description |
 | --- | --- |
+| **Preset** | Dropdown of saved presets (shown only when the server has presets); defaults to the preset you used last, or the first one; a **Custom** entry keeps the manual controls. Its width is capped so the dropdown, **Process**, and the gear stay on one line |
+| **Process** | Runs the selected preset (enabled once a preset is chosen and a recording path is known) |
 | **1080p / 720p / 480p** | Output resolution preset (720p is the default) |
 | **1x / 5x / 10x** | Silent-speed multiplier passed to Talks Reducer |
-| **Settings** | Expandable panel for advanced options and OBS connection |
+| **⚙️** | Expandable **Settings** panel for advanced options and OBS connection |
+
+When the server exposes presets (the shared `settings.json` populates
+`GET /presets`), the dock shows the **Preset** dropdown as the primary control and
+**moves** the resolution/speed selects into the **Settings** panel (the codec radios
+already live there). Selecting a real preset processes with that preset's full
+fidelity; choosing **Custom** moves the resolution/speed controls back into the
+toolbar. When the server has no presets the resolution/speed controls stay in the
+toolbar exactly as before. The chosen preset persists in `localStorage` under
+`obsDock.preset`.
 
 Speed buttons stay disabled until OBS reports a stopped recording path. The dock
 must be open when you stop recording so it can receive the `RecordStateChanged`
@@ -94,6 +105,7 @@ panels, items wrap to the next line.
 
 | Setting | Description |
 | --- | --- |
+| **Resolution / Speed** | Moved here from the toolbar when presets exist; shown in the toolbar otherwise |
 | **Codec** | `h264` (default), `hevc`, `av1`, or `mp3` |
 | **Auto close** | When enabled, adds `--open-location --auto-close` |
 | **Talks Reducer** | Path to `talks-reducer.exe`; `%LOCALAPPDATA%` and other `%VAR%` forms are expanded on the server |
@@ -134,6 +146,12 @@ Settings are stored in the browser `localStorage` under keys prefixed with
 | `codec` | `h264`, `hevc`, `av1`, `mp3` |
 | `autoClose` | `true` adds `--open-location --auto-close` |
 | `exe` | Optional; defaults to `%LOCALAPPDATA%\Programs\talks-reducer\talks-reducer.exe` |
+| `preset` | Optional; a saved preset name. When present the dock emits `--preset NAME` and ignores the resolution/speed/codec fields |
+
+The dock also serves `GET /presets`, which returns the saved preset list as JSON
+(`[{ "name", "resolution", "silent_speed", "sounded_speed", "silent_threshold",
+"video_codec" }, …]`) — the same list authored in the desktop GUI. The dock fetches
+this to populate its **Preset** dropdown.
 
 ### CLI arguments
 
@@ -141,6 +159,7 @@ The server maps dock choices to Talks Reducer flags:
 
 | Dock choice | CLI flags |
 | --- | --- |
+| Preset | `--preset NAME` (the CLI fans the preset's resolution/speed/codec; the payload's other fields are ignored) |
 | 1080p | `--no-small` |
 | 720p | `--small` |
 | 480p | `--small --480` |

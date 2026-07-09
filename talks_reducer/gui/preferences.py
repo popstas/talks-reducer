@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Mapping, MutableMapping, Optional
+from typing import TYPE_CHECKING, MutableMapping, Optional
 
+from ..config import (
+    SettingsReadError,
+    determine_config_path,
+    load_settings,
+    read_settings_strict,
+    save_settings,
+)
+from ..presets import PRESETS_KEY, SELECTED_PRESET_KEY
 from . import layout as layout_helpers
 from .theme import (
     DARK_THEME,
@@ -21,47 +28,20 @@ from .theme import (
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from .app import TalksReducerGUI
 
+# Keys written independently by :mod:`talks_reducer.presets` through its own
+# read-modify-write cycle. ``GUIPreferences`` snapshots ``settings.json`` once at
+# construction and rewrites the whole file on every ``save()``, so it must not
+# clobber these keys with its stale snapshot when a preset was authored after the
+# snapshot was taken.
+_EXTERNALLY_OWNED_KEYS = (PRESETS_KEY, SELECTED_PRESET_KEY)
 
-def determine_config_path(
-    platform: Optional[str] = None,
-    env: Optional[Mapping[str, str]] = None,
-    home: Optional[Path] = None,
-) -> Path:
-    """Return the path to the GUI settings file for the current platform."""
-
-    platform_name = platform if platform is not None else sys.platform
-    env_mapping = env if env is not None else os.environ
-    home_path = Path(home) if home is not None else Path.home()
-
-    if platform_name == "win32":
-        appdata = env_mapping.get("APPDATA")
-        if appdata:
-            base = Path(appdata)
-        else:
-            base = home_path / "AppData" / "Roaming"
-    elif platform_name == "darwin":
-        base = home_path / "Library" / "Application Support"
-    else:
-        xdg_config = env_mapping.get("XDG_CONFIG_HOME")
-        base = Path(xdg_config) if xdg_config else home_path / ".config"
-
-    return base / "talks-reducer" / "settings.json"
-
-
-def load_settings(config_path: Path) -> dict[str, object]:
-    """Load settings from *config_path*, returning an empty dict on failure."""
-
-    try:
-        with config_path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
-    except FileNotFoundError:
-        return {}
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-    if isinstance(data, dict):
-        return data
-    return {}
+__all__ = [
+    "determine_config_path",
+    "load_settings",
+    "save_settings",
+    "GUIPreferences",
+    "PreferenceController",
+]
 
 
 class GUIPreferences:
@@ -132,18 +112,30 @@ class GUIPreferences:
     def save(self) -> bool:
         """Write the current settings to disk, creating parent directories.
 
-        Returns ``True`` when the file is written and ``False`` when an
-        ``OSError`` prevents persistence, so callers that must not act on a
-        stale ``settings.json`` can detect the failure.
+        Before writing, the keys owned by :mod:`talks_reducer.presets`
+        (:data:`_EXTERNALLY_OWNED_KEYS`) are re-read from disk into the in-memory
+        snapshot so a preset authored after construction is not clobbered by this
+        wholesale rewrite. When that re-read fails (a concurrent writer left the
+        file locked or partially written) the save is aborted rather than
+        rewriting the file without the externally-owned keys, which would delete
+        the user's presets. Returns ``True`` when the file is written and
+        ``False`` when the re-read fails or an ``OSError`` prevents persistence,
+        so callers that must not act on a stale ``settings.json`` can detect the
+        failure.
         """
 
         try:
-            self._config_path.parent.mkdir(parents=True, exist_ok=True)
-            with self._config_path.open("w", encoding="utf-8") as handle:
-                json.dump(self._settings, handle, indent=2, sort_keys=True)
-        except OSError:
+            on_disk = read_settings_strict(self._config_path)
+        except SettingsReadError:
             return False
-        return True
+
+        for key in _EXTERNALLY_OWNED_KEYS:
+            if key in on_disk:
+                self._settings[key] = on_disk[key]
+            else:
+                self._settings.pop(key, None)
+
+        return save_settings(self._config_path, self._settings)
 
 
 class PreferenceController:

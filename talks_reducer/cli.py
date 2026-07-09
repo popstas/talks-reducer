@@ -21,6 +21,31 @@ from .timecode import parse_timecode
 from .version_utils import resolve_version
 
 
+class _ListPresetsAction(argparse.Action):
+    """Print the stored preset names and exit, mirroring ``--version``.
+
+    Implemented as an argparse action so ``--list-presets`` works without the
+    otherwise-required ``input_file`` positional, exiting during parsing before
+    the required-argument check runs.
+    """
+
+    def __init__(self, option_strings, dest, **kwargs):
+        kwargs.setdefault("nargs", 0)
+        kwargs.setdefault("default", argparse.SUPPRESS)
+        super().__init__(option_strings, dest, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from . import presets as presets_module
+
+        loaded = presets_module.load_presets()
+        if loaded:
+            for preset in loaded:
+                print(preset.name)
+        else:
+            print("No presets are defined.")
+        parser.exit()
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Create the argument parser used by the command line interface."""
 
@@ -37,6 +62,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--version",
         action="version",
         version=f"talks-reducer {pkg_version}",
+    )
+
+    parser.add_argument(
+        "--preset",
+        dest="preset",
+        default=None,
+        help=(
+            "Apply a saved preset by name as the base configuration before any "
+            "explicit flags. Explicit flags still override the preset. Use "
+            "--list-presets to see the available names."
+        ),
+    )
+    parser.add_argument(
+        "--list-presets",
+        action=_ListPresetsAction,
+        help="Print the names of the saved presets and exit.",
     )
 
     parser.add_argument(
@@ -208,6 +249,76 @@ def _build_parser() -> argparse.ArgumentParser:
         help="GUI only: close the window after all queued files finish successfully.",
     )
     return parser
+
+
+def _detect_explicit_args(argv_list: Sequence[str]) -> set:
+    """Return the set of destination names the user passed explicitly.
+
+    A fresh parser is built with every action default replaced by
+    :data:`argparse.SUPPRESS` so the resulting namespace contains attributes only
+    for arguments that actually appeared on the command line. This lets
+    ``--preset`` fill in fields without clobbering flags the user set explicitly.
+    """
+
+    parser = _build_parser()
+    for action in parser._actions:
+        action.default = argparse.SUPPRESS
+    namespace = parser.parse_args(list(argv_list))
+    return set(vars(namespace).keys())
+
+
+def _apply_preset_to_args(
+    parsed_args: argparse.Namespace, preset: object, explicit: set
+) -> None:
+    """Apply *preset* fields onto *parsed_args* where not explicitly provided.
+
+    Presets are sparse: a field the preset leaves unset (``None``) is skipped so
+    it inherits the parser default or a stored preference instead of being forced.
+    When present, resolution is expanded to the ``small``/``small_480`` tri-state
+    so a preset can force ``--no-small``; each field is only written when the user
+    did not pass the corresponding flag, preserving explicit-flag precedence.
+    """
+
+    resolution = getattr(preset, "resolution", None)
+    if resolution is not None:
+        if resolution == "1080p":
+            small, small_480 = False, False
+        elif resolution == "480p":
+            small, small_480 = True, True
+        else:  # "720p" and any unexpected value.
+            small, small_480 = True, False
+
+        if "small" not in explicit:
+            parsed_args.small = small
+        if "small_480" not in explicit:
+            # ``small_480`` is only meaningful alongside ``small``; when the
+            # effective small flag is off (e.g. an explicit ``--no-small``
+            # overriding a 480p preset) never leave 480p scaling on, or the output
+            # name gains a stray ``480`` marker with no rescale behind it.
+            parsed_args.small_480 = small_480 and bool(
+                getattr(parsed_args, "small", small)
+            )
+
+    if (
+        getattr(preset, "silent_speed", None) is not None
+        and "silent_speed" not in explicit
+    ):
+        parsed_args.silent_speed = float(preset.silent_speed)
+    if (
+        getattr(preset, "sounded_speed", None) is not None
+        and "sounded_speed" not in explicit
+    ):
+        parsed_args.sounded_speed = float(preset.sounded_speed)
+    if (
+        getattr(preset, "silent_threshold", None) is not None
+        and "silent_threshold" not in explicit
+    ):
+        parsed_args.silent_threshold = float(preset.silent_threshold)
+    if (
+        getattr(preset, "video_codec", None) is not None
+        and "video_codec" not in explicit
+    ):
+        parsed_args.video_codec = str(preset.video_codec)
 
 
 def gather_input_files(
@@ -771,6 +882,18 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     parser = _build_parser()
     parsed_args = parser.parse_args(argv_list)
+
+    preset_name = getattr(parsed_args, "preset", None)
+    if preset_name:
+        from . import presets as presets_module
+
+        loaded = presets_module.load_presets()
+        preset = presets_module.find_preset(preset_name, loaded)
+        if preset is None:
+            valid = ", ".join(item.name for item in loaded) or "(none)"
+            parser.error(f"unknown preset '{preset_name}'. Valid presets: {valid}")
+        explicit = _detect_explicit_args(argv_list)
+        _apply_preset_to_args(parsed_args, preset, explicit)
 
     host_value = getattr(parsed_args, "host", None)
     if host_value:

@@ -2,7 +2,7 @@
 
 ## Project Snapshot
 - Core logic lives in `jumpcutter.py`; no package layout, so keep imports and helpers in that file unless you introduce a clear module split.
-- External runtime dependencies: `ffmpeg` in PATH, `ffprobe`, `audiotsm`, `numpy`, `scipy`, `tqdm`.
+- External runtime dependencies: `ffmpeg` in PATH, `ffprobe`, `audiotsm`, `numpy`, `tqdm`.
 - Temporary artifacts go under `TEMP`; clean it explicitly after runs to avoid stale media.
 
 ## Coding Conventions

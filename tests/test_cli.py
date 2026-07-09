@@ -10,6 +10,164 @@ from unittest import mock
 import pytest
 
 from talks_reducer import cli
+from talks_reducer import presets as presets_module
+
+
+def _make_preset(**overrides: object) -> presets_module.Preset:
+    """Build a :class:`Preset` for tests with sensible defaults."""
+
+    base = dict(
+        name="Test preset",
+        resolution="480p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.02,
+        video_codec="hevc",
+    )
+    base.update(overrides)
+    return presets_module.Preset(**base)  # type: ignore[arg-type]
+
+
+def _capture_cli_application(monkeypatch: pytest.MonkeyPatch, captured: dict) -> None:
+    """Patch ``CliApplication`` to capture the parsed namespace and succeed."""
+
+    def build_app(**_kwargs: object) -> mock.Mock:
+        app = mock.Mock()
+
+        def run(parsed: object) -> tuple:
+            captured.update(vars(parsed))
+            return (0, [])
+
+        app.run.side_effect = run
+        return app
+
+    monkeypatch.setattr(cli, "CliApplication", build_app)
+    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
+
+
+def test_main_applies_preset_as_base_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--preset`` should fan its fields onto the parsed namespace."""
+
+    preset = _make_preset(
+        name="480p 10x speedup H.265",
+        resolution="480p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.02,
+        video_codec="hevc",
+    )
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [preset])
+
+    captured: dict = {}
+    _capture_cli_application(monkeypatch, captured)
+
+    cli.main(["--preset", "480p 10x speedup H.265", "input.mp4"])
+
+    assert captured["small"] is True
+    assert captured["small_480"] is True
+    assert captured["silent_speed"] == pytest.approx(10.0)
+    assert captured["sounded_speed"] == pytest.approx(1.0)
+    assert captured["silent_threshold"] == pytest.approx(0.02)
+    assert captured["video_codec"] == "hevc"
+
+
+def test_main_preset_1080p_forces_no_small(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 1080p preset should force ``small=False`` even without an explicit flag."""
+
+    preset = _make_preset(name="1080p", resolution="1080p", video_codec="h264")
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [preset])
+
+    captured: dict = {}
+    _capture_cli_application(monkeypatch, captured)
+
+    cli.main(["--preset", "1080p", "input.mp4"])
+
+    assert captured["small"] is False
+    assert captured["small_480"] is False
+
+
+def test_main_explicit_flags_override_preset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit flags should win over the preset values (explicit > preset)."""
+
+    preset = _make_preset(
+        name="480p 10x speedup H.265",
+        resolution="480p",
+        silent_speed=10.0,
+        video_codec="hevc",
+    )
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [preset])
+
+    captured: dict = {}
+    _capture_cli_application(monkeypatch, captured)
+
+    cli.main(
+        [
+            "--preset",
+            "480p 10x speedup H.265",
+            "--video-codec",
+            "h264",
+            "--silent-speed",
+            "3",
+            "--no-small",
+            "input.mp4",
+        ]
+    )
+
+    assert captured["video_codec"] == "h264"
+    assert captured["silent_speed"] == pytest.approx(3.0)
+    assert captured["small"] is False
+    # ``--no-small`` must fully override the 480p preset: 480p scaling is only
+    # meaningful alongside ``small``, so ``small_480`` must not leak through.
+    assert captured["small_480"] is False
+    # ``sounded_speed`` was not passed, so the preset value still applies.
+    assert captured["sounded_speed"] == pytest.approx(1.0)
+
+
+def test_main_list_presets_prints_names_and_exits(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--list-presets`` should print each name and exit without an input file."""
+
+    presets = [_make_preset(name="Alpha"), _make_preset(name="Beta")]
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: presets)
+
+    with pytest.raises(SystemExit):
+        cli.main(["--list-presets"])
+
+    out = capsys.readouterr().out
+    assert "Alpha" in out
+    assert "Beta" in out
+
+
+def test_main_unknown_preset_reports_valid_names(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An unknown ``--preset`` name should error and list the valid names."""
+
+    preset = _make_preset(name="Known")
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [preset])
+    monkeypatch.setattr(cli, "_launch_gui", lambda argv: False)
+
+    with pytest.raises(SystemExit):
+        cli.main(["--preset", "Nope", "input.mp4"])
+
+    err = capsys.readouterr().err
+    assert "unknown preset 'Nope'" in err
+    assert "Known" in err
+
+
+def test_build_parser_defines_preset_arguments() -> None:
+    """The parser should expose ``--preset`` and default it to ``None``."""
+
+    parser = cli._build_parser()
+
+    args = parser.parse_args(["--preset", "My preset", "input.mp4"])
+    assert args.preset == "My preset"
+
+    defaults = parser.parse_args(["input.mp4"])
+    assert defaults.preset is None
 
 
 def test_build_parser_includes_version_and_defaults(
