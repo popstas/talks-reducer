@@ -540,9 +540,6 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     checkbox_frame = gui.ttk.Frame(gui.options_frame)
     checkbox_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
-    # Column 1 absorbs the slack so the Simple-mode Open output checkbox sits at
-    # the right edge of the preset row.
-    checkbox_frame.columnconfigure(1, weight=1)
 
     # User-named preset dropdown (visible in simple mode only). It is populated
     # from the shared preset store and hidden entirely when no presets exist.
@@ -564,16 +561,16 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         preset_frame.grid_remove()
 
     # Simple-mode Open output checkbox: shares ``open_after_convert_var`` with the
-    # full-layout checkbox but lives on the preset row (line 1, right) so Simple
-    # mode reads "Preset … | Open output" on one line. It is shown only in Simple
-    # mode when a preset selector is present; the full layout uses the
-    # ``checkbox_row1`` copy instead.
+    # full-layout checkbox but lives on the preset row (line 1) right after the
+    # dropdown so Simple mode reads "Preset … | Open output" on one compact line
+    # (no stretched gap). Shown only in Simple mode when a preset selector is
+    # present; the full layout uses the ``checkbox_row1`` copy instead.
     gui.simple_open_output_check = gui.ttk.Checkbutton(
         checkbox_frame,
         text="Open output",
         variable=gui.open_after_convert_var,
     )
-    gui.simple_open_output_check.grid(row=0, column=1, sticky="e", padx=(12, 0))
+    gui.simple_open_output_check.grid(row=0, column=1, sticky="w", padx=(10, 2))
     gui.simple_open_output_check.grid_remove()
 
     checkbox_row1 = gui.ttk.Frame(checkbox_frame)
