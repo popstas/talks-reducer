@@ -1,0 +1,238 @@
+"""User-named preset store shared across the GUI, Web UI, OBS dock, and CLI.
+
+A preset is a saved bundle of processing settings authored in the desktop GUI
+and applied read-only everywhere else. Presets live in the shared
+``settings.json`` (see :mod:`talks_reducer.config`) under the ``presets`` key so
+one canonical list appears on every surface the config file reaches.
+
+The helpers here are UI-agnostic and unit-tested. The three seeded defaults are
+persisted the first time the ``presets`` key is absent; afterward they are
+ordinary, fully editable presets rather than immutable built-ins.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import List, Mapping, Optional, Sequence
+
+from . import config
+
+# Storage keys within ``settings.json``.
+PRESETS_KEY = "presets"
+SELECTED_PRESET_KEY = "selected_preset"
+
+# Valid resolution tri-state values.
+RESOLUTIONS = ("1080p", "720p", "480p")
+
+# Float tolerance for reverse-matching current values back to a preset. Mirrors
+# ``layout.BASIC_PRESET_TOLERANCE`` so both surfaces agree on "unchanged".
+MATCH_TOLERANCE = 1e-9
+
+
+@dataclass(frozen=True)
+class Preset:
+    """A named bundle of processing settings applied across every surface.
+
+    ``resolution`` is an explicit tri-state (``"1080p"``, ``"720p"``, or
+    ``"480p"``) so a 1080p preset can force ``--no-small`` rather than inheriting
+    a persisted ``--small`` default.
+    """
+
+    name: str
+    resolution: str
+    silent_speed: float
+    sounded_speed: float
+    silent_threshold: float
+    video_codec: str
+
+    def to_dict(self) -> dict[str, object]:
+        """Return the JSON-serializable dict stored in ``settings.json``."""
+
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> "Preset":
+        """Build a :class:`Preset` from a stored dict, coercing field types."""
+
+        return cls(
+            name=str(data.get("name", "")),
+            resolution=str(data.get("resolution", "720p")),
+            silent_speed=float(data.get("silent_speed", 5.0)),
+            sounded_speed=float(data.get("sounded_speed", 1.0)),
+            silent_threshold=float(data.get("silent_threshold", 0.01)),
+            video_codec=str(data.get("video_codec", "h264")),
+        )
+
+
+# The three seeded defaults written on first run when ``presets`` is absent.
+DEFAULT_PRESETS: List[Preset] = [
+    Preset(
+        name="720p 10x speedup H.264",
+        resolution="720p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="h264",
+    ),
+    Preset(
+        name="480p 10x speedup H.265",
+        resolution="480p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="hevc",
+    ),
+    Preset(
+        name="720p no speedup H.264",
+        resolution="720p",
+        silent_speed=1.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="h264",
+    ),
+]
+
+
+def _resolve_config_path(config_path: Optional[Path]) -> Path:
+    """Return *config_path* or the platform default settings-file path."""
+
+    return config_path if config_path is not None else config.determine_config_path()
+
+
+def _format_number(value: float) -> str:
+    """Render *value* without a trailing ``.0`` (e.g. ``10`` instead of ``10.0``).
+
+    Matches the CLI-flag rendering used by
+    :func:`talks_reducer.gui.shortcut.build_shortcut_args` so preset flags read
+    the same as a "Create link" command line, without importing the GUI package.
+    """
+
+    text = f"{float(value):.6f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def load_presets(config_path: Optional[Path] = None) -> List[Preset]:
+    """Return the stored presets, seeding :data:`DEFAULT_PRESETS` on first run.
+
+    When the ``presets`` key is absent the defaults are persisted to
+    ``settings.json`` and returned. An explicitly empty list (the user deleted
+    every preset) is preserved and returned as ``[]``.
+    """
+
+    path = _resolve_config_path(config_path)
+    settings = config.load_settings(path)
+
+    if PRESETS_KEY not in settings:
+        save_presets(DEFAULT_PRESETS, config_path=path)
+        return list(DEFAULT_PRESETS)
+
+    raw = settings.get(PRESETS_KEY)
+    if not isinstance(raw, list):
+        return []
+
+    presets: List[Preset] = []
+    for entry in raw:
+        if isinstance(entry, Mapping):
+            presets.append(Preset.from_dict(entry))
+    return presets
+
+
+def save_presets(presets: Sequence[Preset], config_path: Optional[Path] = None) -> bool:
+    """Persist *presets* to the ``presets`` key, preserving other settings."""
+
+    path = _resolve_config_path(config_path)
+    settings = config.load_settings(path)
+    settings[PRESETS_KEY] = [preset.to_dict() for preset in presets]
+    return config.save_settings(path, settings)
+
+
+def find_preset(name: str, presets: Sequence[Preset]) -> Optional[Preset]:
+    """Return the preset named *name* from *presets*, or ``None`` when absent."""
+
+    for preset in presets:
+        if preset.name == name:
+            return preset
+    return None
+
+
+def preset_to_cli_args(preset: Preset) -> List[str]:
+    """Map *preset* to the CLI flags a run should apply.
+
+    Resolution is always emitted explicitly (``--no-small`` / ``--small --720``
+    / ``--small --480``) so the preset wins over a persisted ``--small``
+    default. Speeds, threshold, and codec follow using the same flag spellings
+    as :func:`talks_reducer.gui.shortcut.build_shortcut_args`.
+    """
+
+    args: List[str] = []
+
+    if preset.resolution == "1080p":
+        args.append("--no-small")
+    elif preset.resolution == "480p":
+        args.extend(["--small", "--480"])
+    else:  # "720p" (and any unexpected value) map to the 720p small preset.
+        args.extend(["--small", "--720"])
+
+    args.extend(["--silent-speed", _format_number(preset.silent_speed)])
+    args.extend(["--sounded-speed", _format_number(preset.sounded_speed)])
+    args.extend(["--silent-threshold", _format_number(preset.silent_threshold)])
+    args.extend(["--video-codec", str(preset.video_codec)])
+
+    return args
+
+
+def match_preset(
+    values: Mapping[str, object], presets: Sequence[Preset]
+) -> Optional[str]:
+    """Reverse-match live *values* to a preset name, or ``None`` for "Custom".
+
+    ``values`` supplies ``resolution`` and ``video_codec`` (compared exactly)
+    plus ``silent_speed``, ``sounded_speed``, and ``silent_threshold`` (compared
+    within :data:`MATCH_TOLERANCE`).
+    """
+
+    resolution = str(values.get("resolution", ""))
+    codec = str(values.get("video_codec", ""))
+    try:
+        silent_speed = float(values.get("silent_speed"))
+        sounded_speed = float(values.get("sounded_speed"))
+        silent_threshold = float(values.get("silent_threshold"))
+    except (TypeError, ValueError):
+        return None
+
+    for preset in presets:
+        if preset.resolution != resolution or preset.video_codec != codec:
+            continue
+        if (
+            abs(preset.silent_speed - silent_speed) < MATCH_TOLERANCE
+            and abs(preset.sounded_speed - sounded_speed) < MATCH_TOLERANCE
+            and abs(preset.silent_threshold - silent_threshold) < MATCH_TOLERANCE
+        ):
+            return preset.name
+    return None
+
+
+def get_selected_preset(config_path: Optional[Path] = None) -> Optional[str]:
+    """Return the persisted ``selected_preset`` name, or ``None`` when absent."""
+
+    path = _resolve_config_path(config_path)
+    settings = config.load_settings(path)
+    value = settings.get(SELECTED_PRESET_KEY)
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def set_selected_preset(
+    name: Optional[str], config_path: Optional[Path] = None
+) -> bool:
+    """Persist the selected preset *name* (``None`` clears it for "Custom")."""
+
+    path = _resolve_config_path(config_path)
+    settings = config.load_settings(path)
+    if name:
+        settings[SELECTED_PRESET_KEY] = name
+    else:
+        settings.pop(SELECTED_PRESET_KEY, None)
+    return config.save_settings(path, settings)

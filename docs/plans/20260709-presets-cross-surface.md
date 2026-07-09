@@ -94,27 +94,27 @@ Dependencies identified: `argparse`, Tk/ttk, Gradio, stdlib `http.server`.
 - [x] run `black`, `isort`, and the test suite — must pass before Task 2
 
 ### Task 2: Preset store and model (`talks_reducer/presets.py`)
-- [ ] add `Preset` dataclass: `name: str`, `resolution: str`
+- [x] add `Preset` dataclass: `name: str`, `resolution: str`
       (`"1080p"|"720p"|"480p"`), `silent_speed`, `sounded_speed`,
       `silent_threshold`, `video_codec`
-- [ ] add `DEFAULT_PRESETS`: "720p 10x speedup H.264", "480p 10x speedup H.265",
+- [x] add `DEFAULT_PRESETS`: "720p 10x speedup H.264", "480p 10x speedup H.265",
       "720p no speedup H.264" (values per the design spec)
-- [ ] implement `load_presets()` (reads the `presets` key via
+- [x] implement `load_presets()` (reads the `presets` key via
       `talks_reducer.config`; **seeds and persists `DEFAULT_PRESETS` when the key
       is absent**; returns `[]` only when the user emptied the list) and
       `save_presets(presets)`
-- [ ] implement `preset_to_cli_args(preset) -> list[str]` with the resolution
+- [x] implement `preset_to_cli_args(preset) -> list[str]` with the resolution
       tri-state mapping (`1080p → --no-small`, `720p → --small --720`,
       `480p → --small --480`) plus speed/threshold/codec flags, reusing the flag
       spellings from `gui/shortcut.build_shortcut_args`
-- [ ] implement `match_preset(values, presets) -> str | None` (reverse-match with
+- [x] implement `match_preset(values, presets) -> str | None` (reverse-match with
       the `1e-9` float tolerance from `layout.get_current_preset`)
-- [ ] add `get_selected_preset()` / `set_selected_preset(name)` for the
+- [x] add `get_selected_preset()` / `set_selected_preset(name)` for the
       `selected_preset` key
-- [ ] write `tests/test_presets.py`: first-run seeding, save/load round-trip,
+- [x] write `tests/test_presets.py`: first-run seeding, save/load round-trip,
       `preset_to_cli_args` per resolution (incl. `--no-small`), `match_preset`
       exact-match + `None` ("Custom"), empty-list persistence
-- [ ] run `black`, `isort`, tests — must pass before Task 3
+- [x] run `black`, `isort`, tests — must pass before Task 3
 
 ### Task 3: CLI `--preset` / `--list-presets`
 - [ ] add `--preset NAME` and `--list-presets` to `cli._build_parser()`
