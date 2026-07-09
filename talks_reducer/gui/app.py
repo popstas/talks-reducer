@@ -407,6 +407,7 @@ class TalksReducerGUI:
         self._cut_duration: float = 0.0
 
         self._build_layout()
+        layout_helpers.seed_initial_preset(self)
         self._update_small_variant_state()
         self._apply_simple_mode(initial=True)
         self._apply_status_style(self._status_state)

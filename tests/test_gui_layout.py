@@ -1598,6 +1598,51 @@ def test_advanced_preset_values_maps_resolution_tri_state():
     assert layout.advanced_preset_values(gui)["resolution"] == "480p"
 
 
+def test_seed_initial_preset_defaults_to_first(monkeypatch):
+    monkeypatch.setattr(layout.presets, "get_selected_preset", lambda *a, **k: None)
+    persisted: list = []
+    monkeypatch.setattr(
+        layout.presets,
+        "set_selected_preset",
+        lambda name, *a, **k: persisted.append(name) or True,
+    )
+
+    gui = _make_advanced_preset_gui()
+    gui.simple_preset_var.set("")
+
+    layout.seed_initial_preset(gui)
+
+    first = gui._simple_presets[0].name
+    assert gui.simple_preset_var.get() == first
+    assert persisted[-1] == first
+
+
+def test_seed_initial_preset_restores_remembered(monkeypatch):
+    remembered = _TEST_PRESETS[1].name
+    monkeypatch.setattr(
+        layout.presets, "get_selected_preset", lambda *a, **k: remembered
+    )
+    monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
+
+    gui = _make_advanced_preset_gui()
+    layout.seed_initial_preset(gui)
+
+    assert gui.simple_preset_var.get() == remembered
+
+
+def test_seed_initial_preset_noop_without_presets(monkeypatch):
+    monkeypatch.setattr(layout.presets, "get_selected_preset", lambda *a, **k: None)
+    monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
+
+    gui = _make_advanced_preset_gui()
+    gui._simple_presets = []
+    gui.simple_preset_var.set("")
+
+    layout.seed_initial_preset(gui)
+
+    assert gui.simple_preset_var.get() == ""
+
+
 def test_build_sparse_preset_copies_only_selected_fields():
     values = {
         "resolution": "480p",

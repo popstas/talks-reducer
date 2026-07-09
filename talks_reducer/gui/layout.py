@@ -280,6 +280,30 @@ def apply_advanced_preset(gui: "TalksReducerGUI") -> None:
     refresh_advanced_preset_selection(gui)
 
 
+def seed_initial_preset(gui: "TalksReducerGUI") -> None:
+    """Select and apply a preset on startup: the remembered one, else the first.
+
+    Restores the persisted ``selected_preset`` when it still exists; otherwise
+    defaults to the first stored preset so Simple mode always opens on a concrete
+    preset rather than a blank selection. The chosen preset's values are applied
+    so the live knobs match what the dropdown shows. A no-op when no presets exist.
+    """
+
+    presets_list = getattr(gui, "_simple_presets", [])
+    if not presets_list:
+        return
+    remembered = presets.get_selected_preset()
+    preset = presets.find_preset(remembered or "", presets_list)
+    if preset is None:
+        preset = presets_list[0]
+    simple_var = getattr(gui, "simple_preset_var", None)
+    if simple_var is not None:
+        simple_var.set(preset.name)
+    apply_preset_to_gui(gui, preset)
+    presets.set_selected_preset(preset.name)
+    refresh_advanced_preset_selection(gui)
+
+
 def _report_preset_write_failure(gui: "TalksReducerGUI", message: str) -> None:
     """Surface a failed ``settings.json`` write instead of silently reverting.
 
@@ -493,7 +517,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.options_frame.columnconfigure(0, weight=1)
 
     checkbox_frame = gui.ttk.Frame(gui.options_frame)
-    checkbox_frame.grid(row=0, column=0, columnspan=2, sticky="w")
+    checkbox_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
+    # Column 1 absorbs the slack so the Simple-mode Open output checkbox sits at
+    # the right edge of the preset row.
+    checkbox_frame.columnconfigure(1, weight=1)
 
     # User-named preset dropdown (visible in simple mode only). It is populated
     # from the shared preset store and hidden entirely when no presets exist.
@@ -513,6 +540,19 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     preset_frame.grid(row=0, column=0, sticky="w")
     if not gui._simple_presets:
         preset_frame.grid_remove()
+
+    # Simple-mode Open output checkbox: shares ``open_after_convert_var`` with the
+    # full-layout checkbox but lives on the preset row (line 1, right) so Simple
+    # mode reads "Preset … | Open output" on one line. It is shown only in Simple
+    # mode when a preset selector is present; the full layout uses the
+    # ``checkbox_row1`` copy instead.
+    gui.simple_open_output_check = gui.ttk.Checkbutton(
+        checkbox_frame,
+        text="Open output",
+        variable=gui.open_after_convert_var,
+    )
+    gui.simple_open_output_check.grid(row=0, column=1, sticky="e", padx=(12, 0))
+    gui.simple_open_output_check.grid_remove()
 
     checkbox_row1 = gui.ttk.Frame(checkbox_frame)
     checkbox_row1.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
@@ -1460,7 +1500,19 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
                 gui.small_check.pack_forget()
             if hasattr(gui, "small_480_check"):
                 gui.small_480_check.pack_forget()
+            # Move Open output up onto the preset row (line 1, right) and hide the
+            # full-layout copy so it does not also appear on its own line.
+            if hasattr(gui, "open_output_check"):
+                gui.open_output_check.pack_forget()
+            if hasattr(gui, "simple_open_output_check"):
+                gui.simple_open_output_check.grid()
         else:
+            # No preset selector, so the preset row is hidden; keep Open output in
+            # its full-layout row alongside the manual resolution checkboxes.
+            if hasattr(gui, "simple_open_output_check"):
+                gui.simple_open_output_check.grid_remove()
+            if hasattr(gui, "open_output_check"):
+                gui.open_output_check.pack(side=gui.tk.LEFT, padx=(65, 0))
             if hasattr(gui, "small_check") and hasattr(gui, "open_output_check"):
                 gui.small_check.pack(side=gui.tk.LEFT, before=gui.open_output_check)
             if hasattr(gui, "small_480_check") and hasattr(gui, "open_output_check"):
@@ -1492,8 +1544,14 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.advanced_frame.grid()
         if hasattr(gui, "simple_preset_frame"):
             gui.simple_preset_frame.grid_remove()
-        # Restore the manual resolution checkboxes ahead of Open output so the
-        # full layout keeps its original Small video / 480p / Open output order.
+        # The preset-row Open output copy belongs to Simple mode only.
+        if hasattr(gui, "simple_open_output_check"):
+            gui.simple_open_output_check.grid_remove()
+        # Restore the full-layout Open output (Simple mode may have forgotten it)
+        # then pack the manual resolution checkboxes ahead of it so the full layout
+        # keeps its original Small video / 480p / Open output order.
+        if hasattr(gui, "open_output_check"):
+            gui.open_output_check.pack(side=gui.tk.LEFT, padx=(65, 0))
         if hasattr(gui, "small_check") and hasattr(gui, "open_output_check"):
             gui.small_check.pack(side=gui.tk.LEFT, before=gui.open_output_check)
         if hasattr(gui, "small_480_check") and hasattr(gui, "open_output_check"):
