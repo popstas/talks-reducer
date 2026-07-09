@@ -1387,6 +1387,49 @@ def test_download_filedata_cancels_mid_stream(monkeypatch, tmp_path):
         )
 
 
+def test_send_video_downloads_remote_path_over_http(monkeypatch, tmp_path):
+    """A server-side path that is not local must be fetched over HTTP.
+
+    A different-machine server (for example a Windows client talking to a macOS
+    server) returns a bare path string that does not exist on the client. Copying
+    it would raise ``FileNotFoundError``; ``send_video`` must download it via the
+    Gradio ``file=`` route instead.
+    """
+
+    import gradio_client.client as gradio_client_module
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"input")
+
+    # A POSIX-style server path that does not exist on this machine.
+    remote_path = "/private/var/folders/xx/talks_reducer_web/job_abc/out.mp4"
+    outputs = (remote_path, "log", "summary", remote_path)
+    client_instance = _FileDataClient("http://server:9005/", outputs)
+
+    monkeypatch.setattr(
+        service_client, "gradio_file", lambda path: SimpleNamespace(path=path)
+    )
+    captured: dict = {}
+    monkeypatch.setattr(
+        gradio_client_module.httpx,
+        "stream",
+        _fake_stream_factory(captured, [b"abcd", b"efgh"]),
+    )
+
+    destination, summary, log_text = service_client.send_video(
+        input_path=input_file,
+        output_path=tmp_path / "output.mp4",
+        server_url="http://server:9005/",
+        client_factory=lambda url: client_instance,
+    )
+
+    assert destination.read_bytes() == b"abcdefgh"
+    assert summary == "summary"
+    assert log_text == "log"
+    assert captured["count"] == 1
+    assert captured["url"] == "http://server:9005/file=" + remote_path
+
+
 def test_send_video_falls_back_when_download_files_unsupported(monkeypatch, tmp_path):
     """A factory rejecting ``download_files`` keeps the legacy copy path."""
 

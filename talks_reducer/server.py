@@ -556,13 +556,31 @@ _FAVICON_PATH = find_icon_path(filenames=_FAVICON_FILENAMES)
 _FAVICON_PATH_STR = str(_FAVICON_PATH) if _FAVICON_PATH else None
 _WORKSPACES: list[Path] = []
 
+# Per-request workspaces live under a single stable root so it can be added to
+# Gradio's ``allowed_paths``. Processed files are returned to the ``/process_video``
+# API as plain server-side path strings; without an allowed root Gradio serves
+# them with HTTP 403, so a remote (different-machine) client cannot download the
+# result. Serving this root lets the client fetch the file over HTTP.
+_WORKSPACE_ROOT = Path(tempfile.gettempdir()) / "talks_reducer_web"
+
 
 def _allocate_workspace() -> Path:
     """Create and remember a workspace directory for a single request."""
 
-    path = Path(tempfile.mkdtemp(prefix="talks_reducer_web_"))
+    _WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
+    path = Path(tempfile.mkdtemp(prefix="job_", dir=_WORKSPACE_ROOT))
     _WORKSPACES.append(path)
     return path
+
+
+def build_allowed_paths() -> list[str]:
+    """Return the filesystem roots Gradio may serve processed files from.
+
+    The workspace root holds every processed output, so exposing it lets a
+    remote client download results via the Gradio ``file=`` route.
+    """
+
+    return [str(_WORKSPACE_ROOT)]
 
 
 def _cleanup_workspaces() -> None:
@@ -1381,14 +1399,16 @@ def build_interface(
             gr.HTML(f"<style>{_WEB_UI_CSS}</style>")
         gr.Markdown(f"## Talks Reducer Web UI{version_suffix}")
         with gr.Accordion("About", open=False):
-            gr.Markdown(f"""
+            gr.Markdown(
+                f"""
                 Drop a video or audio file below. Pick a **Resolution** and
                 **Speedup**, choose the **Video codec**, and processing starts on
                 upload. Open **Advanced** for encoder toggles and fine-grained
                 speed/threshold controls.
 
                 Video will be rendered on server **{server_identity}**.
-                """.strip())
+                """.strip()
+            )
 
         file_input = gr.File(
             label="Video or audio file",
@@ -1599,6 +1619,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         inbrowser=args.open_browser,
         favicon_path=_FAVICON_PATH_STR,
         app_kwargs=build_launch_app_kwargs(),
+        allowed_paths=build_allowed_paths(),
         pwa=True,
     )
     # Pass ``css`` to launch() only on versions that accept it there and not on
@@ -1618,6 +1639,7 @@ __all__ = [
     "GradioProgressReporter",
     "PWAManifestMiddleware",
     "TransferProgressMiddleware",
+    "build_allowed_paths",
     "build_interface",
     "build_launch_app_kwargs",
     "main",

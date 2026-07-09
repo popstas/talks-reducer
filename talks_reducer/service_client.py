@@ -681,21 +681,23 @@ def send_video(
         if destination.is_dir():
             destination = destination / name
 
-    if isinstance(target, str):
-        # Stub/legacy clients (gradio auto-download still active) hand back a
-        # local path; copy it as before.
+    if isinstance(target, str) and Path(target).exists():
+        # The ``/process_video`` API returns a bare server-side path string. When
+        # the server shares this machine's filesystem the file is right here, so
+        # copy it directly instead of round-tripping through HTTP.
         download_source = Path(target)
         destination.parent.mkdir(parents=True, exist_ok=True)
         if download_source.resolve() != destination.resolve():
             shutil.copy2(download_source, destination)
     else:
-        # ``download_files=False`` leaves outputs as FileData; download the one
-        # processed file ourselves instead of letting gradio fetch every file
-        # output (the gr.Video preview and the gr.File download both point at the
-        # same file, which would otherwise transfer the video twice).
+        # A remote server hands back a path that does not exist on this machine
+        # (or a FileData object). Download the single processed file over HTTP via
+        # the Gradio ``file=`` route. A bare string is wrapped as FileData so the
+        # shared downloader can resolve the URL.
+        filedata = target if not isinstance(target, str) else {"path": target}
         _download_filedata(
             client,
-            target,
+            filedata,
             destination,
             progress_callback,
             _cancel_if_requested,
