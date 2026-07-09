@@ -751,12 +751,10 @@ class TalksReducerGUI:
 
     def _update_selected_preset(self) -> None:
         """Open the dialog pre-filled with the selection and overwrite it."""
-        from . import presets as presets_module
-
         name = self.advanced_preset_var.get()
-        if not name or name == presets_module.CUSTOM_LABEL:
+        if not name or name == presets.CUSTOM_LABEL:
             return
-        preset = presets_module.find_preset(name, getattr(self, "_simple_presets", []))
+        preset = presets.find_preset(name, getattr(self, "_simple_presets", []))
         initial_fields = preset.present_fields() if preset is not None else None
         preset_dialog.open_save_preset_dialog(
             self,
