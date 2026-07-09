@@ -50,8 +50,10 @@ editing any knob flips the dropdown to **"Custom"** via `presets.match_preset`.
 Save/Update open `preset_dialog.open_save_preset_dialog` — a name field plus a
 checkbox per param (Create-link style) returning `(name, selected_fields)`;
 `layout.build_sparse_preset` captures only the checked fields, so presets can be
-partial. Update pre-checks the existing preset's `present_fields()`. Persistence
-routes through `presets.save_presets` (pure `add_preset`/`update_preset`/`delete_preset`)
+partial. Update pre-checks the existing preset's `present_fields()`. **↑/↓** buttons
+reorder the selected preset via `presets.move_preset`/`layout.move_advanced_preset`
+(order is shared and decides the first-default). Persistence routes through
+`presets.save_presets` (pure `add_preset`/`update_preset`/`delete_preset`/`move_preset`)
 and refreshes every dropdown. The CLI applies `--preset NAME` before explicit flags
 (`cli._apply_preset_to_args`, precedence explicit > preset > default), resolution
 expanded to `--no-small`/`--small --720`/`--small --480`; `--list-presets` prints

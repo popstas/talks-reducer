@@ -56,6 +56,8 @@ and **Save as… / Update / Delete** buttons:
 - **Update** opens the same dialog pre-filled with the selected preset's name and the settings
   it already controls, then overwrites it with the checked live values.
 - **Delete** removes the selected preset.
+- **↑ / ↓** reorder the selected preset within the list. The order is shared across every
+  surface and decides which preset each one defaults to (the first).
 
 Editing any knob so the values no longer match the selected preset flips the dropdown to
 **Custom**. Every save/update/delete refreshes the dropdowns on both the Simple and Advanced
