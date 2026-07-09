@@ -903,6 +903,37 @@ def test_launch_server_tray_falls_back_to_module(
     assert calls == [["--bar"]]
 
 
+def test_launch_server_tray_reports_import_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A swallowed import failure should surface its cause on stderr."""
+
+    monkeypatch.setattr(cli, "_launch_server_tray_binary", lambda argv: False)
+
+    def boom(name: str, package: object = None) -> object:
+        raise ImportError("No module named 'pandas'")
+
+    monkeypatch.setattr(cli, "import_module", boom)
+
+    assert cli._launch_server_tray(["--bar"]) is False
+    captured = capsys.readouterr()
+    assert "No module named 'pandas'" in captured.err
+
+
+def test_launch_server_reports_import_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The Gradio server launcher should echo the underlying import failure."""
+
+    def boom(name: str, package: object = None) -> object:
+        raise ImportError("No module named 'pandas'")
+
+    monkeypatch.setattr(cli, "import_module", boom)
+
+    assert cli._launch_server(["--share"]) is False
+    assert "No module named 'pandas'" in capsys.readouterr().err
+
+
 def test_main_launches_server_when_requested(monkeypatch: pytest.MonkeyPatch) -> None:
     """The server subcommand should dispatch to the Gradio launcher."""
 

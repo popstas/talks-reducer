@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 from importlib import import_module
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
@@ -706,12 +707,27 @@ def _launch_gui(argv: Sequence[str]) -> bool:
     return bool(gui_main(list(argv)))
 
 
+def _report_import_failure(mode: str, exc: ImportError) -> None:
+    """Print why an in-process ``mode`` import failed to stderr.
+
+    Server, tray, and dock modes swallow ``ImportError`` and fall back to a bare
+    "``<mode>`` is unavailable." message. When a real dependency is missing (for
+    example gradio failing to import pandas inside a frozen bundle) that message
+    hides the cause, so echo the exception plus its traceback here to make the
+    failure diagnosable.
+    """
+
+    print(f"Failed to import {mode} ({exc}):", file=sys.stderr)
+    traceback.print_exception(type(exc), exc, exc.__traceback__)
+
+
 def _launch_server(argv: Sequence[str]) -> bool:
     """Attempt to launch the Gradio server with the provided arguments."""
 
     try:
         server_module = import_module(".server", __package__)
-    except ImportError:
+    except ImportError as exc:
+        _report_import_failure("Gradio server", exc)
         return False
 
     server_main = getattr(server_module, "main", None)
@@ -727,7 +743,8 @@ def _launch_dock_server(argv: Sequence[str]) -> bool:
 
     try:
         dock_module = import_module(".dock_server", __package__)
-    except ImportError:
+    except ImportError as exc:
+        _report_import_failure("dock server", exc)
         return False
 
     dock_main = getattr(dock_module, "main", None)
@@ -824,7 +841,8 @@ def _launch_server_tray(argv: Sequence[str]) -> bool:
 
     try:
         tray_module = import_module(".server_tray", __package__)
-    except ImportError:
+    except ImportError as exc:
+        _report_import_failure("server tray", exc)
         return False
 
     tray_main = getattr(tray_module, "main", None)
