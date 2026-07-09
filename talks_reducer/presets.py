@@ -259,6 +259,28 @@ def delete_preset(presets: Sequence[Preset], name: str) -> List[Preset]:
     return [existing for existing in presets if existing.name != name]
 
 
+def move_preset(presets: Sequence[Preset], name: str, delta: int) -> List[Preset]:
+    """Return a new list with the preset named *name* shifted by *delta* slots.
+
+    A negative *delta* moves the preset earlier (up), a positive one later (down);
+    the target index is clamped to the list bounds so moving the first preset up or
+    the last one down is a no-op. An absent *name* returns the list unchanged. The
+    order is shared across every surface via ``settings.json`` and also decides
+    which preset is the "first" default.
+    """
+
+    result = list(presets)
+    index = next((i for i, p in enumerate(result) if p.name == name), None)
+    if index is None:
+        return result
+    new_index = max(0, min(len(result) - 1, index + delta))
+    if new_index == index:
+        return result
+    item = result.pop(index)
+    result.insert(new_index, item)
+    return result
+
+
 def preset_to_cli_args(preset: Preset) -> List[str]:
     """Map *preset* to the CLI flags a run should apply.
 

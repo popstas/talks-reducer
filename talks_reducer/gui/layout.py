@@ -400,6 +400,28 @@ def delete_advanced_preset(gui: "TalksReducerGUI") -> None:
     gui.advanced_preset_var.set(presets.CUSTOM_LABEL)
 
 
+def move_advanced_preset(gui: "TalksReducerGUI", delta: int) -> None:
+    """Shift the selected preset by *delta* slots and persist the new order.
+
+    The reorder is written to ``settings.json`` (shared across surfaces) and the
+    dropdowns refresh; the moved preset stays selected. ``delta`` is ``-1`` for up
+    and ``+1`` for down.
+    """
+
+    name = gui.advanced_preset_var.get()
+    if not name or name == presets.CUSTOM_LABEL:
+        return
+    updated = presets.move_preset(getattr(gui, "_simple_presets", []), name, delta)
+    if not presets.save_presets(updated):
+        _report_preset_write_failure(gui, f"Could not reorder preset '{name}'.")
+        return
+    refresh_preset_dropdowns(gui)
+    gui.advanced_preset_var.set(name)
+    simple_var = getattr(gui, "simple_preset_var", None)
+    if simple_var is not None:
+        simple_var.set(name)
+
+
 def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> None:
     """Build the collapsible **Cut video** panel with range sliders + inputs.
 
@@ -636,6 +658,22 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         command=gui._delete_selected_preset,
     )
     gui.advanced_preset_delete_button.pack(side=gui.tk.LEFT, padx=(4, 0))
+    # Reorder the selected preset within the shared list (also decides which preset
+    # is the "first" default on every surface).
+    gui.advanced_preset_up_button = gui.ttk.Button(
+        advanced_preset_frame,
+        text="↑",
+        width=2,
+        command=gui._move_selected_preset_up,
+    )
+    gui.advanced_preset_up_button.pack(side=gui.tk.LEFT, padx=(8, 0))
+    gui.advanced_preset_down_button = gui.ttk.Button(
+        advanced_preset_frame,
+        text="↓",
+        width=2,
+        command=gui._move_selected_preset_down,
+    )
+    gui.advanced_preset_down_button.pack(side=gui.tk.LEFT, padx=(4, 0))
     gui.advanced_preset_frame = advanced_preset_frame
 
     # Editing any knob flips the Advanced dropdown to "Custom"; slider vars route

@@ -258,6 +258,8 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         _open_save_preset_dialog=Mock(),
         _update_selected_preset=Mock(),
         _delete_selected_preset=Mock(),
+        _move_selected_preset_up=Mock(),
+        _move_selected_preset_down=Mock(),
         small_var=BooleanVarStub(value=True),
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
@@ -522,6 +524,8 @@ def test_build_layout_initializes_widgets(monkeypatch):
         _open_save_preset_dialog=Mock(),
         _update_selected_preset=Mock(),
         _delete_selected_preset=Mock(),
+        _move_selected_preset_up=Mock(),
+        _move_selected_preset_down=Mock(),
         small_var=BooleanVarStub(value=True),
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
@@ -756,6 +760,8 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         _open_save_preset_dialog=Mock(),
         _update_selected_preset=Mock(),
         _delete_selected_preset=Mock(),
+        _move_selected_preset_up=Mock(),
+        _move_selected_preset_down=Mock(),
         small_var=BooleanVarStub(value=True),
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
@@ -1596,6 +1602,41 @@ def test_advanced_preset_values_maps_resolution_tri_state():
 
     gui.small_480_var.set(True)
     assert layout.advanced_preset_values(gui)["resolution"] == "480p"
+
+
+def test_move_advanced_preset_persists_new_order(monkeypatch):
+    saved: list = []
+    monkeypatch.setattr(
+        layout.presets,
+        "save_presets",
+        lambda presets_list, *a, **k: saved.append(list(presets_list)) or True,
+    )
+    monkeypatch.setattr(layout, "refresh_preset_dropdowns", lambda gui: None)
+
+    gui = _make_advanced_preset_gui()
+    gui.advanced_preset_var.set(_TEST_PRESETS[1].name)
+
+    layout.move_advanced_preset(gui, -1)
+
+    order = [preset.name for preset in saved[-1]]
+    assert order == [_TEST_PRESETS[1].name, _TEST_PRESETS[0].name]
+    assert gui.advanced_preset_var.get() == _TEST_PRESETS[1].name
+
+
+def test_move_advanced_preset_noop_on_custom(monkeypatch):
+    saved: list = []
+    monkeypatch.setattr(
+        layout.presets,
+        "save_presets",
+        lambda presets_list, *a, **k: saved.append(list(presets_list)) or True,
+    )
+
+    gui = _make_advanced_preset_gui()
+    gui.advanced_preset_var.set(layout.presets.CUSTOM_LABEL)
+
+    layout.move_advanced_preset(gui, 1)
+
+    assert saved == []
 
 
 def test_seed_initial_preset_defaults_to_first(monkeypatch):

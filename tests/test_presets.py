@@ -426,3 +426,36 @@ def test_match_preset_empty_preset_never_matches():
     values = {"video_codec": "h264", "resolution": "720p"}
 
     assert match_preset(values, [preset]) is None
+
+
+# --- Reordering ------------------------------------------------------------
+
+
+def test_move_preset_up_and_down():
+    original = [_preset("A"), _preset("B"), _preset("C")]
+
+    up = presets.move_preset(original, "C", -1)
+    assert [p.name for p in up] == ["A", "C", "B"]
+
+    down = presets.move_preset(original, "A", 1)
+    assert [p.name for p in down] == ["B", "A", "C"]
+
+
+def test_move_preset_clamps_at_bounds():
+    original = [_preset("A"), _preset("B")]
+
+    assert [p.name for p in presets.move_preset(original, "A", -1)] == ["A", "B"]
+    assert [p.name for p in presets.move_preset(original, "B", 1)] == ["A", "B"]
+
+
+def test_move_preset_absent_name_is_noop():
+    original = [_preset("A"), _preset("B")]
+
+    assert [p.name for p in presets.move_preset(original, "missing", 1)] == ["A", "B"]
+
+
+def test_move_preset_does_not_mutate_source():
+    original = [_preset("A"), _preset("B")]
+    presets.move_preset(original, "A", 1)
+
+    assert [p.name for p in original] == ["A", "B"]

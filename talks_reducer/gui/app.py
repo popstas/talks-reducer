@@ -771,6 +771,14 @@ class TalksReducerGUI:
         """Delete the selected preset and refresh every preset dropdown."""
         layout_helpers.delete_advanced_preset(self)
 
+    def _move_selected_preset_up(self) -> None:
+        """Move the selected preset one slot earlier in the shared order."""
+        layout_helpers.move_advanced_preset(self, -1)
+
+    def _move_selected_preset_down(self) -> None:
+        """Move the selected preset one slot later in the shared order."""
+        layout_helpers.move_advanced_preset(self, 1)
+
     def _toggle_simple_mode(self) -> None:
         self.preference_controller.toggle_simple_mode()
 
