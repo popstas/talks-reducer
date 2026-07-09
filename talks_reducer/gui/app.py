@@ -733,15 +733,40 @@ class TalksReducerGUI:
         """Open the Windows-only **Create lnk** desktop-shortcut dialog."""
         shortcut_helpers.open_create_lnk_dialog(self)
 
+    def _preset_field_values(self) -> dict:
+        """Return the live Advanced knobs as display strings keyed by field."""
+        values = layout_helpers.advanced_preset_values(self)
+        return {key: values[key] for key in values}
+
     def _open_save_preset_dialog(self) -> None:
-        """Prompt for a name and save the current knobs as a new preset."""
+        """Prompt for a name and which params to save as a new preset."""
         preset_dialog.open_save_preset_dialog(
-            self, lambda name: layout_helpers.save_advanced_preset(self, name)
+            self,
+            lambda name, fields: layout_helpers.save_advanced_preset(
+                self, name, fields
+            ),
+            field_values=self._preset_field_values(),
         )
 
     def _update_selected_preset(self) -> None:
-        """Overwrite the selected preset with the current Advanced knobs."""
-        layout_helpers.update_advanced_preset(self)
+        """Open the dialog pre-filled with the selection and overwrite it."""
+        from . import presets as presets_module
+
+        name = self.advanced_preset_var.get()
+        if not name or name == presets_module.CUSTOM_LABEL:
+            return
+        preset = presets_module.find_preset(name, getattr(self, "_simple_presets", []))
+        initial_fields = preset.present_fields() if preset is not None else None
+        preset_dialog.open_save_preset_dialog(
+            self,
+            lambda new_name, fields: layout_helpers.update_advanced_preset(
+                self, new_name, fields
+            ),
+            initial=name,
+            initial_fields=initial_fields,
+            field_values=self._preset_field_values(),
+            title="Update preset",
+        )
 
     def _delete_selected_preset(self) -> None:
         """Delete the selected preset and refresh every preset dropdown."""

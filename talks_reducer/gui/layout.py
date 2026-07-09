@@ -158,17 +158,39 @@ def advanced_preset_values(gui: "TalksReducerGUI") -> dict:
 
 
 def preset_from_gui(gui: "TalksReducerGUI", name: str) -> "presets.Preset":
-    """Build a :class:`~talks_reducer.presets.Preset` named *name* from the knobs."""
+    """Build a full :class:`~talks_reducer.presets.Preset` named *name*."""
 
-    values = advanced_preset_values(gui)
-    return presets.Preset(
-        name=name,
-        resolution=str(values["resolution"]),
-        silent_speed=float(values["silent_speed"]),
-        sounded_speed=float(values["sounded_speed"]),
-        silent_threshold=float(values["silent_threshold"]),
-        video_codec=str(values["video_codec"]),
+    return build_sparse_preset(
+        name,
+        advanced_preset_values(gui),
+        set(presets.PRESET_VALUE_FIELDS),
     )
+
+
+def build_sparse_preset(name: str, values: dict, selected_fields) -> "presets.Preset":
+    """Build a sparse preset from a *values* mapping and a *selected_fields* set.
+
+    Only the fields named in *selected_fields* are copied off *values* into the
+    resulting preset; every other field is left ``None`` so the preset controls
+    just the checked params. Pure (no Tk) so it is unit-testable.
+    """
+
+    float_fields = {"silent_speed", "sounded_speed", "silent_threshold"}
+    kwargs: dict = {"name": name}
+    for field in presets.PRESET_VALUE_FIELDS:
+        if field not in selected_fields or field not in values:
+            continue
+        raw = values[field]
+        kwargs[field] = float(raw) if field in float_fields else str(raw)
+    return presets.Preset(**kwargs)
+
+
+def preset_from_gui_selection(
+    gui: "TalksReducerGUI", name: str, selected_fields
+) -> "presets.Preset":
+    """Snapshot the Advanced knobs into a sparse preset for the checked fields."""
+
+    return build_sparse_preset(name, advanced_preset_values(gui), selected_fields)
 
 
 def refresh_advanced_preset_selection(gui: "TalksReducerGUI") -> None:
@@ -272,8 +294,14 @@ def _report_preset_write_failure(gui: "TalksReducerGUI", message: str) -> None:
         )
 
 
-def save_advanced_preset(gui: "TalksReducerGUI", name: str) -> None:
-    """Capture the current knobs into a new preset named *name* and persist it."""
+def save_advanced_preset(
+    gui: "TalksReducerGUI", name: str, selected_fields=None
+) -> None:
+    """Capture the checked knobs into a new preset named *name* and persist it.
+
+    *selected_fields* is the set of param keys the Save dialog checked; ``None``
+    captures every field (a full preset).
+    """
 
     name = str(name).strip()
     if not name:
@@ -290,7 +318,9 @@ def save_advanced_preset(gui: "TalksReducerGUI", name: str) -> None:
                 "Please choose a different name.",
             )
         return
-    preset = preset_from_gui(gui, name)
+    if selected_fields is None:
+        selected_fields = set(presets.PRESET_VALUE_FIELDS)
+    preset = preset_from_gui_selection(gui, name, selected_fields)
     updated = presets.add_preset(getattr(gui, "_simple_presets", []), preset)
     if not presets.save_presets(updated):
         _report_preset_write_failure(gui, f"Could not save preset '{name}'.")
@@ -300,20 +330,35 @@ def save_advanced_preset(gui: "TalksReducerGUI", name: str) -> None:
     gui.advanced_preset_var.set(name)
 
 
-def update_advanced_preset(gui: "TalksReducerGUI") -> None:
-    """Overwrite the selected preset with the current knobs and persist it."""
+def update_advanced_preset(
+    gui: "TalksReducerGUI",
+    name: Optional[str] = None,
+    selected_fields=None,
+) -> None:
+    """Overwrite the selected preset with the checked knobs and persist it.
 
-    name = gui.advanced_preset_var.get()
-    if not name or name == presets.CUSTOM_LABEL:
+    The currently selected preset name is the update target. When *name* is
+    provided it becomes the (possibly renamed) new name; *selected_fields* limits
+    the capture to the checked params. Both default to a full overwrite of the
+    selection, preserving the pre-dialog behavior for callers that pass nothing.
+    """
+
+    target = gui.advanced_preset_var.get()
+    if not target or target == presets.CUSTOM_LABEL:
         return
-    preset = preset_from_gui(gui, name)
-    updated = presets.update_preset(getattr(gui, "_simple_presets", []), name, preset)
+    new_name = str(name).strip() if name else target
+    if not new_name or new_name == presets.CUSTOM_LABEL:
+        return
+    if selected_fields is None:
+        selected_fields = set(presets.PRESET_VALUE_FIELDS)
+    preset = preset_from_gui_selection(gui, new_name, selected_fields)
+    updated = presets.update_preset(getattr(gui, "_simple_presets", []), target, preset)
     if not presets.save_presets(updated):
-        _report_preset_write_failure(gui, f"Could not update preset '{name}'.")
+        _report_preset_write_failure(gui, f"Could not update preset '{new_name}'.")
         return
-    presets.set_selected_preset(name)
+    presets.set_selected_preset(new_name)
     refresh_preset_dropdowns(gui)
-    gui.advanced_preset_var.set(name)
+    gui.advanced_preset_var.set(new_name)
 
 
 def delete_advanced_preset(gui: "TalksReducerGUI") -> None:

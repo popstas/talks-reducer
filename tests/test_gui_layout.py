@@ -1598,6 +1598,55 @@ def test_advanced_preset_values_maps_resolution_tri_state():
     assert layout.advanced_preset_values(gui)["resolution"] == "480p"
 
 
+def test_build_sparse_preset_copies_only_selected_fields():
+    values = {
+        "resolution": "480p",
+        "silent_speed": 10.0,
+        "sounded_speed": 1.0,
+        "silent_threshold": 0.01,
+        "video_codec": "hevc",
+    }
+
+    preset = layout.build_sparse_preset(
+        "codec+speed", values, {"video_codec", "silent_speed"}
+    )
+
+    assert preset.name == "codec+speed"
+    assert preset.video_codec == "hevc"
+    assert preset.silent_speed == 10.0
+    assert preset.resolution is None
+    assert preset.sounded_speed is None
+    assert preset.silent_threshold is None
+    assert preset.present_fields() == {"video_codec", "silent_speed"}
+
+
+def test_preset_from_gui_selection_captures_checked_subset():
+    gui = _make_advanced_preset_gui()
+
+    preset = layout.preset_from_gui_selection(gui, "just codec", {"video_codec"})
+
+    assert preset.present_fields() == {"video_codec"}
+    assert preset.video_codec == "h264"
+
+
+def test_save_advanced_preset_persists_sparse_selection(monkeypatch):
+    saved: list = []
+    monkeypatch.setattr(
+        layout.presets,
+        "save_presets",
+        lambda presets_list, *a, **k: saved.append(list(presets_list)) or True,
+    )
+    monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
+    monkeypatch.setattr(layout, "refresh_preset_dropdowns", lambda gui: None)
+
+    gui = _make_advanced_preset_gui()
+    layout.save_advanced_preset(gui, "Fast codec", {"video_codec", "silent_speed"})
+
+    stored = saved[-1][-1]
+    assert stored.name == "Fast codec"
+    assert stored.present_fields() == {"video_codec", "silent_speed"}
+
+
 def test_refresh_advanced_preset_selection_matches_preset():
     gui = _make_advanced_preset_gui()
     # The stub knobs match the first test preset (720p / 10x / h264).
