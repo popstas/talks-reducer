@@ -189,14 +189,19 @@ Dependencies identified: `argparse`, Tk/ttk, Gradio, stdlib `http.server`.
 - [x] run `black`, `isort`, tests — must pass before Task 8
 
 ### Task 8: Verify acceptance criteria
-- [ ] verify each surface applies a preset and the resolution tri-state
+- [x] verify each surface applies a preset and the resolution tri-state
       (incl. 1080p `--no-small`) end-to-end against `ProcessingOptions`
-- [ ] verify CLI precedence (explicit flag > preset > default) and backward
-      compatibility with a pre-existing `settings.json` (no `presets` key → seeds)
-- [ ] run the full unit-test suite
-- [ ] run `black --check`, `isort --check`, and any repo linter — fix all issues
-- [ ] verify coverage of the new `presets.py` / `config.py` meets project
-      standard
+      (`preset_to_cli_args` + `cli._apply_preset_to_args` tri-state expansion;
+      surface tests in `test_gui_layout.py`/`test_server.py`/`test_dock_server.py`
+      all pass)
+- [x] verify CLI precedence (explicit flag > preset > default) and backward
+      compatibility with a pre-existing `settings.json` (no `presets` key → seeds;
+      legacy keys preserved, empty list preserved — confirmed via integration run)
+- [x] run the full unit-test suite (872 passed)
+- [x] run `black --check`, `isort --check`, and any repo linter — fix all issues
+      (both clean, 83 files unchanged)
+- [x] verify coverage of the new `presets.py` / `config.py` meets project
+      standard (both 100%)
 
 ### Task 9: [Final] Update documentation
 - [ ] update `README.md` (preset feature + `--preset`/`--list-presets` CLI)
