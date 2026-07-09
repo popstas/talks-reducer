@@ -1125,21 +1125,28 @@ def _silent_speed_to_speedup_label(speed: float) -> Optional[str]:
 def preset_to_web_controls(preset: Preset) -> dict[str, object]:
     """Map *preset* to the Web UI control values it should apply.
 
-    Returns the ``resolution`` radio label (``"No change"`` for a ``1080p``
-    preset), the matching ``speedup`` radio label (``None`` when the preset's
-    silent speed is not one of the radio's presets), the ``video_codec`` dropdown
-    value, and the numeric ``silent_speed`` / ``silent_threshold`` /
-    ``sounded_speed`` slider values.
+    Presets are sparse, so only the params the preset defines appear in the
+    returned mapping; a caller leaves every other control untouched. When present,
+    keys are the ``resolution`` radio label (``"No change"`` for a ``1080p``
+    preset), the matching ``speedup`` radio label (``None`` when the silent speed
+    is not one of the radio's presets), the ``video_codec`` dropdown value, and
+    the numeric ``silent_speed`` / ``silent_threshold`` / ``sounded_speed`` slider
+    values.
     """
 
-    return {
-        "resolution": _preset_resolution_to_radio(preset.resolution),
-        "speedup": _silent_speed_to_speedup_label(preset.silent_speed),
-        "silent_speed": float(preset.silent_speed),
-        "video_codec": str(preset.video_codec),
-        "silent_threshold": float(preset.silent_threshold),
-        "sounded_speed": float(preset.sounded_speed),
-    }
+    controls: dict[str, object] = {}
+    if preset.resolution is not None:
+        controls["resolution"] = _preset_resolution_to_radio(preset.resolution)
+    if preset.silent_speed is not None:
+        controls["speedup"] = _silent_speed_to_speedup_label(preset.silent_speed)
+        controls["silent_speed"] = float(preset.silent_speed)
+    if preset.video_codec is not None:
+        controls["video_codec"] = str(preset.video_codec)
+    if preset.silent_threshold is not None:
+        controls["silent_threshold"] = float(preset.silent_threshold)
+    if preset.sounded_speed is not None:
+        controls["sounded_speed"] = float(preset.sounded_speed)
+    return controls
 
 
 def process_video_ui(
@@ -1452,14 +1459,20 @@ def build_interface(
                     gr.update(),
                 )
             controls = preset_to_web_controls(preset)
-            speedup = controls["speedup"]
+
+            def _upd(key: str) -> object:
+                return (
+                    gr.update(value=controls[key]) if key in controls else gr.update()
+                )
+
+            speedup = controls.get("speedup")
             return (
-                gr.update(value=controls["resolution"]),
+                _upd("resolution"),
                 gr.update() if speedup is None else gr.update(value=speedup),
-                gr.update(value=controls["silent_speed"]),
-                gr.update(value=controls["video_codec"]),
-                gr.update(value=controls["silent_threshold"]),
-                gr.update(value=controls["sounded_speed"]),
+                _upd("silent_speed"),
+                _upd("video_codec"),
+                _upd("silent_threshold"),
+                _upd("sounded_speed"),
             )
 
         preset_dropdown.change(

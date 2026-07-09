@@ -76,23 +76,26 @@ BASIC_PRESET_TOLERANCE = 1e-9
 def apply_preset_to_gui(gui: "TalksReducerGUI", preset: "presets.Preset") -> None:
     """Fan a stored :class:`~talks_reducer.presets.Preset` onto the GUI vars.
 
-    The resolution tri-state maps onto ``small_var``/``small_480_var`` explicitly
-    (``1080p`` → both off, ``720p`` → small only, ``480p`` → small + 480p) so a
-    preset always wins over a persisted ``--small`` default. Speeds and the
-    threshold route through the basic-slider updaters when they exist so the
-    slider labels and persisted preferences stay in sync; the codec updates the
-    shared ``video_codec_var``.
+    Presets are sparse: only the fields the preset defines are applied, so a
+    preset that stores just a codec leaves the resolution and speeds untouched.
+    When present, the resolution tri-state maps onto
+    ``small_var``/``small_480_var`` explicitly (``1080p`` → both off, ``720p`` →
+    small only, ``480p`` → small + 480p) so a preset always wins over a persisted
+    ``--small`` default. Speeds and the threshold route through the basic-slider
+    updaters when they exist so the slider labels and persisted preferences stay
+    in sync; the codec updates the shared ``video_codec_var``.
     """
 
-    if preset.resolution == "1080p":
-        gui.small_var.set(False)
-        gui.small_480_var.set(False)
-    elif preset.resolution == "480p":
-        gui.small_var.set(True)
-        gui.small_480_var.set(True)
-    else:  # "720p" and any unexpected value map to the 720p small preset.
-        gui.small_var.set(True)
-        gui.small_480_var.set(False)
+    if preset.resolution is not None:
+        if preset.resolution == "1080p":
+            gui.small_var.set(False)
+            gui.small_480_var.set(False)
+        elif preset.resolution == "480p":
+            gui.small_var.set(True)
+            gui.small_480_var.set(True)
+        else:  # "720p" and any unexpected value map to the 720p small preset.
+            gui.small_var.set(True)
+            gui.small_480_var.set(False)
 
     updaters = getattr(gui, "_slider_updaters", {})
     variables = getattr(gui, "_basic_variables", {})
@@ -101,6 +104,8 @@ def apply_preset_to_gui(gui: "TalksReducerGUI", preset: "presets.Preset") -> Non
         ("sounded_speed", preset.sounded_speed),
         ("silent_threshold", preset.silent_threshold),
     ):
+        if value is None:
+            continue
         updater: Callable[[str], None] | None = updaters.get(key)
         if updater is not None:
             updater(str(value))
@@ -109,7 +114,8 @@ def apply_preset_to_gui(gui: "TalksReducerGUI", preset: "presets.Preset") -> Non
             if variable is not None:
                 variable.set(value)
 
-    gui.video_codec_var.set(preset.video_codec)
+    if preset.video_codec is not None:
+        gui.video_codec_var.set(preset.video_codec)
 
 
 def _apply_simple_preset(gui: "TalksReducerGUI") -> None:

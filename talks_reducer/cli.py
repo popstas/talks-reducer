@@ -272,34 +272,52 @@ def _apply_preset_to_args(
 ) -> None:
     """Apply *preset* fields onto *parsed_args* where not explicitly provided.
 
-    Resolution is expanded to the ``small``/``small_480`` tri-state so a preset
-    can force ``--no-small``; each field is only written when the user did not
-    pass the corresponding flag, preserving explicit-flag precedence.
+    Presets are sparse: a field the preset leaves unset (``None``) is skipped so
+    it inherits the parser default or a stored preference instead of being forced.
+    When present, resolution is expanded to the ``small``/``small_480`` tri-state
+    so a preset can force ``--no-small``; each field is only written when the user
+    did not pass the corresponding flag, preserving explicit-flag precedence.
     """
 
-    resolution = getattr(preset, "resolution", "720p")
-    if resolution == "1080p":
-        small, small_480 = False, False
-    elif resolution == "480p":
-        small, small_480 = True, True
-    else:  # "720p" and any unexpected value.
-        small, small_480 = True, False
+    resolution = getattr(preset, "resolution", None)
+    if resolution is not None:
+        if resolution == "1080p":
+            small, small_480 = False, False
+        elif resolution == "480p":
+            small, small_480 = True, True
+        else:  # "720p" and any unexpected value.
+            small, small_480 = True, False
 
-    if "small" not in explicit:
-        parsed_args.small = small
-    if "small_480" not in explicit:
-        # ``small_480`` is only meaningful alongside ``small``; when the effective
-        # small flag is off (e.g. an explicit ``--no-small`` overriding a 480p
-        # preset) never leave 480p scaling on, or the output name gains a stray
-        # ``480`` marker with no rescale behind it.
-        parsed_args.small_480 = small_480 and bool(getattr(parsed_args, "small", small))
-    if "silent_speed" not in explicit:
+        if "small" not in explicit:
+            parsed_args.small = small
+        if "small_480" not in explicit:
+            # ``small_480`` is only meaningful alongside ``small``; when the
+            # effective small flag is off (e.g. an explicit ``--no-small``
+            # overriding a 480p preset) never leave 480p scaling on, or the output
+            # name gains a stray ``480`` marker with no rescale behind it.
+            parsed_args.small_480 = small_480 and bool(
+                getattr(parsed_args, "small", small)
+            )
+
+    if (
+        getattr(preset, "silent_speed", None) is not None
+        and "silent_speed" not in explicit
+    ):
         parsed_args.silent_speed = float(preset.silent_speed)
-    if "sounded_speed" not in explicit:
+    if (
+        getattr(preset, "sounded_speed", None) is not None
+        and "sounded_speed" not in explicit
+    ):
         parsed_args.sounded_speed = float(preset.sounded_speed)
-    if "silent_threshold" not in explicit:
+    if (
+        getattr(preset, "silent_threshold", None) is not None
+        and "silent_threshold" not in explicit
+    ):
         parsed_args.silent_threshold = float(preset.silent_threshold)
-    if "video_codec" not in explicit:
+    if (
+        getattr(preset, "video_codec", None) is not None
+        and "video_codec" not in explicit
+    ):
         parsed_args.video_codec = str(preset.video_codec)
 
 

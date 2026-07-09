@@ -12,7 +12,7 @@ ordinary, fully editable presets rather than immutable built-ins.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Mapping, Optional, Sequence
 
@@ -34,39 +34,82 @@ CUSTOM_LABEL = "Custom"
 MATCH_TOLERANCE = 1e-9
 
 
+# The tunable value fields a preset can carry. ``name`` is excluded because it
+# is the identity, not an applied value.
+PRESET_VALUE_FIELDS = (
+    "resolution",
+    "silent_speed",
+    "sounded_speed",
+    "silent_threshold",
+    "video_codec",
+)
+
+
 @dataclass(frozen=True)
 class Preset:
     """A named bundle of processing settings applied across every surface.
 
-    ``resolution`` is an explicit tri-state (``"1080p"``, ``"720p"``, or
-    ``"480p"``) so a 1080p preset can force ``--no-small`` rather than inheriting
-    a persisted ``--small`` default.
+    Presets are **sparse**: every value field is optional and a field left as
+    ``None`` is not stored, not applied, and ignored when reverse-matching, so a
+    preset controls only the params it was saved with. ``resolution`` is an
+    explicit tri-state (``"1080p"``, ``"720p"``, or ``"480p"``) so a 1080p preset
+    can force ``--no-small`` rather than inheriting a persisted ``--small``
+    default.
     """
 
     name: str
-    resolution: str
-    silent_speed: float
-    sounded_speed: float
-    silent_threshold: float
-    video_codec: str
+    resolution: Optional[str] = None
+    silent_speed: Optional[float] = None
+    sounded_speed: Optional[float] = None
+    silent_threshold: Optional[float] = None
+    video_codec: Optional[str] = None
 
     def to_dict(self) -> dict[str, object]:
-        """Return the JSON-serializable dict stored in ``settings.json``."""
+        """Return the JSON dict stored in ``settings.json``.
 
-        return asdict(self)
+        Only fields the preset actually defines are serialized, so a sparse
+        preset round-trips without inventing values for the params it omits.
+        """
+
+        data: dict[str, object] = {"name": self.name}
+        for field in PRESET_VALUE_FIELDS:
+            value = getattr(self, field)
+            if value is not None:
+                data[field] = value
+        return data
 
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> "Preset":
-        """Build a :class:`Preset` from a stored dict, coercing field types."""
+        """Build a :class:`Preset` from a stored dict, coercing present fields.
+
+        A missing (or explicitly ``null``) field loads as ``None`` so both the
+        new sparse presets and the fully populated presets written by the first
+        release round-trip unchanged.
+        """
+
+        def _opt_str(key: str) -> Optional[str]:
+            value = data.get(key)
+            return str(value) if value is not None else None
+
+        def _opt_float(key: str) -> Optional[float]:
+            value = data.get(key)
+            return float(value) if value is not None else None
 
         return cls(
             name=str(data.get("name", "")),
-            resolution=str(data.get("resolution", "720p")),
-            silent_speed=float(data.get("silent_speed", 5.0)),
-            sounded_speed=float(data.get("sounded_speed", 1.0)),
-            silent_threshold=float(data.get("silent_threshold", 0.01)),
-            video_codec=str(data.get("video_codec", "h264")),
+            resolution=_opt_str("resolution"),
+            silent_speed=_opt_float("silent_speed"),
+            sounded_speed=_opt_float("sounded_speed"),
+            silent_threshold=_opt_float("silent_threshold"),
+            video_codec=_opt_str("video_codec"),
         )
+
+    def present_fields(self) -> set:
+        """Return the set of value fields this preset defines (non-``None``)."""
+
+        return {
+            field for field in PRESET_VALUE_FIELDS if getattr(self, field) is not None
+        }
 
 
 # The three seeded defaults written on first run when ``presets`` is absent.
@@ -219,25 +262,32 @@ def delete_preset(presets: Sequence[Preset], name: str) -> List[Preset]:
 def preset_to_cli_args(preset: Preset) -> List[str]:
     """Map *preset* to the CLI flags a run should apply.
 
-    Resolution is always emitted explicitly (``--no-small`` / ``--small --720``
-    / ``--small --480``) so the preset wins over a persisted ``--small``
-    default. Speeds, threshold, and codec follow using the same flag spellings
-    as :func:`talks_reducer.gui.shortcut.build_shortcut_args`.
+    Only the fields the (sparse) preset defines are emitted, so a preset that
+    stores just a codec leaves resolution and speeds untouched. When present,
+    resolution is emitted explicitly (``--no-small`` / ``--small --720`` /
+    ``--small --480``) so the preset wins over a persisted ``--small`` default.
+    Speeds, threshold, and codec follow using the same flag spellings as
+    :func:`talks_reducer.gui.shortcut.build_shortcut_args`.
     """
 
     args: List[str] = []
 
-    if preset.resolution == "1080p":
-        args.append("--no-small")
-    elif preset.resolution == "480p":
-        args.extend(["--small", "--480"])
-    else:  # "720p" (and any unexpected value) map to the 720p small preset.
-        args.extend(["--small", "--720"])
+    if preset.resolution is not None:
+        if preset.resolution == "1080p":
+            args.append("--no-small")
+        elif preset.resolution == "480p":
+            args.extend(["--small", "--480"])
+        else:  # "720p" (and any unexpected value) map to the 720p small preset.
+            args.extend(["--small", "--720"])
 
-    args.extend(["--silent-speed", _format_number(preset.silent_speed)])
-    args.extend(["--sounded-speed", _format_number(preset.sounded_speed)])
-    args.extend(["--silent-threshold", _format_number(preset.silent_threshold)])
-    args.extend(["--video-codec", str(preset.video_codec)])
+    if preset.silent_speed is not None:
+        args.extend(["--silent-speed", _format_number(preset.silent_speed)])
+    if preset.sounded_speed is not None:
+        args.extend(["--sounded-speed", _format_number(preset.sounded_speed)])
+    if preset.silent_threshold is not None:
+        args.extend(["--silent-threshold", _format_number(preset.silent_threshold)])
+    if preset.video_codec is not None:
+        args.extend(["--video-codec", str(preset.video_codec)])
 
     return args
 
@@ -249,26 +299,37 @@ def match_preset(
 
     ``values`` supplies ``resolution`` and ``video_codec`` (compared exactly)
     plus ``silent_speed``, ``sounded_speed``, and ``silent_threshold`` (compared
-    within :data:`MATCH_TOLERANCE`).
+    within :data:`MATCH_TOLERANCE`). A sparse preset matches when **every field
+    it defines** equals the live value; the params it omits are ignored. A preset
+    with no value fields never matches so it cannot hijack the "Custom" state.
     """
 
-    resolution = str(values.get("resolution", ""))
-    codec = str(values.get("video_codec", ""))
-    try:
-        silent_speed = float(values.get("silent_speed"))
-        sounded_speed = float(values.get("sounded_speed"))
-        silent_threshold = float(values.get("silent_threshold"))
-    except (TypeError, ValueError):
-        return None
-
     for preset in presets:
-        if preset.resolution != resolution or preset.video_codec != codec:
+        present = preset.present_fields()
+        if not present:
             continue
-        if (
-            abs(preset.silent_speed - silent_speed) < MATCH_TOLERANCE
-            and abs(preset.sounded_speed - sounded_speed) < MATCH_TOLERANCE
-            and abs(preset.silent_threshold - silent_threshold) < MATCH_TOLERANCE
+        if "resolution" in present and preset.resolution != str(
+            values.get("resolution", "")
         ):
+            continue
+        if "video_codec" in present and preset.video_codec != str(
+            values.get("video_codec", "")
+        ):
+            continue
+
+        matched = True
+        for field in ("silent_speed", "sounded_speed", "silent_threshold"):
+            if field not in present:
+                continue
+            try:
+                live = float(values.get(field))
+            except (TypeError, ValueError):
+                matched = False
+                break
+            if abs(getattr(preset, field) - live) >= MATCH_TOLERANCE:
+                matched = False
+                break
+        if matched:
             return preset.name
     return None
 

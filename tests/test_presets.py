@@ -341,3 +341,88 @@ def test_preset_from_dict_coerces_types():
 
     assert preset.silent_speed == 10.0
     assert preset.silent_threshold == 0.02
+
+
+# --- Sparse presets --------------------------------------------------------
+
+
+def test_sparse_to_dict_stores_only_present_fields():
+    preset = Preset(name="codec only", video_codec="hevc")
+
+    assert preset.to_dict() == {"name": "codec only", "video_codec": "hevc"}
+
+
+def test_from_dict_missing_fields_load_as_none():
+    preset = Preset.from_dict({"name": "codec only", "video_codec": "hevc"})
+
+    assert preset.video_codec == "hevc"
+    assert preset.resolution is None
+    assert preset.silent_speed is None
+    assert preset.sounded_speed is None
+    assert preset.silent_threshold is None
+
+
+def test_from_dict_explicit_null_loads_as_none():
+    preset = Preset.from_dict({"name": "x", "silent_speed": None})
+
+    assert preset.silent_speed is None
+
+
+def test_sparse_round_trip(tmp_path):
+    path = _config_path(tmp_path)
+    sparse = [Preset(name="speed swap", silent_speed=10.0, video_codec="h264")]
+
+    assert save_presets(sparse, config_path=path) is True
+    # Only the defined fields are persisted on disk.
+    stored = _read(path)["presets"]
+    assert stored == [
+        {"name": "speed swap", "silent_speed": 10.0, "video_codec": "h264"}
+    ]
+    assert load_presets(config_path=path) == sparse
+
+
+def test_present_fields_reports_defined_fields():
+    preset = Preset(name="x", resolution="480p", video_codec="av1")
+
+    assert preset.present_fields() == {"resolution", "video_codec"}
+    assert Preset(name="empty").present_fields() == set()
+
+
+def test_preset_to_cli_args_sparse_emits_only_present_flags():
+    preset = Preset(name="codec only", video_codec="hevc")
+
+    assert preset_to_cli_args(preset) == ["--video-codec", "hevc"]
+
+
+def test_preset_to_cli_args_sparse_resolution_only():
+    preset = Preset(name="res only", resolution="1080p")
+
+    assert preset_to_cli_args(preset) == ["--no-small"]
+
+
+def test_match_preset_sparse_ignores_undefined_fields():
+    preset = Preset(name="codec only", video_codec="hevc")
+    values = {
+        "resolution": "480p",
+        "silent_speed": 3.0,
+        "sounded_speed": 2.0,
+        "silent_threshold": 0.5,
+        "video_codec": "hevc",
+    }
+
+    # The preset only constrains the codec, so any resolution/speed still matches.
+    assert match_preset(values, [preset]) == "codec only"
+
+
+def test_match_preset_sparse_requires_defined_field_to_match():
+    preset = Preset(name="codec only", video_codec="hevc")
+    values = {"video_codec": "h264"}
+
+    assert match_preset(values, [preset]) is None
+
+
+def test_match_preset_empty_preset_never_matches():
+    preset = Preset(name="empty")
+    values = {"video_codec": "h264", "resolution": "720p"}
+
+    assert match_preset(values, [preset]) is None
