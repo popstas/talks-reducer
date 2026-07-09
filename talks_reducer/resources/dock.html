@@ -152,6 +152,40 @@
       display: none;
     }
 
+    #presetControls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #presetControls.hidden {
+      display: none;
+    }
+
+    #manualControls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #manualControls.hidden {
+      display: none;
+    }
+
+    select {
+      color: var(--text);
+      background: var(--input-bg);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    select:focus { border-color: var(--accent); }
+
     button {
       border: 0;
       border-radius: 3px;
@@ -270,16 +304,23 @@
     <div class="card">
       <div class="toolbar">
         <div id="processingControls" class="hidden">
-          <div class="radio-group">
-            <label class="radio-pill"><input type="radio" name="resolution" value="1080p" /> 1080p</label>
-            <label class="radio-pill"><input type="radio" name="resolution" value="720p" checked /> 720p</label>
-            <label class="radio-pill"><input type="radio" name="resolution" value="480p" /> 480p</label>
+          <div id="presetControls" class="hidden">
+            <select id="presetSelect"></select>
+            <button id="presetProcessBtn" disabled>Process</button>
           </div>
 
-          <div class="buttons">
-            <button data-speed="1" disabled>1x</button>
-            <button data-speed="5" disabled>5x</button>
-            <button data-speed="10" disabled>10x</button>
+          <div id="manualControls">
+            <div class="radio-group">
+              <label class="radio-pill"><input type="radio" name="resolution" value="1080p" /> 1080p</label>
+              <label class="radio-pill"><input type="radio" name="resolution" value="720p" checked /> 720p</label>
+              <label class="radio-pill"><input type="radio" name="resolution" value="480p" /> 480p</label>
+            </div>
+
+            <div class="buttons">
+              <button data-speed="1" disabled>1x</button>
+              <button data-speed="5" disabled>5x</button>
+              <button data-speed="10" disabled>10x</button>
+            </div>
           </div>
         </div>
 
@@ -288,6 +329,7 @@
 
         <details class="settings">
           <summary>Settings</summary>
+          <div id="manualSettingsSlot" class="row hidden"></div>
           <div class="row">
             <label class="small">Codec</label>
             <div class="radio-group">
@@ -335,9 +377,11 @@
   // Prefer the origin the page was served from (so any --port works and the
   // dock can be opened straight from the dock-server). Fall back to the default
   // port when loaded as a local file:// document inside OBS.
-  const PROCESS_URL = location.origin && location.origin.startsWith('http')
-    ? location.origin + '/process'
-    : 'http://127.0.0.1:17890/process';
+  const SERVER_ORIGIN = location.origin && location.origin.startsWith('http')
+    ? location.origin
+    : 'http://127.0.0.1:17890';
+  const PROCESS_URL = SERVER_ORIGIN + '/process';
+  const PRESETS_URL = SERVER_ORIGIN + '/presets';
   const DEFAULT_EXE = '%LOCALAPPDATA%\\Programs\\talks-reducer\\talks-reducer.exe';
   const DEFAULT_CODEC = 'h264';
   const ALLOWED_CODECS = new Set(['h264', 'hevc', 'av1', 'mp3']);
@@ -357,9 +401,16 @@
   const toolbarConnectBtn = $('toolbarConnectBtn');
   const toolbarNotice = $('toolbarNotice');
   const processingControls = $('processingControls');
+  const presetControls = $('presetControls');
+  const presetSelect = $('presetSelect');
+  const presetProcessBtn = $('presetProcessBtn');
+  const manualControls = $('manualControls');
+  const manualSettingsSlot = $('manualSettingsSlot');
   const settings = document.querySelector('.settings');
   const logEl = $('log');
   const speedButtons = document.querySelectorAll('button[data-speed]');
+
+  let presetList = [];
 
   let ws = null;
   let connected = false;
@@ -495,6 +546,62 @@
   function updateProcessButtons() {
     const enabled = Boolean(lastRecordingPath.trim());
     speedButtons.forEach((btn) => { btn.disabled = !enabled; });
+    presetProcessBtn.disabled = !enabled || !presetSelect.value;
+  }
+
+  function applyPresetVisibility() {
+    // When a real preset is selected the manual resolution/speed become
+    // read-only settings, so tuck them into the Settings panel. "Custom"
+    // (empty value) surfaces the manual controls as the primary UI again.
+    const hasPreset = Boolean(presetSelect.value);
+    manualControls.classList.toggle('hidden', hasPreset);
+    manualSettingsSlot.classList.toggle('hidden', !hasPreset);
+    updateProcessButtons();
+  }
+
+  function populatePresetDropdown(presets) {
+    presetList = Array.isArray(presets) ? presets : [];
+    presetSelect.innerHTML = '';
+
+    const custom = document.createElement('option');
+    custom.value = '';
+    custom.textContent = 'Custom';
+    presetSelect.appendChild(custom);
+
+    presetList.forEach((preset) => {
+      const option = document.createElement('option');
+      option.value = preset.name;
+      option.textContent = preset.name;
+      presetSelect.appendChild(option);
+    });
+
+    const saved = localStorage.getItem('obsDock.preset') || '';
+    const known = presetList.some((preset) => preset.name === saved);
+    presetSelect.value = known ? saved : '';
+  }
+
+  async function loadPresets() {
+    let presets = [];
+    try {
+      const res = await fetch(PRESETS_URL);
+      if (res.ok) presets = await res.json();
+    } catch (_) {
+      presets = [];
+    }
+
+    if (!Array.isArray(presets) || presets.length === 0) {
+      // No presets: keep the manual controls in the main UI as before.
+      presetControls.classList.add('hidden');
+      manualControls.classList.remove('hidden');
+      manualSettingsSlot.classList.add('hidden');
+      return;
+    }
+
+    populatePresetDropdown(presets);
+    presetControls.classList.remove('hidden');
+    // Relocate the manual resolution/speed selects into the Settings panel.
+    manualSettingsSlot.appendChild(manualControls);
+    applyPresetVisibility();
   }
 
   function getResolution() {
@@ -674,7 +781,7 @@
     };
   }
 
-  async function sendProcess(speed) {
+  async function sendProcess({ speed, preset } = {}) {
     const file = (lastRecordingPath || '').trim();
     if (!file) {
       log('Нет файла. Останови запись в OBS.');
@@ -683,18 +790,27 @@
 
     const payload = {
       file,
-      speed: Number(speed),
-      resolution: getResolution(),
-      codec: getCodec(),
       autoClose: autoClose.checked,
       exe: talksReducerExe.value.trim() || DEFAULT_EXE
     };
 
+    if (preset) {
+      payload.preset = preset;
+    } else {
+      payload.speed = Number(speed);
+      payload.resolution = getResolution();
+      payload.codec = getCodec();
+    }
+
     localStorage.setItem('obsDock.talksReducerExe', payload.exe);
-    localStorage.setItem('obsDock.videoCodec', payload.codec);
+    if (payload.codec) localStorage.setItem('obsDock.videoCodec', payload.codec);
     localStorage.setItem('obsDock.autoClose', payload.autoClose ? '1' : '0');
 
-    log(`Processing: speed=${payload.speed}x, resolution=${payload.resolution}, codec=${payload.codec}`);
+    if (preset) {
+      log(`Processing: preset=${preset}`);
+    } else {
+      log(`Processing: speed=${payload.speed}x, resolution=${payload.resolution}, codec=${payload.codec}`);
+    }
 
     try {
       const res = await fetch(PROCESS_URL, {
@@ -734,11 +850,21 @@
   });
 
   speedButtons.forEach((btn) => {
-    btn.addEventListener('click', () => sendProcess(btn.dataset.speed));
+    btn.addEventListener('click', () => sendProcess({ speed: btn.dataset.speed }));
+  });
+
+  presetSelect.addEventListener('change', () => {
+    localStorage.setItem('obsDock.preset', presetSelect.value);
+    applyPresetVisibility();
+  });
+
+  presetProcessBtn.addEventListener('click', () => {
+    if (presetSelect.value) sendProcess({ preset: presetSelect.value });
   });
 
   updateProcessButtons();
   setObsStatus('', 'OBS: disconnected');
+  loadPresets();
   connectObs();
 })();
 </script>

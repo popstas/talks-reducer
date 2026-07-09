@@ -173,20 +173,20 @@ Dependencies identified: `argparse`, Tk/ttk, Gradio, stdlib `http.server`.
 - [x] run `black`, `isort`, tests — must pass before Task 7
 
 ### Task 7: OBS dock presets
-- [ ] add `GET /presets` to `dock_server.py` returning the preset list from
+- [x] add `GET /presets` to `dock_server.py` returning the preset list from
       `load_presets()` (JSON)
-- [ ] in `build_args()`: when the `POST /process` payload carries a `preset`
+- [x] in `build_args()`: when the `POST /process` payload carries a `preset`
       name, emit `--preset NAME` (full-fidelity) instead of the
       resolution/speed/codec flags; keep the current mapping when no preset is
       sent
-- [ ] update `resources/dock.html`: fetch `/presets`; when presets exist, show a
+- [x] update `resources/dock.html`: fetch `/presets`; when presets exist, show a
       `Preset` dropdown as the primary control and **move** the
       resolution/speed/codec selects into the settings panel; when none exist,
       keep those selects in the main UI as today; persist the choice in a new
       `obsDock.preset` `localStorage` key
-- [ ] write `tests/test_dock_server.py` cases: `GET /presets` payload; `build_args`
+- [x] write `tests/test_dock_server.py` cases: `GET /presets` payload; `build_args`
       emits `--preset NAME` for a preset payload and the legacy flags otherwise
-- [ ] run `black`, `isort`, tests — must pass before Task 8
+- [x] run `black`, `isort`, tests — must pass before Task 8
 
 ### Task 8: Verify acceptance criteria
 - [ ] verify each surface applies a preset and the resolution tri-state

@@ -88,7 +88,7 @@ def test_handle_process_validates_and_spawns(tmp_path, monkeypatch) -> None:
 
     assert status == 202
     assert str(exe) in message
-    assert calls == [(str(exe), str(video), "720p", 5, "hevc", True)]
+    assert calls == [(str(exe), str(video), "720p", 5, "hevc", True, None)]
 
 
 def test_resolve_dock_html_returns_bundled_file() -> None:
@@ -128,6 +128,119 @@ def test_dock_server_serves_ui_and_rejects_bad_post(monkeypatch) -> None:
         response = conn.getresponse()
         assert response.status == 400
         assert b"Missing file path" in response.read()
+        conn.close()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
+def test_build_args_emits_preset_flag() -> None:
+    """A preset payload emits ``--preset NAME`` instead of the legacy flags."""
+
+    assert dock_server.build_args(
+        "v.mp4", "720p", 5, "hevc", False, preset="My Preset"
+    ) == [
+        "v.mp4",
+        "--preset",
+        "My Preset",
+    ]
+    assert dock_server.build_args("v.mp4", "480p", 10, "av1", True, preset="Fast") == [
+        "v.mp4",
+        "--preset",
+        "Fast",
+        "--open-location",
+        "--auto-close",
+    ]
+
+
+def test_handle_process_routes_preset(tmp_path, monkeypatch) -> None:
+    """A known preset name skips the legacy validation and spawns via --preset."""
+
+    video = tmp_path / "clip.mkv"
+    video.write_bytes(b"data")
+    exe = tmp_path / "talks-reducer.exe"
+    exe.write_bytes(b"exe")
+
+    monkeypatch.setattr(dock_server, "_preset_names", lambda: ["720p fast"])
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        dock_server,
+        "start_talks_reducer",
+        lambda *args: calls.append(args),
+    )
+
+    status, message = dock_server.handle_process(
+        {
+            "file": str(video),
+            "preset": "720p fast",
+            "exe": str(exe),
+            "autoClose": False,
+        }
+    )
+
+    assert status == 202
+    assert calls == [(str(exe), str(video), "", None, "h264", False, "720p fast")]
+
+
+def test_handle_process_rejects_unknown_preset(tmp_path, monkeypatch) -> None:
+    """An unknown preset name is rejected with the list of valid names."""
+
+    video = tmp_path / "clip.mkv"
+    video.write_bytes(b"data")
+
+    monkeypatch.setattr(dock_server, "_preset_names", lambda: ["720p fast"])
+    monkeypatch.setattr(dock_server, "start_talks_reducer", lambda *args: None)
+
+    status, message = dock_server.handle_process(
+        {"file": str(video), "preset": "missing"}
+    )
+
+    assert status == 400
+    assert "Unknown preset" in message
+    assert "720p fast" in message
+
+
+def test_get_presets_returns_store(monkeypatch) -> None:
+    """``GET /presets`` returns the stored presets as a JSON list of dicts."""
+
+    from talks_reducer import presets as presets_module
+
+    sample = [
+        presets_module.Preset(
+            name="720p fast",
+            resolution="720p",
+            silent_speed=10.0,
+            sounded_speed=1.0,
+            silent_threshold=0.01,
+            video_codec="h264",
+        )
+    ]
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: sample)
+
+    httpd = dock_server.DockServer(("127.0.0.1", 0), dock_server.DEFAULT_EXE)
+    thread = Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = httpd.server_address[1]
+        conn = HTTPConnection("127.0.0.1", port)
+        conn.request("GET", "/presets")
+        response = conn.getresponse()
+        body = response.read()
+        assert response.status == 200
+        assert "application/json" in response.getheader("Content-Type")
+        data = json.loads(body)
+        assert data == [
+            {
+                "name": "720p fast",
+                "resolution": "720p",
+                "silent_speed": 10.0,
+                "sounded_speed": 1.0,
+                "silent_threshold": 0.01,
+                "video_codec": "h264",
+            }
+        ]
         conn.close()
     finally:
         httpd.shutdown()

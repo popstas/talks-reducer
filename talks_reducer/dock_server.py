@@ -87,20 +87,30 @@ def build_args(
     speed: int,
     codec: str,
     auto_close: bool,
+    preset: Optional[str] = None,
 ) -> List[str]:
-    """Translate dock options into Talks Reducer command line arguments."""
+    """Translate dock options into Talks Reducer command line arguments.
+
+    When *preset* names a stored preset the dock emits ``--preset NAME`` for
+    full fidelity, letting the CLI fan the preset's resolution/speed/codec/
+    threshold onto the run. Otherwise the legacy resolution/speed/codec mapping
+    is used so a dock without presets behaves exactly as before.
+    """
 
     args: List[str] = [input_file]
 
-    if resolution == "1080p":
-        args.append("--no-small")
-    elif resolution == "720p":
-        args.append("--small")
-    elif resolution == "480p":
-        args.extend(["--small", "--480"])
+    if preset:
+        args.extend(["--preset", preset])
+    else:
+        if resolution == "1080p":
+            args.append("--no-small")
+        elif resolution == "720p":
+            args.append("--small")
+        elif resolution == "480p":
+            args.extend(["--small", "--480"])
 
-    args.extend(["--silent-speed", str(speed)])
-    args.extend(["--video-codec", codec])
+        args.extend(["--silent-speed", str(speed)])
+        args.extend(["--video-codec", codec])
 
     if auto_close:
         args.extend(["--open-location", "--auto-close"])
@@ -115,22 +125,35 @@ def start_talks_reducer(
     speed: int,
     codec: str,
     auto_close: bool,
+    preset: Optional[str] = None,
 ) -> None:
     """Spawn the Talks Reducer executable for a single dock job."""
 
-    args = build_args(input_file, resolution, speed, codec, auto_close)
+    args = build_args(input_file, resolution, speed, codec, auto_close, preset)
     creationflags = _CREATE_NO_WINDOW if os.name == "nt" else 0
     subprocess.Popen([exe_path, *args], creationflags=creationflags)
+
+
+def _preset_names() -> List[str]:
+    """Return the names of the stored presets from the shared settings file."""
+
+    from .presets import load_presets
+
+    return [preset.name for preset in load_presets()]
 
 
 def handle_process(payload: dict, default_exe: Optional[str] = None) -> Tuple[int, str]:
     """Validate a dock request and launch Talks Reducer.
 
     Return an ``(status_code, message)`` pair mirroring the original Node.js
-    server's responses so the dock UI keeps behaving identically.
+    server's responses so the dock UI keeps behaving identically. When the
+    payload carries a ``preset`` name the resolution/speed/codec fields are
+    ignored (the preset drives them via ``--preset NAME``) and only the preset
+    name is validated against the stored list.
     """
 
     input_file = str(payload.get("file") or "").strip()
+    preset = str(payload.get("preset") or "").strip()
     resolution = str(payload.get("resolution") or "").strip()
     codec = str(payload.get("codec") or "h264").strip()
     auto_close = bool(payload.get("autoClose"))
@@ -145,16 +168,26 @@ def handle_process(payload: dict, default_exe: Optional[str] = None) -> Tuple[in
         return 400, "Missing file path"
     if not os.path.isfile(input_file):
         return 400, f"File not found: {input_file}"
-    if speed not in ALLOWED_SPEEDS:
-        return 400, "Speed must be 1, 5, or 10"
-    if resolution not in ALLOWED_RESOLUTIONS:
-        return 400, "Resolution must be 1080p, 720p, or 480p"
-    if codec not in ALLOWED_CODECS:
-        return 400, "Codec must be h264, hevc, av1, or mp3"
+
+    if preset:
+        valid_names = _preset_names()
+        if preset not in valid_names:
+            listed = ", ".join(valid_names) if valid_names else "(none)"
+            return 400, f"Unknown preset: {preset}. Available: {listed}"
+    else:
+        if speed not in ALLOWED_SPEEDS:
+            return 400, "Speed must be 1, 5, or 10"
+        if resolution not in ALLOWED_RESOLUTIONS:
+            return 400, "Resolution must be 1080p, 720p, or 480p"
+        if codec not in ALLOWED_CODECS:
+            return 400, "Codec must be h264, hevc, av1, or mp3"
+
     if not os.path.isfile(exe_path):
         return 400, f"Executable not found: {exe_path}"
 
-    start_talks_reducer(exe_path, input_file, resolution, speed, codec, auto_close)
+    start_talks_reducer(
+        exe_path, input_file, resolution, speed, codec, auto_close, preset or None
+    )
     return 202, f"Started talks-reducer: {exe_path}"
 
 
@@ -185,6 +218,16 @@ class _DockRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - required handler name
         path = urlsplit(self.path).path
+        if path == "/presets":
+            from .presets import load_presets
+
+            presets = [preset.to_dict() for preset in load_presets()]
+            self._send(
+                200,
+                json.dumps(presets),
+                content_type="application/json; charset=utf-8",
+            )
+            return
         if path in ("/", "/dock.html", "/index.html"):
             html = resolve_dock_html()
             if html is None:
