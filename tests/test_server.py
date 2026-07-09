@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import threading
 import time
+from contextlib import suppress
 from pathlib import Path
 from queue import SimpleQueue
 from typing import Iterator
@@ -351,6 +353,22 @@ def test_cleanup_workspaces_removes_temporary_directories(tmp_path: Path) -> Non
     for workspace in workspaces:
         assert not workspace.exists()
     assert server._WORKSPACES == []
+
+
+def test_allocate_workspace_lives_under_served_root() -> None:
+    """Workspaces must sit under a root that Gradio is allowed to serve."""
+
+    allowed = server.build_allowed_paths()
+    assert allowed == [str(server._WORKSPACE_ROOT)]
+
+    workspace = server._allocate_workspace()
+    try:
+        assert workspace.exists()
+        assert str(workspace).startswith(str(server._WORKSPACE_ROOT))
+    finally:
+        server._WORKSPACES.remove(workspace)
+        with suppress(Exception):
+            shutil.rmtree(workspace)
 
 
 def test_gradio_progress_reporter_updates_progress() -> None:

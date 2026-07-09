@@ -8,9 +8,9 @@ import shutil
 import sys
 import threading
 import time
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Optional, Sequence, Tuple
+from typing import Any, AsyncIterator, Callable, Iterator, Optional, Sequence, Tuple
 
 from gradio_client import Client
 
@@ -354,6 +354,36 @@ class StreamingJob:
             cancel_method()
 
 
+@contextmanager
+def _resilient_console_encoding() -> "Iterator[None]":
+    """Temporarily let ``sys.stdout``/``sys.stderr`` drop unencodable characters.
+
+    ``gradio_client.Client.__init__`` finishes construction by printing a status
+    line containing a ``✔`` character. On a Windows console using a legacy
+    code page (for example cp1251) that glyph has no mapping, so the bare
+    ``print`` raises :class:`UnicodeEncodeError` and aborts client construction —
+    which in remote mode silently drops the CLI back to local processing.
+    Switching the streams' error handler to ``replace`` for the duration of the
+    call keeps the status line visible while letting the client finish building.
+    """
+
+    streams = [
+        stream
+        for stream in (sys.stdout, sys.stderr)
+        if stream is not None and callable(getattr(stream, "reconfigure", None))
+    ]
+    previous = [getattr(stream, "errors", None) for stream in streams]
+    for stream in streams:
+        with suppress(ValueError, OSError):
+            stream.reconfigure(errors="replace")
+    try:
+        yield
+    finally:
+        for stream, errors in zip(streams, previous):
+            with suppress(ValueError, OSError):
+                stream.reconfigure(errors=errors or "strict")
+
+
 def _build_client(client_builder: Callable[..., Client], server_url: str) -> Client:
     """Return a gradio client with auto-download disabled when supported.
 
@@ -365,10 +395,11 @@ def _build_client(client_builder: Callable[..., Client], server_url: str) -> Cli
     own download path).
     """
 
-    try:
-        return client_builder(server_url, download_files=False)
-    except TypeError:
-        return client_builder(server_url)
+    with _resilient_console_encoding():
+        try:
+            return client_builder(server_url, download_files=False)
+        except TypeError:
+            return client_builder(server_url)
 
 
 def _filedata_get(filedata: Any, key: str) -> Any:
@@ -650,21 +681,23 @@ def send_video(
         if destination.is_dir():
             destination = destination / name
 
-    if isinstance(target, str):
-        # Stub/legacy clients (gradio auto-download still active) hand back a
-        # local path; copy it as before.
+    if isinstance(target, str) and Path(target).exists():
+        # The ``/process_video`` API returns a bare server-side path string. When
+        # the server shares this machine's filesystem the file is right here, so
+        # copy it directly instead of round-tripping through HTTP.
         download_source = Path(target)
         destination.parent.mkdir(parents=True, exist_ok=True)
         if download_source.resolve() != destination.resolve():
             shutil.copy2(download_source, destination)
     else:
-        # ``download_files=False`` leaves outputs as FileData; download the one
-        # processed file ourselves instead of letting gradio fetch every file
-        # output (the gr.Video preview and the gr.File download both point at the
-        # same file, which would otherwise transfer the video twice).
+        # A remote server hands back a path that does not exist on this machine
+        # (or a FileData object). Download the single processed file over HTTP via
+        # the Gradio ``file=`` route. A bare string is wrapped as FileData so the
+        # shared downloader can resolve the URL.
+        filedata = target if not isinstance(target, str) else {"path": target}
         _download_filedata(
             client,
-            target,
+            filedata,
             destination,
             progress_callback,
             _cancel_if_requested,

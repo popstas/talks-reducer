@@ -157,6 +157,7 @@ def test_headless_mode_runs_and_opens_browser(
         "inbrowser": False,
         "prevent_thread_lock": True,
         "show_error": True,
+        "allowed_paths": server_module.build_allowed_paths(),
         "pwa": True,
         "css": server_module._WEB_UI_CSS,
     }

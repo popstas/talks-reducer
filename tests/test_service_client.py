@@ -1387,6 +1387,49 @@ def test_download_filedata_cancels_mid_stream(monkeypatch, tmp_path):
         )
 
 
+def test_send_video_downloads_remote_path_over_http(monkeypatch, tmp_path):
+    """A server-side path that is not local must be fetched over HTTP.
+
+    A different-machine server (for example a Windows client talking to a macOS
+    server) returns a bare path string that does not exist on the client. Copying
+    it would raise ``FileNotFoundError``; ``send_video`` must download it via the
+    Gradio ``file=`` route instead.
+    """
+
+    import gradio_client.client as gradio_client_module
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"input")
+
+    # A POSIX-style server path that does not exist on this machine.
+    remote_path = "/private/var/folders/xx/talks_reducer_web/job_abc/out.mp4"
+    outputs = (remote_path, "log", "summary", remote_path)
+    client_instance = _FileDataClient("http://server:9005/", outputs)
+
+    monkeypatch.setattr(
+        service_client, "gradio_file", lambda path: SimpleNamespace(path=path)
+    )
+    captured: dict = {}
+    monkeypatch.setattr(
+        gradio_client_module.httpx,
+        "stream",
+        _fake_stream_factory(captured, [b"abcd", b"efgh"]),
+    )
+
+    destination, summary, log_text = service_client.send_video(
+        input_path=input_file,
+        output_path=tmp_path / "output.mp4",
+        server_url="http://server:9005/",
+        client_factory=lambda url: client_instance,
+    )
+
+    assert destination.read_bytes() == b"abcdefgh"
+    assert summary == "summary"
+    assert log_text == "log"
+    assert captured["count"] == 1
+    assert captured["url"] == "http://server:9005/file=" + remote_path
+
+
 def test_send_video_falls_back_when_download_files_unsupported(monkeypatch, tmp_path):
     """A factory rejecting ``download_files`` keeps the legacy copy path."""
 
@@ -1416,6 +1459,48 @@ def test_send_video_falls_back_when_download_files_unsupported(monkeypatch, tmp_
     assert destination.read_bytes() == server_file.read_bytes()
     assert summary == "summary"
     assert log_text == "log"
+
+
+class _CharmapStream:
+    """Stand in for a Windows console stream that cannot encode ``✔``.
+
+    ``write`` mirrors a cp1251 stdout: it raises :class:`UnicodeEncodeError`
+    for characters outside the code page while the error handler is ``strict``
+    and drops them when it is ``replace``, matching what ``reconfigure`` does.
+    """
+
+    def __init__(self) -> None:
+        self.errors = "strict"
+        self.written: list[str] = []
+
+    def reconfigure(self, *, errors: str) -> None:
+        self.errors = errors
+
+    def write(self, text: str) -> int:
+        if self.errors == "strict" and "✔" in text:
+            raise UnicodeEncodeError("charmap", text, 0, 1, "unmapped")
+        self.written.append(text.replace("✔", "?"))
+        return len(text)
+
+    def flush(self) -> None:  # pragma: no cover - trivial
+        pass
+
+
+def test_build_client_survives_unencodable_status_print(monkeypatch):
+    """Client construction must not crash on a ``✔`` status line."""
+
+    stream = _CharmapStream()
+    monkeypatch.setattr(service_client.sys, "stdout", stream)
+
+    def builder(server_url, **kwargs):
+        print(f"Loaded as API: {server_url} ✔")
+        return SimpleNamespace(server_url=server_url, kwargs=kwargs)
+
+    client = service_client._build_client(builder, "http://localhost:9005/")
+
+    assert client.kwargs == {"download_files": False}
+    assert stream.errors == "strict"  # restored afterwards
+    assert any("Loaded as API" in chunk for chunk in stream.written)
 
 
 @pytest.fixture
