@@ -255,6 +255,9 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         _stop_processing=Mock(),
         _open_last_output=Mock(),
         _check_for_updates=Mock(),
+        _open_save_preset_dialog=Mock(),
+        _update_selected_preset=Mock(),
+        _delete_selected_preset=Mock(),
         small_var=BooleanVarStub(value=True),
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
@@ -266,6 +269,7 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         cut_end_text_var=StringVarStub(value="00:00:00.000"),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
+        advanced_preset_var=StringVarStub(value=""),
         preferences=SimpleNamespace(
             get_float=lambda key, default: default,
             get=lambda key, default: default,
@@ -515,6 +519,9 @@ def test_build_layout_initializes_widgets(monkeypatch):
         _stop_processing=stop_processing,
         _open_last_output=open_last_output,
         _check_for_updates=Mock(),
+        _open_save_preset_dialog=Mock(),
+        _update_selected_preset=Mock(),
+        _delete_selected_preset=Mock(),
         small_var=BooleanVarStub(value=True),
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
@@ -526,6 +533,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         cut_end_text_var=StringVarStub(value="00:00:00.000"),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
+        advanced_preset_var=StringVarStub(value=""),
         preferences=preferences,
         processing_mode_var=StringVarStub(value="local"),
         server_url_var=StringVarStub(value=""),
@@ -745,6 +753,9 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         _stop_processing=Mock(),
         _open_last_output=Mock(),
         _check_for_updates=Mock(),
+        _open_save_preset_dialog=Mock(),
+        _update_selected_preset=Mock(),
+        _delete_selected_preset=Mock(),
         small_var=BooleanVarStub(value=True),
         small_480_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
@@ -756,6 +767,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         cut_end_text_var=StringVarStub(value="00:00:00.000"),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
+        advanced_preset_var=StringVarStub(value=""),
         preferences=SimpleNamespace(
             get_float=lambda key, default: default,
             get=lambda key, default: default,
@@ -1164,6 +1176,7 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     gui = SimpleNamespace(
         simple_mode_var=SimpleNamespace(get=lambda: True),
         basic_options_frame=make_widget_mock(),
+        advanced_preset_frame=make_widget_mock(),
         log_frame=make_widget_mock(),
         activity_frame=make_widget_mock(),
         server_managed=True,
@@ -1180,6 +1193,8 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     layout.apply_simple_mode(gui, initial=True)
 
     gui.basic_options_frame.grid_remove.assert_called_once()
+    # The Advanced-only preset management strip is hidden in Simple mode.
+    gui.advanced_preset_frame.grid_remove.assert_called_once()
     gui.log_frame.grid_remove.assert_called_once()
     # The Connected clients panel is hidden in Simple mode even when managed.
     gui.activity_frame.grid_remove.assert_called_once()
@@ -1201,6 +1216,7 @@ def test_apply_simple_mode_full_branch(monkeypatch):
     gui = SimpleNamespace(
         simple_mode_var=SimpleNamespace(get=lambda: False),
         basic_options_frame=make_widget_mock(),
+        advanced_preset_frame=make_widget_mock(),
         log_frame=make_widget_mock(),
         activity_frame=make_widget_mock(),
         server_managed=True,
@@ -1218,6 +1234,8 @@ def test_apply_simple_mode_full_branch(monkeypatch):
     layout.apply_simple_mode(gui)
 
     gui.basic_options_frame.grid.assert_called_once()
+    # The full layout restores the Advanced preset management strip.
+    gui.advanced_preset_frame.grid.assert_called_once()
     gui.log_frame.grid.assert_called_once()
     # A managed GUI restores the Connected clients panel in the full layout.
     gui.activity_frame.grid.assert_called_once()
@@ -1480,3 +1498,187 @@ def test_apply_simple_preset_unknown_name_noops(monkeypatch):
     assert gui.small_480_var.get() is False
     assert gui.video_codec_var.get() == "h264"
     assert persisted == []
+
+
+def _make_advanced_preset_gui() -> SimpleNamespace:
+    """Return a stub GUI exposing the vars the Advanced strip helpers touch."""
+
+    silent = DummyVar(10.0)
+    sounded = DummyVar(1.0)
+    threshold = DummyVar(0.01)
+    return SimpleNamespace(
+        small_var=BooleanVarStub(value=True),
+        small_480_var=BooleanVarStub(value=False),
+        video_codec_var=StringVarStub(value="h264"),
+        silent_speed_var=silent,
+        sounded_speed_var=sounded,
+        silent_threshold_var=threshold,
+        simple_mode_var=BooleanVarStub(value=False),
+        simple_preset_var=StringVarStub(value=""),
+        advanced_preset_var=StringVarStub(value=""),
+        _slider_updaters={},
+        _basic_variables={
+            "silent_speed": silent,
+            "sounded_speed": sounded,
+            "silent_threshold": threshold,
+        },
+        _simple_presets=list(_TEST_PRESETS),
+    )
+
+
+def test_advanced_preset_values_maps_resolution_tri_state():
+    gui = _make_advanced_preset_gui()
+
+    gui.small_var.set(False)
+    assert layout.advanced_preset_values(gui)["resolution"] == "1080p"
+
+    gui.small_var.set(True)
+    gui.small_480_var.set(False)
+    assert layout.advanced_preset_values(gui)["resolution"] == "720p"
+
+    gui.small_480_var.set(True)
+    assert layout.advanced_preset_values(gui)["resolution"] == "480p"
+
+
+def test_refresh_advanced_preset_selection_matches_preset():
+    gui = _make_advanced_preset_gui()
+    # The stub knobs match the first test preset (720p / 10x / h264).
+    layout.refresh_advanced_preset_selection(gui)
+
+    assert gui.advanced_preset_var.get() == "720p 10x speedup H.264"
+
+
+def test_refresh_advanced_preset_selection_flips_to_custom():
+    gui = _make_advanced_preset_gui()
+    # Editing a knob so it no longer matches any preset flips to "Custom".
+    gui.silent_speed_var.set(3.5)
+
+    layout.refresh_advanced_preset_selection(gui)
+
+    assert gui.advanced_preset_var.get() == layout.presets.CUSTOM_LABEL
+
+
+def test_apply_advanced_preset_applies_and_persists(monkeypatch):
+    persisted: list[str] = []
+    monkeypatch.setattr(
+        layout.presets,
+        "set_selected_preset",
+        lambda name, *a, **k: persisted.append(name) or True,
+    )
+
+    gui = _make_advanced_preset_gui()
+    gui.advanced_preset_var = StringVarStub(value="480p 10x speedup H.265")
+
+    layout.apply_advanced_preset(gui)
+
+    assert gui.small_480_var.get() is True
+    assert gui.video_codec_var.get() == "hevc"
+    assert persisted == ["480p 10x speedup H.265"]
+
+
+def test_apply_advanced_preset_custom_noops(monkeypatch):
+    persisted: list[str] = []
+    monkeypatch.setattr(
+        layout.presets,
+        "set_selected_preset",
+        lambda name, *a, **k: persisted.append(name) or True,
+    )
+
+    gui = _make_advanced_preset_gui()
+    gui.advanced_preset_var = StringVarStub(value=layout.presets.CUSTOM_LABEL)
+
+    layout.apply_advanced_preset(gui)
+
+    assert persisted == []
+
+
+def test_save_advanced_preset_persists_and_refreshes(monkeypatch):
+    saved: list[list] = []
+    monkeypatch.setattr(
+        layout.presets, "save_presets", lambda presets, *a, **k: saved.append(presets)
+    )
+    monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
+    # ``refresh_preset_dropdowns`` reloads the store: echo back what was saved.
+    monkeypatch.setattr(
+        layout.presets, "load_presets", lambda *a, **k: list(saved[-1]) if saved else []
+    )
+
+    gui = _make_advanced_preset_gui()
+    gui.small_var.set(False)  # 1080p
+    gui.video_codec_var.set("av1")
+
+    layout.save_advanced_preset(gui, "My new preset")
+
+    assert saved, "save_presets should be called"
+    new = layout.presets.find_preset("My new preset", saved[-1])
+    assert new is not None
+    assert new.resolution == "1080p"
+    assert new.video_codec == "av1"
+    assert gui.advanced_preset_var.get() == "My new preset"
+
+
+def test_update_advanced_preset_overwrites_selection(monkeypatch):
+    saved: list[list] = []
+    monkeypatch.setattr(
+        layout.presets, "save_presets", lambda presets, *a, **k: saved.append(presets)
+    )
+    monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
+    monkeypatch.setattr(
+        layout.presets, "load_presets", lambda *a, **k: list(saved[-1]) if saved else []
+    )
+
+    gui = _make_advanced_preset_gui()
+    gui.advanced_preset_var = StringVarStub(value="720p 10x speedup H.264")
+    gui.video_codec_var.set("hevc")  # change a knob before updating
+
+    layout.update_advanced_preset(gui)
+
+    updated = layout.presets.find_preset("720p 10x speedup H.264", saved[-1])
+    assert updated is not None
+    assert updated.video_codec == "hevc"
+
+
+def test_delete_advanced_preset_removes_selection(monkeypatch):
+    saved: list[list] = []
+    monkeypatch.setattr(
+        layout.presets, "save_presets", lambda presets, *a, **k: saved.append(presets)
+    )
+    monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
+    monkeypatch.setattr(
+        layout.presets, "load_presets", lambda *a, **k: list(saved[-1]) if saved else []
+    )
+
+    gui = _make_advanced_preset_gui()
+    gui.advanced_preset_var = StringVarStub(value="720p 10x speedup H.264")
+
+    layout.delete_advanced_preset(gui)
+
+    assert layout.presets.find_preset("720p 10x speedup H.264", saved[-1]) is None
+    assert gui.advanced_preset_var.get() == layout.presets.CUSTOM_LABEL
+
+
+def test_build_layout_creates_advanced_preset_strip(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    gui = _make_layout_gui()
+
+    layout.build_layout(gui)
+
+    assert isinstance(gui.advanced_preset_combo, WidgetStub)
+    assert gui.advanced_preset_combo.kwargs["values"] == [
+        preset.name for preset in _TEST_PRESETS
+    ]
+    assert gui.advanced_preset_save_button.kwargs["command"] is (
+        gui._open_save_preset_dialog
+    )
+    assert gui.advanced_preset_update_button.kwargs["command"] is (
+        gui._update_selected_preset
+    )
+    assert gui.advanced_preset_delete_button.kwargs["command"] is (
+        gui._delete_selected_preset
+    )
+    # The strip is created and gridded (visible in the full layout).
+    assert gui.advanced_preset_frame.grid_calls

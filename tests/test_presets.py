@@ -9,6 +9,8 @@ from talks_reducer import presets
 from talks_reducer.presets import (
     DEFAULT_PRESETS,
     Preset,
+    add_preset,
+    delete_preset,
     find_preset,
     get_selected_preset,
     load_presets,
@@ -16,7 +18,19 @@ from talks_reducer.presets import (
     preset_to_cli_args,
     save_presets,
     set_selected_preset,
+    update_preset,
 )
+
+
+def _preset(name: str, resolution: str = "720p", codec: str = "h264") -> Preset:
+    return Preset(
+        name=name,
+        resolution=resolution,
+        silent_speed=5.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec=codec,
+    )
 
 
 def _config_path(tmp_path: Path) -> Path:
@@ -227,6 +241,62 @@ def test_set_selected_preset_preserves_other_settings(tmp_path):
     stored = _read(path)
     assert stored["selected_preset"] == DEFAULT_PRESETS[0].name
     assert stored["presets"][0]["name"] == DEFAULT_PRESETS[0].name
+
+
+def test_add_preset_appends_and_leaves_source_untouched():
+    original = [_preset("A"), _preset("B")]
+    result = add_preset(original, _preset("C"))
+
+    assert [p.name for p in result] == ["A", "B", "C"]
+    # The helper is pure: the source list is not mutated in place.
+    assert [p.name for p in original] == ["A", "B"]
+
+
+def test_add_preset_overwrites_same_name():
+    original = [_preset("A", codec="h264"), _preset("B")]
+    result = add_preset(original, _preset("A", codec="hevc"))
+
+    assert [p.name for p in result] == ["B", "A"]
+    assert find_preset("A", result).video_codec == "hevc"
+
+
+def test_update_preset_replaces_named_entry():
+    original = [_preset("A"), _preset("B", codec="h264")]
+    replacement = _preset("B", codec="av1")
+    result = update_preset(original, "B", replacement)
+
+    assert [p.name for p in result] == ["A", "B"]
+    assert find_preset("B", result).video_codec == "av1"
+    # Source is not mutated.
+    assert find_preset("B", original).video_codec == "h264"
+
+
+def test_update_preset_can_rename():
+    original = [_preset("A"), _preset("B")]
+    result = update_preset(original, "B", _preset("B renamed"))
+
+    assert [p.name for p in result] == ["A", "B renamed"]
+
+
+def test_update_preset_appends_when_name_absent():
+    original = [_preset("A")]
+    result = update_preset(original, "missing", _preset("New"))
+
+    assert [p.name for p in result] == ["A", "New"]
+
+
+def test_delete_preset_removes_named_entry():
+    original = [_preset("A"), _preset("B"), _preset("C")]
+    result = delete_preset(original, "B")
+
+    assert [p.name for p in result] == ["A", "C"]
+    # Source is not mutated.
+    assert [p.name for p in original] == ["A", "B", "C"]
+
+
+def test_delete_preset_absent_name_is_noop():
+    original = [_preset("A")]
+    assert [p.name for p in delete_preset(original, "missing")] == ["A"]
 
 
 def test_preset_from_dict_coerces_types():

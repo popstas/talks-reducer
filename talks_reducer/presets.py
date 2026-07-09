@@ -25,6 +25,10 @@ SELECTED_PRESET_KEY = "selected_preset"
 # Valid resolution tri-state values.
 RESOLUTIONS = ("1080p", "720p", "480p")
 
+# Label shown in an authoring dropdown when the live knobs match no stored
+# preset. Mirrors :func:`match_preset` returning ``None``.
+CUSTOM_LABEL = "Custom"
+
 # Float tolerance for reverse-matching current values back to a preset. Mirrors
 # ``layout.BASIC_PRESET_TOLERANCE`` so both surfaces agree on "unchanged".
 MATCH_TOLERANCE = 1e-9
@@ -154,6 +158,42 @@ def find_preset(name: str, presets: Sequence[Preset]) -> Optional[Preset]:
         if preset.name == name:
             return preset
     return None
+
+
+def add_preset(presets: Sequence[Preset], preset: Preset) -> List[Preset]:
+    """Return a new list with *preset* appended.
+
+    Any existing preset that shares *preset*'s name is dropped first so a
+    "Save as…" reusing a name overwrites in place rather than creating a
+    duplicate the dropdown could not disambiguate.
+    """
+
+    result = [existing for existing in presets if existing.name != preset.name]
+    result.append(preset)
+    return result
+
+
+def update_preset(presets: Sequence[Preset], name: str, preset: Preset) -> List[Preset]:
+    """Return a new list with the preset named *name* replaced by *preset*.
+
+    When *name* is absent the *preset* is appended so an "Update" on a stale
+    selection still persists the current knobs rather than silently dropping
+    them.
+    """
+
+    result = list(presets)
+    for index, existing in enumerate(result):
+        if existing.name == name:
+            result[index] = preset
+            return result
+    result.append(preset)
+    return result
+
+
+def delete_preset(presets: Sequence[Preset], name: str) -> List[Preset]:
+    """Return a new list with the preset named *name* removed."""
+
+    return [existing for existing in presets if existing.name != name]
 
 
 def preset_to_cli_args(preset: Preset) -> List[str]:

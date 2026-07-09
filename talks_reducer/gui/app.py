@@ -42,7 +42,7 @@ try:
     from ..version_utils import resolve_version
     from . import discovery as discovery_helpers
     from . import layout as layout_helpers
-    from . import relaunch
+    from . import preset_dialog, relaunch
     from . import shortcut as shortcut_helpers
     from . import taskbar as taskbar_helpers
     from . import update_checker
@@ -87,7 +87,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from talks_reducer.gui import discovery as discovery_helpers
     from talks_reducer.gui import layout as layout_helpers
-    from talks_reducer.gui import relaunch
+    from talks_reducer.gui import preset_dialog, relaunch
     from talks_reducer.gui import shortcut as shortcut_helpers
     from talks_reducer.gui import taskbar as taskbar_helpers
     from talks_reducer.gui import update_checker
@@ -315,6 +315,12 @@ class TalksReducerGUI:
             value=self.preferences.get("simple_mode", True)
         )
         self.simple_preset_var = tk.StringVar(value=presets.get_selected_preset() or "")
+        # The Advanced management strip re-derives its selection from the live
+        # knobs (via ``refresh_advanced_preset_selection``); seed it with the
+        # persisted choice so the first render is not empty.
+        self.advanced_preset_var = tk.StringVar(
+            value=presets.get_selected_preset() or presets.CUSTOM_LABEL
+        )
         self.run_after_drop_var = tk.BooleanVar(value=True)
         self.small_var = tk.BooleanVar(value=self.preferences.get("small_video", True))
         self.small_480_var = tk.BooleanVar(
@@ -726,6 +732,20 @@ class TalksReducerGUI:
     def _open_create_lnk_dialog(self) -> None:
         """Open the Windows-only **Create lnk** desktop-shortcut dialog."""
         shortcut_helpers.open_create_lnk_dialog(self)
+
+    def _open_save_preset_dialog(self) -> None:
+        """Prompt for a name and save the current knobs as a new preset."""
+        preset_dialog.open_save_preset_dialog(
+            self, lambda name: layout_helpers.save_advanced_preset(self, name)
+        )
+
+    def _update_selected_preset(self) -> None:
+        """Overwrite the selected preset with the current Advanced knobs."""
+        layout_helpers.update_advanced_preset(self)
+
+    def _delete_selected_preset(self) -> None:
+        """Delete the selected preset and refresh every preset dropdown."""
+        layout_helpers.delete_advanced_preset(self)
 
     def _toggle_simple_mode(self) -> None:
         self.preference_controller.toggle_simple_mode()

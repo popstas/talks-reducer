@@ -147,20 +147,20 @@ Dependencies identified: `argparse`, Tk/ttk, Gradio, stdlib `http.server`.
 - [x] run `black`, `isort`, tests — must pass before Task 5
 
 ### Task 5: Advanced mode preset management strip (GUI)
-- [ ] add an inline strip above the Advanced knobs: `Preset` dropdown +
+- [x] add an inline strip above the Advanced knobs: `Preset` dropdown +
       **Save as… / Update / Delete** buttons
-- [ ] wire the dropdown to `match_preset` so editing any knob flips it to
+- [x] wire the dropdown to `match_preset` so editing any knob flips it to
       **"Custom"**
-- [ ] **Save as…** opens a name-entry modal (reuse the `gui/shortcut.py`
+- [x] **Save as…** opens a name-entry modal (reuse the `gui/shortcut.py`
       "Create lnk" modal pattern) and appends a preset from the current knobs;
       **Update** overwrites the selected preset; **Delete** removes it — all via
       `presets.save_presets`, refreshing every dropdown (Simple + Advanced)
-- [ ] extract the pure preset-mutation helpers (add/update/delete a preset in a
+- [x] extract the pure preset-mutation helpers (add/update/delete a preset in a
       list) so they are unit-testable without Tk
-- [ ] write tests: `tests/test_presets.py` for the mutation helpers;
+- [x] write tests: `tests/test_presets.py` for the mutation helpers;
       `tests/test_gui_layout.py` (or `test_gui_app.py`) for the "Custom" flip and
       dropdown refresh
-- [ ] run `black`, `isort`, tests — must pass before Task 6
+- [x] run `black`, `isort`, tests — must pass before Task 6
 
 ### Task 6: Web UI preset dropdown (Gradio)
 - [ ] add a `Preset` dropdown near the top of `server.build_interface`,
