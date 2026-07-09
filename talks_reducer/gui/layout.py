@@ -8,6 +8,7 @@ import sys
 import time
 from typing import TYPE_CHECKING, Callable, Optional
 
+from .. import presets
 from ..icons import find_icon_path
 from ..models import default_temp_folder
 from .tooltips import add_tooltip
@@ -71,51 +72,59 @@ BASIC_PRESETS: dict[str, dict[str, float]] = {
 
 BASIC_PRESET_TOLERANCE = 1e-9
 
-PRESET_LABELS: dict[str, str] = {
-    "compress_only": "No speedup",
-    "defaults": "×5 (default)",
-    "silence_x10": "×10",
-}
 
-CODEC_LABELS: dict[str, str] = {
-    "h264": "H.264",
-    "hevc": "H.265",
-    "av1": "AV1",
-    "mp3": "mp3 (audio only)",
-}
+def apply_preset_to_gui(gui: "TalksReducerGUI", preset: "presets.Preset") -> None:
+    """Fan a stored :class:`~talks_reducer.presets.Preset` onto the GUI vars.
 
+    The resolution tri-state maps onto ``small_var``/``small_480_var`` explicitly
+    (``1080p`` → both off, ``720p`` → small only, ``480p`` → small + 480p) so a
+    preset always wins over a persisted ``--small`` default. Speeds and the
+    threshold route through the basic-slider updaters when they exist so the
+    slider labels and persisted preferences stay in sync; the codec updates the
+    shared ``video_codec_var``.
+    """
 
-def get_current_preset(gui: "TalksReducerGUI") -> str:
-    """Return the preset key matching current speed var values, or 'custom'."""
-    vals = {
-        "silent_speed": gui.silent_speed_var.get(),
-        "sounded_speed": gui.sounded_speed_var.get(),
-        "silent_threshold": gui.silent_threshold_var.get(),
-    }
-    for key, preset in BASIC_PRESETS.items():
-        if all(abs(vals[k] - v) < BASIC_PRESET_TOLERANCE for k, v in preset.items()):
-            return key
-    return "custom"
+    if preset.resolution == "1080p":
+        gui.small_var.set(False)
+        gui.small_480_var.set(False)
+    elif preset.resolution == "480p":
+        gui.small_var.set(True)
+        gui.small_480_var.set(True)
+    else:  # "720p" and any unexpected value map to the 720p small preset.
+        gui.small_var.set(True)
+        gui.small_480_var.set(False)
+
+    updaters = getattr(gui, "_slider_updaters", {})
+    variables = getattr(gui, "_basic_variables", {})
+    for key, value in (
+        ("silent_speed", preset.silent_speed),
+        ("sounded_speed", preset.sounded_speed),
+        ("silent_threshold", preset.silent_threshold),
+    ):
+        updater: Callable[[str], None] | None = updaters.get(key)
+        if updater is not None:
+            updater(str(value))
+        else:
+            variable = variables.get(key)
+            if variable is not None:
+                variable.set(value)
+
+    gui.video_codec_var.set(preset.video_codec)
 
 
 def _apply_simple_preset(gui: "TalksReducerGUI") -> None:
-    """Apply the preset selected in the simple-mode speedup dropdown."""
-    label = gui.simple_preset_var.get()
-    if label == "custom":
+    """Apply the user-named preset selected in the simple-mode dropdown.
+
+    The chosen name is looked up in the cached preset list, fanned onto the GUI
+    vars, and persisted via ``selected_preset`` so the choice survives relaunch.
+    """
+
+    name = gui.simple_preset_var.get()
+    preset = presets.find_preset(name, getattr(gui, "_simple_presets", []))
+    if preset is None:
         return
-    for key, display in PRESET_LABELS.items():
-        if display == label:
-            apply_basic_preset(gui, key)
-            break
-
-
-def _apply_simple_codec(gui: "TalksReducerGUI") -> None:
-    """Apply the codec selected in the simple-mode codec dropdown."""
-    label = gui.simple_codec_var.get()
-    for key, display in CODEC_LABELS.items():
-        if display == label:
-            gui.video_codec_var.set(key)
-            break
+    apply_preset_to_gui(gui, preset)
+    presets.set_selected_preset(name)
 
 
 def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> None:
@@ -237,36 +246,24 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     checkbox_frame = gui.ttk.Frame(gui.options_frame)
     checkbox_frame.grid(row=0, column=0, columnspan=2, sticky="w")
 
-    # Speedup preset and video codec dropdowns (visible in simple mode only)
-    speedup_frame = gui.ttk.Frame(checkbox_frame)
-    speedup_label = gui.ttk.Label(speedup_frame, text="Speedup:")
-    speedup_label.pack(side=gui.tk.LEFT, padx=(0, 2))
-    preset_values = [PRESET_LABELS[k] for k in BASIC_PRESETS] + ["custom"]
-    speedup_combo = gui.ttk.Combobox(
-        speedup_frame,
+    # User-named preset dropdown (visible in simple mode only). It is populated
+    # from the shared preset store and hidden entirely when no presets exist.
+    gui._simple_presets = presets.load_presets()
+    preset_frame = gui.ttk.Frame(checkbox_frame)
+    preset_label = gui.ttk.Label(preset_frame, text="Preset:")
+    preset_label.pack(side=gui.tk.LEFT, padx=(0, 2))
+    preset_combo = gui.ttk.Combobox(
+        preset_frame,
         textvariable=gui.simple_preset_var,
-        values=preset_values,
+        values=[preset.name for preset in gui._simple_presets],
         state="readonly",
-        width=14,
+        width=28,
     )
-    speedup_combo.pack(side=gui.tk.LEFT)
-    speedup_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_preset(gui))
-    speedup_frame.grid(row=0, column=0, sticky="w")
-
-    codec_frame = gui.ttk.Frame(checkbox_frame)
-    codec_label = gui.ttk.Label(codec_frame, text="Video codec:")
-    codec_label.pack(side=gui.tk.LEFT, padx=(0, 2))
-    codec_values = list(CODEC_LABELS.values())
-    simple_codec_combo = gui.ttk.Combobox(
-        codec_frame,
-        textvariable=gui.simple_codec_var,
-        values=codec_values,
-        state="readonly",
-        width=14,
-    )
-    simple_codec_combo.pack(side=gui.tk.LEFT)
-    simple_codec_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_codec(gui))
-    codec_frame.grid(row=0, column=1, sticky="w", padx=(8, 0))
+    preset_combo.pack(side=gui.tk.LEFT)
+    preset_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_preset(gui))
+    preset_frame.grid(row=0, column=0, sticky="w")
+    if not gui._simple_presets:
+        preset_frame.grid_remove()
 
     checkbox_row1 = gui.ttk.Frame(checkbox_frame)
     checkbox_row1.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
@@ -305,12 +302,9 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.simple_mode_check.grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
-    gui.simple_speedup_frame = speedup_frame
-    gui.simple_speedup_label = speedup_label
-    gui.simple_speedup_combo = speedup_combo
-    gui.simple_codec_frame = codec_frame
-    gui.simple_codec_label = codec_label
-    gui.simple_codec_combo = simple_codec_combo
+    gui.simple_preset_frame = preset_frame
+    gui.simple_preset_label = preset_label
+    gui.simple_preset_combo = preset_combo
 
     gui.advanced_visible = gui.tk.BooleanVar(value=False)
 
@@ -1149,10 +1143,11 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.button_frame.grid_remove()
         gui.advanced_frame.grid_remove()
         gui.run_after_drop_var.set(True)
-        if hasattr(gui, "simple_speedup_frame"):
-            gui.simple_speedup_frame.grid()
-        if hasattr(gui, "simple_codec_frame"):
-            gui.simple_codec_frame.grid()
+        # Show the preset selector only when at least one preset exists.
+        if hasattr(gui, "simple_preset_frame") and getattr(
+            gui, "_simple_presets", None
+        ):
+            gui.simple_preset_frame.grid()
         # Cut video is an Advanced-only feature: hide its checkbox and panel.
         if hasattr(gui, "cut_check"):
             gui.cut_check.pack_forget()
@@ -1173,10 +1168,8 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.button_frame.grid()
         if gui.advanced_visible.get():
             gui.advanced_frame.grid()
-        if hasattr(gui, "simple_speedup_frame"):
-            gui.simple_speedup_frame.grid_remove()
-        if hasattr(gui, "simple_codec_frame"):
-            gui.simple_codec_frame.grid_remove()
+        if hasattr(gui, "simple_preset_frame"):
+            gui.simple_preset_frame.grid_remove()
         # Restore the Advanced-only Cut video checkbox and (if enabled) its panel.
         if hasattr(gui, "cut_check"):
             gui.cut_check.pack(side=gui.tk.LEFT, padx=(65, 0))

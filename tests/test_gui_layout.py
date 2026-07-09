@@ -7,6 +7,40 @@ from unittest.mock import Mock
 import pytest
 
 import talks_reducer.gui.layout as layout
+from talks_reducer.presets import Preset
+
+_TEST_PRESETS = [
+    Preset(
+        name="720p 10x speedup H.264",
+        resolution="720p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="h264",
+    ),
+    Preset(
+        name="480p 10x speedup H.265",
+        resolution="480p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="hevc",
+    ),
+]
+
+
+@pytest.fixture(autouse=True)
+def _stub_preset_store(monkeypatch):
+    """Keep ``build_layout`` from touching the real ``settings.json`` on disk.
+
+    Individual tests override ``load_presets`` when they need a different list.
+    """
+
+    monkeypatch.setattr(
+        layout.presets, "load_presets", lambda *a, **k: list(_TEST_PRESETS)
+    )
+    monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
+    monkeypatch.setattr(layout.presets, "get_selected_preset", lambda *a, **k: None)
 
 
 class DummyVar:
@@ -232,7 +266,6 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         cut_end_text_var=StringVarStub(value="00:00:00.000"),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
-        simple_codec_var=StringVarStub(value=""),
         preferences=SimpleNamespace(
             get_float=lambda key, default: default,
             get=lambda key, default: default,
@@ -493,7 +526,6 @@ def test_build_layout_initializes_widgets(monkeypatch):
         cut_end_text_var=StringVarStub(value="00:00:00.000"),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
-        simple_codec_var=StringVarStub(value=""),
         preferences=preferences,
         processing_mode_var=StringVarStub(value="local"),
         server_url_var=StringVarStub(value=""),
@@ -724,7 +756,6 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         cut_end_text_var=StringVarStub(value="00:00:00.000"),
         simple_mode_var=BooleanVarStub(value=False),
         simple_preset_var=StringVarStub(value=""),
-        simple_codec_var=StringVarStub(value=""),
         preferences=SimpleNamespace(
             get_float=lambda key, default: default,
             get=lambda key, default: default,
@@ -1293,3 +1324,159 @@ class TestClampWindowPosition:
         assert (
             layout.clamp_window_position((100, -400), (470, 300), (1920, 1080)) is None
         )
+
+
+def _make_preset_target_gui() -> SimpleNamespace:
+    """Return a stub GUI exposing only the vars ``apply_preset_to_gui`` touches."""
+
+    silent = DummyVar(5.0)
+    sounded = DummyVar(1.0)
+    threshold = DummyVar(0.01)
+    return SimpleNamespace(
+        small_var=BooleanVarStub(value=True),
+        small_480_var=BooleanVarStub(value=False),
+        video_codec_var=StringVarStub(value="h264"),
+        silent_speed_var=silent,
+        sounded_speed_var=sounded,
+        silent_threshold_var=threshold,
+        _slider_updaters={},
+        _basic_variables={
+            "silent_speed": silent,
+            "sounded_speed": sounded,
+            "silent_threshold": threshold,
+        },
+    )
+
+
+def test_apply_preset_to_gui_sets_vars_for_480p():
+    gui = _make_preset_target_gui()
+    preset = Preset(
+        name="480p 10x speedup H.265",
+        resolution="480p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.02,
+        video_codec="hevc",
+    )
+
+    layout.apply_preset_to_gui(gui, preset)
+
+    assert gui.small_var.get() is True
+    assert gui.small_480_var.get() is True
+    assert gui.silent_speed_var.get() == pytest.approx(10.0)
+    assert gui.silent_threshold_var.get() == pytest.approx(0.02)
+    assert gui.video_codec_var.get() == "hevc"
+
+
+def test_apply_preset_to_gui_1080p_clears_small():
+    gui = _make_preset_target_gui()
+    preset = Preset(
+        name="1080p no speedup H.264",
+        resolution="1080p",
+        silent_speed=1.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="h264",
+    )
+
+    layout.apply_preset_to_gui(gui, preset)
+
+    assert gui.small_var.get() is False
+    assert gui.small_480_var.get() is False
+
+
+def test_apply_preset_to_gui_prefers_slider_updaters():
+    gui = _make_preset_target_gui()
+    calls: list[tuple[str, str]] = []
+    gui._slider_updaters = {
+        "silent_speed": lambda value: calls.append(("silent_speed", value)),
+    }
+    preset = Preset(
+        name="720p",
+        resolution="720p",
+        silent_speed=7.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="h264",
+    )
+
+    layout.apply_preset_to_gui(gui, preset)
+
+    # The slider updater is used when present so the label/preferences sync.
+    assert ("silent_speed", "7.0") in calls
+    assert gui.small_var.get() is True
+    assert gui.small_480_var.get() is False
+
+
+def test_build_layout_populates_preset_dropdown(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+
+    gui = _make_layout_gui()
+
+    layout.build_layout(gui)
+
+    assert isinstance(gui.simple_preset_combo, WidgetStub)
+    assert gui.simple_preset_combo.kwargs["values"] == [
+        preset.name for preset in _TEST_PRESETS
+    ]
+    # A non-empty list keeps the selector visible (no grid_remove after grid).
+    assert gui.simple_preset_frame.grid_calls
+    assert not gui.simple_preset_frame.grid_remove_calls
+
+
+def test_build_layout_hides_preset_selector_when_empty(monkeypatch):
+    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_entry", Mock())
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+    monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
+    monkeypatch.setattr(layout.presets, "load_presets", lambda *a, **k: [])
+
+    gui = _make_layout_gui()
+
+    layout.build_layout(gui)
+
+    assert gui._simple_presets == []
+    # No presets: the selector is hidden right after creation.
+    assert gui.simple_preset_frame.grid_remove_calls
+
+
+def test_apply_simple_preset_applies_and_persists(monkeypatch):
+    persisted: list[str] = []
+    monkeypatch.setattr(
+        layout.presets,
+        "set_selected_preset",
+        lambda name, *a, **k: persisted.append(name) or True,
+    )
+
+    gui = _make_preset_target_gui()
+    gui.simple_preset_var = StringVarStub(value="480p 10x speedup H.265")
+    gui._simple_presets = list(_TEST_PRESETS)
+
+    layout._apply_simple_preset(gui)
+
+    assert gui.small_480_var.get() is True
+    assert gui.video_codec_var.get() == "hevc"
+    assert persisted == ["480p 10x speedup H.265"]
+
+
+def test_apply_simple_preset_unknown_name_noops(monkeypatch):
+    persisted: list[str] = []
+    monkeypatch.setattr(
+        layout.presets,
+        "set_selected_preset",
+        lambda name, *a, **k: persisted.append(name) or True,
+    )
+
+    gui = _make_preset_target_gui()
+    gui.simple_preset_var = StringVarStub(value="does-not-exist")
+    gui._simple_presets = list(_TEST_PRESETS)
+
+    layout._apply_simple_preset(gui)
+
+    # Unknown selection leaves the vars untouched and persists nothing.
+    assert gui.small_480_var.get() is False
+    assert gui.video_codec_var.get() == "h264"
+    assert persisted == []

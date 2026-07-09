@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from tkinter import filedialog, messagebox, ttk
 
 try:
+    from .. import presets
     from ..cli import gather_input_files
     from ..ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from ..models import ProcessingOptions
@@ -81,6 +82,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     if str(PACKAGE_ROOT) not in sys.path:
         sys.path.insert(0, str(PACKAGE_ROOT))
 
+    from talks_reducer import presets
     from talks_reducer.cli import gather_input_files
     from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from talks_reducer.gui import discovery as discovery_helpers
@@ -312,8 +314,7 @@ class TalksReducerGUI:
         self.simple_mode_var = tk.BooleanVar(
             value=self.preferences.get("simple_mode", True)
         )
-        self.simple_preset_var = tk.StringVar(value="")
-        self.simple_codec_var = tk.StringVar(value="")
+        self.simple_preset_var = tk.StringVar(value=presets.get_selected_preset() or "")
         self.run_after_drop_var = tk.BooleanVar(value=True)
         self.small_var = tk.BooleanVar(value=self.preferences.get("small_video", True))
         self.small_480_var = tk.BooleanVar(
@@ -400,12 +401,6 @@ class TalksReducerGUI:
         self._cut_duration: float = 0.0
 
         self._build_layout()
-        self._sync_simple_preset()
-        self.silent_speed_var.trace_add("write", self._sync_simple_preset)
-        self.sounded_speed_var.trace_add("write", self._sync_simple_preset)
-        self.silent_threshold_var.trace_add("write", self._sync_simple_preset)
-        self._sync_simple_codec()
-        self.video_codec_var.trace_add("write", self._sync_simple_codec)
         self._update_small_variant_state()
         self._apply_simple_mode(initial=True)
         self._apply_status_style(self._status_state)
@@ -731,19 +726,6 @@ class TalksReducerGUI:
     def _open_create_lnk_dialog(self) -> None:
         """Open the Windows-only **Create lnk** desktop-shortcut dialog."""
         shortcut_helpers.open_create_lnk_dialog(self)
-
-    def _sync_simple_preset(self, *_: object) -> None:
-        """Update the simple-mode speedup dropdown to reflect current speed vars."""
-        key = layout_helpers.get_current_preset(self)
-        if key == "custom":
-            self.simple_preset_var.set("custom")
-        else:
-            self.simple_preset_var.set(layout_helpers.PRESET_LABELS[key])
-
-    def _sync_simple_codec(self, *_: object) -> None:
-        """Update the simple-mode codec dropdown to reflect the current video codec var."""
-        key = self.video_codec_var.get()
-        self.simple_codec_var.set(layout_helpers.CODEC_LABELS.get(key, key))
 
     def _toggle_simple_mode(self) -> None:
         self.preference_controller.toggle_simple_mode()

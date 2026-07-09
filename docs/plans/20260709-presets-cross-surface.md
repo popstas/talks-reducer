@@ -128,18 +128,23 @@ Dependencies identified: `argparse`, Tk/ttk, Gradio, stdlib `http.server`.
 - [x] run `black`, `isort`, tests — must pass before Task 4
 
 ### Task 4: Simple mode preset dropdown (GUI)
-- [ ] replace `simple_speedup_frame` + `simple_codec_frame` with a single
+- [x] replace `simple_speedup_frame` + `simple_codec_frame` with a single
       `Preset` dropdown (line 1) in `gui/layout.py`; keep `Simple mode` +
       `Open after convert` checkboxes (line 2)
-- [ ] on selection, apply the preset to the underlying GUI vars (resolution →
-      `small_var`/`small_480_var`, speeds, threshold, codec)
-- [ ] hide the preset selector entirely when `load_presets()` returns `[]`
-- [ ] remove the hardcoded `BASIC_PRESETS`/`PRESET_LABELS` speed table and its
-      `app.py` sync wiring (`simple_preset_var` speed logic); persist the chosen
-      preset via `selected_preset`
-- [ ] write `tests/test_gui_layout.py` cases: applying a preset sets the vars;
-      empty-preset list hides the selector; selection persists
-- [ ] run `black`, `isort`, tests — must pass before Task 5
+- [x] on selection, apply the preset to the underlying GUI vars (resolution →
+      `small_var`/`small_480_var`, speeds, threshold, codec) via
+      `apply_preset_to_gui`
+- [x] hide the preset selector entirely when `load_presets()` returns `[]`
+- [x] remove the hardcoded `PRESET_LABELS`/`CODEC_LABELS` simple-mode tables and
+      the `app.py` sync wiring (`_sync_simple_preset`/`_sync_simple_codec` +
+      traces); persist the chosen preset via `selected_preset`
+      (`get_selected_preset` seeds `simple_preset_var`, `set_selected_preset` on
+      selection). `BASIC_PRESETS` is retained because the Advanced-mode "Basic
+      options" quick-preset link buttons still use it (out of scope for removal).
+- [x] write `tests/test_gui_layout.py` cases: applying a preset sets the vars
+      (720p/480p/1080p + slider-updater path); empty-preset list hides the
+      selector; selection persists via `set_selected_preset`
+- [x] run `black`, `isort`, tests — must pass before Task 5
 
 ### Task 5: Advanced mode preset management strip (GUI)
 - [ ] add an inline strip above the Advanced knobs: `Preset` dropdown +
