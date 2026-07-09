@@ -8,9 +8,9 @@ import shutil
 import sys
 import threading
 import time
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Optional, Sequence, Tuple
+from typing import Any, AsyncIterator, Callable, Iterator, Optional, Sequence, Tuple
 
 from gradio_client import Client
 
@@ -354,6 +354,36 @@ class StreamingJob:
             cancel_method()
 
 
+@contextmanager
+def _resilient_console_encoding() -> "Iterator[None]":
+    """Temporarily let ``sys.stdout``/``sys.stderr`` drop unencodable characters.
+
+    ``gradio_client.Client.__init__`` finishes construction by printing a status
+    line containing a ``✔`` character. On a Windows console using a legacy
+    code page (for example cp1251) that glyph has no mapping, so the bare
+    ``print`` raises :class:`UnicodeEncodeError` and aborts client construction —
+    which in remote mode silently drops the CLI back to local processing.
+    Switching the streams' error handler to ``replace`` for the duration of the
+    call keeps the status line visible while letting the client finish building.
+    """
+
+    streams = [
+        stream
+        for stream in (sys.stdout, sys.stderr)
+        if stream is not None and callable(getattr(stream, "reconfigure", None))
+    ]
+    previous = [getattr(stream, "errors", None) for stream in streams]
+    for stream in streams:
+        with suppress(ValueError, OSError):
+            stream.reconfigure(errors="replace")
+    try:
+        yield
+    finally:
+        for stream, errors in zip(streams, previous):
+            with suppress(ValueError, OSError):
+                stream.reconfigure(errors=errors or "strict")
+
+
 def _build_client(client_builder: Callable[..., Client], server_url: str) -> Client:
     """Return a gradio client with auto-download disabled when supported.
 
@@ -365,10 +395,11 @@ def _build_client(client_builder: Callable[..., Client], server_url: str) -> Cli
     own download path).
     """
 
-    try:
-        return client_builder(server_url, download_files=False)
-    except TypeError:
-        return client_builder(server_url)
+    with _resilient_console_encoding():
+        try:
+            return client_builder(server_url, download_files=False)
+        except TypeError:
+            return client_builder(server_url)
 
 
 def _filedata_get(filedata: Any, key: str) -> Any:
