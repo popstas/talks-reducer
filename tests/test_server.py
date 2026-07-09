@@ -1906,6 +1906,35 @@ def test_preset_to_web_controls_custom_speed_has_no_speedup_label() -> None:
     assert controls["silent_speed"] == pytest.approx(7.0)
 
 
+def test_resolve_initial_web_preset_defaults_to_first(monkeypatch) -> None:
+    monkeypatch.setattr(server, "get_selected_preset", lambda *a, **k: None)
+    presets = [_preset(name="Alpha"), _preset(name="Beta")]
+
+    assert server.resolve_initial_web_preset(presets).name == "Alpha"
+
+
+def test_resolve_initial_web_preset_restores_remembered(monkeypatch) -> None:
+    monkeypatch.setattr(server, "get_selected_preset", lambda *a, **k: "Beta")
+    presets = [_preset(name="Alpha"), _preset(name="Beta")]
+
+    assert server.resolve_initial_web_preset(presets).name == "Beta"
+
+
+def test_resolve_initial_web_preset_remembered_missing_falls_to_first(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(server, "get_selected_preset", lambda *a, **k: "Gone")
+    presets = [_preset(name="Alpha"), _preset(name="Beta")]
+
+    assert server.resolve_initial_web_preset(presets).name == "Alpha"
+
+
+def test_resolve_initial_web_preset_none_when_empty(monkeypatch) -> None:
+    monkeypatch.setattr(server, "get_selected_preset", lambda *a, **k: None)
+
+    assert server.resolve_initial_web_preset([]) is None
+
+
 def test_build_interface_preset_dropdown_populated_from_store() -> None:
     """The Preset dropdown lists the presets passed into ``build_interface``."""
 

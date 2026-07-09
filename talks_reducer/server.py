@@ -27,7 +27,13 @@ from talks_reducer.pipeline import (
     _input_to_output_filename,
     speed_up_video,
 )
-from talks_reducer.presets import Preset, find_preset, load_presets
+from talks_reducer.presets import (
+    Preset,
+    find_preset,
+    get_selected_preset,
+    load_presets,
+    set_selected_preset,
+)
 from talks_reducer.progress import (
     CallbackProgressHandle,
     ProgressHandle,
@@ -1149,6 +1155,21 @@ def preset_to_web_controls(preset: Preset) -> dict[str, object]:
     return controls
 
 
+def resolve_initial_web_preset(preset_list: Sequence[Preset]) -> Optional[Preset]:
+    """Return the preset the Web UI should open on: remembered, else the first.
+
+    Restores the persisted ``selected_preset`` when it still exists in
+    *preset_list*; otherwise defaults to the first preset so the dropdown opens on
+    a concrete selection instead of blank. Returns ``None`` when no presets exist.
+    """
+
+    remembered = get_selected_preset()
+    preset = find_preset(remembered, preset_list) if remembered else None
+    if preset is None and preset_list:
+        preset = preset_list[0]
+    return preset
+
+
 def process_video_ui(
     file_path: Optional[str],
     resolution: str,
@@ -1361,21 +1382,30 @@ def build_interface(
         )
 
         preset_choices = [preset.name for preset in preset_list]
+        default_preset = resolve_initial_web_preset(preset_list)
+        initial_controls = (
+            preset_to_web_controls(default_preset) if default_preset is not None else {}
+        )
+
+        def _initial(key: str, fallback: object) -> object:
+            value = initial_controls.get(key, fallback)
+            return fallback if value is None else value
+
         preset_dropdown = gr.Dropdown(
             choices=preset_choices,
-            value=None,
+            value=default_preset.name if default_preset is not None else None,
             label="Preset",
             visible=bool(preset_choices),
         )
 
         resolution_radio = gr.Radio(
             choices=["No change", "720p", "480p"],
-            value="720p",
+            value=_initial("resolution", "720p"),
             label="Resolution",
         )
         speedup_radio = gr.Radio(
             choices=["1×", "5×", "10×"],
-            value="10×",
+            value=_initial("speedup", "10×"),
             label="Speedup",
         )
         codec_dropdown = gr.Dropdown(
@@ -1385,7 +1415,7 @@ def build_interface(
                 ("av1 (no advantages)", "av1"),
                 ("mp3 (audio only)", "mp3"),
             ],
-            value="hevc",
+            value=_initial("video_codec", "hevc"),
             label="Video codec",
             elem_classes=["tr-codec"],
         )
@@ -1416,15 +1446,23 @@ def build_interface(
                 info="Append the selected codec (e.g. _h264) to the output filename.",
             )
             silent_speed_input = gr.Slider(
-                minimum=1.0, maximum=10.0, value=10.0, step=0.1, label="Silent speed"
+                minimum=1.0,
+                maximum=10.0,
+                value=_initial("silent_speed", 10.0),
+                step=0.1,
+                label="Silent speed",
             )
             sounded_speed_input = gr.Slider(
-                minimum=0.5, maximum=3.0, value=1.0, step=0.01, label="Sounded speed"
+                minimum=0.5,
+                maximum=3.0,
+                value=_initial("sounded_speed", 1.0),
+                step=0.01,
+                label="Sounded speed",
             )
             silent_threshold_input = gr.Slider(
                 minimum=0.0,
                 maximum=1.0,
-                value=0.01,
+                value=_initial("silent_threshold", 0.01),
                 step=0.01,
                 label="Silent threshold",
             )
@@ -1458,6 +1496,11 @@ def build_interface(
                     gr.update(),
                     gr.update(),
                 )
+            # Persist the choice so the dropdown reopens on it (shared with the
+            # desktop GUI via ``settings.json``). Best-effort: a read-only config
+            # must not break applying the preset to the controls.
+            with suppress(Exception):
+                set_selected_preset(preset.name)
             controls = preset_to_web_controls(preset)
 
             def _upd(key: str) -> object:
