@@ -227,6 +227,7 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         Scale=WidgetFactory("Scale"),
         FLAT="flat",
         LEFT="left",
+        RIGHT="right",
         NORMAL="normal",
         DISABLED="disabled",
         HORIZONTAL="horizontal",
@@ -476,6 +477,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         Scale=WidgetFactory("Scale"),
         FLAT="flat",
         LEFT="left",
+        RIGHT="right",
         NORMAL="normal",
         DISABLED="disabled",
         HORIZONTAL="horizontal",
@@ -729,6 +731,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         Scale=WidgetFactory("Scale"),
         FLAT="flat",
         LEFT="left",
+        RIGHT="right",
         NORMAL="normal",
         DISABLED="disabled",
         HORIZONTAL="horizontal",
@@ -1180,7 +1183,7 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     monkeypatch.setattr(layout, "apply_window_size", apply_size)
 
     gui = SimpleNamespace(
-        tk=SimpleNamespace(LEFT="left"),
+        tk=SimpleNamespace(LEFT="left", RIGHT="right"),
         simple_mode_var=SimpleNamespace(get=lambda: True),
         basic_options_frame=make_widget_mock(),
         advanced_preset_frame=make_widget_mock(),
@@ -1231,7 +1234,7 @@ def test_apply_simple_mode_simple_branch_keeps_checkboxes_without_presets(monkey
     monkeypatch.setattr(layout, "apply_window_size", apply_size)
 
     gui = SimpleNamespace(
-        tk=SimpleNamespace(LEFT="left"),
+        tk=SimpleNamespace(LEFT="left", RIGHT="right"),
         simple_mode_var=SimpleNamespace(get=lambda: True),
         basic_options_frame=make_widget_mock(),
         advanced_preset_frame=make_widget_mock(),
@@ -1287,7 +1290,7 @@ def test_apply_simple_mode_full_branch(monkeypatch):
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
         cut_enabled_var=SimpleNamespace(get=lambda: True),
-        tk=SimpleNamespace(LEFT="left"),
+        tk=SimpleNamespace(LEFT="left", RIGHT="right"),
         drop_zone=Mock(),
     )
 
@@ -1329,7 +1332,7 @@ def test_apply_simple_mode_full_branch_hides_activity_when_standalone(monkeypatc
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
         cut_enabled_var=SimpleNamespace(get=lambda: False),
-        tk=SimpleNamespace(LEFT="left"),
+        tk=SimpleNamespace(LEFT="left", RIGHT="right"),
         drop_zone=Mock(),
     )
 

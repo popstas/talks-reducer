@@ -540,11 +540,23 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     checkbox_frame = gui.ttk.Frame(gui.options_frame)
     checkbox_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
+    # Column 0 fills the width so the Simple-mode preset row can stretch and
+    # right-align Open output to the content margin.
+    checkbox_frame.columnconfigure(0, weight=1)
 
-    # User-named preset dropdown (visible in simple mode only). It is populated
-    # from the shared preset store and hidden entirely when no presets exist.
+    # Simple-mode preset row: the dropdown packs on the left and Open output packs
+    # on the right so its right edge lines up with the full-width controls (drop
+    # zone / "Open last"). It is its own frame (packed internally), so it never
+    # shares grid columns with the manual ``checkbox_row1`` — sharing them let the
+    # wide manual row inflate the columns and push Open output off-screen after a
+    # Simple-mode toggle. Populated from the shared store and hidden (with Open
+    # output) when no presets exist, where the manual ``checkbox_row1`` copy is
+    # used instead.
     gui._simple_presets = presets.load_presets()
-    preset_frame = gui.ttk.Frame(checkbox_frame)
+    simple_row = gui.ttk.Frame(checkbox_frame)
+    simple_row.grid(row=0, column=0, columnspan=3, sticky="ew")
+
+    preset_frame = gui.ttk.Frame(simple_row)
     preset_label = gui.ttk.Label(preset_frame, text="Preset:")
     preset_label.pack(side=gui.tk.LEFT, padx=(0, 2))
     preset_combo = gui.ttk.Combobox(
@@ -556,22 +568,17 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     preset_combo.pack(side=gui.tk.LEFT)
     preset_combo.bind("<<ComboboxSelected>>", lambda e: _apply_simple_preset(gui))
-    preset_frame.grid(row=0, column=0, sticky="w")
-    if not gui._simple_presets:
-        preset_frame.grid_remove()
+    preset_frame.pack(side=gui.tk.LEFT)
 
-    # Simple-mode Open output checkbox: shares ``open_after_convert_var`` with the
-    # full-layout checkbox but lives on the preset row (line 1) right after the
-    # dropdown so Simple mode reads "Preset … | Open output" on one compact line
-    # (no stretched gap). Shown only in Simple mode when a preset selector is
-    # present; the full layout uses the ``checkbox_row1`` copy instead.
     gui.simple_open_output_check = gui.ttk.Checkbutton(
-        checkbox_frame,
+        simple_row,
         text="Open output",
         variable=gui.open_after_convert_var,
     )
-    gui.simple_open_output_check.grid(row=0, column=1, sticky="w", padx=(10, 2))
-    gui.simple_open_output_check.grid_remove()
+    gui.simple_open_output_check.pack(side=gui.tk.RIGHT, padx=(0, 2))
+
+    if not gui._simple_presets:
+        simple_row.grid_remove()
 
     checkbox_row1 = gui.ttk.Frame(checkbox_frame)
     checkbox_row1.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
@@ -612,7 +619,8 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.simple_mode_check.grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
-    gui.simple_preset_frame = preset_frame
+    # The whole simple row (dropdown + Open output) shows/hides together.
+    gui.simple_preset_frame = simple_row
     gui.simple_preset_label = preset_label
     gui.simple_preset_combo = preset_combo
 
@@ -1535,17 +1543,14 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
                 gui.small_check.pack_forget()
             if hasattr(gui, "small_480_check"):
                 gui.small_480_check.pack_forget()
-            # Move Open output up onto the preset row (line 1, right) and hide the
-            # full-layout copy so it does not also appear on its own line.
+            # Open output rides inside the preset row (shown via
+            # ``simple_preset_frame``); hide the full-layout copy so it does not
+            # also appear on its own line.
             if hasattr(gui, "open_output_check"):
                 gui.open_output_check.pack_forget()
-            if hasattr(gui, "simple_open_output_check"):
-                gui.simple_open_output_check.grid()
         else:
             # No preset selector, so the preset row is hidden; keep Open output in
             # its full-layout row alongside the manual resolution checkboxes.
-            if hasattr(gui, "simple_open_output_check"):
-                gui.simple_open_output_check.grid_remove()
             if hasattr(gui, "open_output_check"):
                 gui.open_output_check.pack(side=gui.tk.LEFT, padx=(65, 0))
             if hasattr(gui, "small_check") and hasattr(gui, "open_output_check"):
@@ -1578,10 +1583,8 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
         if gui.advanced_visible.get():
             gui.advanced_frame.grid()
         if hasattr(gui, "simple_preset_frame"):
+            # Hides the whole preset row, including its Open output copy.
             gui.simple_preset_frame.grid_remove()
-        # The preset-row Open output copy belongs to Simple mode only.
-        if hasattr(gui, "simple_open_output_check"):
-            gui.simple_open_output_check.grid_remove()
         # Restore the full-layout Open output (Simple mode may have forgotten it)
         # then pack the manual resolution checkboxes ahead of it so the full layout
         # keeps its original Small video / 480p / Open output order.
