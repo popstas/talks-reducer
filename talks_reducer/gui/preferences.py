@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Mapping, MutableMapping, Optional
+from typing import TYPE_CHECKING, MutableMapping, Optional
 
+from ..config import determine_config_path, load_settings, save_settings
 from . import layout as layout_helpers
 from .theme import (
     DARK_THEME,
@@ -21,47 +21,13 @@ from .theme import (
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from .app import TalksReducerGUI
 
-
-def determine_config_path(
-    platform: Optional[str] = None,
-    env: Optional[Mapping[str, str]] = None,
-    home: Optional[Path] = None,
-) -> Path:
-    """Return the path to the GUI settings file for the current platform."""
-
-    platform_name = platform if platform is not None else sys.platform
-    env_mapping = env if env is not None else os.environ
-    home_path = Path(home) if home is not None else Path.home()
-
-    if platform_name == "win32":
-        appdata = env_mapping.get("APPDATA")
-        if appdata:
-            base = Path(appdata)
-        else:
-            base = home_path / "AppData" / "Roaming"
-    elif platform_name == "darwin":
-        base = home_path / "Library" / "Application Support"
-    else:
-        xdg_config = env_mapping.get("XDG_CONFIG_HOME")
-        base = Path(xdg_config) if xdg_config else home_path / ".config"
-
-    return base / "talks-reducer" / "settings.json"
-
-
-def load_settings(config_path: Path) -> dict[str, object]:
-    """Load settings from *config_path*, returning an empty dict on failure."""
-
-    try:
-        with config_path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
-    except FileNotFoundError:
-        return {}
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-    if isinstance(data, dict):
-        return data
-    return {}
+__all__ = [
+    "determine_config_path",
+    "load_settings",
+    "save_settings",
+    "GUIPreferences",
+    "PreferenceController",
+]
 
 
 class GUIPreferences:
@@ -137,13 +103,7 @@ class GUIPreferences:
         stale ``settings.json`` can detect the failure.
         """
 
-        try:
-            self._config_path.parent.mkdir(parents=True, exist_ok=True)
-            with self._config_path.open("w", encoding="utf-8") as handle:
-                json.dump(self._settings, handle, indent=2, sort_keys=True)
-        except OSError:
-            return False
-        return True
+        return save_settings(self._config_path, self._settings)
 
 
 class PreferenceController:

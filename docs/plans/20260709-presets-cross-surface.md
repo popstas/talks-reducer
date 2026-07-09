@@ -82,16 +82,16 @@ Dependencies identified: `argparse`, Tk/ttk, Gradio, stdlib `http.server`.
 ## Implementation Steps
 
 ### Task 1: Extract shared config module
-- [ ] create `talks_reducer/config.py` with `determine_config_path()`,
+- [x] create `talks_reducer/config.py` with `determine_config_path()`,
       `load_settings()`, and a new `save_settings(data)` moved/lifted from
       `gui/preferences.py` (no behavior change to path resolution)
-- [ ] update `gui/preferences.py` to import these from `talks_reducer.config`
+- [x] update `gui/preferences.py` to import these from `talks_reducer.config`
       (re-export for any existing importers to preserve backward compatibility)
-- [ ] write tests in `tests/test_config.py` for config path resolution per
+- [x] write tests in `tests/test_config.py` for config path resolution per
       platform-base and load/save round-trip (success + malformed-JSON returns
       `{}`)
-- [ ] confirm `tests/test_gui_preferences.py` still passes unchanged
-- [ ] run `black`, `isort`, and the test suite — must pass before Task 2
+- [x] confirm `tests/test_gui_preferences.py` still passes unchanged
+- [x] run `black`, `isort`, and the test suite — must pass before Task 2
 
 ### Task 2: Preset store and model (`talks_reducer/presets.py`)
 - [ ] add `Preset` dataclass: `name: str`, `resolution: str`
