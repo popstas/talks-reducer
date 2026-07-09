@@ -78,95 +78,95 @@ the design spec `docs/superpowers/specs/2026-07-09-presets-design.md`.
 ## Implementation Steps
 
 ### Task 1: Sparse preset data model (`talks_reducer/presets.py`)
-- [ ] make `Preset` value fields optional (`resolution`, `silent_speed`,
+- [x] make `Preset` value fields optional (`resolution`, `silent_speed`,
       `sounded_speed`, `silent_threshold`, `video_codec` default `None`); `name`
       stays required
-- [ ] serialize only non-`None` fields in `save_presets`; `load_presets` tolerates
+- [x] serialize only non-`None` fields in `save_presets`; `load_presets` tolerates
       missing keys (absent → `None`); keep the three seeded defaults fully
       populated
-- [ ] update `preset_to_cli_args` to emit flags only for present fields (and
+- [x] update `preset_to_cli_args` to emit flags only for present fields (and
       resolution only when set)
-- [ ] update `match_preset` so a preset matches when **every present field** equals
+- [x] update `match_preset` so a preset matches when **every present field** equals
       the current value (fields it doesn't define are ignored)
-- [ ] add a `preset_fields_present(preset) -> set[str]` helper for the dialog/apply
-- [ ] update `test_presets.py`: sparse round-trip (only checked fields stored),
+- [x] add a `preset_fields_present(preset) -> set[str]` helper for the dialog/apply
+- [x] update `test_presets.py`: sparse round-trip (only checked fields stored),
       apply/CLI/match with partial presets, full-preset backward compatibility
-- [ ] run `black`, `isort`, tests — must pass before Task 2
+- [x] run `black`, `isort`, tests — must pass before Task 2
 
 ### Task 2: Param-selection Save/Update dialog (sparse capture)
-- [ ] extend `gui/preset_dialog.py` (or add a helper) to show a name entry **plus**
+- [x] extend `gui/preset_dialog.py` (or add a helper) to show a name entry **plus**
       per-param checkboxes (resolution, silent speed, sounded speed, threshold,
       codec) mirroring the "Create link" dialog, returning `(name, selected_fields)`
-- [ ] add a pure builder `preset_from_gui_selection(gui, name, selected_fields)`
+- [x] add a pure builder `preset_from_gui_selection(gui, name, selected_fields)`
       in `layout.py`/`presets.py` that captures only the checked fields into a
       sparse `Preset`
-- [ ] wire **Save as…** and **Update** (layout.py L288/L304) to open the dialog;
+- [x] wire **Save as…** and **Update** (layout.py L288/L304) to open the dialog;
       Update pre-fills the name and pre-checks the fields the existing preset
       defines
-- [ ] apply-side: confirm `apply_preset_to_gui` only sets present fields (leaves
+- [x] apply-side: confirm `apply_preset_to_gui` only sets present fields (leaves
       others untouched)
-- [ ] tests for `preset_from_gui_selection` (checked subset only) and the
+- [x] tests for `preset_from_gui_selection` (checked subset only) and the
       apply-only-present behavior; keep the pure builder Tk-free for unit testing
-- [ ] run `black`, `isort`, tests — must pass before Task 3
+- [x] run `black`, `isort`, tests — must pass before Task 3
 
 ### Task 3: GUI — default first preset + remember last selection
-- [ ] on GUI init, restore `get_selected_preset()`; if unset or not found, select
+- [x] on GUI init, restore `get_selected_preset()`; if unset or not found, select
       and apply the **first** preset in the list (when the list is non-empty)
-- [ ] ensure both Simple and Advanced dropdowns seed from that value and persist
+- [x] ensure both Simple and Advanced dropdowns seed from that value and persist
       changes via `set_selected_preset`
-- [ ] tests in `test_gui_layout.py`: default-to-first when no saved selection;
+- [x] tests in `test_gui_layout.py`: default-to-first when no saved selection;
       restore a saved selection; empty list still hides the selector
-- [ ] run `black`, `isort`, tests — must pass before Task 4
+- [x] run `black`, `isort`, tests — must pass before Task 4
 
 ### Task 4: Simple-mode layout — Open output on line 1 right
-- [ ] rearrange the Simple-mode rows in `layout.py`: line 1 = preset dropdown
+- [x] rearrange the Simple-mode rows in `layout.py`: line 1 = preset dropdown
       (left) + "Open output" checkbox (right); line 2 = "Simple mode" checkbox
-- [ ] keep the empty-preset case tidy (checkbox still placed when the selector is
+- [x] keep the empty-preset case tidy (checkbox still placed when the selector is
       hidden)
-- [ ] tests/assertions for the widget arrangement where feasible (grid row/column),
+- [x] tests/assertions for the widget arrangement where feasible (grid row/column),
       otherwise note manual verification
-- [ ] run `black`, `isort`, tests — must pass before Task 5
+- [x] run `black`, `isort`, tests — must pass before Task 5
 
 ### Task 5: Web UI — default first preset + remember last
-- [ ] `server.py`: the preset dropdown defaults to `get_selected_preset()`, else
+- [x] `server.py`: the preset dropdown defaults to `get_selected_preset()`, else
       the first preset; the change handler persists the choice via
       `set_selected_preset`
-- [ ] tests in `test_server.py`: default value resolution (saved → first → none)
+- [x] tests in `test_server.py`: default value resolution (saved → first → none)
       and that selecting persists
-- [ ] run `black`, `isort`, tests — must pass before Task 6
+- [x] run `black`, `isort`, tests — must pass before Task 6
 
 ### Task 6: OBS dock — remember last + default first
-- [ ] `dock.html`: on load, restore `obsDock.preset`; if unset/invalid, default to
+- [x] `dock.html`: on load, restore `obsDock.preset`; if unset/invalid, default to
       the first preset from `/presets`; persist on change; keep the Process button
       enabled state correct
-- [ ] tests in `test_dock_server.py` for any server-side support needed (e.g.
+- [x] tests in `test_dock_server.py` for any server-side support needed (e.g.
       `/presets` ordering); JS default/persist verified manually
-- [ ] run `black`, `isort`, tests — must pass before Task 7
+- [x] run `black`, `isort`, tests — must pass before Task 7
 
 ### Task 7: OBS dock — restyle to match OBS + single-line layout
-- [ ] reduce corner rounding on the dock controls to match OBS native widgets
+- [x] reduce corner rounding on the dock controls to match OBS native widgets
       (square-ish, ~2–4px; drop the 99px/10px radii on `#presetControls`,
       select, and buttons)
-- [ ] replace the `<summary>Settings</summary>` text with a ⚙️ gear (accessible
+- [x] replace the `<summary>Settings</summary>` text with a ⚙️ gear (accessible
       label retained)
-- [ ] cap the preset `<select>` width (flex layout / `max-width`) so
+- [x] cap the preset `<select>` width (flex layout / `max-width`) so
       select + "Process" + gear fit on one line without wrapping
-- [ ] manual verification note (HTML/CSS; no unit test) — see Post-Completion
-- [ ] run `black`, `isort`, and the suite — must pass before Task 8
+- [x] manual verification note (HTML/CSS; no unit test) — see Post-Completion
+- [x] run `black`, `isort`, and the suite — must pass before Task 8
 
 ### Task 8: Verify acceptance criteria
-- [ ] verify sparse presets end-to-end (GUI apply leaves unset fields alone; CLI
+- [x] verify sparse presets end-to-end (GUI apply leaves unset fields alone; CLI
       `--preset` emits only present flags; Web/dock apply only present fields)
-- [ ] verify default-first + remember-last on all three surfaces
-- [ ] verify backward compatibility with pre-existing full presets in settings.json
-- [ ] run the full unit suite; `black --check`, `isort --check-only`; fix all
-- [ ] verify coverage of changed `presets.py` logic
+- [x] verify default-first + remember-last on all three surfaces
+- [x] verify backward compatibility with pre-existing full presets in settings.json
+- [x] run the full unit suite; `black --check`, `isort --check-only`; fix all
+- [x] verify coverage of changed `presets.py` logic
 
 ### Task 9: [Final] Update documentation
-- [ ] update `docs/gui.md` (Simple-mode line-1 Open output, Save/Update param
+- [x] update `docs/gui.md` (Simple-mode line-1 Open output, Save/Update param
       dialog, default-first/remember), `docs/obs-dock.md` (restyle, gear,
       remember/default), `README.md` if needed
-- [ ] update `CLAUDE.md` GUI section for sparse presets + layout changes
+- [x] update `CLAUDE.md` GUI section for sparse presets + layout changes
 
 ## Technical Details
 
