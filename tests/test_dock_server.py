@@ -248,6 +248,31 @@ def test_get_presets_returns_store(monkeypatch) -> None:
         thread.join(timeout=5)
 
 
+def test_get_presets_serializes_sparse_preset(monkeypatch) -> None:
+    """A sparse preset is returned with only its defined fields."""
+
+    from talks_reducer import presets as presets_module
+
+    sample = [presets_module.Preset(name="codec only", video_codec="hevc")]
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: sample)
+
+    httpd = dock_server.DockServer(("127.0.0.1", 0), dock_server.DEFAULT_EXE)
+    thread = Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = httpd.server_address[1]
+        conn = HTTPConnection("127.0.0.1", port)
+        conn.request("GET", "/presets")
+        response = conn.getresponse()
+        data = json.loads(response.read())
+        assert data == [{"name": "codec only", "video_codec": "hevc"}]
+        conn.close()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
 def test_cli_dispatches_dock_server(monkeypatch) -> None:
     """The ``dock-server`` keyword routes into the dock server entry point."""
 
