@@ -13,7 +13,11 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Optional, Sequence, Tuple
 
 from gradio_client import Client
-from gradio_client import file as gradio_file
+
+try:  # ``handle_file`` replaces the deprecated ``file`` helper in newer releases.
+    from gradio_client import handle_file as gradio_file
+except ImportError:  # pragma: no cover - fallback for older gradio_client
+    from gradio_client import file as gradio_file
 from gradio_client.client import Status, StatusUpdate
 
 try:
