@@ -12,12 +12,12 @@ from pathlib import Path
 from typing import Callable, Dict
 
 import numpy as np
-from scipy.io import wavfile
 
 from talks_reducer.version_utils import resolve_version
 
 from . import audio as audio_utils
 from . import chunks as chunk_utils
+from . import wav_io as wavfile
 from .ffmpeg import (
     build_audio_only_command,
     build_extract_audio_command,

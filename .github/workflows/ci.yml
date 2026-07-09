@@ -28,7 +28,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov
+          # SciPy is a test-only dependency: tests/test_wav_io.py checks that the
+          # bundled talks_reducer.wav_io stays byte-compatible with scipy.io.wavfile.
+          pip install pytest pytest-cov scipy
 
       - name: Run tests
         run: pytest --cov=talks_reducer --cov-report=xml

@@ -186,6 +186,13 @@ DEFAULT_EXCLUDES = [
     "PyQt5",
     "PyQt6",
     "matplotlib",
+    # gradio pulls in pandas (plus its pytz/tzdata timezone data) only for the
+    # ``gr.DataFrame`` component and plotting helpers. The Talks Reducer server
+    # uses none of those, and gradio imports pandas lazily, so excluding it trims
+    # ~17 MB from the frozen bundle without affecting the web UI.
+    "pandas",
+    "pytz",
+    "tzdata",
     "numba",
     "cupy",
     "torch",

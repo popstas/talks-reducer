@@ -42,10 +42,15 @@ PyInstaller spends most of its time walking imports. To keep GUI builds snappy:
   scripts/requirements-pyinstaller.txt`). Avoid installing heavy ML stacks such as Torch or
   TensorFlow in that environment so PyInstaller never attempts to analyze them.
 - Use the committed `talks-reducer.spec` file via `./scripts/build-gui.sh`. The spec excludes
-  Torch, TensorFlow, TensorBoard, torchvision/torchaudio, Pandas, Qt bindings, setuptools'
+  Torch, TensorFlow, TensorBoard, torchvision/torchaudio, Pandas (plus its pytz/tzdata timezone
+  data, pulled in transitively by Gradio but unused by the server), Qt bindings, setuptools'
   vendored helpers, and other bulky modules that previously slowed the analysis stage. Set
   `PYINSTALLER_EXTRA_EXCLUDES=module1,module2` if you need to drop additional imports for an
   experimental build.
+- SciPy is intentionally *not* a runtime dependency: WAV I/O goes through the tiny
+  `talks_reducer/wav_io.py` helper instead of `scipy.io.wavfile`, which keeps ~75 MB of unused
+  SciPy out of the bundle. SciPy is installed only in the CI test job, where
+  `tests/test_wav_io.py` asserts the helper stays byte-compatible with `scipy.io.wavfile`.
 - Keep optional imports in the codebase lazy (wrapped in `try/except` or moved inside
   functions) so the analyzer only sees the dependencies required for the shipping GUI.
 

@@ -18,7 +18,6 @@ let
     };
 
   pythonForThis = python.withPackages (ps: with ps;[
-    scipy
     numpy
     pillow
     audiotsm
