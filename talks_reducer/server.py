@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import inspect
 import json
 import shutil
 import socket
@@ -1336,6 +1337,12 @@ def process_video(
 
 _WEB_UI_CSS = ".tr-codec { max-width: 22rem; } .tr-codec .wrap { min-height: 0; }"
 
+# Gradio moved the ``css`` argument between ``Blocks(css=...)`` (older releases)
+# and ``Blocks.launch(css=...)`` (newer ones). Introspect where it is accepted so
+# the web UI styles apply — and no ``TypeError`` is raised — across versions.
+_BLOCKS_SUPPORTS_CSS = "css" in inspect.signature(gr.Blocks.__init__).parameters
+_LAUNCH_SUPPORTS_CSS = "css" in inspect.signature(gr.Blocks.launch).parameters
+
 
 def build_interface(
     concurrency_limit: int = 1,
@@ -1363,7 +1370,15 @@ def build_interface(
         f" v{app_version}" if app_version and app_version != "unknown" else ""
     )
 
-    with gr.Blocks(title=f"Talks Reducer Web UI{version_suffix}") as demo:
+    blocks_kwargs: dict = {"title": f"Talks Reducer Web UI{version_suffix}"}
+    if _BLOCKS_SUPPORTS_CSS:
+        blocks_kwargs["css"] = _WEB_UI_CSS
+
+    with gr.Blocks(**blocks_kwargs) as demo:
+        # When neither Blocks() nor launch() accepts a ``css`` argument, inject the
+        # stylesheet directly so the UI is styled on every Gradio version.
+        if not _BLOCKS_SUPPORTS_CSS and not _LAUNCH_SUPPORTS_CSS:
+            gr.HTML(f"<style>{_WEB_UI_CSS}</style>")
         gr.Markdown(f"## Talks Reducer Web UI{version_suffix}")
         with gr.Accordion("About", open=False):
             gr.Markdown(f"""
@@ -1577,7 +1592,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parser.parse_args(argv)
 
     demo = build_interface(concurrency_limit=getattr(args, "concurrency", 1))
-    demo.launch(
+    launch_kwargs: dict = dict(
         server_name=args.host,
         server_port=args.port,
         share=args.share,
@@ -1585,8 +1600,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         favicon_path=_FAVICON_PATH_STR,
         app_kwargs=build_launch_app_kwargs(),
         pwa=True,
-        css=_WEB_UI_CSS,
     )
+    # Pass ``css`` to launch() only on versions that accept it there and not on
+    # Blocks(); otherwise it was already applied in build_interface.
+    if _LAUNCH_SUPPORTS_CSS and not _BLOCKS_SUPPORTS_CSS:
+        launch_kwargs["css"] = _WEB_UI_CSS
+    demo.launch(**launch_kwargs)
 
 
 atexit.register(_cleanup_workspaces)

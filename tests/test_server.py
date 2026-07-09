@@ -2001,3 +2001,24 @@ def test_build_interface_preset_change_handler_registered() -> None:
         "Silent threshold",
         "Sounded speed",
     ]
+
+
+def test_main_passes_css_to_launch_only_when_supported(monkeypatch) -> None:
+    """launch() receives ``css`` only on Gradio versions that accept it there.
+
+    Regression for the ``Blocks.launch() got an unexpected keyword argument
+    'css'`` crash on versions where ``css`` lives on ``Blocks`` instead.
+    """
+
+    from types import SimpleNamespace
+
+    captured: dict = {}
+    demo = SimpleNamespace(launch=lambda **kw: captured.update(kw))
+    monkeypatch.setattr(server, "build_interface", lambda **kw: demo)
+
+    server.main(["--host", "127.0.0.1", "--port", "0", "--no-browser"])
+
+    if server._LAUNCH_SUPPORTS_CSS and not server._BLOCKS_SUPPORTS_CSS:
+        assert captured.get("css") == server._WEB_UI_CSS
+    else:
+        assert "css" not in captured
