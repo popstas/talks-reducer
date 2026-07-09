@@ -1523,6 +1523,7 @@ def _make_advanced_preset_gui() -> SimpleNamespace:
             "silent_threshold": threshold,
         },
         _simple_presets=list(_TEST_PRESETS),
+        messagebox=Mock(),
     )
 
 
@@ -1595,7 +1596,9 @@ def test_apply_advanced_preset_custom_noops(monkeypatch):
 def test_save_advanced_preset_persists_and_refreshes(monkeypatch):
     saved: list[list] = []
     monkeypatch.setattr(
-        layout.presets, "save_presets", lambda presets, *a, **k: saved.append(presets)
+        layout.presets,
+        "save_presets",
+        lambda presets, *a, **k: saved.append(presets) or True,
     )
     monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
     # ``refresh_preset_dropdowns`` reloads the store: echo back what was saved.
@@ -1617,10 +1620,33 @@ def test_save_advanced_preset_persists_and_refreshes(monkeypatch):
     assert gui.advanced_preset_var.get() == "My new preset"
 
 
+def test_save_advanced_preset_reports_write_failure(monkeypatch):
+    persisted: list = []
+    monkeypatch.setattr(layout.presets, "save_presets", lambda *a, **k: False)
+    monkeypatch.setattr(
+        layout.presets,
+        "set_selected_preset",
+        lambda *a, **k: persisted.append(a) or True,
+    )
+    monkeypatch.setattr(
+        layout.presets, "load_presets", lambda *a, **k: list(_TEST_PRESETS)
+    )
+
+    gui = _make_advanced_preset_gui()
+
+    layout.save_advanced_preset(gui, "My new preset")
+
+    # A failed write must surface an error and skip persisting the selection.
+    assert gui.messagebox.showerror.called
+    assert persisted == []
+
+
 def test_update_advanced_preset_overwrites_selection(monkeypatch):
     saved: list[list] = []
     monkeypatch.setattr(
-        layout.presets, "save_presets", lambda presets, *a, **k: saved.append(presets)
+        layout.presets,
+        "save_presets",
+        lambda presets, *a, **k: saved.append(presets) or True,
     )
     monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
     monkeypatch.setattr(
@@ -1641,7 +1667,9 @@ def test_update_advanced_preset_overwrites_selection(monkeypatch):
 def test_delete_advanced_preset_removes_selection(monkeypatch):
     saved: list[list] = []
     monkeypatch.setattr(
-        layout.presets, "save_presets", lambda presets, *a, **k: saved.append(presets)
+        layout.presets,
+        "save_presets",
+        lambda presets, *a, **k: saved.append(presets) or True,
     )
     monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
     monkeypatch.setattr(

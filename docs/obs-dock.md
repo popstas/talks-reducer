@@ -87,11 +87,12 @@ The dock connects to OBS automatically on load. When connected, the button shows
 
 When the server exposes presets (the shared `settings.json` populates
 `GET /presets`), the dock shows the **Preset** dropdown as the primary control and
-**moves** the resolution/speed/codec selects into the **Settings** panel. Selecting
-a real preset hides the manual resolution/speed controls and processes with that
-preset's full fidelity; choosing **Custom** restores them. When the server has no
-presets the resolution/speed/codec controls stay in the toolbar exactly as before.
-The chosen preset persists in `localStorage` under `obsDock.preset`.
+**moves** the resolution/speed selects into the **Settings** panel (the codec radios
+already live there). Selecting a real preset processes with that preset's full
+fidelity; choosing **Custom** moves the resolution/speed controls back into the
+toolbar. When the server has no presets the resolution/speed controls stay in the
+toolbar exactly as before. The chosen preset persists in `localStorage` under
+`obsDock.preset`.
 
 Speed buttons stay disabled until OBS reports a stopped recording path. The dock
 must be open when you stop recording so it can receive the `RecordStateChanged`

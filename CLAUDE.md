@@ -46,7 +46,8 @@ resolution expanded to the `--no-small`/`--small --720`/`--small --480` tri-stat
 `--list-presets` prints names and exits. The Web UI shows a `Preset` dropdown
 (`server.build_interface`, `preset_to_web_controls`); the OBS dock serves
 `GET /presets` and, when presets exist, shows a `Preset` dropdown as the primary
-control while **moving** the resolution/speed/codec selects into the settings panel
+control while **moving** the resolution/speed selects into the settings panel (the
+codec radios already live there), relocating them back to the toolbar on **Custom**
 (`dock.html`, `obsDock.preset` `localStorage` key), sending a `preset` field that
 `dock_server.build_args` maps to `--preset NAME`.
 - **Small video** — toggles the `--small` preset used by the CLI.

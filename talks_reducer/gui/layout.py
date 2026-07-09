@@ -221,6 +221,20 @@ def apply_advanced_preset(gui: "TalksReducerGUI") -> None:
     refresh_advanced_preset_selection(gui)
 
 
+def _report_preset_write_failure(gui: "TalksReducerGUI", message: str) -> None:
+    """Surface a failed ``settings.json`` write instead of silently reverting.
+
+    A read-only or unwritable config would otherwise let the dropdown roll back on
+    the next reload with no feedback, so the user is told the change was not saved.
+    """
+
+    messagebox = getattr(gui, "messagebox", None)
+    if messagebox is not None:
+        messagebox.showerror(
+            "Presets", f"{message} The settings file could not be written."
+        )
+
+
 def save_advanced_preset(gui: "TalksReducerGUI", name: str) -> None:
     """Capture the current knobs into a new preset named *name* and persist it."""
 
@@ -229,7 +243,9 @@ def save_advanced_preset(gui: "TalksReducerGUI", name: str) -> None:
         return
     preset = preset_from_gui(gui, name)
     updated = presets.add_preset(getattr(gui, "_simple_presets", []), preset)
-    presets.save_presets(updated)
+    if not presets.save_presets(updated):
+        _report_preset_write_failure(gui, f"Could not save preset '{name}'.")
+        return
     presets.set_selected_preset(name)
     refresh_preset_dropdowns(gui)
     gui.advanced_preset_var.set(name)
@@ -243,7 +259,9 @@ def update_advanced_preset(gui: "TalksReducerGUI") -> None:
         return
     preset = preset_from_gui(gui, name)
     updated = presets.update_preset(getattr(gui, "_simple_presets", []), name, preset)
-    presets.save_presets(updated)
+    if not presets.save_presets(updated):
+        _report_preset_write_failure(gui, f"Could not update preset '{name}'.")
+        return
     presets.set_selected_preset(name)
     refresh_preset_dropdowns(gui)
     gui.advanced_preset_var.set(name)
@@ -256,7 +274,9 @@ def delete_advanced_preset(gui: "TalksReducerGUI") -> None:
     if not name or name == presets.CUSTOM_LABEL:
         return
     updated = presets.delete_preset(getattr(gui, "_simple_presets", []), name)
-    presets.save_presets(updated)
+    if not presets.save_presets(updated):
+        _report_preset_write_failure(gui, f"Could not delete preset '{name}'.")
+        return
     presets.set_selected_preset(None)
     refresh_preset_dropdowns(gui)
     gui.advanced_preset_var.set(presets.CUSTOM_LABEL)

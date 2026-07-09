@@ -550,12 +550,21 @@
   }
 
   function applyPresetVisibility() {
-    // When a real preset is selected the manual resolution/speed become
-    // read-only settings, so tuck them into the Settings panel. "Custom"
-    // (empty value) surfaces the manual controls as the primary UI again.
+    // A selected preset drives processing, so tuck the manual resolution/speed
+    // controls into the collapsible Settings panel as adjustable settings.
+    // "Custom" (empty value) moves them back into the toolbar as the primary UI.
+    // The node is physically relocated rather than class-toggled because it now
+    // lives inside the Settings slot, whose own hidden state would otherwise clip
+    // it (a hidden parent hides the manual controls regardless of their class).
     const hasPreset = Boolean(presetSelect.value);
-    manualControls.classList.toggle('hidden', hasPreset);
-    manualSettingsSlot.classList.toggle('hidden', !hasPreset);
+    if (hasPreset) {
+      manualSettingsSlot.appendChild(manualControls);
+      manualSettingsSlot.classList.remove('hidden');
+    } else {
+      processingControls.appendChild(manualControls);
+      manualSettingsSlot.classList.add('hidden');
+    }
+    manualControls.classList.remove('hidden');
     updateProcessButtons();
   }
 
@@ -599,8 +608,8 @@
 
     populatePresetDropdown(presets);
     presetControls.classList.remove('hidden');
-    // Relocate the manual resolution/speed selects into the Settings panel.
-    manualSettingsSlot.appendChild(manualControls);
+    // applyPresetVisibility relocates the manual controls into the Settings
+    // panel (named preset) or keeps them in the toolbar (Custom).
     applyPresetVisibility();
   }
 
