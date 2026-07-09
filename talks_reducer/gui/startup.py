@@ -175,6 +175,34 @@ def _gui_settings_from_namespace(parsed: argparse.Namespace) -> Dict[str, object
     return settings
 
 
+def _expand_seeded_preset(parsed: argparse.Namespace) -> None:
+    """Fan a ``--preset NAME`` seed onto the namespace's per-field attributes.
+
+    The seed parser leaves ``--preset`` as a bare name, but
+    :func:`_gui_settings_from_namespace` only understands concrete fields
+    (``small``, ``silent_speed``, ``video_codec`` …). Without this expansion a
+    launch such as ``talks-reducer.exe <file> --preset Smallest`` (used by the
+    OBS dock) would silently drop the preset. Reuse the CLI's
+    :func:`_apply_preset_to_args` so preset fields flow through with the same
+    explicit-flag precedence, then clear ``preset`` so it does not leak further.
+    """
+
+    preset_name = getattr(parsed, "preset", None)
+    if not preset_name:
+        return
+
+    from .. import presets as presets_module
+    from ..cli import _apply_preset_to_args
+
+    explicit = set(vars(parsed).keys())
+    preset = presets_module.find_preset(preset_name, presets_module.load_presets())
+    if preset is not None:
+        _apply_preset_to_args(parsed, preset, explicit)
+
+    if hasattr(parsed, "preset"):
+        delattr(parsed, "preset")
+
+
 def _parse_seeded_launch(
     argv: Sequence[str],
 ) -> Optional[Tuple[List[str], Dict[str, object]]]:
@@ -195,6 +223,8 @@ def _parse_seeded_launch(
         parsed = parser.parse_args(list(argv))
     except SystemExit:
         return None
+
+    _expand_seeded_preset(parsed)
 
     input_paths = getattr(parsed, "input_file", None) or []
     input_files = [path for path in input_paths if path and Path(path).exists()]

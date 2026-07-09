@@ -131,6 +131,7 @@ def start_talks_reducer(
 
     args = build_args(input_file, resolution, speed, codec, auto_close, preset)
     creationflags = _CREATE_NO_WINDOW if os.name == "nt" else 0
+    print(f"[dock] launching: {exe_path} {' '.join(args)}", flush=True)
     subprocess.Popen([exe_path, *args], creationflags=creationflags)
 
 
@@ -152,6 +153,7 @@ def handle_process(payload: dict, default_exe: Optional[str] = None) -> Tuple[in
     name is validated against the stored list.
     """
 
+    print(f"[dock] /process payload: {payload}", flush=True)
     input_file = str(payload.get("file") or "").strip()
     preset = str(payload.get("preset") or "").strip()
     resolution = str(payload.get("resolution") or "").strip()

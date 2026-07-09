@@ -175,6 +175,83 @@ def test_parse_seeded_launch_omits_480_when_unspecified(tmp_path) -> None:
     assert "small_480" not in settings
 
 
+def test_parse_seeded_launch_expands_preset(tmp_path, monkeypatch) -> None:
+    """``--preset NAME`` (the OBS dock path) fans preset fields onto GUI settings."""
+
+    from talks_reducer import presets as presets_module
+
+    preset = presets_module.Preset(
+        name="Smallest",
+        resolution="480p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="hevc",
+    )
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [preset])
+
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch(
+        [str(video), "--preset", "Smallest", "--open-location", "--auto-close"]
+    )
+
+    assert seeded is not None
+    input_files, settings = seeded
+    assert input_files == [str(video)]
+    # 480p preset expands to the small/small_480 tri-state and the codec/speeds.
+    assert settings["small"] is True
+    assert settings["small_480"] is True
+    assert settings["video_codec"] == "hevc"
+    assert settings["silent_speed"] == 10.0
+    assert settings["open_location"] is True
+    assert settings["auto_close"] is True
+    # The raw preset name must not leak into GUI settings.
+    assert "preset" not in settings
+
+
+def test_parse_seeded_launch_preset_yields_to_explicit_flag(
+    tmp_path, monkeypatch
+) -> None:
+    """An explicit flag still overrides the value the preset would set."""
+
+    from talks_reducer import presets as presets_module
+
+    preset = presets_module.Preset(name="Smallest", resolution="480p")
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [preset])
+
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch(
+        [str(video), "--preset", "Smallest", "--no-small"]
+    )
+
+    assert seeded is not None
+    _, settings = seeded
+    assert settings["small"] is False
+    assert settings["small_480"] is False
+
+
+def test_parse_seeded_launch_unknown_preset_is_ignored(tmp_path, monkeypatch) -> None:
+    """An unrecognised preset name seeds nothing rather than raising."""
+
+    from talks_reducer import presets as presets_module
+
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [])
+
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch([str(video), "--preset", "Nope"])
+
+    assert seeded is not None
+    input_files, settings = seeded
+    assert input_files == [str(video)]
+    assert "preset" not in settings
+
+
 def test_parse_seeded_launch_seeds_settings_without_file() -> None:
     """An args-only launch (settings, no file) seeds the GUI with empty inputs."""
 
