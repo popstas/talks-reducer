@@ -117,15 +117,15 @@ Dependencies identified: `argparse`, Tk/ttk, Gradio, stdlib `http.server`.
 - [x] run `black`, `isort`, tests — must pass before Task 3
 
 ### Task 3: CLI `--preset` / `--list-presets`
-- [ ] add `--preset NAME` and `--list-presets` to `cli._build_parser()`
-- [ ] in `main()`: `--list-presets` prints names and exits; `--preset NAME`
+- [x] add `--preset NAME` and `--list-presets` to `cli._build_parser()`
+- [x] in `main()`: `--list-presets` prints names and exits; `--preset NAME`
       loads the preset and applies its fields as the base config **before**
       explicit flags are applied, so explicit flags override (precedence:
       explicit flag > preset > default)
-- [ ] unknown `--preset NAME` errors clearly, listing valid names
-- [ ] write `tests/test_cli.py` cases: `--preset` sets each field; explicit flag
+- [x] unknown `--preset NAME` errors clearly, listing valid names
+- [x] write `tests/test_cli.py` cases: `--preset` sets each field; explicit flag
       overrides a preset value; `--list-presets` output; unknown-preset error
-- [ ] run `black`, `isort`, tests — must pass before Task 4
+- [x] run `black`, `isort`, tests — must pass before Task 4
 
 ### Task 4: Simple mode preset dropdown (GUI)
 - [ ] replace `simple_speedup_frame` + `simple_codec_frame` with a single
