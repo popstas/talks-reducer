@@ -64,7 +64,7 @@ Docks → Custom Browser Docks
 
 The dock UI is served by `dock-server`, so the URL follows `--host`/`--port`.
 
-3. Open **Settings** in the dock and confirm:
+3. Open **Settings** (the ⚙️ gear in the toolbar) in the dock and confirm:
 
 - **Talks Reducer** points to your `talks-reducer.exe`
 - **OBS WebSocket** URL matches OBS (default `ws://127.0.0.1:4455`)
@@ -79,11 +79,11 @@ The dock connects to OBS automatically on load. When connected, the button shows
 
 | Control | Description |
 | --- | --- |
-| **Preset** | Dropdown of saved presets (shown only when the server has presets); a **Custom** entry keeps the manual controls |
+| **Preset** | Dropdown of saved presets (shown only when the server has presets); defaults to the preset you used last, or the first one; a **Custom** entry keeps the manual controls. Its width is capped so the dropdown, **Process**, and the gear stay on one line |
 | **Process** | Runs the selected preset (enabled once a preset is chosen and a recording path is known) |
 | **1080p / 720p / 480p** | Output resolution preset (720p is the default) |
 | **1x / 5x / 10x** | Silent-speed multiplier passed to Talks Reducer |
-| **Settings** | Expandable panel for advanced options and OBS connection |
+| **⚙️** | Expandable **Settings** panel for advanced options and OBS connection |
 
 When the server exposes presets (the shared `settings.json` populates
 `GET /presets`), the dock shows the **Preset** dropdown as the primary control and

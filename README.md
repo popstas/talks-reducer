@@ -94,8 +94,11 @@ Every input can also be a directory, and you can pass as many as you like in one
 
 **Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec)
 you author once in the desktop GUI's Advanced mode and reuse everywhere — Simple mode, the
-Web UI, the OBS dock, and the CLI (`--preset`). They live in the shared `settings.json`, so
-one list appears on every surface. See [docs/cli.md](docs/cli.md#named-presets).
+Web UI, the OBS dock, and the CLI (`--preset`). When saving you pick which settings the preset
+controls, so a preset can be partial (e.g. codec-only) and applying it leaves your other
+settings alone. They live in the shared `settings.json`, so one list appears on every surface,
+and each surface opens on the preset you used last. See
+[docs/cli.md](docs/cli.md#named-presets).
 
 → Full flag reference — codecs, keyframes, silence thresholds, trimming, remote options:
 [docs/cli.md](docs/cli.md).
