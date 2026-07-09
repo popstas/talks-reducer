@@ -12,16 +12,46 @@ return to the full layout with file pickers, the Run button, and detailed loggin
 Drag files or folders from your desktop onto the drop zone, click it to open the system file
 picker, or add them via the Explorer/Finder dialog; duplicates are ignored.
 
-The basic options mirror the CLI presets: **Small video**, a **Video codec** picker that
-swaps between h.265 (25% smaller), h.264 (10% faster), av1 (no advantages), and mp3 (audio
-only), and **Open after convert**, which reveals each exported file in your system file
-manager as soon as its job finishes.
+In **Simple mode** a single **Preset** dropdown replaces the individual encoding controls:
+pick a saved preset (see [Presets](#presets) below) to fan its resolution, speeds, threshold,
+and codec onto the hidden Advanced knobs. Alongside it sit the **Simple mode** and **Open
+after convert** checkboxes; the latter reveals each exported file in your system file manager
+as soon as its job finishes. When no presets exist (you deleted them all) the dropdown is
+hidden entirely.
+
+In **Advanced mode** the basic options mirror the CLI presets directly: **Small video**, a
+**Video codec** picker that swaps between h.265 (25% smaller), h.264 (10% faster), av1 (no
+advantages), and mp3 (audio only), and the timing/audio sliders.
 
 **Advanced** settings reveal the output path, temp folder, the timing/audio knobs mirrored
 from the command line, **Keyframe interval (s)** to balance scroll smoothness against output
 size, a **Use global FFmpeg** toggle (disabled automatically when no system binary is
 detected) that prioritises the system binary when you need encoders the bundled build lacks,
 and an appearance picker that can force dark or light mode or follow your operating system.
+
+## Presets
+
+A **preset** is a named bundle of processing settings — resolution (1080p/720p/480p),
+silent and sounded speed, silent threshold, and video codec — that you author once and apply
+read-only everywhere: Simple mode, the Web UI, the OBS dock, and the CLI's `--preset` flag.
+Presets are stored in the shared `settings.json`, so a preset created on the desktop GUI also
+appears in the Web UI and dock served from that machine. On first launch three defaults are
+seeded: **720p 10x speedup H.264**, **480p 10x speedup H.265**, and **720p no speedup H.264**.
+
+**Simple mode** exposes only a **Preset** dropdown; selecting a preset applies its fields and
+persists the choice (it is re-selected on the next launch).
+
+**Advanced mode** adds a management strip above the encoding knobs with a **Preset** dropdown
+and **Save as… / Update / Delete** buttons:
+
+- **Save as…** opens a name-entry dialog and stores the current knobs as a new preset (reusing
+  an existing name overwrites it).
+- **Update** overwrites the currently selected preset with the live knob values.
+- **Delete** removes the selected preset.
+
+Editing any knob so the values no longer match the selected preset flips the dropdown to
+**Custom**. Every save/update/delete refreshes the dropdowns on both the Simple and Advanced
+layouts.
 
 ## Processing mode and Discover
 

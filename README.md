@@ -18,6 +18,7 @@ re-encoding them to much smaller files.
 - **Fast** — in-memory audio/video processing, auto GPU encoding.
 - **Extract audio** — export an audio-only `.mp3` instead of video.
 - **Simple mode** — one drop zone, minimum settings.
+- **Named presets** — save a settings bundle once, apply it on every surface.
 - **Remote mode** — offload to your fastest machine.
 - **Watch mode** — convert the latest video from a recordings folder.
 - **OBS integration** — convert buttons inside an OBS dock.
@@ -85,9 +86,16 @@ talks-reducer --480 input.mp4                              # scale down to 480p 
 talks-reducer --video-codec mp3 talk.mp4                   # export audio only, as .mp3
 talks-reducer --cut-start 00:00:10 --cut-end 00:01:00 demo.mp4  # keep only 10s–60s
 talks-reducer --url http://localhost:9005 demo.mp4         # process on a remote server
+talks-reducer --preset "480p 10x speedup H.265" demo.mp4   # apply a saved preset
+talks-reducer --list-presets                               # print the saved preset names
 ```
 
 Every input can also be a directory, and you can pass as many as you like in one run.
+
+**Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec)
+you author once in the desktop GUI's Advanced mode and reuse everywhere — Simple mode, the
+Web UI, the OBS dock, and the CLI (`--preset`). They live in the shared `settings.json`, so
+one list appears on every surface. See [docs/cli.md](docs/cli.md#named-presets).
 
 → Full flag reference — codecs, keyframes, silence thresholds, trimming, remote options:
 [docs/cli.md](docs/cli.md).

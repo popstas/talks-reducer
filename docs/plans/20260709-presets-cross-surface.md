@@ -204,10 +204,10 @@ Dependencies identified: `argparse`, Tk/ttk, Gradio, stdlib `http.server`.
       standard (both 100%)
 
 ### Task 9: [Final] Update documentation
-- [ ] update `README.md` (preset feature + `--preset`/`--list-presets` CLI)
-- [ ] update `docs/cli.md`, `docs/gui.md`, `docs/server.md`, `docs/obs-dock.md`
+- [x] update `README.md` (preset feature + `--preset`/`--list-presets` CLI)
+- [x] update `docs/cli.md`, `docs/gui.md`, `docs/server.md`, `docs/obs-dock.md`
       for the new preset controls per surface
-- [ ] update the GUI section of `CLAUDE.md` (Simple mode dropdown replacement,
+- [x] update the GUI section of `CLAUDE.md` (Simple mode dropdown replacement,
       Advanced management strip, OBS dock settings-panel move)
 
 ## Technical Details

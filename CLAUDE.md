@@ -26,6 +26,29 @@ with file pickers, the Run button, and detailed logging.
 - **Input drop zone** — drag files or folders from your desktop, click to open
 the system file picker, or add them via the Explorer/Finder dialog; duplicates
 are ignored.
+- **Presets** — user-named bundles of processing settings (`resolution`,
+`silent_speed`, `sounded_speed`, `silent_threshold`, `video_codec`) stored in the
+shared `settings.json` (`presets` key) via `talks_reducer/presets.py` and applied
+read-only on every surface (Simple mode, Web UI, OBS dock, CLI `--preset`).
+`load_presets()` seeds three `DEFAULT_PRESETS` on first run when the key is absent;
+an emptied list persists as `[]`. **Simple mode** replaces the old
+`simple_speedup_frame`/`simple_codec_frame` with a single `Preset` dropdown
+(`simple_preset_var`); selecting a preset fans its fields onto the underlying vars
+via `layout.apply_preset_to_gui` and persists the choice via `set_selected_preset`
+(`selected_preset` key). The selector is hidden when `load_presets()` returns `[]`.
+**Advanced mode** adds a management strip (`Preset` dropdown + **Save as… / Update /
+Delete**): editing any knob flips the dropdown to **"Custom"** via
+`presets.match_preset`; Save/Update/Delete route through `presets.save_presets`
+(pure mutation helpers `add_preset`/`update_preset`/`delete_preset`) and refresh
+every dropdown. The CLI applies `--preset NAME` as the base config before explicit
+flags (`cli._apply_preset_to_args`, precedence explicit > preset > default), with
+resolution expanded to the `--no-small`/`--small --720`/`--small --480` tri-state;
+`--list-presets` prints names and exits. The Web UI shows a `Preset` dropdown
+(`server.build_interface`, `preset_to_web_controls`); the OBS dock serves
+`GET /presets` and, when presets exist, shows a `Preset` dropdown as the primary
+control while **moving** the resolution/speed/codec selects into the settings panel
+(`dock.html`, `obsDock.preset` `localStorage` key), sending a `preset` field that
+`dock_server.build_args` maps to `--preset NAME`.
 - **Small video** — toggles the `--small` preset used by the CLI.
 - **Open after convert** — controls whether the exported file is revealed in
 your system file manager as soon as each job finishes.
