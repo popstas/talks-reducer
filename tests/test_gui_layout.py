@@ -1174,6 +1174,7 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     monkeypatch.setattr(layout, "apply_window_size", apply_size)
 
     gui = SimpleNamespace(
+        tk=SimpleNamespace(LEFT="left"),
         simple_mode_var=SimpleNamespace(get=lambda: True),
         basic_options_frame=make_widget_mock(),
         advanced_preset_frame=make_widget_mock(),
@@ -1184,6 +1185,10 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
         advanced_frame=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
+        _simple_presets=list(_TEST_PRESETS),
+        small_check=make_widget_mock(),
+        small_480_check=make_widget_mock(),
+        open_output_check=make_widget_mock(),
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
         cut_enabled_var=SimpleNamespace(get=lambda: True),
@@ -1202,11 +1207,57 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     gui.button_frame.grid_remove.assert_called_once()
     gui.advanced_frame.grid_remove.assert_called_once()
     gui.run_after_drop_var.set.assert_called_once_with(True)
+    # With a preset available the manual resolution checkboxes are hidden so the
+    # preset drives resolution.
+    gui.small_check.pack_forget.assert_called_once()
+    gui.small_480_check.pack_forget.assert_called_once()
     # Cut video is hidden in Simple mode regardless of the persisted flag.
     gui.cut_check.pack_forget.assert_called_once()
     gui.cut_panel.grid_remove.assert_called_once()
     apply_size.assert_called_once_with(gui, simple=True)
     gui.drop_zone.focus_set.assert_called_once()
+
+
+def test_apply_simple_mode_simple_branch_keeps_checkboxes_without_presets(monkeypatch):
+    """With no presets the resolution checkboxes stay visible in Simple mode."""
+
+    apply_size = Mock()
+    monkeypatch.setattr(layout, "apply_window_size", apply_size)
+
+    gui = SimpleNamespace(
+        tk=SimpleNamespace(LEFT="left"),
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+        basic_options_frame=make_widget_mock(),
+        advanced_preset_frame=make_widget_mock(),
+        log_frame=make_widget_mock(),
+        activity_frame=make_widget_mock(),
+        server_managed=True,
+        button_frame=make_widget_mock(),
+        advanced_frame=make_widget_mock(),
+        run_after_drop_var=SimpleNamespace(set=Mock()),
+        advanced_visible=SimpleNamespace(get=lambda: False),
+        _simple_presets=[],
+        small_check=make_widget_mock(),
+        small_480_check=make_widget_mock(),
+        open_output_check=make_widget_mock(),
+        cut_check=make_widget_mock(),
+        cut_panel=make_widget_mock(),
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        drop_zone=Mock(),
+    )
+
+    layout.apply_simple_mode(gui, initial=True)
+
+    # The preset selector is hidden when empty, so the manual checkboxes remain
+    # the only resolution control and must stay packed (not forgotten).
+    gui.small_check.pack_forget.assert_not_called()
+    gui.small_480_check.pack_forget.assert_not_called()
+    gui.small_check.pack.assert_called_once_with(
+        side="left", before=gui.open_output_check
+    )
+    gui.small_480_check.pack.assert_called_once_with(
+        side="left", padx=(65, 0), before=gui.open_output_check
+    )
 
 
 def test_apply_simple_mode_full_branch(monkeypatch):
@@ -1224,6 +1275,9 @@ def test_apply_simple_mode_full_branch(monkeypatch):
         advanced_frame=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: True),
+        small_check=make_widget_mock(),
+        small_480_check=make_widget_mock(),
+        open_output_check=make_widget_mock(),
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
         cut_enabled_var=SimpleNamespace(get=lambda: True),
@@ -1242,6 +1296,9 @@ def test_apply_simple_mode_full_branch(monkeypatch):
     gui.activity_frame.grid_remove.assert_not_called()
     gui.button_frame.grid.assert_called_once()
     gui.advanced_frame.grid.assert_called_once()
+    # Advanced restores the manual resolution checkboxes ahead of Open output.
+    gui.small_check.pack.assert_called_once()
+    gui.small_480_check.pack.assert_called_once()
     # Advanced restores the Cut video checkbox; the panel shows because cut is on.
     gui.cut_check.pack.assert_called_once()
     gui.cut_panel.grid.assert_called_once()
@@ -1559,6 +1616,71 @@ def test_refresh_advanced_preset_selection_flips_to_custom():
     assert gui.advanced_preset_var.get() == layout.presets.CUSTOM_LABEL
 
 
+def test_refresh_advanced_preset_selection_clears_stale_simple_selection(monkeypatch):
+    """An Advanced edit to "Custom" must clear the Simple dropdown selection.
+
+    Simple mode hides the manual knobs but processing reads the live vars, so a
+    lingering preset name would show one preset while converting with different
+    values. The persisted ``selected_preset`` is cleared too so a relaunch into
+    Simple mode stays consistent.
+    """
+
+    persisted: list[str | None] = []
+    monkeypatch.setattr(
+        layout.presets,
+        "set_selected_preset",
+        lambda name, *a, **k: persisted.append(name) or True,
+    )
+
+    gui = _make_advanced_preset_gui()
+    gui.simple_preset_var.set("720p 10x speedup H.264")
+    gui.silent_speed_var.set(3.5)
+
+    layout.refresh_advanced_preset_selection(gui)
+
+    assert gui.advanced_preset_var.get() == layout.presets.CUSTOM_LABEL
+    assert gui.simple_preset_var.get() == ""
+    assert persisted == [None]
+
+
+def test_refresh_advanced_preset_selection_syncs_simple_to_matched_preset(monkeypatch):
+    """A knob edit that lands on a stored preset selects it in Simple mode too."""
+
+    persisted: list[str | None] = []
+    monkeypatch.setattr(
+        layout.presets,
+        "set_selected_preset",
+        lambda name, *a, **k: persisted.append(name) or True,
+    )
+
+    gui = _make_advanced_preset_gui()
+    # Stub knobs already match the first preset; the Simple selector starts empty.
+    layout.refresh_advanced_preset_selection(gui)
+
+    assert gui.simple_preset_var.get() == "720p 10x speedup H.264"
+    assert persisted == ["720p 10x speedup H.264"]
+
+
+def test_refresh_advanced_preset_selection_skips_redundant_persist(monkeypatch):
+    """Repeated calls that keep the same match must not rewrite settings.json."""
+
+    persisted: list[str | None] = []
+    monkeypatch.setattr(
+        layout.presets,
+        "set_selected_preset",
+        lambda name, *a, **k: persisted.append(name) or True,
+    )
+
+    gui = _make_advanced_preset_gui()
+    gui.simple_preset_var.set("720p 10x speedup H.264")
+
+    layout.refresh_advanced_preset_selection(gui)
+    layout.refresh_advanced_preset_selection(gui)
+
+    # Already in sync, so no write happens on either call.
+    assert persisted == []
+
+
 def test_refresh_advanced_preset_selection_skips_before_knobs_exist():
     """``add_slider`` builds sliders before every knob var exists.
 
@@ -1641,6 +1763,22 @@ def test_save_advanced_preset_persists_and_refreshes(monkeypatch):
     assert new.resolution == "1080p"
     assert new.video_codec == "av1"
     assert gui.advanced_preset_var.get() == "My new preset"
+
+
+def test_save_advanced_preset_rejects_reserved_custom_name(monkeypatch):
+    saved: list = []
+    monkeypatch.setattr(
+        layout.presets, "save_presets", lambda presets, *a, **k: saved.append(presets)
+    )
+
+    gui = _make_advanced_preset_gui()
+
+    layout.save_advanced_preset(gui, layout.presets.CUSTOM_LABEL)
+
+    # "Custom" is the dropdown sentinel; saving under it must be refused so the
+    # preset never becomes unmanageable.
+    assert gui.messagebox.showerror.called
+    assert saved == []
 
 
 def test_save_advanced_preset_reports_write_failure(monkeypatch):

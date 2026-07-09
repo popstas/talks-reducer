@@ -8,7 +8,13 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, MutableMapping, Optional
 
-from ..config import determine_config_path, load_settings, save_settings
+from ..config import (
+    SettingsReadError,
+    determine_config_path,
+    load_settings,
+    read_settings_strict,
+    save_settings,
+)
 from ..presets import PRESETS_KEY, SELECTED_PRESET_KEY
 from . import layout as layout_helpers
 from .theme import (
@@ -109,12 +115,20 @@ class GUIPreferences:
         Before writing, the keys owned by :mod:`talks_reducer.presets`
         (:data:`_EXTERNALLY_OWNED_KEYS`) are re-read from disk into the in-memory
         snapshot so a preset authored after construction is not clobbered by this
-        wholesale rewrite. Returns ``True`` when the file is written and
-        ``False`` when an ``OSError`` prevents persistence, so callers that must
-        not act on a stale ``settings.json`` can detect the failure.
+        wholesale rewrite. When that re-read fails (a concurrent writer left the
+        file locked or partially written) the save is aborted rather than
+        rewriting the file without the externally-owned keys, which would delete
+        the user's presets. Returns ``True`` when the file is written and
+        ``False`` when the re-read fails or an ``OSError`` prevents persistence,
+        so callers that must not act on a stale ``settings.json`` can detect the
+        failure.
         """
 
-        on_disk = load_settings(self._config_path)
+        try:
+            on_disk = read_settings_strict(self._config_path)
+        except SettingsReadError:
+            return False
+
         for key in _EXTERNALLY_OWNED_KEYS:
             if key in on_disk:
                 self._settings[key] = on_disk[key]

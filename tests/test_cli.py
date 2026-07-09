@@ -118,6 +118,9 @@ def test_main_explicit_flags_override_preset(
     assert captured["video_codec"] == "h264"
     assert captured["silent_speed"] == pytest.approx(3.0)
     assert captured["small"] is False
+    # ``--no-small`` must fully override the 480p preset: 480p scaling is only
+    # meaningful alongside ``small``, so ``small_480`` must not leak through.
+    assert captured["small_480"] is False
     # ``sounded_speed`` was not passed, so the preset value still applies.
     assert captured["sounded_speed"] == pytest.approx(1.0)
 

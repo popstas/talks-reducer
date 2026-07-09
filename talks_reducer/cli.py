@@ -288,7 +288,11 @@ def _apply_preset_to_args(
     if "small" not in explicit:
         parsed_args.small = small
     if "small_480" not in explicit:
-        parsed_args.small_480 = small_480
+        # ``small_480`` is only meaningful alongside ``small``; when the effective
+        # small flag is off (e.g. an explicit ``--no-small`` overriding a 480p
+        # preset) never leave 480p scaling on, or the output name gains a stray
+        # ``480`` marker with no rescale behind it.
+        parsed_args.small_480 = small_480 and bool(getattr(parsed_args, "small", small))
     if "silent_speed" not in explicit:
         parsed_args.silent_speed = float(preset.silent_speed)
     if "sounded_speed" not in explicit:

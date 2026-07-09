@@ -125,7 +125,14 @@ def load_presets(config_path: Optional[Path] = None) -> List[Preset]:
     """
 
     path = _resolve_config_path(config_path)
-    settings = config.load_settings(path)
+    try:
+        settings = config.read_settings_strict(path)
+    except config.SettingsReadError:
+        # A locked or partially written file must not be mistaken for a missing
+        # ``presets`` key: re-seeding on top of a ``{}`` produced by a read
+        # failure would clobber every other setting. Return the defaults without
+        # persisting so the transient failure leaves the file untouched.
+        return list(DEFAULT_PRESETS)
 
     if PRESETS_KEY not in settings:
         save_presets(DEFAULT_PRESETS, config_path=path)
@@ -137,8 +144,15 @@ def load_presets(config_path: Optional[Path] = None) -> List[Preset]:
 
     presets: List[Preset] = []
     for entry in raw:
-        if isinstance(entry, Mapping):
+        if not isinstance(entry, Mapping):
+            continue
+        try:
             presets.append(Preset.from_dict(entry))
+        except (TypeError, ValueError):
+            # A partially edited or corrupt preset entry (e.g. a non-numeric
+            # ``silent_speed``) must not take down every surface that loads the
+            # store; skip it rather than propagating the conversion error.
+            continue
     return presets
 
 
@@ -146,7 +160,13 @@ def save_presets(presets: Sequence[Preset], config_path: Optional[Path] = None) 
     """Persist *presets* to the ``presets`` key, preserving other settings."""
 
     path = _resolve_config_path(config_path)
-    settings = config.load_settings(path)
+    try:
+        settings = config.read_settings_strict(path)
+    except config.SettingsReadError:
+        # Abort rather than rewrite the file from a ``{}`` produced by a read
+        # failure, which would delete every non-preset setting. Mirrors
+        # ``GUIPreferences.save()`` hardening for the shared ``settings.json``.
+        return False
     settings[PRESETS_KEY] = [preset.to_dict() for preset in presets]
     return config.save_settings(path, settings)
 
@@ -270,7 +290,12 @@ def set_selected_preset(
     """Persist the selected preset *name* (``None`` clears it for "Custom")."""
 
     path = _resolve_config_path(config_path)
-    settings = config.load_settings(path)
+    try:
+        settings = config.read_settings_strict(path)
+    except config.SettingsReadError:
+        # Abort rather than collapse the shared ``settings.json`` to just the
+        # ``selected_preset`` key when the file is transiently unreadable.
+        return False
     if name:
         settings[SELECTED_PRESET_KEY] = name
     else:

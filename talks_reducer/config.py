@@ -41,20 +41,45 @@ def determine_config_path(
     return base / "talks-reducer" / "settings.json"
 
 
-def load_settings(config_path: Path) -> dict[str, object]:
-    """Load settings from *config_path*, returning an empty dict on failure."""
+class SettingsReadError(Exception):
+    """Raised when an existing settings file cannot be read or parsed.
+
+    Distinguished from a genuinely absent file so callers that merge on-disk
+    state into a wholesale rewrite can abort rather than treat an unreadable
+    file as empty and clobber keys they do not own.
+    """
+
+
+def read_settings_strict(config_path: Path) -> dict[str, object]:
+    """Load settings, distinguishing genuine absence from a read failure.
+
+    Returns an empty dict when the file does not exist. Raises
+    :class:`SettingsReadError` when the file exists but cannot be read or parsed
+    (``OSError`` from a concurrent lock, ``json.JSONDecodeError`` from a
+    partially written file), so a caller must not mistake a transient failure
+    for real absence.
+    """
 
     try:
         with config_path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
     except FileNotFoundError:
         return {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SettingsReadError(str(config_path)) from exc
 
     if isinstance(data, dict):
         return data
     return {}
+
+
+def load_settings(config_path: Path) -> dict[str, object]:
+    """Load settings from *config_path*, returning an empty dict on failure."""
+
+    try:
+        return read_settings_strict(config_path)
+    except SettingsReadError:
+        return {}
 
 
 def save_settings(config_path: Path, data: Mapping[str, object]) -> bool:

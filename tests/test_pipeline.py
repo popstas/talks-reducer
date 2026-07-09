@@ -90,6 +90,18 @@ from talks_reducer.progress import NullProgressReporter
             Path("clip_speedup_av1.mp4"),
         ),
         (
+            # ``small`` is off (e.g. ``--no-small`` overriding a 480p preset), so
+            # no rescale happens and the name must not gain a stray ``480`` marker.
+            Path("video.mp4"),
+            False,
+            480,
+            False,
+            "hevc",
+            None,
+            None,
+            Path("video_speedup.mp4"),
+        ),
+        (
             Path("plain.mp4"),
             False,
             None,

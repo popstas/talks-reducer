@@ -64,6 +64,34 @@ def test_load_presets_preserves_empty_list(tmp_path):
     assert load_presets(config_path=path) == []
 
 
+def test_load_presets_skips_malformed_entries(tmp_path):
+    path = _config_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "presets": [
+                    {
+                        "name": "Good",
+                        "resolution": "720p",
+                        "silent_speed": 10.0,
+                        "sounded_speed": 1.0,
+                        "silent_threshold": 0.01,
+                        "video_codec": "h264",
+                    },
+                    # A non-numeric speed must not take down every surface.
+                    {"name": "Broken", "silent_speed": "fast"},
+                    "not-a-mapping",
+                ]
+            },
+            handle,
+        )
+
+    result = load_presets(config_path=path)
+
+    assert [preset.name for preset in result] == ["Good"]
+
+
 def test_save_and_load_round_trip(tmp_path):
     path = _config_path(tmp_path)
     custom = [

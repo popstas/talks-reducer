@@ -724,7 +724,7 @@ def _input_to_output_filename(
     if small:
         suffix_tokens.append("small")
 
-    if small_target_height == 480:
+    if small and small_target_height == 480:
         suffix_tokens.append("480")
 
     if not optimize and not small:
