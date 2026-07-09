@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import ctypes.util
 import importlib.util
 import os
 import pathlib
@@ -7,7 +8,6 @@ import platform
 import subprocess
 import sys
 import sysconfig
-import ctypes.util
 from typing import Iterable
 
 try:
@@ -186,13 +186,15 @@ DEFAULT_EXCLUDES = [
     "PyQt5",
     "PyQt6",
     "matplotlib",
-    # gradio pulls in pandas (plus its pytz/tzdata timezone data) only for the
-    # ``gr.DataFrame`` component and plotting helpers. The Talks Reducer server
-    # uses none of those, and gradio imports pandas lazily, so excluding it trims
-    # ~17 MB from the frozen bundle without affecting the web UI.
-    "pandas",
-    "pytz",
-    "tzdata",
+    # NOTE: pandas must NOT be excluded. Newer gradio (broken on 6.20.0; still
+    # lazy on 6.17.3) imports pandas eagerly at the top of ``gradio/caching.py``,
+    # which ``import gradio`` pulls in via ``routes`` → ``networking`` →
+    # ``blocks``. Excluding it made ``import gradio`` raise
+    # ``ModuleNotFoundError: No module named 'pandas'`` inside the frozen bundle,
+    # so both the web server and the "Run as server in tray" mode died with a
+    # bare "Server tray mode is unavailable." (the ImportError was swallowed).
+    # Keeping pandas costs ~17 MB but is required for the bundled server to
+    # import at all.
     "numba",
     "cupy",
     "torch",
