@@ -277,6 +277,7 @@ def speed_up_video(
         add_codec_suffix=options.add_codec_suffix,
         silent_speed=options.silent_speed,
         sounded_speed=options.sounded_speed,
+        prefer_clean_audio_name=True,
     )
     output_path = Path(output_path)
 
@@ -699,6 +700,7 @@ def _input_to_output_filename(
     add_codec_suffix: bool = False,
     silent_speed: float | None = None,
     sounded_speed: float | None = None,
+    prefer_clean_audio_name: bool = False,
 ) -> Path:
     dot_index = filename.name.rfind(".")
     normalized_silent = _normalize_speed(silent_speed, _DEFAULT_SILENT_SPEED)
@@ -736,6 +738,15 @@ def _input_to_output_filename(
     suffix = f"_{'_'.join(suffix_tokens)}" if suffix_tokens else ""
     extension = ".mp3" if is_audio_only else ".mp4"
     stem = filename.name[:dot_index] if dot_index != -1 else filename.name
+
+    if prefer_clean_audio_name and is_audio_only and suffix_tokens:
+        # Audio extraction keeps the input's clean name when it is not taken;
+        # an mp3 input occupies that name itself, so the suffixed fallback
+        # also protects the source file from being overwritten.
+        candidate = filename.with_name(stem + extension)
+        if not candidate.exists():
+            return candidate
+
     return filename.with_name(stem + suffix + extension)
 
 

@@ -162,6 +162,27 @@ def test_default_remote_destination_small_without_speedup(tmp_path):
     assert result.name == "mini_small.mp4"
 
 
+def test_default_remote_destination_mp3_prefers_clean_name(tmp_path):
+    input_path = tmp_path / "talk.m4a"
+    input_path.write_text("data")
+
+    result = app._default_remote_destination(
+        input_path, small=True, small_480=True, video_codec="mp3"
+    )
+
+    assert result == tmp_path / "talk.mp3"
+
+
+def test_default_remote_destination_mp3_clean_name_taken(tmp_path):
+    input_path = tmp_path / "talk.m4a"
+    input_path.write_text("data")
+    (tmp_path / "talk.mp3").write_text("existing")
+
+    result = app._default_remote_destination(input_path, small=False, video_codec="mp3")
+
+    assert result == tmp_path / "talk_speedup.mp3"
+
+
 def test_parse_ratios_from_summary_extracts_values():
     summary = "**Duration:** 40s -> 17s (42.5%)\n" "**Size:** 4.0M -> 0.7M (17.25%)\n"
 

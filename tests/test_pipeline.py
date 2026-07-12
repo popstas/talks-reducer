@@ -241,6 +241,79 @@ def test_input_to_output_filename_orders_fast_before_codec() -> None:
     assert output == Path("clip_speedup_fast_h264.mp4")
 
 
+def test_input_to_output_filename_prefers_clean_mp3_name(tmp_path: Path) -> None:
+    """MP3 outputs drop the suffixes when the clean name is free."""
+
+    input_file = tmp_path / "talk.m4a"
+    input_file.touch()
+
+    output = pipeline._input_to_output_filename(
+        input_file,
+        True,
+        480,
+        video_codec="mp3",
+        prefer_clean_audio_name=True,
+    )
+
+    assert output == tmp_path / "talk.mp3"
+
+
+def test_input_to_output_filename_clean_mp3_name_taken(tmp_path: Path) -> None:
+    """An existing clean-name file falls back to the suffixed name."""
+
+    input_file = tmp_path / "talk.m4a"
+    input_file.touch()
+    (tmp_path / "talk.mp3").touch()
+
+    output = pipeline._input_to_output_filename(
+        input_file,
+        False,
+        None,
+        video_codec="mp3",
+        prefer_clean_audio_name=True,
+    )
+
+    assert output == tmp_path / "talk_speedup.mp3"
+
+
+def test_input_to_output_filename_clean_mp3_name_protects_mp3_input(
+    tmp_path: Path,
+) -> None:
+    """An mp3 input occupies the clean name, so the source is never overwritten."""
+
+    input_file = tmp_path / "talk.mp3"
+    input_file.touch()
+
+    output = pipeline._input_to_output_filename(
+        input_file,
+        False,
+        None,
+        video_codec="mp3",
+        prefer_clean_audio_name=True,
+    )
+
+    assert output == tmp_path / "talk_speedup.mp3"
+
+
+def test_input_to_output_filename_clean_name_ignores_video_codecs(
+    tmp_path: Path,
+) -> None:
+    """The clean-name preference only applies to mp3 outputs."""
+
+    input_file = tmp_path / "video.mkv"
+    input_file.touch()
+
+    output = pipeline._input_to_output_filename(
+        input_file,
+        False,
+        None,
+        video_codec="h264",
+        prefer_clean_audio_name=True,
+    )
+
+    assert output == tmp_path / "video_speedup.mp4"
+
+
 def test_extract_video_metadata_uses_ffprobe(monkeypatch) -> None:
     """Metadata should be parsed from ffprobe output for the demo asset."""
 

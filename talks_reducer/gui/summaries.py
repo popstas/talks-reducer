@@ -45,6 +45,7 @@ def default_remote_destination(
         add_codec_suffix=add_codec_suffix,
         silent_speed=silent_speed,
         sounded_speed=sounded_speed,
+        prefer_clean_audio_name=True,
     )
 
 
