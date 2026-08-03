@@ -269,6 +269,46 @@ def apply_theme(
         ],
     )
     style.configure(
+        "Segment.TButton",
+        background=palette["surface"],
+        foreground=palette["foreground"],
+        borderwidth=1,
+        relief="solid",
+        padding=(9, 2),
+        font=("TkDefaultFont", 8),
+    )
+    style.map(
+        "Segment.TButton",
+        background=[
+            ("active", palette.get("hover", palette["surface"])),
+            ("disabled", palette["surface"]),
+        ],
+        foreground=[
+            ("active", palette.get("hover_text", palette["foreground"])),
+            ("disabled", palette["foreground"]),
+        ],
+    )
+    style.configure(
+        "SelectedSegment.TButton",
+        background=selected_background,
+        foreground=selected_foreground,
+        borderwidth=1,
+        relief="solid",
+        padding=(9, 2),
+        font=("TkDefaultFont", 8),
+    )
+    style.map(
+        "SelectedSegment.TButton",
+        background=[
+            ("active", selected_background),
+            ("disabled", selected_background),
+        ],
+        foreground=[
+            ("active", selected_foreground),
+            ("disabled", selected_foreground),
+        ],
+    )
+    style.configure(
         "TButton",
         background=palette["surface"],
         foreground=palette["foreground"],

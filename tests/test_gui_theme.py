@@ -13,6 +13,16 @@ from talks_reducer.gui.theme import (
 )
 
 
+def _configured_styles(style: Mock) -> dict[str, dict]:
+    """Map style name to kwargs for every ``style.configure(name, **kwargs)`` call."""
+
+    return {
+        call.args[0]: call.kwargs
+        for call in style.configure.call_args_list
+        if call.args
+    }
+
+
 def test_detect_system_theme_windows(monkeypatch):
     reader = Mock(return_value=0)
     runner = Mock()
@@ -107,4 +117,31 @@ def test_apply_theme_updates_widgets():
         troughcolor=LIGHT_THEME["surface"],
         borderwidth=0,
         thickness=20,
+    )
+
+
+def test_segment_styles_are_configured():
+    style = Mock()
+    apply_theme(
+        style,
+        LIGHT_THEME,
+        {
+            "root": Mock(),
+            "drop_zone": Mock(),
+            "log_text": Mock(),
+            "activity_text": Mock(),
+            "status_label": Mock(),
+            "sliders": [Mock()],
+            "tk": SimpleNamespace(FLAT="flat"),
+            "apply_status_style": Mock(),
+            "status_state": "idle",
+        },
+    )
+
+    configured = _configured_styles(style)
+    assert "Segment.TButton" in configured
+    assert "SelectedSegment.TButton" in configured
+    assert (
+        configured["SelectedSegment.TButton"]["background"]
+        != configured["Segment.TButton"]["background"]
     )
