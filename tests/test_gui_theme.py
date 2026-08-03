@@ -151,7 +151,6 @@ def test_segment_styles_are_configured():
         configured["SelectedSegment.TButton"]["background"]
         != configured["Segment.TButton"]["background"]
     )
-    assert "Heading.TLabel" in configured
 
     # A disabled Segment.TButton (e.g. the Remote mode button before a server
     # URL is set) must not look identical to an enabled one: the ``disabled``

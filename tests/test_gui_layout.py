@@ -2615,24 +2615,27 @@ def test_applying_a_preset_moves_the_resolution_buttons():
     assert gui.resolution_var.get() == "1080p"
 
 
-def test_basic_options_group_leads_the_panel():
-    """The panel opens with a Basic options group holding speedup + resolution."""
+def test_panel_has_no_group_headings():
+    """The panel is a flat run of labelled rows, opening with Silence speedup.
+
+    The group captions ("BASIC OPTIONS" and friends) were dropped: each row is
+    already labelled, so the headings only spent vertical space.
+    """
 
     gui = _make_layout_gui()
     layout.build_layout(gui)
 
-    headings = [
-        widget.kwargs["text"]
+    styles = {widget.kwargs.get("style") for widget in gui.ttk.Label.created}
+    assert "Heading.TLabel" not in styles
+
+    first_row = min(
+        widget.grid_calls[0][1]["row"]
         for widget in gui.ttk.Label.created
-        if widget.kwargs.get("style") == "Heading.TLabel"
-    ]
-    assert headings[0] == "BASIC OPTIONS"
-    assert headings == [
-        "BASIC OPTIONS",
-        "SPEED & SILENCE",
-        "OUTPUT",
-        "PROCESSING & APPEARANCE",
-    ]
+        if widget.args
+        and widget.args[0] is gui.basic_options_frame
+        and widget.grid_calls
+    )
+    assert first_row == 0
 
 
 def test_option_rows_lead_with_the_strongest_reduction():
@@ -2661,7 +2664,7 @@ def test_silence_speedup_row_lives_in_the_basic_options_frame():
     layout.build_layout(gui)
 
     assert gui.basic_presets_frame.args[0] is gui.basic_options_frame
-    assert gui.basic_presets_frame.grid_calls[0][1]["row"] == 1
+    assert gui.basic_presets_frame.grid_calls[0][1]["row"] == 0
 
 
 def test_every_row_opens_on_its_first_button():

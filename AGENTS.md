@@ -26,12 +26,14 @@ Look at the commit history to get more examples.
 - **Input drop zone** — drag files or folders from your desktop, click to open
   the system file picker, or add them via the Explorer/Finder dialog; duplicates
   are ignored.
-- **Basic options** — the panel (`layout.py`, inside `options_frame`) renders its choice-style
+- **Basic options** — the panel (`layout.py`, inside `options_frame`) is a flat run of labelled
+  rows with no group captions: every row is already labelled, so the headings only spent vertical
+  space. Row spacing carries the grouping instead — `layout.SETTING_ROW_PADY` above every option
+  row, the wider `layout.PRESET_ROW_PADY` around the Preset strip so it reads as its own band.
+  The panel renders its choice-style
   settings as `SegmentedChoice` (`talks_reducer/gui/segmented.py`) — one `ttk.Button` per option,
-  styled `Segment.TButton`/`SelectedSegment.TButton` (added in `theme.py` alongside
-  `Heading.TLabel`, used for the panel's four group headings: **Basic options** (holding **Silence
-speedup** and **Resolution**), **Speed & silence**, **Output**,
-  **Processing & appearance**) — instead of the `tk.Scale` sliders it used to use. **Silent**
+  styled `Segment.TButton`/`SelectedSegment.TButton` (added in `theme.py`)
+  — instead of the `tk.Scale` sliders it used to use. **Silent**
   speed offers 10/5/2/1 (custom 1–10, default 10 — every row leads with its
   strongest option and opens on it); **Sounded** speed offers 1/1.3/1.5/2 (custom
   0.75–10, default 1 — 1.3 and 1.5 are newly reachable now that the old slider's 0.25 quantization
@@ -58,13 +60,13 @@ speedup** and **Resolution**), **Speed & silence**, **Output**,
   styles) so the swap never reflows the row. Every bound control traces its variable and is registered into
   `gui._slider_updaters` through `layout.add_segmented`'s `apply_and_persist` wrapper, so
   `apply_preset_to_gui` and presets applied on other surfaces keep moving the buttons exactly as
-  they moved the sliders they replaced. The "Basic options" macro row (**Silence ×10** /
+  they moved the sliders they replaced. The **Silence speedup** macro row (**Silence ×10** /
   **Silence ×5** / **No speedup**) is also a `SegmentedChoice` (`gui.basic_preset_control`,
   `variable=None`); **Silence ×5** (`gui.reset_basic_button`) used to disable itself when the
   sliders already matched the defaults, but a button rendered as "selected" must not
   simultaneously be disabled, so it no longer does — clicking it always re-applies the defaults.
-- **Resolution** — a `SegmentedChoice` (**720p** / **480p** / **orig**) in the **Basic options**
-  group, replacing the old **Small video** + **480p** checkboxes. `orig` leaves the source
+- **Resolution** — a `SegmentedChoice` (**720p** / **480p** / **orig**) in the basic options
+  panel, replacing the old **Small video** + **480p** checkboxes. `orig` leaves the source
   resolution untouched and corresponds to the CLI's `--no-small`. The control is a *projection*:
   `small_var`/`small_480_var` remain the source of truth that presets, the seeded-launch CLI
   flags and `_collect_arguments` read, so clicking a button fans onto them

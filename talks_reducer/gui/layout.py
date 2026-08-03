@@ -59,6 +59,17 @@ def format_activity_line(entry: dict) -> str:
 # leaving Simple mode and would otherwise restore them flush against each other.
 CHECKBOX_ROW_GAP = (24, 0)
 
+# Vertical gap above every option row in ``basic_options_frame``. The group
+# headings that used to space the panel out are gone, so the gap itself is all
+# that separates one setting from the next — hence a single shared value rather
+# than the per-row mix of ``(8, 0)`` and ``4`` it replaces.
+SETTING_ROW_PADY = (12, 0)
+
+# The Preset strip gets a wider gap on both sides than the settings rows below
+# it: it applies all of them at once, so it reads as its own band rather than as
+# the first of the rows.
+PRESET_ROW_PADY = (36, 24)
+
 # Silence is sped up 10x out of the box: every row is ordered strongest-first,
 # and the default is the first button so a fresh install starts there.
 DEFAULT_SILENT_SPEED = 10.0
@@ -770,7 +781,9 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     # Save as… / Update / Delete. It authors the shared preset store and is
     # hidden in Simple mode (where the read-only Simple dropdown applies instead).
     advanced_preset_frame = gui.ttk.Frame(gui.options_frame)
-    advanced_preset_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 6))
+    advanced_preset_frame.grid(
+        row=1, column=0, columnspan=2, sticky="w", pady=PRESET_ROW_PADY
+    )
     gui.ttk.Label(advanced_preset_frame, text="Preset:").pack(
         side=gui.tk.LEFT, padx=(0, 2)
     )
@@ -834,32 +847,28 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             "write", lambda *_: refresh_advanced_preset_selection(gui)
         )
 
-    # A plain Frame rather than a Labelframe: the panel's four groups each carry
-    # their own heading now, so the caption was left empty — but an empty
+    # A plain Frame rather than a Labelframe: the panel is a single flat run of
+    # labelled rows, so there is no caption to render — and an empty
     # ``labelwidget`` still reserved a full text line above the border, which is
-    # most of the dead space that used to separate the Preset row from "BASIC
-    # OPTIONS". The macro row the caption used to host moved into that group as a
-    # normal labelled row.
+    # dead space right under the Preset row. The macro row the caption used to
+    # host is now a normal labelled row like the rest.
     gui.basic_options_frame = gui.ttk.Frame(gui.options_frame, padding=0)
     gui.basic_options_frame.grid(
         row=2, column=0, columnspan=2, sticky="ew", pady=(0, 0)
     )
     gui.basic_options_frame.columnconfigure(1, weight=1)
 
-    # The first heading sits directly under the Preset row, so it skips the
-    # inter-group top padding the later headings need to separate them from the
-    # rows above.
-    add_group_heading(gui, gui.basic_options_frame, "Basic options", row=0, pady=(4, 2))
-
     gui.ttk.Label(gui.basic_options_frame, text="Silence speedup").grid(
-        row=1, column=0, sticky="w", pady=(8, 0)
+        row=0, column=0, sticky="w", pady=SETTING_ROW_PADY
     )
     # Parented on ``basic_options_frame``, not merely gridded into it: ``grid``
     # is handled by the widget's own parent, so a frame created under
     # ``options_frame`` would land in *that* grid — which is what once pushed
     # this row up next to the Preset strip.
     gui.basic_presets_frame = gui.ttk.Frame(gui.basic_options_frame)
-    gui.basic_presets_frame.grid(row=1, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    gui.basic_presets_frame.grid(
+        row=0, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY
+    )
 
     gui.basic_preset_control = SegmentedChoice(
         gui.basic_presets_frame,
@@ -883,10 +892,12 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.reset_basic_button = gui.basic_preset_buttons["silence_x10"]
 
     gui.ttk.Label(gui.basic_options_frame, text="Resolution").grid(
-        row=2, column=0, sticky="w", pady=(8, 0)
+        row=1, column=0, sticky="w", pady=SETTING_ROW_PADY
     )
     resolution_choice = gui.ttk.Frame(gui.basic_options_frame)
-    resolution_choice.grid(row=2, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    resolution_choice.grid(
+        row=1, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY
+    )
     gui.resolution_var = gui.tk.StringVar(value=resolution_from_small(gui))
     gui.resolution_control = SegmentedChoice(
         resolution_choice,
@@ -906,8 +917,6 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             "write", lambda *_: gui.resolution_var.set(resolution_from_small(gui))
         )
 
-    add_group_heading(gui, gui.basic_options_frame, "Speed & silence", row=3)
-
     gui.silent_speed_var = gui.tk.DoubleVar(
         value=min(
             max(gui.preferences.get_float("silent_speed", DEFAULT_SILENT_SPEED), 1.0),
@@ -919,7 +928,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Silent",
         gui.silent_speed_var,
-        row=4,
+        row=2,
         setting_key="silent_speed",
         options=[
             Option(10.0, "10"),
@@ -945,7 +954,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Sounded",
         gui.sounded_speed_var,
-        row=5,
+        row=3,
         setting_key="sounded_speed",
         options=[
             Option(1.0, "1"),
@@ -968,7 +977,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Threshold",
         gui.silent_threshold_var,
-        row=6,
+        row=4,
         setting_key="silent_threshold",
         options=[
             Option(0.01, "0.01"),
@@ -985,13 +994,11 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.threshold_help_button = threshold_control.help_button
 
-    add_group_heading(gui, gui.basic_options_frame, "Output", row=7)
-
     gui.ttk.Label(gui.basic_options_frame, text="Codec").grid(
-        row=8, column=0, sticky="w", pady=(8, 0)
+        row=5, column=0, sticky="w", pady=SETTING_ROW_PADY
     )
     codec_choice = gui.ttk.Frame(gui.basic_options_frame)
-    codec_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    codec_choice.grid(row=5, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY)
     gui.video_codec_control = SegmentedChoice(
         codec_choice,
         [
@@ -1013,13 +1020,11 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(12, 0))
 
-    add_group_heading(gui, gui.basic_options_frame, "Processing & appearance", row=9)
-
     gui.ttk.Label(gui.basic_options_frame, text="Mode").grid(
-        row=10, column=0, sticky="w", pady=(8, 0)
+        row=6, column=0, sticky="w", pady=SETTING_ROW_PADY
     )
     mode_choice = gui.ttk.Frame(gui.basic_options_frame)
-    mode_choice.grid(row=10, column=1, sticky="w", pady=(8, 0))
+    mode_choice.grid(row=6, column=1, sticky="w", pady=SETTING_ROW_PADY)
     gui.processing_mode_control = SegmentedChoice(
         mode_choice,
         [Option("local", "Local"), Option("remote", "Remote")],
@@ -1060,16 +1065,16 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text=format_local_server_url(local_server_url) if server_managed else "",
     )
     gui.local_server_url_label.grid(
-        row=10, column=2, sticky="w", padx=(8, 0), pady=(8, 0)
+        row=6, column=2, sticky="w", padx=(8, 0), pady=SETTING_ROW_PADY
     )
     if not (server_managed and local_server_url):
         gui.local_server_url_label.grid_remove()
 
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
-        row=11, column=0, sticky="w", pady=(8, 0)
+        row=7, column=0, sticky="w", pady=SETTING_ROW_PADY
     )
     theme_choice = gui.ttk.Frame(gui.basic_options_frame)
-    theme_choice.grid(row=11, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    theme_choice.grid(row=7, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY)
     gui.theme_control = SegmentedChoice(
         theme_choice,
         [Option("os", "OS"), Option("light", "Light"), Option("dark", "Dark")],
@@ -1503,7 +1508,7 @@ def add_segmented(
     custom: "CustomSpec | None" = None,
     tooltip: str | None = None,
     help_url: str | None = None,
-    pady: int | tuple[int, int] = 4,
+    pady: "int | tuple[int, int]" = SETTING_ROW_PADY,
 ) -> "SegmentedChoice":
     """Add a labeled row of choice buttons to *parent* and wire it into presets.
 
@@ -1570,25 +1575,6 @@ def add_segmented(
     gui._basic_variables[setting_key] = variable
     variable.trace_add("write", lambda *_: update_basic_reset_state(gui))
     return control
-
-
-def add_group_heading(
-    gui: "TalksReducerGUI",
-    parent: "tk.Misc",
-    text: str,
-    *,
-    row: int,
-    pady: tuple = (10, 2),
-):
-    """Add a quiet section heading above a run of related settings rows.
-
-    *pady* is overridable so the panel's first heading, which has no settings
-    rows above it to separate itself from, can drop the leading gap.
-    """
-
-    heading = gui.ttk.Label(parent, text=text.upper(), style="Heading.TLabel")
-    heading.grid(row=row, column=0, columnspan=3, sticky="w", pady=pady)
-    return heading
 
 
 def update_basic_reset_state(gui: "TalksReducerGUI") -> None:
