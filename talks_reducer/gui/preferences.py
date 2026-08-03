@@ -313,9 +313,20 @@ class PreferenceController:
             threading.Thread(target=ping_remote_mode, daemon=True).start()
 
     def on_server_url_change(self, *_: object) -> None:
+        """Persist the URL and refresh Remote's enabled state, but not the row.
+
+        This fires on every keystroke (``server_url_var`` is traced on
+        ``write``) and again whenever Discover fills the field in, so the
+        Server URL row's visibility must not be recomputed here — only a mode
+        switch or the initial build should move it (see
+        ``update_processing_mode_visibility``'s docstring). Passing
+        ``update_row=False`` still lets the Remote segment enable/disable
+        itself as the URL becomes non-empty/empty.
+        """
+
         value = self.gui.server_url_var.get().strip()
         self.gui.preferences.update("server_url", value)
-        self.gui._update_processing_mode_state()
+        self.gui._update_processing_mode_state(update_row=False)
 
     def resolve_theme_mode(self) -> str:
         preference = self.gui.theme_var.get().lower()

@@ -1270,7 +1270,9 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         watch.start()
 
 
-def update_processing_mode_visibility(gui: "TalksReducerGUI") -> None:
+def update_processing_mode_visibility(
+    gui: "TalksReducerGUI", *, update_row: bool = True
+) -> None:
     """Show the Server URL row in remote mode, or whenever no URL is set yet.
 
     Local processing has no server to address, so the readiness text is hidden
@@ -1285,16 +1287,30 @@ def update_processing_mode_visibility(gui: "TalksReducerGUI") -> None:
     hatch stays open until a URL is configured; once one exists, the row goes
     back to being remote-only. Do not simplify this back to ``remote`` alone.
 
+    *update_row* gates whether the row's own visibility is recomputed at all;
+    it defaults to ``True`` for the mode-change and initial-build callers. The
+    escape hatch is meant to be evaluated when the **mode** changes or at
+    build time — never while the user is editing the URL text itself, since
+    ``server_url_var`` is traced on every keystroke (and again when Discover
+    fills it in). Recomputing on every character would flip ``has_url`` true
+    the instant a single character lands, hiding the row — Discover button
+    included — out from under whatever the user was doing to it. The
+    server-URL write handler (``_on_server_url_change`` /
+    ``on_server_url_change``) calls ``_update_processing_mode_state`` with
+    *update_row* forced to ``False`` for exactly this reason: an edit to the
+    URL text must never move the row, only a mode switch may. Do not remove
+    this parameter or make URL edits recompute the row again.
+
     The row is grid-managed inside ``basic_options_frame`` while the status
     label is packed inside ``mode_choice``, so each is hidden with its own
     geometry manager.
     """
 
     remote = gui.processing_mode_var.get() == "remote"
-    has_url = bool(gui.server_url_var.get().strip())
-    show_row = remote or not has_url
     row = getattr(gui, "server_url_row", None)
-    if row is not None:
+    if update_row and row is not None:
+        has_url = bool(gui.server_url_var.get().strip())
+        show_row = remote or not has_url
         row.grid() if show_row else row.grid_remove()
     label = getattr(gui, "remote_status_label", None)
     if label is not None:

@@ -660,7 +660,16 @@ class TalksReducerGUI:
             label.configure(text="")
             label.grid_remove()
 
-    def _update_processing_mode_state(self) -> None:
+    def _update_processing_mode_state(self, *, update_row: bool = True) -> None:
+        """Refresh the Remote segment's enabled state and (usually) its row.
+
+        *update_row* is forwarded to ``update_processing_mode_visibility``. It
+        is forced to ``False`` by ``_on_server_url_change`` (a per-keystroke
+        write-trace callback) so editing the URL text never moves the Server
+        URL row; only an explicit mode switch or the initial build recomputes
+        its visibility. See that function's docstring for why.
+        """
+
         has_url = bool(self.server_url_var.get().strip())
         if not has_url and self.processing_mode_var.get() == "remote":
             self.processing_mode_var.set("local")
@@ -669,7 +678,7 @@ class TalksReducerGUI:
         if hasattr(self, "remote_mode_button"):
             state = self.tk.NORMAL if has_url else self.tk.DISABLED
             self.remote_mode_button.configure(state=state)
-        layout_helpers.update_processing_mode_visibility(self)
+        layout_helpers.update_processing_mode_visibility(self, update_row=update_row)
 
     def _set_remote_status(self, message: str) -> None:
         """Show *message* beside the processing-mode buttons."""

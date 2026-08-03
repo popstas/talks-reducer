@@ -7,6 +7,8 @@ from unittest.mock import Mock
 import pytest
 
 import talks_reducer.gui.layout as layout
+from talks_reducer.gui.app import TalksReducerGUI
+from talks_reducer.gui.preferences import PreferenceController
 from talks_reducer.presets import Preset
 
 _TEST_PRESETS = [
@@ -1232,6 +1234,44 @@ def test_server_url_row_is_shown_on_a_fresh_config_with_no_url():
     layout.build_layout(gui)
     layout.update_processing_mode_visibility(gui)
     assert gui.server_url_row.grid_calls
+    assert not gui.server_url_row.grid_remove_calls
+
+
+def test_editing_the_server_url_does_not_hide_the_row():
+    """Regression: a keystroke into the URL field used to hide the row itself.
+
+    ``server_url_var`` is traced on ``write`` (``app.py``, mirrored here by
+    wiring the real ``PreferenceController.on_server_url_change``), so it
+    fires on every character typed and again whenever Discover fills the
+    field in. Before this fix, that write-trace recomputed the Server URL
+    row's visibility on every call: the moment the field became non-empty
+    while still in local mode, ``has_url`` flipped true and the row —
+    Discover button included — vanished out from under whatever the user was
+    doing with it. This wires the real ``PreferenceController`` and the real
+    (unmocked) ``TalksReducerGUI._update_processing_mode_state`` onto the
+    stub GUI, so it exercises the actual production call chain: ``write``
+    trace -> ``on_server_url_change`` -> ``_update_processing_mode_state`` ->
+    ``update_processing_mode_visibility``.
+    """
+
+    gui = _make_layout_gui(server_url_var=StringVarStub(value=""))
+    layout.build_layout(gui)
+    layout.update_processing_mode_visibility(gui)
+    assert gui.server_url_row.grid_calls
+    assert not gui.server_url_row.grid_remove_calls
+
+    # Swap in the real state-updater (the fixture stubs it as a no-op Mock)
+    # and wire the real preference-change handler the way ``TalksReducerGUI``
+    # does at construction time, so the write trace below exercises the
+    # actual production code rather than a hand-rolled stand-in.
+    gui._update_processing_mode_state = (
+        lambda **kwargs: TalksReducerGUI._update_processing_mode_state(gui, **kwargs)
+    )
+    controller = PreferenceController(gui)
+    gui.server_url_var.trace_add("write", controller.on_server_url_change)
+
+    gui.server_url_var.set("http://192.168.1.5:9005")
+
     assert not gui.server_url_row.grid_remove_calls
 
 
