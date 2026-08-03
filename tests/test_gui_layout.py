@@ -2513,15 +2513,15 @@ def test_resolution_buttons_replace_the_small_checkboxes():
     assert not hasattr(gui, "small_check")
     assert not hasattr(gui, "small_480_check")
     assert [button.kwargs["text"] for button in gui.resolution_control.buttons] == [
-        "480p",
         "720p",
+        "480p",
         "orig",
     ]
 
 
 @pytest.mark.parametrize(
     "index, expected_small, expected_480",
-    [(0, True, True), (1, True, False), (2, False, False)],
+    [(0, True, False), (1, True, True), (2, False, False)],
 )
 def test_clicking_a_resolution_button_drives_the_small_vars(
     index, expected_small, expected_480
@@ -2568,3 +2568,32 @@ def test_basic_options_group_leads_the_panel():
         "OUTPUT",
         "PROCESSING & APPEARANCE",
     ]
+
+
+def test_option_rows_lead_with_the_strongest_reduction():
+    """Rows are ordered so the most aggressive setting comes first."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    assert [b.kwargs["text"] for b in gui.basic_preset_control.buttons] == [
+        "Silence ×10",
+        "Silence ×5",
+        "No speedup",
+    ]
+    assert [o.label for o in layout.RESOLUTION_OPTIONS] == ["720p", "480p", "orig"]
+
+
+def test_silence_speedup_row_lives_in_the_basic_options_frame():
+    """Regression: the macro row rendered next to the Preset strip instead.
+
+    ``grid`` is handled by a widget's own parent, so a frame created under
+    ``options_frame`` and gridded "into" ``basic_options_frame`` silently landed
+    in the outer grid.
+    """
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    assert gui.basic_presets_frame.args[0] is gui.basic_options_frame
+    assert gui.basic_presets_frame.grid_calls[0][1]["row"] == 1

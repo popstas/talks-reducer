@@ -59,8 +59,8 @@ DEFAULT_RESOLUTION = "1080p"
 # "orig" rather than "1080p": the pipeline leaves the source resolution alone in
 # this state, and a 1440p or 4K source is not downscaled to 1080p.
 RESOLUTION_OPTIONS = (
-    Option("480p", "480p"),
     Option("720p", "720p"),
+    Option("480p", "480p"),
     Option(DEFAULT_RESOLUTION, "orig"),
 )
 
@@ -816,27 +816,6 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     basic_label = gui.ttk.Label(basic_label_container, text="")
     basic_label.pack(side=gui.tk.LEFT)
 
-    gui.basic_presets_frame = gui.ttk.Frame(gui.options_frame)
-
-    gui.basic_preset_control = SegmentedChoice(
-        gui.basic_presets_frame,
-        [
-            Option("compress_only", "No speedup"),
-            Option("defaults", "Silence ×5"),
-            Option("silence_x10", "Silence ×10"),
-        ],
-        tk=gui.tk,
-        ttk=gui.ttk,
-        variable=None,
-        on_change=lambda value: gui._apply_basic_preset(value),
-    )
-    gui.reset_basic_button = gui.basic_preset_control.buttons[1]
-    gui.basic_preset_buttons = {
-        "compress_only": gui.basic_preset_control.buttons[0],
-        "defaults": gui.basic_preset_control.buttons[1],
-        "silence_x10": gui.basic_preset_control.buttons[2],
-    }
-
     gui.basic_options_frame = gui.ttk.Labelframe(
         gui.options_frame, padding=0, labelwidget=basic_label_container
     )
@@ -850,8 +829,32 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.ttk.Label(gui.basic_options_frame, text="Silence speedup").grid(
         row=1, column=0, sticky="w", pady=(8, 0)
     )
+    # Parented on ``basic_options_frame``, not merely gridded into it: ``grid``
+    # is handled by the widget's own parent, so a frame created under
+    # ``options_frame`` would land in *that* grid — which is what once pushed
+    # this row up next to the Preset strip.
+    gui.basic_presets_frame = gui.ttk.Frame(gui.basic_options_frame)
     gui.basic_presets_frame.grid(row=1, column=1, columnspan=2, sticky="w", pady=(8, 0))
+
+    gui.basic_preset_control = SegmentedChoice(
+        gui.basic_presets_frame,
+        [
+            Option("silence_x10", "Silence ×10"),
+            Option("defaults", "Silence ×5"),
+            Option("compress_only", "No speedup"),
+        ],
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=None,
+        on_change=lambda value: gui._apply_basic_preset(value),
+    )
     gui.basic_preset_control.frame.pack(side=gui.tk.LEFT)
+    gui.basic_preset_buttons = {
+        "silence_x10": gui.basic_preset_control.buttons[0],
+        "defaults": gui.basic_preset_control.buttons[1],
+        "compress_only": gui.basic_preset_control.buttons[2],
+    }
+    gui.reset_basic_button = gui.basic_preset_buttons["defaults"]
 
     gui.ttk.Label(gui.basic_options_frame, text="Resolution").grid(
         row=2, column=0, sticky="w", pady=(8, 0)
@@ -890,10 +893,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         row=4,
         setting_key="silent_speed",
         options=[
-            Option(1.0, "1"),
-            Option(2.0, "2"),
-            Option(5.0, "5"),
             Option(10.0, "10"),
+            Option(5.0, "5"),
+            Option(2.0, "2"),
+            Option(1.0, "1"),
         ],
         default_value=5.0,
         custom=CustomSpec(minimum=1.0, maximum=10.0),

@@ -25,13 +25,13 @@ In **Advanced mode** the basic options mirror the CLI presets directly, as a pan
 rows grouped under four quiet headings — **Basic options**, **Speed & silence**, **Output**, and
 **Processing & appearance**:
 
-- **Silence speedup** offers the three shortcuts **No speedup**, **Silence ×5** and
-  **Silence ×10**, each setting the speed and threshold knobs below in one click.
-- **Resolution** offers **480p**, **720p** and **orig**. `orig` keeps the source resolution
+- **Silence speedup** offers the three shortcuts **Silence ×10**, **Silence ×5** and
+  **No speedup**, each setting the speed and threshold knobs below in one click.
+- **Resolution** offers **720p**, **480p** and **orig**. `orig` keeps the source resolution
   untouched (the CLI's `--no-small`); the other two match `--small --480` and `--small --720`.
   This replaces the former **Small video** and **480p** checkboxes.
 
-- **Silent** and **Sounded** speed each offer four preset buttons (silent: 1, 2, 5, 10; sounded:
+- **Silent** and **Sounded** speed each offer four preset buttons (silent: 10, 5, 2, 1; sounded:
   1, 1.3, 1.5, 2) plus a trailing **…** button. Clicking **…** swaps it for an inline entry —
   type any other value in range (1–10 for silent speed, 0.75–10 for sounded speed), press Enter
   to commit — clicking away commits too — or press Escape to cancel. A committed value keeps its
