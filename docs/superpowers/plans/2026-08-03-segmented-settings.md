@@ -976,7 +976,20 @@ def add_segmented(
     )
     control.frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=pady)
 
-    gui._slider_updaters[setting_key] = control.set_value
+    def apply_and_persist(value) -> None:
+        """Set the control and persist, for callers that drive it programmatically.
+
+        ``reset_basic_defaults`` and ``apply_preset_to_gui`` reach the knobs only
+        through ``_slider_updaters`` and rely on that call to write the new value
+        to ``settings.json`` — the slider's own ``update()`` used to do both.
+        ``SegmentedChoice.set_value`` deliberately does not fire ``on_change``, so
+        the persistence half is restored here rather than in the widget.
+        """
+
+        control.set_value(value)
+        persist(value)
+
+    gui._slider_updaters[setting_key] = apply_and_persist
     gui._basic_defaults[setting_key] = default_value
     gui._basic_variables[setting_key] = variable
     gui._segmented_controls[setting_key] = control
@@ -1048,7 +1061,19 @@ Then replace the three call sites (currently `add_slider(...)` at layout.py:739,
     )
 ```
 
-Rows shift by one because Task 5 inserts group headings; the exact row numbers are finalized in Task 5. Also add `gui._segmented_controls = {}` next to wherever `gui._slider_updaters = {}` is initialized in `app.py`.
+**Use Task 6's final row numbers now**, leaving rows 0, 4 and 6 empty for the headings that task inserts — an empty `grid` row collapses to zero height, so the panel looks right in the meantime and Task 6 only has to add headings rather than renumber everything. That means every row below the three knobs must move down too, in the same commit:
+
+| Row | Content | Was |
+| --- | --- | --- |
+| 1 / 2 / 3 | Silent / Sounded / Threshold | 0 / 1 / 2 |
+| 5 | Video codec label + `codec_choice` | 3 |
+| 7 | Processing mode label + `mode_choice` + `local_server_url_label` | 4 |
+| 8 | Server URL label + entry + Discover | 5 |
+| 9 | Theme label + `theme_choice` | 6 |
+
+Leaving the codec row at 3 while Threshold moves to 3 puts two controls in the same grid cell and visibly breaks the panel.
+
+Also add `gui._segmented_controls = {}` next to wherever `gui._slider_updaters = {}` is initialized in `app.py`.
 
 - [ ] **Step 4: Run the full test suite**
 
