@@ -151,18 +151,11 @@ class PreferenceController:
 
     def on_small_video_change(self, *_: object) -> None:
         self.gui.preferences.update("small_video", bool(self.gui.small_var.get()))
-        self.update_small_variant_state()
 
     def on_small_480_change(self, *_: object) -> None:
         self.gui.preferences.update(
             "small_video_480", bool(self.gui.small_480_var.get())
         )
-
-    def update_small_variant_state(self) -> None:
-        if not hasattr(self.gui, "small_480_check"):
-            return
-        state = self.gui.tk.NORMAL if self.gui.small_var.get() else self.gui.tk.DISABLED
-        self.gui.small_480_check.configure(state=state)
 
     def on_open_after_convert_change(self, *_: object) -> None:
         self.gui.preferences.update(

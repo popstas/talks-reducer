@@ -21,9 +21,15 @@ re-selects the preset you used last, or the first preset when none is remembered
 presets exist (you deleted them all) the dropdown is hidden entirely and the manual resolution
 checkboxes return.
 
-In **Advanced mode** the basic options mirror the CLI presets directly: **Small video**, plus
-a "Basic options" panel of button rows grouped under three quiet headings — **Speed &
-silence**, **Output**, and **Processing & appearance**:
+In **Advanced mode** the basic options mirror the CLI presets directly, as a panel of button
+rows grouped under four quiet headings — **Basic options**, **Speed & silence**, **Output**, and
+**Processing & appearance**:
+
+- **Silence speedup** offers the three shortcuts **No speedup**, **Silence ×5** and
+  **Silence ×10**, each setting the speed and threshold knobs below in one click.
+- **Resolution** offers **480p**, **720p** and **orig**. `orig` keeps the source resolution
+  untouched (the CLI's `--no-small`); the other two match `--small --480` and `--small --720`.
+  This replaces the former **Small video** and **480p** checkboxes.
 
 - **Silent** and **Sounded** speed each offer four preset buttons (silent: 1, 2, 5, 10; sounded:
   1, 1.3, 1.5, 2) plus a trailing **…** button. Clicking **…** swaps it for an inline entry —

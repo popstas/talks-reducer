@@ -29,7 +29,8 @@ Look at the commit history to get more examples.
 - **Basic options** — the panel (`layout.py`, inside `options_frame`) renders its choice-style
   settings as `SegmentedChoice` (`talks_reducer/gui/segmented.py`) — one `ttk.Button` per option,
   styled `Segment.TButton`/`SelectedSegment.TButton` (added in `theme.py` alongside
-  `Heading.TLabel`, used for the panel's three group headings: **Speed & silence**, **Output**,
+  `Heading.TLabel`, used for the panel's four group headings: **Basic options** (holding **Silence
+speedup** and **Resolution**), **Speed & silence**, **Output**,
   **Processing & appearance**) — instead of the `tk.Scale` sliders it used to use. **Silent**
   speed offers 1/2/5/10 (custom 1–10, default 5); **Sounded** speed offers 1/1.3/1.5/2 (custom
   0.75–10, default 1 — 1.3 and 1.5 are newly reachable now that the old slider's 0.25 quantization
@@ -61,7 +62,16 @@ Look at the commit history to get more examples.
   `variable=None`); **Silence ×5** (`gui.reset_basic_button`) used to disable itself when the
   sliders already matched the defaults, but a button rendered as "selected" must not
   simultaneously be disabled, so it no longer does — clicking it always re-applies the defaults.
-- **Small video** — toggles the `--small` preset used by the CLI.
+- **Resolution** — a `SegmentedChoice` (**480p** / **720p** / **orig**) in the **Basic options**
+  group, replacing the old **Small video** + **480p** checkboxes. `orig` leaves the source
+  resolution untouched and corresponds to the CLI's `--no-small`. The control is a *projection*:
+  `small_var`/`small_480_var` remain the source of truth that presets, the seeded-launch CLI
+  flags and `_collect_arguments` read, so clicking a button fans onto them
+  (`layout.apply_resolution_choice`) and a trace on both booleans writes `resolution_var` back
+  (`layout.resolution_from_small`) — that is what makes an applied preset move the buttons.
+  Because the control lives inside `basic_options_frame`, which Simple mode hides, a Simple-mode
+  session with **zero** presets now has no resolution control at all (the checkboxes used to
+  cover that case).
 - **Open after convert** — controls whether the exported file is revealed in
   your system file manager as soon as each job finishes.
 - **Cut video** — an **Advanced-only** checkbox (`apply_simple_mode` hides it and

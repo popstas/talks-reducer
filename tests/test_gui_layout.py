@@ -1384,8 +1384,6 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
         _simple_presets=list(_TEST_PRESETS),
-        small_check=make_widget_mock(),
-        small_480_check=make_widget_mock(),
         open_output_check=make_widget_mock(),
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
@@ -1405,10 +1403,8 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     gui.button_frame.grid_remove.assert_called_once()
     gui.advanced_frame.grid_remove.assert_called_once()
     gui.run_after_drop_var.set.assert_called_once_with(True)
-    # With a preset available the manual resolution checkboxes are hidden so the
-    # preset drives resolution.
-    gui.small_check.pack_forget.assert_called_once()
-    gui.small_480_check.pack_forget.assert_called_once()
+    # With a preset available, Open output rides in the preset row instead.
+    gui.open_output_check.pack_forget.assert_called_once()
     # Cut video is hidden in Simple mode regardless of the persisted flag.
     gui.cut_check.pack_forget.assert_called_once()
     gui.cut_panel.grid_remove.assert_called_once()
@@ -1435,8 +1431,6 @@ def test_apply_simple_mode_simple_branch_keeps_checkboxes_without_presets(monkey
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
         _simple_presets=[],
-        small_check=make_widget_mock(),
-        small_480_check=make_widget_mock(),
         open_output_check=make_widget_mock(),
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
@@ -1446,16 +1440,10 @@ def test_apply_simple_mode_simple_branch_keeps_checkboxes_without_presets(monkey
 
     layout.apply_simple_mode(gui, initial=True)
 
-    # The preset selector is hidden when empty, so the manual checkboxes remain
-    # the only resolution control and must stay packed (not forgotten).
-    gui.small_check.pack_forget.assert_not_called()
-    gui.small_480_check.pack_forget.assert_not_called()
-    gui.small_check.pack.assert_called_once_with(
-        side="left", before=gui.open_output_check
-    )
-    gui.small_480_check.pack.assert_called_once_with(
-        side="left", padx=(65, 0), before=gui.open_output_check
-    )
+    # The preset row is hidden when empty, so this copy of Open output is the
+    # only one left and must stay packed rather than forgotten.
+    gui.open_output_check.pack_forget.assert_not_called()
+    gui.open_output_check.pack.assert_called_once_with(side="left")
 
 
 def test_apply_simple_mode_full_branch(monkeypatch):
@@ -1473,8 +1461,6 @@ def test_apply_simple_mode_full_branch(monkeypatch):
         advanced_frame=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: True),
-        small_check=make_widget_mock(),
-        small_480_check=make_widget_mock(),
         open_output_check=make_widget_mock(),
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
@@ -1494,9 +1480,8 @@ def test_apply_simple_mode_full_branch(monkeypatch):
     gui.activity_frame.grid_remove.assert_not_called()
     gui.button_frame.grid.assert_called_once()
     gui.advanced_frame.grid.assert_called_once()
-    # Advanced restores the manual resolution checkboxes ahead of Open output.
-    gui.small_check.pack.assert_called_once()
-    gui.small_480_check.pack.assert_called_once()
+    # Advanced restores its own Open output copy.
+    gui.open_output_check.pack.assert_called_once()
     # Advanced restores the Cut video checkbox; the panel shows because cut is on.
     gui.cut_check.pack.assert_called_once()
     gui.cut_panel.grid.assert_called_once()
@@ -2519,3 +2504,67 @@ def test_sounded_speed_custom_range_reaches_ten():
     assert segmented.parse_custom("4", spec) == 4.0
     assert segmented.parse_custom("99", spec) == 10.0
     assert segmented.parse_custom("0.1", spec) == 0.75
+
+
+def test_resolution_buttons_replace_the_small_checkboxes():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    assert not hasattr(gui, "small_check")
+    assert not hasattr(gui, "small_480_check")
+    assert [button.kwargs["text"] for button in gui.resolution_control.buttons] == [
+        "480p",
+        "720p",
+        "orig",
+    ]
+
+
+@pytest.mark.parametrize(
+    "index, expected_small, expected_480",
+    [(0, True, True), (1, True, False), (2, False, False)],
+)
+def test_clicking_a_resolution_button_drives_the_small_vars(
+    index, expected_small, expected_480
+):
+    """The booleans stay the source of truth that presets and the CLI read."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    gui.resolution_control.buttons[index].kwargs["command"]()
+
+    assert gui.small_var.get() is expected_small
+    assert gui.small_480_var.get() is expected_480
+
+
+def test_applying_a_preset_moves_the_resolution_buttons():
+    """A preset writes the booleans; the buttons must follow them."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    layout.apply_preset_to_gui(gui, Preset(name="tiny", resolution="480p"))
+    assert gui.resolution_var.get() == "480p"
+
+    layout.apply_preset_to_gui(gui, Preset(name="full", resolution="1080p"))
+    assert gui.resolution_var.get() == "1080p"
+
+
+def test_basic_options_group_leads_the_panel():
+    """The panel opens with a Basic options group holding speedup + resolution."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    headings = [
+        widget.kwargs["text"]
+        for widget in gui.ttk.Label.created
+        if widget.kwargs.get("style") == "Heading.TLabel"
+    ]
+    assert headings[0] == "BASIC OPTIONS"
+    assert headings == [
+        "BASIC OPTIONS",
+        "SPEED & SILENCE",
+        "OUTPUT",
+        "PROCESSING & APPEARANCE",
+    ]

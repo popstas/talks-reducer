@@ -54,6 +54,44 @@ def format_activity_line(entry: dict) -> str:
     return f"{clock}  {client_ip}  {action}".rstrip()
 
 
+DEFAULT_RESOLUTION = "1080p"
+
+# "orig" rather than "1080p": the pipeline leaves the source resolution alone in
+# this state, and a 1440p or 4K source is not downscaled to 1080p.
+RESOLUTION_OPTIONS = (
+    Option("480p", "480p"),
+    Option("720p", "720p"),
+    Option(DEFAULT_RESOLUTION, "orig"),
+)
+
+
+def resolution_from_small(gui: "TalksReducerGUI") -> str:
+    """Collapse ``small_var``/``small_480_var`` into the resolution tri-state."""
+
+    if gui.small_var.get():
+        return "480p" if gui.small_480_var.get() else "720p"
+    return DEFAULT_RESOLUTION
+
+
+def apply_resolution_choice(gui: "TalksReducerGUI", value: str) -> None:
+    """Fan a resolution choice back onto the two boolean vars behind it.
+
+    Those booleans remain the source of truth — presets, the CLI seed and
+    ``_collect_arguments`` all read them — so the buttons are a projection of
+    them rather than a third independent piece of state.
+    """
+
+    if value == DEFAULT_RESOLUTION:
+        gui.small_var.set(False)
+        gui.small_480_var.set(False)
+    elif value == "480p":
+        gui.small_var.set(True)
+        gui.small_480_var.set(True)
+    else:
+        gui.small_var.set(True)
+        gui.small_480_var.set(False)
+
+
 BASIC_PRESETS: dict[str, dict[str, float]] = {
     "compress_only": {
         "silent_speed": 1.0,
@@ -171,13 +209,8 @@ def advanced_preset_values(gui: "TalksReducerGUI") -> dict:
     :func:`~talks_reducer.presets.Preset`.
     """
 
-    if gui.small_var.get():
-        resolution = "480p" if gui.small_480_var.get() else "720p"
-    else:
-        resolution = "1080p"
-
     return {
-        "resolution": resolution,
+        "resolution": resolution_from_small(gui),
         "silent_speed": gui.silent_speed_var.get(),
         "sounded_speed": gui.sounded_speed_var.get(),
         "silent_threshold": gui.silent_threshold_var.get(),
@@ -675,24 +708,12 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     checkbox_row1 = gui.ttk.Frame(checkbox_frame)
     checkbox_row1.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
-    gui.small_check = gui.ttk.Checkbutton(
-        checkbox_row1,
-        text="Small video",
-        variable=gui.small_var,
-    )
-    gui.small_check.pack(side=gui.tk.LEFT)
-    gui.small_480_check = gui.ttk.Checkbutton(
-        checkbox_row1,
-        text="480p",
-        variable=gui.small_480_var,
-    )
-    gui.small_480_check.pack(side=gui.tk.LEFT, padx=(65, 0))
     gui.open_output_check = gui.ttk.Checkbutton(
         checkbox_row1,
         text="Open output",
         variable=gui.open_after_convert_var,
     )
-    gui.open_output_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+    gui.open_output_check.pack(side=gui.tk.LEFT)
 
     gui.cut_check = gui.ttk.Checkbutton(
         checkbox_row1,
@@ -787,12 +808,15 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             "write", lambda *_: refresh_advanced_preset_selection(gui)
         )
 
+    # The Labelframe keeps an empty title: the panel's four groups each carry
+    # their own heading now, so a Labelframe caption would name the first group
+    # twice. The macro row it used to host moved into that group as a normal
+    # labelled row.
     basic_label_container = gui.ttk.Frame(gui.options_frame)
-    basic_label = gui.ttk.Label(basic_label_container, text="Basic options")
+    basic_label = gui.ttk.Label(basic_label_container, text="")
     basic_label.pack(side=gui.tk.LEFT)
 
-    gui.basic_presets_frame = gui.ttk.Frame(basic_label_container)
-    gui.basic_presets_frame.pack(side=gui.tk.LEFT, padx=(12, 0))
+    gui.basic_presets_frame = gui.ttk.Frame(gui.options_frame)
 
     gui.basic_preset_control = SegmentedChoice(
         gui.basic_presets_frame,
@@ -806,7 +830,6 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=None,
         on_change=lambda value: gui._apply_basic_preset(value),
     )
-    gui.basic_preset_control.frame.pack(side=gui.tk.LEFT)
     gui.reset_basic_button = gui.basic_preset_control.buttons[1]
     gui.basic_preset_buttons = {
         "compress_only": gui.basic_preset_control.buttons[0],
@@ -822,7 +845,39 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.basic_options_frame.columnconfigure(1, weight=1)
 
-    add_group_heading(gui, gui.basic_options_frame, "Speed & silence", row=0)
+    add_group_heading(gui, gui.basic_options_frame, "Basic options", row=0)
+
+    gui.ttk.Label(gui.basic_options_frame, text="Silence speedup").grid(
+        row=1, column=0, sticky="w", pady=(8, 0)
+    )
+    gui.basic_presets_frame.grid(row=1, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    gui.basic_preset_control.frame.pack(side=gui.tk.LEFT)
+
+    gui.ttk.Label(gui.basic_options_frame, text="Resolution").grid(
+        row=2, column=0, sticky="w", pady=(8, 0)
+    )
+    resolution_choice = gui.ttk.Frame(gui.basic_options_frame)
+    resolution_choice.grid(row=2, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    gui.resolution_var = gui.tk.StringVar(value=resolution_from_small(gui))
+    gui.resolution_control = SegmentedChoice(
+        resolution_choice,
+        list(RESOLUTION_OPTIONS),
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=gui.resolution_var,
+        default_value=DEFAULT_RESOLUTION,
+        on_change=lambda value: apply_resolution_choice(gui, value),
+    )
+    gui.resolution_control.frame.pack(side=gui.tk.LEFT)
+    # ``small_var``/``small_480_var`` stay the source of truth — presets, the
+    # CLI seed and ``_collect_arguments`` all read them — so the buttons follow
+    # whatever writes those, and writing them back here would loop.
+    for _small_var in (gui.small_var, gui.small_480_var):
+        _small_var.trace_add(
+            "write", lambda *_: gui.resolution_var.set(resolution_from_small(gui))
+        )
+
+    add_group_heading(gui, gui.basic_options_frame, "Speed & silence", row=3)
 
     gui.silent_speed_var = gui.tk.DoubleVar(
         value=min(max(gui.preferences.get_float("silent_speed", 5.0), 1.0), 10.0)
@@ -832,7 +887,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Silent",
         gui.silent_speed_var,
-        row=1,
+        row=4,
         setting_key="silent_speed",
         options=[
             Option(1.0, "1"),
@@ -858,7 +913,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Sounded",
         gui.sounded_speed_var,
-        row=2,
+        row=5,
         setting_key="sounded_speed",
         options=[
             Option(1.0, "1"),
@@ -881,7 +936,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Threshold",
         gui.silent_threshold_var,
-        row=3,
+        row=6,
         setting_key="silent_threshold",
         options=[
             Option(0.01, "0.01"),
@@ -898,13 +953,13 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.threshold_help_button = threshold_control.help_button
 
-    add_group_heading(gui, gui.basic_options_frame, "Output", row=4)
+    add_group_heading(gui, gui.basic_options_frame, "Output", row=7)
 
     gui.ttk.Label(gui.basic_options_frame, text="Codec").grid(
-        row=5, column=0, sticky="w", pady=(8, 0)
+        row=8, column=0, sticky="w", pady=(8, 0)
     )
     codec_choice = gui.ttk.Frame(gui.basic_options_frame)
-    codec_choice.grid(row=5, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    codec_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=(8, 0))
     gui.video_codec_control = SegmentedChoice(
         codec_choice,
         [
@@ -926,13 +981,13 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(12, 0))
 
-    add_group_heading(gui, gui.basic_options_frame, "Processing & appearance", row=6)
+    add_group_heading(gui, gui.basic_options_frame, "Processing & appearance", row=9)
 
     gui.ttk.Label(gui.basic_options_frame, text="Mode").grid(
-        row=7, column=0, sticky="w", pady=(8, 0)
+        row=10, column=0, sticky="w", pady=(8, 0)
     )
     mode_choice = gui.ttk.Frame(gui.basic_options_frame)
-    mode_choice.grid(row=7, column=1, sticky="w", pady=(8, 0))
+    mode_choice.grid(row=10, column=1, sticky="w", pady=(8, 0))
     gui.processing_mode_control = SegmentedChoice(
         mode_choice,
         [Option("local", "Local"), Option("remote", "Remote")],
@@ -973,16 +1028,16 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text=format_local_server_url(local_server_url) if server_managed else "",
     )
     gui.local_server_url_label.grid(
-        row=7, column=2, sticky="w", padx=(8, 0), pady=(8, 0)
+        row=10, column=2, sticky="w", padx=(8, 0), pady=(8, 0)
     )
     if not (server_managed and local_server_url):
         gui.local_server_url_label.grid_remove()
 
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
-        row=9, column=0, sticky="w", pady=(8, 0)
+        row=11, column=0, sticky="w", pady=(8, 0)
     )
     theme_choice = gui.ttk.Frame(gui.basic_options_frame)
-    theme_choice.grid(row=9, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    theme_choice.grid(row=11, column=1, columnspan=2, sticky="w", pady=(8, 0))
     gui.theme_control = SegmentedChoice(
         theme_choice,
         [Option("os", "OS"), Option("light", "Light"), Option("dark", "Dark")],
@@ -1702,33 +1757,15 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui, "_simple_presets", None
         ):
             gui.simple_preset_frame.grid()
-        # Resolution is driven read-only by the selected preset in Simple mode,
-        # so the manual Small video / 480p checkboxes are hidden while a preset
-        # exists (they would otherwise silently override the preset while it still
-        # shows selected). When ``load_presets()`` returns an empty list the
-        # selector is hidden, so the checkboxes must stay visible as the only
-        # resolution control Simple mode has left.
-        if getattr(gui, "_simple_presets", None):
-            if hasattr(gui, "small_check"):
-                gui.small_check.pack_forget()
-            if hasattr(gui, "small_480_check"):
-                gui.small_480_check.pack_forget()
-            # Open output rides inside the preset row (shown via
-            # ``simple_preset_frame``); hide the full-layout copy so it does not
-            # also appear on its own line.
-            if hasattr(gui, "open_output_check"):
+        # Open output rides inside the preset row (shown via
+        # ``simple_preset_frame``) whenever presets exist, so the full-layout
+        # copy is hidden to keep it off its own line. With no presets that row
+        # is gone, and this copy is the only Open output left.
+        if hasattr(gui, "open_output_check"):
+            if getattr(gui, "_simple_presets", None):
                 gui.open_output_check.pack_forget()
-        else:
-            # No preset selector, so the preset row is hidden; keep Open output in
-            # its full-layout row alongside the manual resolution checkboxes.
-            if hasattr(gui, "open_output_check"):
-                gui.open_output_check.pack(side=gui.tk.LEFT, padx=(65, 0))
-            if hasattr(gui, "small_check") and hasattr(gui, "open_output_check"):
-                gui.small_check.pack(side=gui.tk.LEFT, before=gui.open_output_check)
-            if hasattr(gui, "small_480_check") and hasattr(gui, "open_output_check"):
-                gui.small_480_check.pack(
-                    side=gui.tk.LEFT, padx=(65, 0), before=gui.open_output_check
-                )
+            else:
+                gui.open_output_check.pack(side=gui.tk.LEFT)
         # Cut video is an Advanced-only feature: hide its checkbox and panel.
         if hasattr(gui, "cut_check"):
             gui.cut_check.pack_forget()
@@ -1759,13 +1796,7 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
         # then pack the manual resolution checkboxes ahead of it so the full layout
         # keeps its original Small video / 480p / Open output order.
         if hasattr(gui, "open_output_check"):
-            gui.open_output_check.pack(side=gui.tk.LEFT, padx=(65, 0))
-        if hasattr(gui, "small_check") and hasattr(gui, "open_output_check"):
-            gui.small_check.pack(side=gui.tk.LEFT, before=gui.open_output_check)
-        if hasattr(gui, "small_480_check") and hasattr(gui, "open_output_check"):
-            gui.small_480_check.pack(
-                side=gui.tk.LEFT, padx=(65, 0), before=gui.open_output_check
-            )
+            gui.open_output_check.pack(side=gui.tk.LEFT)
         # Restore the Advanced-only Cut video checkbox and (if enabled) its panel.
         if hasattr(gui, "cut_check"):
             gui.cut_check.pack(side=gui.tk.LEFT, padx=(65, 0))

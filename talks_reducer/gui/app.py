@@ -409,7 +409,6 @@ class TalksReducerGUI:
 
         self._build_layout()
         layout_helpers.seed_initial_preset(self)
-        self._update_small_variant_state()
         self._apply_simple_mode(initial=True)
         self._apply_status_style(self._status_state)
         self._refresh_theme()
@@ -1259,9 +1258,6 @@ class TalksReducerGUI:
 
     def _on_small_480_change(self, *_: object) -> None:
         self.preference_controller.on_small_480_change(*_)
-
-    def _update_small_variant_state(self) -> None:
-        self.preference_controller.update_small_variant_state()
 
     def _on_open_after_convert_change(self, *_: object) -> None:
         self.preference_controller.on_open_after_convert_change(*_)
