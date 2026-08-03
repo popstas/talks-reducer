@@ -682,6 +682,40 @@ def _build_layout_with_cut(monkeypatch, *, cut_enabled: bool):
     return gui
 
 
+def test_simple_mode_open_output_and_cut_share_one_row():
+    """The three checkboxes sit in one packed row, Simple mode first.
+
+    Simple mode leads because ``apply_simple_mode`` re-``pack``s the other two
+    when leaving Simple mode, and a re-packed widget lands at the end of the
+    row — a widget packed after them would move on every toggle.
+    """
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    row = gui.simple_mode_check.args[0]
+    assert gui.open_output_check.args[0] is row
+    assert gui.cut_check.args[0] is row
+
+    # Each checkbox is packed immediately after it is created, so creation order
+    # among this row's children is the left-to-right order Tk lays them out in.
+    siblings = [
+        widget
+        for widget in gui.ttk.Checkbutton.created
+        if widget.args and widget.args[0] is row
+    ]
+    assert [widget.kwargs["text"] for widget in siblings] == [
+        "Simple mode",
+        "Open output",
+        "Cut video",
+    ]
+    assert all(
+        call[1].get("side") == "left"
+        for widget in siblings
+        for call in widget.pack_calls
+    )
+
+
 def test_build_cut_panel_constructs_widgets(monkeypatch):
     gui = _build_layout_with_cut(monkeypatch, cut_enabled=True)
 
@@ -1443,7 +1477,9 @@ def test_apply_simple_mode_simple_branch_keeps_checkboxes_without_presets(monkey
     # The preset row is hidden when empty, so this copy of Open output is the
     # only one left and must stay packed rather than forgotten.
     gui.open_output_check.pack_forget.assert_not_called()
-    gui.open_output_check.pack.assert_called_once_with(side="left")
+    gui.open_output_check.pack.assert_called_once_with(
+        side="left", padx=layout.CHECKBOX_ROW_GAP
+    )
 
 
 def test_apply_simple_mode_full_branch(monkeypatch):
@@ -2240,6 +2276,35 @@ def test_build_layout_creates_advanced_preset_strip(monkeypatch):
     )
     # The strip is created and gridded (visible in the full layout).
     assert gui.advanced_preset_frame.grid_calls
+
+
+def test_basic_options_panel_has_no_empty_caption_gap():
+    """The panel is a plain Frame, so nothing reserves a blank caption line.
+
+    An empty ``labelwidget`` on the old Labelframe reserved a full text line
+    above the border, which — together with the frame's own top padding — is
+    what left a wide gap between the Preset strip and "BASIC OPTIONS".
+    """
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    assert gui.basic_options_frame.widget_type == "Frame"
+    assert "labelwidget" not in gui.basic_options_frame.kwargs
+    assert gui.basic_options_frame.grid_calls[0][1]["pady"] == (0, 0)
+
+
+def test_preset_options_carry_a_summary_tooltip():
+    """Each preset button explains what it applies; "Custom" says why it is on."""
+
+    options = layout.preset_options(_TEST_PRESETS)
+
+    assert [option.tooltip for option in options[:-1]] == [
+        layout.presets.describe_preset(preset) for preset in _TEST_PRESETS
+    ]
+    assert "Resolution: 720p" in options[0].tooltip
+    assert options[-1].value == CUSTOM_LABEL
+    assert options[-1].tooltip
 
 
 def test_build_layout_registers_segmented_updaters():

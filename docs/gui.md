@@ -77,9 +77,11 @@ read-only everywhere: Simple mode, the Web UI, the OBS dock, and the CLI's `--pr
 Presets are **sparse**: a preset stores only the settings you choose, so applying it changes
 just those and leaves everything else as it is. Presets are stored in the shared
 `settings.json`, so a preset created on the desktop GUI also appears in the Web UI and dock
-served from that machine. On first launch three defaults are seeded: **720p 10x speedup H.264**,
-**480p 10x speedup H.265**, and **720p no speedup H.264**. Each surface opens on the preset you
-used last (or the first preset when none is remembered).
+served from that machine. On first launch five defaults are seeded — **Compatible** (720p,
+silence ×10, h.264), **Optimal** (the same in h.265), **Smallest** (480p h.265), **Compress**
+(720p h.264, no speedup) and **mp3** (audio only, no resolution). Hover a preset button to see
+exactly which settings it applies. Each surface opens on the preset you used last (or the first
+preset when none is remembered).
 
 **Simple mode** exposes only a **Preset** dropdown; selecting a preset applies its fields and
 persists the choice (it is re-selected on the next launch).

@@ -44,6 +44,25 @@ PRESET_VALUE_FIELDS = (
     "video_codec",
 )
 
+# Human-readable names for the value fields, shared by the Save/Update dialog's
+# checkboxes and the preset summaries shown as tooltips.
+PRESET_FIELD_LABELS = {
+    "resolution": "Resolution",
+    "silent_speed": "Silent speed",
+    "sounded_speed": "Sounded speed",
+    "silent_threshold": "Silent threshold",
+    "video_codec": "Codec",
+}
+
+# Display names for the codec identifiers stored in a preset, matching the
+# labels on the GUI's Codec buttons.
+CODEC_LABELS = {
+    "h264": "h.264",
+    "hevc": "h.265",
+    "av1": "av1",
+    "mp3": "mp3",
+}
+
 
 @dataclass(frozen=True)
 class Preset:
@@ -112,10 +131,16 @@ class Preset:
         }
 
 
-# The three seeded defaults written on first run when ``presets`` is absent.
+# The seeded defaults written on first run when ``presets`` is absent. Named for
+# the outcome rather than the settings ("Compatible", not "720p 10x speedup
+# H.264") — the values are one hover away in the GUI (:func:`describe_preset`),
+# so the name is free to say what the preset is *for*. "Compatible" leads
+# because it is the first-run default on every surface and h.264 plays
+# everywhere. "mp3" is deliberately sparse: it carries no resolution, so
+# extracting audio leaves the video settings alone.
 DEFAULT_PRESETS: List[Preset] = [
     Preset(
-        name="720p 10x speedup H.264",
+        name="Compatible",
         resolution="720p",
         silent_speed=10.0,
         sounded_speed=1.0,
@@ -123,7 +148,15 @@ DEFAULT_PRESETS: List[Preset] = [
         video_codec="h264",
     ),
     Preset(
-        name="480p 10x speedup H.265",
+        name="Optimal",
+        resolution="720p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="hevc",
+    ),
+    Preset(
+        name="Smallest",
         resolution="480p",
         silent_speed=10.0,
         sounded_speed=1.0,
@@ -131,12 +164,19 @@ DEFAULT_PRESETS: List[Preset] = [
         video_codec="hevc",
     ),
     Preset(
-        name="720p no speedup H.264",
+        name="Compress",
         resolution="720p",
         silent_speed=1.0,
         sounded_speed=1.0,
         silent_threshold=0.01,
         video_codec="h264",
+    ),
+    Preset(
+        name="mp3",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="mp3",
     ),
 ]
 
@@ -312,6 +352,46 @@ def preset_to_cli_args(preset: Preset) -> List[str]:
         args.extend(["--video-codec", str(preset.video_codec)])
 
     return args
+
+
+def describe_preset_fields(preset: Preset) -> List[str]:
+    """Return one ``"Label: value"`` line per field *preset* actually applies.
+
+    Sparse presets list only their present fields, so the summary doubles as a
+    statement of what the preset leaves untouched. Speeds are rendered as
+    ``10×`` and the codec identifier is mapped to its GUI label (``hevc`` reads
+    as ``h.265``), matching the human-readable style of the Save-preset dialog
+    rather than raw CLI flags.
+    """
+
+    lines: List[str] = []
+    for field in PRESET_VALUE_FIELDS:
+        value = getattr(preset, field)
+        if value is None:
+            continue
+        if field in ("silent_speed", "sounded_speed"):
+            rendered = f"{_format_number(value)}×"
+        elif field == "silent_threshold":
+            rendered = _format_number(value)
+        elif field == "video_codec":
+            rendered = CODEC_LABELS.get(str(value), str(value))
+        else:
+            rendered = str(value)
+        lines.append(f"{PRESET_FIELD_LABELS[field]}: {rendered}")
+    return lines
+
+
+def describe_preset(preset: Preset) -> str:
+    """Return the multi-line summary of *preset* shown as a hover tooltip.
+
+    A preset with no value fields yields an explicit note rather than an empty
+    string, so the tooltip never renders as a blank bubble.
+    """
+
+    lines = describe_preset_fields(preset)
+    if not lines:
+        return "Applies no settings"
+    return "\n".join(lines)
 
 
 def match_preset(

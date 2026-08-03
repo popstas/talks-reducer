@@ -34,8 +34,12 @@ are **sparse**: every value field on `Preset` is `Optional`, `to_dict()` stores 
 the fields that are set, and `preset.present_fields()` reports them. Apply/CLI/match
 all skip absent fields (`apply_preset_to_gui`, `_apply_preset_to_args`,
 `preset_to_web_controls` return sparse control maps, `match_preset` compares only
-present fields — a zero-field preset never matches). `load_presets()` seeds three
-fully-populated `DEFAULT_PRESETS` on first run when the key is absent; an emptied
+present fields — a zero-field preset never matches). `load_presets()` seeds five
+`DEFAULT_PRESETS` on first run when the key is absent — **Compatible** (720p ×10 h.264, the
+first-run default on every surface), **Optimal** (720p ×10 h.265), **Smallest** (480p ×10
+h.265), **Compress** (720p h.264, silence ×1) and the deliberately sparse **mp3** (no
+resolution, so it leaves the video settings alone). They are named for the outcome rather
+than the settings, since the values are one hover away (`describe_preset`). An emptied
 list persists as `[]`. Each surface opens on the remembered `selected_preset`, else
 the first preset (`layout.seed_initial_preset`, `server.resolve_initial_web_preset`,
 dock `populatePresetDropdown`). **Simple mode** replaces the old
@@ -50,7 +54,13 @@ editing any knob flips the selection to **"Custom"** via `presets.match_preset`.
 buttons rather than a dropdown so every preset is visible at once; **Custom** is a real option in
 it, and because presets can be added, renamed, reordered or deleted while the window is open,
 `refresh_preset_dropdowns` calls `advanced_preset_control.set_options(preset_options(...))`, which
-destroys and rebuilds the buttons instead of reconfiguring a `values` list. Simple mode keeps its
+destroys and rebuilds the buttons instead of reconfiguring a `values` list. Every preset button
+carries a hover summary of what the preset applies (`presets.describe_preset` →
+`Option.tooltip`) — one `Label: value` line per **present** field, so a sparse preset visibly
+lists only the settings it controls; **Custom**'s tooltip explains why it is selected. The
+labels come from `presets.PRESET_FIELD_LABELS`/`CODEC_LABELS`, which
+`preset_dialog.FIELD_SPECS` also derives from, so the tooltip and the Save-dialog checkboxes
+cannot drift apart. Simple mode keeps its
 `ttk.Combobox` — its 470px-wide window has no room for a row of preset-name buttons.
 Save/Update open `preset_dialog.open_save_preset_dialog` — a name field plus a
 checkbox per param (Create-link style) returning `(name, selected_fields)`;
@@ -69,7 +79,12 @@ from the default preset and persists selection on change. The OBS dock serves
 **Custom** (`dock.html`, `obsDock.preset` `localStorage`), sending a `preset` field
 that `dock_server.build_args` maps to `--preset NAME`. The dock's controls use
 squared 4px corners to match OBS and cap the preset select width for a single-line row.
-- **Basic options** — the panel (`layout.py`, inside `options_frame`) renders its choice-style
+- **Basic options** — the panel (`layout.py`, inside `options_frame`) is a plain `ttk.Frame`
+sitting flush under the Preset strip: it used to be a `ttk.Labelframe` whose caption was left
+empty once each group grew its own heading, but an empty `labelwidget` still reserves a full
+text line, which — with the frame's own `pady` and the first heading's top pad — is what left a
+wide gap under the presets. `add_group_heading` therefore takes a `pady` override and the first
+heading passes `(2, 2)`. The panel renders its choice-style
 settings as `SegmentedChoice` (`talks_reducer/gui/segmented.py`) — one `ttk.Button` per option,
 styled `Segment.TButton`/`SelectedSegment.TButton` (added in `theme.py` alongside
 `Heading.TLabel`, used for the panel's four group headings: **Basic options** (holding **Silence
@@ -123,7 +138,14 @@ Because the control lives inside `basic_options_frame`, which Simple mode hides,
 session with **zero** presets now has no resolution control at all (the checkboxes used to
 cover that case).
 - **Open after convert** — controls whether the exported file is revealed in
-your system file manager as soon as each job finishes.
+your system file manager as soon as each job finishes. Its checkbox shares one packed row
+(`checkbox_row1`) with **Simple mode** and **Cut video**, gap `layout.CHECKBOX_ROW_GAP`.
+**Simple mode** is packed *first* because it is the only one of the three never hidden:
+`apply_simple_mode` `pack_forget`s the other two and re-`pack`s them on the way back, and a
+re-packed widget rejoins at the **end** of the row — so anything packed behind them would
+shift on every toggle, and the two restore calls must stay in Open-output-then-Cut-video
+order. Every `pack` of those two (build *and* both restore paths) passes the same
+`CHECKBOX_ROW_GAP`, or a toggle silently collapses the spacing.
 - **Cut video** — an **Advanced-only** checkbox (`apply_simple_mode` hides
 `cut_check`/`cut_panel` in Simple mode) that reveals a collapsible trim panel
 with two linked range sliders (start ≤ end, range `0..duration`), each paired

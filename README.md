@@ -86,7 +86,7 @@ talks-reducer --480 input.mp4                              # scale down to 480p 
 talks-reducer --video-codec mp3 talk.mp4                   # export audio only, as .mp3
 talks-reducer --cut-start 00:00:10 --cut-end 00:01:00 demo.mp4  # keep only 10s–60s
 talks-reducer --url http://localhost:9005 demo.mp4         # process on a remote server
-talks-reducer --preset "480p 10x speedup H.265" demo.mp4   # apply a saved preset
+talks-reducer --preset "Smallest" demo.mp4                 # apply a saved preset
 talks-reducer --list-presets                               # print the saved preset names
 ```
 

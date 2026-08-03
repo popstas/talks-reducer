@@ -54,6 +54,11 @@ def format_activity_line(entry: dict) -> str:
     return f"{clock}  {client_ip}  {action}".rstrip()
 
 
+# Gap between the checkboxes sharing the Simple mode / Open output / Cut video
+# row. Shared with ``apply_simple_mode``, which re-packs two of the three when
+# leaving Simple mode and would otherwise restore them flush against each other.
+CHECKBOX_ROW_GAP = (24, 0)
+
 # Silence is sped up 10x out of the box: every row is ordered strongest-first,
 # and the default is the first button so a fresh install starts there.
 DEFAULT_SILENT_SPEED = 10.0
@@ -306,10 +311,22 @@ def preset_options(presets_list) -> list:
     ``CUSTOM_LABEL`` is a real option rather than a fallback so the row can show
     "no stored preset matches" the same way it shows a match — it is what
     :func:`refresh_advanced_preset_selection` writes into ``advanced_preset_var``.
+    Each preset button carries a hover summary of the settings it applies (see
+    :func:`~talks_reducer.presets.describe_preset`), since the name alone says
+    nothing about the values behind it.
     """
 
-    options = [Option(preset.name, preset.name) for preset in presets_list]
-    options.append(Option(presets.CUSTOM_LABEL, presets.CUSTOM_LABEL))
+    options = [
+        Option(preset.name, preset.name, presets.describe_preset(preset))
+        for preset in presets_list
+    ]
+    options.append(
+        Option(
+            presets.CUSTOM_LABEL,
+            presets.CUSTOM_LABEL,
+            "The current settings match no saved preset",
+        )
+    )
     return options
 
 
@@ -710,14 +727,27 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     if not gui._simple_presets:
         simple_row.grid_remove()
 
+    # Simple mode, Open output and Cut video share one row. Simple mode leads
+    # because it is the only one of the three that is never hidden: the other two
+    # are ``pack_forget``-ed in Simple mode and re-packed on the way back, and a
+    # re-``pack``ed widget goes to the end of the row — so anything packed after
+    # them would jump position on every toggle.
     checkbox_row1 = gui.ttk.Frame(checkbox_frame)
     checkbox_row1.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
+    gui.simple_mode_check = gui.ttk.Checkbutton(
+        checkbox_row1,
+        text="Simple mode",
+        variable=gui.simple_mode_var,
+        command=gui._toggle_simple_mode,
+    )
+    gui.simple_mode_check.pack(side=gui.tk.LEFT)
+
     gui.open_output_check = gui.ttk.Checkbutton(
         checkbox_row1,
         text="Open output",
         variable=gui.open_after_convert_var,
     )
-    gui.open_output_check.pack(side=gui.tk.LEFT)
+    gui.open_output_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
 
     gui.cut_check = gui.ttk.Checkbutton(
         checkbox_row1,
@@ -725,17 +755,9 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=gui.cut_enabled_var,
         command=gui._toggle_cut_panel,
     )
-    gui.cut_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+    gui.cut_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
 
     build_cut_panel(gui, checkbox_frame, row=2)
-
-    gui.simple_mode_check = gui.ttk.Checkbutton(
-        checkbox_frame,
-        text="Simple mode",
-        variable=gui.simple_mode_var,
-        command=gui._toggle_simple_mode,
-    )
-    gui.simple_mode_check.grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
     # The whole simple row (dropdown + Open output) shows/hides together.
     gui.simple_preset_frame = simple_row
@@ -748,7 +770,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     # Save as… / Update / Delete. It authors the shared preset store and is
     # hidden in Simple mode (where the read-only Simple dropdown applies instead).
     advanced_preset_frame = gui.ttk.Frame(gui.options_frame)
-    advanced_preset_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
+    advanced_preset_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 6))
     gui.ttk.Label(advanced_preset_frame, text="Preset:").pack(
         side=gui.tk.LEFT, padx=(0, 2)
     )
@@ -812,23 +834,22 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             "write", lambda *_: refresh_advanced_preset_selection(gui)
         )
 
-    # The Labelframe keeps an empty title: the panel's four groups each carry
-    # their own heading now, so a Labelframe caption would name the first group
-    # twice. The macro row it used to host moved into that group as a normal
-    # labelled row.
-    basic_label_container = gui.ttk.Frame(gui.options_frame)
-    basic_label = gui.ttk.Label(basic_label_container, text="")
-    basic_label.pack(side=gui.tk.LEFT)
-
-    gui.basic_options_frame = gui.ttk.Labelframe(
-        gui.options_frame, padding=0, labelwidget=basic_label_container
-    )
+    # A plain Frame rather than a Labelframe: the panel's four groups each carry
+    # their own heading now, so the caption was left empty — but an empty
+    # ``labelwidget`` still reserved a full text line above the border, which is
+    # most of the dead space that used to separate the Preset row from "BASIC
+    # OPTIONS". The macro row the caption used to host moved into that group as a
+    # normal labelled row.
+    gui.basic_options_frame = gui.ttk.Frame(gui.options_frame, padding=0)
     gui.basic_options_frame.grid(
-        row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        row=2, column=0, columnspan=2, sticky="ew", pady=(0, 0)
     )
     gui.basic_options_frame.columnconfigure(1, weight=1)
 
-    add_group_heading(gui, gui.basic_options_frame, "Basic options", row=0)
+    # The first heading sits directly under the Preset row, so it skips the
+    # inter-group top padding the later headings need to separate them from the
+    # rows above.
+    add_group_heading(gui, gui.basic_options_frame, "Basic options", row=0, pady=(4, 2))
 
     gui.ttk.Label(gui.basic_options_frame, text="Silence speedup").grid(
         row=1, column=0, sticky="w", pady=(8, 0)
@@ -1552,12 +1573,21 @@ def add_segmented(
 
 
 def add_group_heading(
-    gui: "TalksReducerGUI", parent: "tk.Misc", text: str, *, row: int
+    gui: "TalksReducerGUI",
+    parent: "tk.Misc",
+    text: str,
+    *,
+    row: int,
+    pady: tuple = (10, 2),
 ):
-    """Add a quiet section heading above a run of related settings rows."""
+    """Add a quiet section heading above a run of related settings rows.
+
+    *pady* is overridable so the panel's first heading, which has no settings
+    rows above it to separate itself from, can drop the leading gap.
+    """
 
     heading = gui.ttk.Label(parent, text=text.upper(), style="Heading.TLabel")
-    heading.grid(row=row, column=0, columnspan=3, sticky="w", pady=(10, 2))
+    heading.grid(row=row, column=0, columnspan=3, sticky="w", pady=pady)
     return heading
 
 
@@ -1776,7 +1806,7 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             if getattr(gui, "_simple_presets", None):
                 gui.open_output_check.pack_forget()
             else:
-                gui.open_output_check.pack(side=gui.tk.LEFT)
+                gui.open_output_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
         # Cut video is an Advanced-only feature: hide its checkbox and panel.
         if hasattr(gui, "cut_check"):
             gui.cut_check.pack_forget()
@@ -1803,14 +1833,15 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
         if hasattr(gui, "simple_preset_frame"):
             # Hides the whole preset row, including its Open output copy.
             gui.simple_preset_frame.grid_remove()
-        # Restore the full-layout Open output (Simple mode may have forgotten it)
-        # then pack the manual resolution checkboxes ahead of it so the full layout
-        # keeps its original Small video / 480p / Open output order.
+        # Restore the full-layout Open output (Simple mode may have forgotten it),
+        # then Cut video after it. Both re-pack at the end of the row, so the
+        # order of these two calls is what puts them back in their build order
+        # behind the never-hidden Simple mode checkbox.
         if hasattr(gui, "open_output_check"):
-            gui.open_output_check.pack(side=gui.tk.LEFT)
+            gui.open_output_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
         # Restore the Advanced-only Cut video checkbox and (if enabled) its panel.
         if hasattr(gui, "cut_check"):
-            gui.cut_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+            gui.cut_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
         if hasattr(gui, "cut_panel"):
             if (
                 getattr(gui, "cut_enabled_var", None) is not None
