@@ -70,6 +70,8 @@ class VarStub:
 
     def set(self, value):
         self._value = value
+        for _mode, callback in list(self.trace_calls):
+            callback()
 
     def trace_add(self, mode: str, callback):
         self.trace_calls.append((mode, callback))
@@ -2203,8 +2205,49 @@ def test_build_layout_registers_segmented_updaters():
 def test_build_layout_no_longer_creates_sliders_for_basic_options():
     gui = _make_layout_gui()
     layout.build_layout(gui)
-    # Keyframe interval (removed in Task 8) plus the two Cut video sliders.
-    assert len(gui._sliders) == 3
+    # Just the two Cut video sliders; keyframe interval moved to buttons in Task 8.
+    assert len(gui._sliders) == 2
+
+
+def test_estimate_keyframe_overhead_matches_known_samples():
+    assert layout.estimate_keyframe_overhead(60.0) == pytest.approx(0.5)
+    assert layout.estimate_keyframe_overhead(30.0) == pytest.approx(1.4)
+    assert layout.estimate_keyframe_overhead(1.0) == pytest.approx(44.0)
+
+
+def test_estimate_keyframe_overhead_clamps_out_of_range_input():
+    assert layout.estimate_keyframe_overhead(999.0) == pytest.approx(0.5)
+    assert layout.estimate_keyframe_overhead(0.0) == pytest.approx(44.0)
+
+
+def test_estimate_keyframe_overhead_interpolates_between_samples():
+    value = layout.estimate_keyframe_overhead(20.0)
+    assert 1.4 < value < 4.7
+
+
+def test_format_percent_switches_precision_at_ten():
+    assert layout.format_percent(1.4) == "+1.4%"
+    assert layout.format_percent(44.0) == "+44%"
+
+
+def test_keyframe_interval_label_tracks_the_selected_value():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.keyframe_interval_control.set_value(60.0)
+    texts = [
+        kwargs.get("text")
+        for _args, kwargs in gui.keyframe_interval_value_label.configure_calls
+        if "text" in kwargs
+    ]
+    assert texts[-1] == "+0.5%"
+
+
+def test_keyframe_interval_persists_the_selected_value():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.preferences.update.reset_mock()
+    gui.keyframe_interval_control._on_option_click(0)  # 5 sec
+    gui.preferences.update.assert_any_call("keyframe_interval_seconds", 5.0)
 
 
 def test_apply_preset_to_gui_still_lands_values_through_segmented_updaters():

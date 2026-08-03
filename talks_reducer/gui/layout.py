@@ -516,6 +516,55 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
     gui._update_cut_convert_button()
 
 
+KEYFRAME_INTERVAL_MIN = 1.0
+KEYFRAME_INTERVAL_MAX = 60.0
+KEYFRAME_INTERVAL_DEFAULT = 30.0
+KEYFRAME_INTERVAL_SAMPLES = [
+    (60.0, 0.5),
+    (30.0, 1.4),
+    (10.0, 4.7),
+    (5.0, 9.6),
+    (1.0, 44.0),
+]
+
+
+def estimate_keyframe_overhead(interval_seconds: float) -> float:
+    """Estimate percent size increase vs. encoding with no extra keyframes.
+
+    Values between the measured samples are interpolated in log space, which
+    matches how the overhead actually scales with the interval.
+    """
+
+    bounded = max(KEYFRAME_INTERVAL_MIN, min(KEYFRAME_INTERVAL_MAX, interval_seconds))
+    samples = KEYFRAME_INTERVAL_SAMPLES
+    if bounded >= samples[0][0]:
+        return samples[0][1]
+    if bounded <= samples[-1][0]:
+        return samples[-1][1]
+
+    for upper_idx in range(len(samples) - 1):
+        upper_interval, upper_percent = samples[upper_idx]
+        lower_interval, lower_percent = samples[upper_idx + 1]
+        if lower_interval <= bounded <= upper_interval:
+            ratio = (math.log(bounded) - math.log(upper_interval)) / (
+                math.log(lower_interval) - math.log(upper_interval)
+            )
+            return math.exp(
+                math.log(upper_percent)
+                + ratio * (math.log(lower_percent) - math.log(upper_percent))
+            )
+
+    return samples[-1][1]
+
+
+def format_percent(delta_percent: float) -> str:
+    """Format an overhead estimate, dropping the decimal above ten percent."""
+
+    if abs(delta_percent) >= 10.0:
+        return f"{delta_percent:+.0f}%"
+    return f"{delta_percent:+.1f}%"
+
+
 def build_layout(gui: "TalksReducerGUI") -> None:
     """Construct the main layout for the GUI."""
 
@@ -1021,101 +1070,62 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.frame_margin_var = gui.tk.StringVar(value=str(frame_margin_default))
     add_entry(gui, gui.advanced_frame, "Frame margin", gui.frame_margin_var, row=6)
 
-    min_interval = 1.0
-    max_interval = 60.0
-    interval_resolution = 1.0
-    default_keyframe_interval = 30.0
-    keyframe_interval_setting = gui.preferences.get_float(
-        "keyframe_interval_seconds", default_keyframe_interval
+    keyframe_setting = gui.preferences.get_float(
+        "keyframe_interval_seconds", KEYFRAME_INTERVAL_DEFAULT
     )
     try:
-        validated_interval = float(keyframe_interval_setting)
+        validated_interval = float(keyframe_setting)
     except (TypeError, ValueError):
-        validated_interval = default_keyframe_interval
-    if not (min_interval <= validated_interval <= max_interval):
-        validated_interval = max(min_interval, min(max_interval, validated_interval))
-        gui.preferences.update(
-            "keyframe_interval_seconds", float(f"{validated_interval:.6f}")
-        )
-
-    gui.ttk.Label(gui.advanced_frame, text="Keyframe interval").grid(
-        row=7, column=0, sticky="w", pady=4
+        validated_interval = KEYFRAME_INTERVAL_DEFAULT
+    validated_interval = max(
+        KEYFRAME_INTERVAL_MIN, min(KEYFRAME_INTERVAL_MAX, validated_interval)
     )
 
     gui.keyframe_interval_var = gui.tk.DoubleVar(value=validated_interval)
 
-    gui.keyframe_interval_value_label = gui.ttk.Label(gui.advanced_frame)
-    gui.keyframe_interval_value_label.grid(row=7, column=2, sticky="e", pady=4)
-
-    keyframe_percent_samples = [
-        (60.0, 0.5),
-        (30.0, 1.4),
-        (10.0, 4.7),
-        (5.0, 9.6),
-        (1.0, 44.0),
-    ]
-
-    def estimate_keyframe_overhead(interval_seconds: float) -> float:
-        """Estimate percent size increase vs. encoding with no extra keyframes."""
-
-        bounded = max(min_interval, min(max_interval, interval_seconds))
-        samples = keyframe_percent_samples
-        if bounded >= samples[0][0]:
-            return samples[0][1]
-        if bounded <= samples[-1][0]:
-            return samples[-1][1]
-
-        for upper_idx in range(len(samples) - 1):
-            upper_interval, upper_percent = samples[upper_idx]
-            lower_interval, lower_percent = samples[upper_idx + 1]
-            if lower_interval <= bounded <= upper_interval:
-                ratio = (math.log(bounded) - math.log(upper_interval)) / (
-                    math.log(lower_interval) - math.log(upper_interval)
-                )
-                interpolated = math.exp(
-                    math.log(upper_percent)
-                    + ratio * (math.log(lower_percent) - math.log(upper_percent))
-                )
-                return interpolated
-
-        return samples[-1][1]
-
-    def format_percent(delta_percent: float) -> str:
-        if abs(delta_percent) >= 10.0:
-            return f"{delta_percent:+.0f}%"
-        return f"{delta_percent:+.1f}%"
-
-    def update_keyframe_interval(value: str) -> None:
-        numeric = float(value)
-        clamped = max(min_interval, min(max_interval, numeric))
-        steps = round((clamped - min_interval) / interval_resolution)
-        quantized = min_interval + steps * interval_resolution
-        if abs(gui.keyframe_interval_var.get() - quantized) > 1e-9:
-            gui.keyframe_interval_var.set(quantized)
-        delta_percent = estimate_keyframe_overhead(quantized)
-        gui.keyframe_interval_value_label.configure(
-            text=f"{quantized:.0f}s, {format_percent(delta_percent)}"
-        )
-        gui.preferences.update("keyframe_interval_seconds", float(f"{quantized:.6f}"))
-
-    gui.keyframe_interval_slider = gui.tk.Scale(
-        gui.advanced_frame,
-        variable=gui.keyframe_interval_var,
-        from_=min_interval,
-        to=max_interval,
-        orient=gui.tk.HORIZONTAL,
-        resolution=interval_resolution,
-        showvalue=False,
-        command=update_keyframe_interval,
-        length=240,
-        highlightthickness=0,
+    gui.ttk.Label(gui.advanced_frame, text="Keyframe interval").grid(
+        row=7, column=0, sticky="w", pady=4
     )
-    gui.keyframe_interval_slider.grid(row=7, column=1, sticky="ew", pady=4, padx=(0, 8))
+    keyframe_row = gui.ttk.Frame(gui.advanced_frame)
+    keyframe_row.grid(row=7, column=1, columnspan=2, sticky="w", pady=4)
 
-    update_keyframe_interval(str(validated_interval))
-    sliders = getattr(gui, "_sliders", None)
-    if isinstance(sliders, list):
-        sliders.append(gui.keyframe_interval_slider)
+    gui.keyframe_interval_value_label = gui.ttk.Label(keyframe_row)
+
+    def update_keyframe_interval(value) -> None:
+        """Persist the chosen interval and refresh the size-overhead label."""
+
+        numeric = max(KEYFRAME_INTERVAL_MIN, min(KEYFRAME_INTERVAL_MAX, float(value)))
+        gui.keyframe_interval_value_label.configure(
+            text=format_percent(estimate_keyframe_overhead(numeric))
+        )
+        gui.preferences.update("keyframe_interval_seconds", float(f"{numeric:.6f}"))
+
+    gui.keyframe_interval_control = SegmentedChoice(
+        keyframe_row,
+        [
+            Option(5.0, "5 sec"),
+            Option(10.0, "10 sec"),
+            Option(30.0, "30 sec"),
+            Option(60.0, "60 sec"),
+        ],
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=gui.keyframe_interval_var,
+        default_value=KEYFRAME_INTERVAL_DEFAULT,
+        custom=CustomSpec(
+            minimum=KEYFRAME_INTERVAL_MIN,
+            maximum=KEYFRAME_INTERVAL_MAX,
+            display_format="{:g} sec",
+        ),
+    )
+    gui.keyframe_interval_control.frame.pack(side=gui.tk.LEFT)
+    gui.keyframe_interval_value_label.pack(side=gui.tk.LEFT, padx=(12, 0))
+
+    gui.keyframe_interval_var.trace_add(
+        "write", lambda *_: update_keyframe_interval(gui.keyframe_interval_var.get())
+    )
+
+    update_keyframe_interval(validated_interval)
 
     gui.start_in_server_tray_check = gui.ttk.Checkbutton(
         gui.advanced_frame,
