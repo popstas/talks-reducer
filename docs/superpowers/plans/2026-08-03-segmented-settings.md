@@ -789,14 +789,13 @@ def test_segment_styles_are_configured():
     configured = _configured_styles(style)
     assert "Segment.TButton" in configured
     assert "SelectedSegment.TButton" in configured
-    assert "Heading.TLabel" in configured
     assert (
         configured["SelectedSegment.TButton"]["background"]
         != configured["Segment.TButton"]["background"]
     )
 ```
 
-`Heading.TLabel` is added in Task 6; until then that assertion fails. Write the test now without the `Heading.TLabel` line and add that line as part of Task 6.
+`Heading.TLabel` arrives in Task 6, which adds its own assertion to this same test. Do not reference it here.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -899,8 +898,8 @@ def test_build_layout_registers_segmented_updaters():
 def test_build_layout_no_longer_creates_sliders_for_basic_options():
     gui = _make_layout_gui()
     layout.build_layout(gui)
-    # Only the two Cut video sliders remain registered for theme restyling.
-    assert len(gui._sliders) == 2
+    # Keyframe interval (removed in Task 8) plus the two Cut video sliders.
+    assert len(gui._sliders) == 3
 
 
 def test_apply_preset_to_gui_still_lands_values_through_segmented_updaters():
@@ -917,7 +916,7 @@ Note: `_make_layout_gui` currently seeds `_sliders`, `_slider_updaters`, `_basic
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `python -m pytest tests/test_gui_layout.py -k "segmented or sliders" -v`
-Expected: FAIL — `test_build_layout_no_longer_creates_sliders_for_basic_options` reports 5 sliders (3 basic + keyframe + 2 cut = 6 before Task 8; assert the number you actually observe and revisit it in Task 8).
+Expected: FAIL — before this task `_sliders` holds 6 entries (3 basic + keyframe + 2 cut), so the `== 3` assertion fails. After this task it holds 3; Task 8 removes the keyframe slider and tightens the assertion to 2.
 
 - [ ] **Step 3: Add `add_segmented` and delete `add_slider`**
 
@@ -1335,7 +1334,7 @@ def add_group_heading(gui: "TalksReducerGUI", parent: "tk.Misc", text: str, *, r
     return heading
 ```
 
-and register `Heading.TLabel` in `theme.py` next to the segment styles:
+and add `assert "Heading.TLabel" in configured` to `test_segment_styles_are_configured` in `tests/test_gui_theme.py`, then register `Heading.TLabel` in `theme.py` next to the segment styles:
 
 ```python
     style.configure(
