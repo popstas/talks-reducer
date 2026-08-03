@@ -2507,3 +2507,15 @@ def test_reshowing_the_server_url_row_keeps_it_before_the_status_text():
 
     assert gui.server_url_row.pack_calls
     assert gui.server_url_row.pack_calls[-1][1]["before"] is gui.remote_status_label
+
+
+def test_sounded_speed_custom_range_reaches_ten():
+    """Typed sounded speeds go as high as silent speeds, not just to 2."""
+
+    assert layout.SOUNDED_SPEED_MAXIMUM == 10.0
+    spec = segmented.CustomSpec(
+        minimum=layout.SOUNDED_SPEED_MINIMUM, maximum=layout.SOUNDED_SPEED_MAXIMUM
+    )
+    assert segmented.parse_custom("4", spec) == 4.0
+    assert segmented.parse_custom("99", spec) == 10.0
+    assert segmented.parse_custom("0.1", spec) == 0.75

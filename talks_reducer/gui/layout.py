@@ -79,6 +79,12 @@ THRESHOLD_ARTICLE_URL = (
     "How-hard-can-you-trim-silence-before-speech-to-text-breaks-08-03"
 )
 
+# Sounded speed offers 1/1.3/1.5/2 as buttons, but the typed range runs to the
+# same ceiling as silent speed: skimming already-watched material at 4x or more
+# is a real use, and nothing downstream caps it.
+SOUNDED_SPEED_MINIMUM = 0.75
+SOUNDED_SPEED_MAXIMUM = 10.0
+
 # Any threshold may be typed, but past ~0.9 the detector treats almost the whole
 # track as silence, so the control caps there rather than at a nominal 1.0.
 THRESHOLD_MAXIMUM = 0.9
@@ -839,7 +845,13 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
 
     gui.sounded_speed_var = gui.tk.DoubleVar(
-        value=min(max(gui.preferences.get_float("sounded_speed", 1.0), 0.75), 2.0)
+        value=min(
+            max(
+                gui.preferences.get_float("sounded_speed", 1.0),
+                SOUNDED_SPEED_MINIMUM,
+            ),
+            SOUNDED_SPEED_MAXIMUM,
+        )
     )
     add_segmented(
         gui,
@@ -855,7 +867,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             Option(2.0, "2"),
         ],
         default_value=1.0,
-        custom=CustomSpec(minimum=0.75, maximum=2.0),
+        custom=CustomSpec(minimum=SOUNDED_SPEED_MINIMUM, maximum=SOUNDED_SPEED_MAXIMUM),
     )
 
     gui.silent_threshold_var = gui.tk.DoubleVar(
