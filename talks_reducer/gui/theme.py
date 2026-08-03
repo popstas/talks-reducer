@@ -309,6 +309,12 @@ def apply_theme(
         ],
     )
     style.configure(
+        "Heading.TLabel",
+        background=palette["background"],
+        foreground=palette["foreground"],
+        font=("TkDefaultFont", 7),
+    )
+    style.configure(
         "TButton",
         background=palette["surface"],
         foreground=palette["foreground"],

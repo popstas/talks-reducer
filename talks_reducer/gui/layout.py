@@ -6,6 +6,7 @@ import math
 import re
 import sys
 import time
+import webbrowser
 from typing import TYPE_CHECKING, Callable, Optional
 
 from .. import presets
@@ -72,6 +73,18 @@ BASIC_PRESETS: dict[str, dict[str, float]] = {
 }
 
 BASIC_PRESET_TOLERANCE = 1e-9
+
+THRESHOLD_ARTICLE_URL = (
+    "https://telegra.ph/"
+    "How-hard-can-you-trim-silence-before-speech-to-text-breaks-08-03"
+)
+
+THRESHOLD_TOOLTIP = (
+    "0.01 — never cuts speech; only mutes silence on a good microphone\n"
+    "0.03 — fits most cases and phone video, but may cut quiet speech\n"
+    "0.05 — cuts aggressively\n"
+    "0.10 — the last sane limit for painless silence removal"
+)
 
 
 def apply_preset_to_gui(gui: "TalksReducerGUI", preset: "presets.Preset") -> None:
@@ -725,6 +738,8 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.basic_options_frame.columnconfigure(1, weight=1)
 
+    add_group_heading(gui, gui.basic_options_frame, "Speed & silence", row=0)
+
     gui.silent_speed_var = gui.tk.DoubleVar(
         value=min(max(gui.preferences.get_float("silent_speed", 5.0), 1.0), 10.0)
     )
@@ -783,7 +798,17 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         ],
         default_value=0.01,
         custom=CustomSpec(minimum=0.0, maximum=1.0, display_format="{:.2f}"),
+        tooltip=THRESHOLD_TOOLTIP,
     )
+    gui.threshold_help_button = gui.ttk.Button(
+        gui.basic_options_frame,
+        text="?",
+        style="Link.TButton",
+        command=lambda: webbrowser.open(THRESHOLD_ARTICLE_URL),
+    )
+    gui.threshold_help_button.grid(row=3, column=2, sticky="w", padx=(8, 0))
+
+    add_group_heading(gui, gui.basic_options_frame, "Output", row=4)
 
     gui.ttk.Label(gui.basic_options_frame, text="Codec").grid(
         row=5, column=0, sticky="w", pady=(8, 0)
@@ -810,6 +835,8 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=gui.add_codec_suffix_var,
     )
     gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(12, 0))
+
+    add_group_heading(gui, gui.basic_options_frame, "Processing & appearance", row=6)
 
     gui.ttk.Label(gui.basic_options_frame, text="Mode").grid(
         row=7, column=0, sticky="w", pady=(8, 0)
@@ -1311,6 +1338,16 @@ def add_segmented(
     gui._segmented_controls[setting_key] = control
     variable.trace_add("write", lambda *_: update_basic_reset_state(gui))
     return control
+
+
+def add_group_heading(
+    gui: "TalksReducerGUI", parent: "tk.Misc", text: str, *, row: int
+):
+    """Add a quiet section heading above a run of related settings rows."""
+
+    heading = gui.ttk.Label(parent, text=text.upper(), style="Heading.TLabel")
+    heading.grid(row=row, column=0, columnspan=3, sticky="w", pady=(10, 2))
+    return heading
 
 
 def update_basic_reset_state(gui: "TalksReducerGUI") -> None:

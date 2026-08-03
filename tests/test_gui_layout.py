@@ -2240,3 +2240,24 @@ def test_basic_options_frame_grid_positions_do_not_collide():
         raise AssertionError(f"no {text!r} label found on basic_options_frame")
 
     assert _label_row("Threshold") != _label_row("Codec")
+
+
+def test_threshold_tooltip_lists_every_documented_value():
+    for value in ("0.01", "0.03", "0.05", "0.10"):
+        assert value in layout.THRESHOLD_TOOLTIP
+
+
+def test_threshold_help_button_opens_the_article(monkeypatch):
+    opened = []
+    monkeypatch.setattr(layout.webbrowser, "open", lambda url: opened.append(url))
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.threshold_help_button.kwargs["command"]()
+    assert opened == [layout.THRESHOLD_ARTICLE_URL]
+
+
+def test_threshold_article_url_points_at_the_telegraph_post():
+    assert layout.THRESHOLD_ARTICLE_URL == (
+        "https://telegra.ph/"
+        "How-hard-can-you-trim-silence-before-speech-to-text-breaks-08-03"
+    )
