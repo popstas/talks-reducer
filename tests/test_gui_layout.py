@@ -986,15 +986,15 @@ def test_update_basic_reset_state_updates_highlight():
             "silent_threshold": threshold_var,
         },
         reset_basic_button=defaults_button,
-        basic_preset_buttons={"defaults": defaults_button},
+        basic_preset_buttons={"silence_x5": defaults_button},
         basic_preset_control=control,
         tk=SimpleNamespace(NORMAL="normal", DISABLED="disabled"),
     )
 
     layout.update_basic_reset_state(gui)
 
-    assert gui._active_basic_preset == "defaults"
-    assert control.selected_calls[-1] == "defaults"
+    assert gui._active_basic_preset == "silence_x5"
+    assert control.selected_calls[-1] == "silence_x5"
     assert defaults_button.configure.call_args_list == []
 
     silent_var.set(2.0)
@@ -1147,7 +1147,7 @@ def test_update_basic_preset_highlight_selects_active_button():
         },
         basic_preset_buttons={
             "compress_only": make_widget_mock(),
-            "defaults": make_widget_mock(),
+            "silence_x5": make_widget_mock(),
             "silence_x10": make_widget_mock(),
         },
         basic_preset_control=control,
@@ -2248,7 +2248,7 @@ def test_build_layout_registers_segmented_updaters():
     for key in ("silent_speed", "sounded_speed", "silent_threshold"):
         assert key in gui._slider_updaters
         assert key in gui._basic_variables
-    assert gui._basic_defaults["silent_speed"] == 5.0
+    assert gui._basic_defaults["silent_speed"] == 10.0
     assert gui._basic_defaults["sounded_speed"] == 1.0
     assert gui._basic_defaults["silent_threshold"] == 0.01
 
@@ -2597,3 +2597,16 @@ def test_silence_speedup_row_lives_in_the_basic_options_frame():
 
     assert gui.basic_presets_frame.args[0] is gui.basic_options_frame
     assert gui.basic_presets_frame.grid_calls[0][1]["row"] == 1
+
+
+def test_every_row_opens_on_its_first_button():
+    """A fresh install starts on the leading (strongest) option in each row."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    assert gui.silent_speed_var.get() == layout.DEFAULT_SILENT_SPEED == 10.0
+    assert gui._basic_defaults["silent_speed"] == 10.0
+    # The macro that matches those defaults is the first one, Silence x10.
+    layout.update_basic_preset_highlight(gui)
+    assert gui._active_basic_preset == "silence_x10"

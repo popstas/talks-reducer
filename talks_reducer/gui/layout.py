@@ -54,6 +54,10 @@ def format_activity_line(entry: dict) -> str:
     return f"{clock}  {client_ip}  {action}".rstrip()
 
 
+# Silence is sped up 10x out of the box: every row is ordered strongest-first,
+# and the default is the first button so a fresh install starts there.
+DEFAULT_SILENT_SPEED = 10.0
+
 DEFAULT_RESOLUTION = "1080p"
 
 # "orig" rather than "1080p": the pipeline leaves the source resolution alone in
@@ -98,7 +102,7 @@ BASIC_PRESETS: dict[str, dict[str, float]] = {
         "sounded_speed": 1.0,
         "silent_threshold": 0.01,
     },
-    "defaults": {
+    "silence_x5": {
         "silent_speed": 5.0,
         "sounded_speed": 1.0,
         "silent_threshold": 0.01,
@@ -840,7 +844,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_presets_frame,
         [
             Option("silence_x10", "Silence ×10"),
-            Option("defaults", "Silence ×5"),
+            Option("silence_x5", "Silence ×5"),
             Option("compress_only", "No speedup"),
         ],
         tk=gui.tk,
@@ -851,10 +855,11 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.basic_preset_control.frame.pack(side=gui.tk.LEFT)
     gui.basic_preset_buttons = {
         "silence_x10": gui.basic_preset_control.buttons[0],
-        "defaults": gui.basic_preset_control.buttons[1],
+        "silence_x5": gui.basic_preset_control.buttons[1],
         "compress_only": gui.basic_preset_control.buttons[2],
     }
-    gui.reset_basic_button = gui.basic_preset_buttons["defaults"]
+    # The macro that restores the defaults is now x10, not x5.
+    gui.reset_basic_button = gui.basic_preset_buttons["silence_x10"]
 
     gui.ttk.Label(gui.basic_options_frame, text="Resolution").grid(
         row=2, column=0, sticky="w", pady=(8, 0)
@@ -883,7 +888,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     add_group_heading(gui, gui.basic_options_frame, "Speed & silence", row=3)
 
     gui.silent_speed_var = gui.tk.DoubleVar(
-        value=min(max(gui.preferences.get_float("silent_speed", 5.0), 1.0), 10.0)
+        value=min(
+            max(gui.preferences.get_float("silent_speed", DEFAULT_SILENT_SPEED), 1.0),
+            10.0,
+        )
     )
     add_segmented(
         gui,
@@ -898,7 +906,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             Option(2.0, "2"),
             Option(1.0, "1"),
         ],
-        default_value=5.0,
+        default_value=DEFAULT_SILENT_SPEED,
         custom=CustomSpec(minimum=1.0, maximum=10.0),
     )
 

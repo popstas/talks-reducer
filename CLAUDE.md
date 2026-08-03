@@ -75,7 +75,8 @@ styled `Segment.TButton`/`SelectedSegment.TButton` (added in `theme.py` alongsid
 `Heading.TLabel`, used for the panel's four group headings: **Basic options** (holding **Silence
 speedup** and **Resolution**), **Speed & silence**, **Output**,
 **Processing & appearance**) — instead of the `tk.Scale` sliders it used to use. **Silent**
-speed offers 10/5/2/1 (custom 1–10, default 5); **Sounded** speed offers 1/1.3/1.5/2 (custom
+speed offers 10/5/2/1 (custom 1–10, default 10 — every row leads with its
+strongest option and opens on it); **Sounded** speed offers 1/1.3/1.5/2 (custom
 0.75–10, default 1 — 1.3 and 1.5 are newly reachable now that the old slider's 0.25 quantization
 is gone); **Threshold** offers 0.01/0.03/0.05/0.10 (custom 0–`THRESHOLD_MAXIMUM`, which is
 0.9 — past that the detector calls almost the whole track silence — default 0.01), the group
@@ -104,7 +105,8 @@ they moved the sliders they replaced — losing a key from `_slider_updaters` ma
 applying silently, with no error. `gui._sliders` — the list `theme.py` iterates to restyle
 `tk.Scale` widgets — now holds only the two Cut video range sliders (`cut_start_slider`,
 `cut_end_slider`); a continuous time position stayed a slider because it isn't a small set of
-choices. The "Basic options" macro row (**Silence ×10** / **Silence ×5** / **No speedup**) is
+choices. The "Basic options" macro row (**Silence ×10** / **Silence ×5** / **No speedup**, keyed
+`silence_x10`/`silence_x5`/`compress_only`) is
 also a `SegmentedChoice` (`gui.basic_preset_control`, `variable=None`, highlighted externally via
 `update_basic_preset_highlight`); **Silence ×5** (`gui.reset_basic_button`) used to disable
 itself when the sliders already matched the defaults, but a button rendered as "selected" must

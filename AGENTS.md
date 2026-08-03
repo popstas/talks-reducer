@@ -32,7 +32,8 @@ Look at the commit history to get more examples.
   `Heading.TLabel`, used for the panel's four group headings: **Basic options** (holding **Silence
 speedup** and **Resolution**), **Speed & silence**, **Output**,
   **Processing & appearance**) — instead of the `tk.Scale` sliders it used to use. **Silent**
-  speed offers 10/5/2/1 (custom 1–10, default 5); **Sounded** speed offers 1/1.3/1.5/2 (custom
+  speed offers 10/5/2/1 (custom 1–10, default 10 — every row leads with its
+  strongest option and opens on it); **Sounded** speed offers 1/1.3/1.5/2 (custom
   0.75–10, default 1 — 1.3 and 1.5 are newly reachable now that the old slider's 0.25 quantization
   is gone); **Threshold** offers 0.01/0.03/0.05/0.10 (custom 0–`THRESHOLD_MAXIMUM`, which is 0.9 —
   past that the detector calls almost the whole track silence — default 0.01), the group carries

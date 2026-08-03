@@ -32,7 +32,8 @@ rows grouped under four quiet headings — **Basic options**, **Speed & silence*
   This replaces the former **Small video** and **480p** checkboxes.
 
 - **Silent** and **Sounded** speed each offer four preset buttons (silent: 10, 5, 2, 1; sounded:
-  1, 1.3, 1.5, 2) plus a trailing **…** button. Clicking **…** swaps it for an inline entry —
+  1, 1.3, 1.5, 2). Silent speed defaults to **10**: every row is ordered strongest-first and
+  starts on its leading button plus a trailing **…** button. Clicking **…** swaps it for an inline entry —
   type any other value in range (1–10 for silent speed, 0.75–10 for sounded speed), press Enter
   to commit — clicking away commits too — or press Escape to cancel. A committed value keeps its
   input box, so you can adjust it without reopening the editor; clicking any preset button
