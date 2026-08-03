@@ -80,6 +80,11 @@ def format_custom_label(value: float, spec: CustomSpec) -> str:
 
 SEGMENT_STYLE = "Segment.TButton"
 SELECTED_SEGMENT_STYLE = "SelectedSegment.TButton"
+# The "…" slot is styled apart from the option buttons: it has to line up with
+# the entry that replaces it, and a segment's horizontal padding would make it
+# noticeably wider than that entry.
+CUSTOM_SEGMENT_STYLE = "CustomSegment.TButton"
+SELECTED_CUSTOM_SEGMENT_STYLE = "SelectedCustomSegment.TButton"
 CUSTOM_PLACEHOLDER = "…"
 
 # The ``…`` slot's button and its inline entry share this width (in text units)
@@ -139,7 +144,7 @@ class SegmentedChoice:
             self.custom_button = ttk.Button(
                 self.frame,
                 text=CUSTOM_PLACEHOLDER,
-                style=SEGMENT_STYLE,
+                style=CUSTOM_SEGMENT_STYLE,
                 width=CUSTOM_SLOT_WIDTH,
                 command=self._begin_custom_edit,
             )
@@ -298,11 +303,13 @@ class SegmentedChoice:
         if self.custom_button is None:
             return
         if self._custom_value is None:
-            self.custom_button.configure(text=CUSTOM_PLACEHOLDER, style=SEGMENT_STYLE)
+            self.custom_button.configure(
+                text=CUSTOM_PLACEHOLDER, style=CUSTOM_SEGMENT_STYLE
+            )
         else:
             self.custom_button.configure(
                 text=format_custom_label(self._custom_value, self._custom),
-                style=SELECTED_SEGMENT_STYLE,
+                style=SELECTED_CUSTOM_SEGMENT_STYLE,
             )
 
     def _on_option_click(self, index: int) -> None:

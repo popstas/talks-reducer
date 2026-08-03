@@ -35,13 +35,18 @@ Look at the commit history to get more examples.
   0.75–2, default 1 — 1.3 and 1.5 are newly reachable now that the old slider's 0.25 quantization
   is gone); **Threshold** offers 0.01/0.03/0.05/0.10 (custom 0–`THRESHOLD_MAXIMUM`, which is 0.9 —
   past that the detector calls almost the whole track silence — default 0.01), the group carries
-  one tooltip listing what each value trims, and a `?` link (`webbrowser.open` on
+  one tooltip listing what each value trims, and a narrow `?` link (`HelpLink.TButton`,
+  `webbrowser.open` on
   `THRESHOLD_ARTICLE_URL`, the telegra.ph write-up on trimming silence before speech-to-text
   breaks) sits in the setting's **label**, not in the value row — `add_segmented`'s `help_url`
   builds the label as a frame holding the text plus the link and exposes it as
   `control.help_button`. **Codec** offers h.264/h.265/av1/mp3, each with its own tooltip ("Faster", "25%
   smaller", "No advantages", "Audio only" — text that used to sit in parentheses in the label);
-  **Add codec suffix** sits to its right. **Mode** offers Local/Remote (see below); **Theme**
+  **Add codec suffix** sits to its right. **Mode** offers Local/Remote and carries the whole
+  remote group on its own line — the address `ttk.Entry` (`SERVER_URL_WIDTH`), **Discover**, then
+  the readiness text, in that order; `server_url_row` and `remote_status_label` are both packed
+  into the Mode row's frame, so `update_processing_mode_visibility` hides them with
+  `pack_forget` and re-packs the row `before=remote_status_label` to keep that order. **Theme**
   offers OS/Light/Dark. A trailing `…` slot on the custom-range controls swaps itself for an
   inline `ttk.Entry` — Enter commits (clamped to the control's bounds), Escape/focus-out cancels,
   a non-number cancels. Every bound control traces its variable and is registered into

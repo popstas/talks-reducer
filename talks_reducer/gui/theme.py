@@ -294,6 +294,74 @@ def apply_theme(
             ("disabled", palette["border"]),
         ],
     )
+    # The "…" slot swaps itself for an entry of the same character width, but a
+    # segment button's 10px horizontal padding makes it render far wider than
+    # that entry. The slot therefore uses its own near-padless variants so the
+    # button and the entry occupy the same space and the row never jumps.
+    style.configure(
+        "CustomSegment.TButton",
+        background=palette["surface"],
+        foreground=palette["foreground"],
+        borderwidth=1,
+        relief="solid",
+        padding=(2, 2),
+        font=("TkDefaultFont", 8),
+    )
+    style.map(
+        "CustomSegment.TButton",
+        background=[
+            ("active", palette.get("hover", palette["surface"])),
+            ("disabled", palette["surface"]),
+        ],
+        foreground=[
+            ("active", palette.get("hover_text", palette["foreground"])),
+            ("disabled", palette["border"]),
+        ],
+    )
+    style.configure(
+        "SelectedCustomSegment.TButton",
+        background=selected_background,
+        foreground=selected_foreground,
+        borderwidth=1,
+        relief="solid",
+        padding=(2, 2),
+        font=("TkDefaultFont", 8),
+    )
+    style.map(
+        "SelectedCustomSegment.TButton",
+        background=[
+            ("active", selected_background),
+            ("disabled", selected_background),
+        ],
+        foreground=[
+            ("active", selected_foreground),
+            ("disabled", selected_foreground),
+        ],
+    )
+    # A "?" help link is one glyph wide; the default Link padding leaves it
+    # looking like a button, so it gets a tighter horizontal inset and takes its
+    # width from its content.
+    style.configure(
+        "HelpLink.TButton",
+        background=palette["background"],
+        foreground=palette["accent"],
+        borderwidth=0,
+        relief="flat",
+        highlightthickness=0,
+        padding=(5, 0),
+        font=("TkDefaultFont", 8, "underline"),
+    )
+    style.map(
+        "HelpLink.TButton",
+        background=[
+            ("active", palette.get("hover", palette["background"])),
+            ("disabled", palette["background"]),
+        ],
+        foreground=[
+            ("active", palette.get("accent", palette["foreground"])),
+            ("disabled", palette["foreground"]),
+        ],
+    )
     style.configure(
         "SelectedSegment.TButton",
         background=selected_background,

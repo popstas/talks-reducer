@@ -450,17 +450,22 @@ def test_build_layout_aligns_server_entry_and_discover_button(monkeypatch):
 
     layout.build_layout(gui)
 
-    row_grid = gui.server_url_row.grid_calls[-1][1]
+    row_pack = gui.server_url_row.pack_calls[-1][1]
     entry_pack = gui.server_entry.pack_calls[-1][1]
     button_pack = gui.server_discover_button.pack_calls[-1][1]
 
     # The entry and the Discover button are packed side-by-side inside the
-    # shared ``server_url_row`` frame, which itself carries the row/padding so
-    # both widgets align vertically and hide together in local mode.
-    assert row_grid["row"] == 8
-    assert row_grid["pady"] == (8, 0)
+    # shared ``server_url_row`` frame, which now rides in the Mode row itself
+    # rather than occupying a line of its own, so the whole group hides together
+    # in local mode.
+    assert row_pack["side"] == gui.tk.LEFT
     assert entry_pack["side"] == gui.tk.LEFT
     assert button_pack["side"] == gui.tk.LEFT
+
+    # Both the address group and the readiness text live in the Mode row's own
+    # frame, not in basic_options_frame — that is what moved them onto one line.
+    assert gui.server_url_row.args[0] is gui.remote_status_label.args[0]
+    assert gui.server_url_row.args[0] is not gui.basic_options_frame
 
 
 def test_build_layout_initializes_widgets(monkeypatch):
@@ -1215,14 +1220,14 @@ def test_server_url_row_is_hidden_in_local_mode_with_a_configured_url():
     )
     layout.build_layout(gui)
     layout.update_processing_mode_visibility(gui)
-    assert gui.server_url_row.grid_remove_calls
+    assert gui.server_url_row.pack_forget_calls
 
 
 def test_server_url_row_is_shown_in_remote_mode():
     gui = _make_layout_gui(processing_mode_var=StringVarStub(value="remote"))
     layout.build_layout(gui)
     layout.update_processing_mode_visibility(gui)
-    assert gui.server_url_row.grid_calls
+    assert gui.server_url_row.pack_calls
 
 
 def test_server_url_row_is_shown_on_a_fresh_config_with_no_url():
@@ -1238,8 +1243,8 @@ def test_server_url_row_is_shown_on_a_fresh_config_with_no_url():
     gui = _make_layout_gui(server_url_var=StringVarStub(value=""))
     layout.build_layout(gui)
     layout.update_processing_mode_visibility(gui)
-    assert gui.server_url_row.grid_calls
-    assert not gui.server_url_row.grid_remove_calls
+    assert gui.server_url_row.pack_calls
+    assert not gui.server_url_row.pack_forget_calls
 
 
 def test_editing_the_server_url_does_not_hide_the_row():
@@ -1262,8 +1267,8 @@ def test_editing_the_server_url_does_not_hide_the_row():
     gui = _make_layout_gui(server_url_var=StringVarStub(value=""))
     layout.build_layout(gui)
     layout.update_processing_mode_visibility(gui)
-    assert gui.server_url_row.grid_calls
-    assert not gui.server_url_row.grid_remove_calls
+    assert gui.server_url_row.pack_calls
+    assert not gui.server_url_row.pack_forget_calls
 
     # Swap in the real state-updater (the fixture stubs it as a no-op Mock)
     # and wire the real preference-change handler the way ``TalksReducerGUI``
@@ -1277,7 +1282,7 @@ def test_editing_the_server_url_does_not_hide_the_row():
 
     gui.server_url_var.set("http://192.168.1.5:9005")
 
-    assert not gui.server_url_row.grid_remove_calls
+    assert not gui.server_url_row.pack_forget_calls
 
 
 def test_apply_window_icon_prefers_windows_ico(monkeypatch):
@@ -2481,3 +2486,24 @@ def test_refreshing_presets_rebuilds_the_preset_buttons(monkeypatch):
         CUSTOM_LABEL,
     ]
     assert all(button.destroyed for button in original)
+
+
+def test_reshowing_the_server_url_row_keeps_it_before_the_status_text():
+    """Re-packing appends to the end, which would reorder the Mode row.
+
+    The address group and the readiness text share the Mode row's frame, so a
+    plain ``pack()`` on the row after it was hidden would land it *after* the
+    status label instead of before Discover's neighbour. The row is therefore
+    re-packed with ``before=remote_status_label``.
+    """
+
+    gui = _make_layout_gui(processing_mode_var=StringVarStub(value="local"))
+    gui.server_url_var.set("http://192.168.1.5:9005")
+    layout.build_layout(gui)
+
+    gui.server_url_row.pack_calls.clear()
+    gui.processing_mode_var.set("remote")
+    layout.update_processing_mode_visibility(gui)
+
+    assert gui.server_url_row.pack_calls
+    assert gui.server_url_row.pack_calls[-1][1]["before"] is gui.remote_status_label

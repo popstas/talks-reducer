@@ -57,9 +57,9 @@ Hovering the **Threshold** row shows a tooltip explaining what each preset trims
 - **0.05** — cuts aggressively.
 - **0.10** — the last sane limit for painless silence removal.
 
-A **?** link next to the **Threshold** label opens a longer write-up on choosing a threshold in
-your browser. It sits on the label rather than in the row of values, so it never competes with
-the buttons for width.
+A narrow **?** link next to the **Threshold** label opens a longer write-up on choosing a
+threshold in your browser. It sits on the label rather than in the row of values, so it never
+competes with the buttons for width.
 
 ## Presets
 
@@ -101,11 +101,13 @@ uploads to a configured server — the **Remote** button is disabled until a ser
 supplied. Leave **Local** selected to keep rendering on this machine even if a server is saved;
 switch to **Remote** to hand jobs off while the GUI downloads the finished files automatically.
 
-The **Server URL** field and its **Discover** button only appear once **Remote** is selected;
-they stay hidden entirely while **Local** is active. Click **Discover** to scan your local
+The address field, its **Discover** button and the connection status all sit on the **Mode**
+line itself, to the right of **Local** / **Remote**. The address field and **Discover** are
+hidden while **Local** is active — except when no server URL is saved yet, in which case they
+stay visible so **Remote** can be configured at all. Click **Discover** to scan your local
 network for Talks Reducer instances listening on port `9005` — the button updates with the
 discovery progress, showing the scanned/total host count as `scanned / total`. Once the server
-responds, a status next to the Mode buttons reads `Server <host> is ready` (or `Server <host> is
+responds, a status after **Discover** reads `Server <host> is ready` (or `Server <host> is
 unreachable` if the ping fails).
 
 ## Cut video

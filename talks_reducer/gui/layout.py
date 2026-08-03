@@ -83,6 +83,10 @@ THRESHOLD_ARTICLE_URL = (
 # track as silence, so the control caps there rather than at a nominal 1.0.
 THRESHOLD_MAXIMUM = 0.9
 
+# The address field shares the Mode row now, so it is sized to fit beside the
+# mode buttons and Discover rather than to the full width of a dedicated row.
+SERVER_URL_WIDTH = 21
+
 THRESHOLD_TOOLTIP = (
     "0.01 — never cuts speech; only mutes silence on a good microphone\n"
     "0.03 — fits most cases and phone video, but may cut quiet speech\n"
@@ -927,6 +931,22 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.processing_mode_control.frame.pack(side=gui.tk.LEFT)
     gui.remote_mode_button = gui.processing_mode_control.buttons[1]
 
+    # The address field rides in the Mode row rather than on a line of its own:
+    # it only matters alongside Local/Remote, and a dedicated row left a wide
+    # gap whenever it was hidden. The explanatory "Server URL" caption is gone
+    # with it — the field sits next to the mode buttons, which is context enough.
+    gui.server_url_row = gui.ttk.Frame(mode_choice)
+    gui.server_url_row.pack(side=gui.tk.LEFT, padx=(12, 0))
+    gui.server_entry = gui.ttk.Entry(
+        gui.server_url_row, textvariable=gui.server_url_var, width=SERVER_URL_WIDTH
+    )
+    gui.server_entry.pack(side=gui.tk.LEFT)
+    gui.server_discover_button = gui.ttk.Button(
+        gui.server_url_row, text="Discover", command=gui._start_discovery
+    )
+    gui.server_discover_button.pack(side=gui.tk.LEFT, padx=(8, 0))
+
+    # Packed last so the readiness text reads after the Discover button.
     gui.remote_status_label = gui.ttk.Label(
         mode_choice, textvariable=gui.remote_status_var
     )
@@ -943,18 +963,6 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     if not (server_managed and local_server_url):
         gui.local_server_url_label.grid_remove()
-
-    gui.server_url_row = gui.ttk.Frame(gui.basic_options_frame)
-    gui.server_url_row.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(8, 0))
-    gui.ttk.Label(gui.server_url_row, text="Server URL").pack(side=gui.tk.LEFT)
-    gui.server_entry = gui.ttk.Entry(
-        gui.server_url_row, textvariable=gui.server_url_var, width=40
-    )
-    gui.server_entry.pack(side=gui.tk.LEFT, padx=(8, 0))
-    gui.server_discover_button = gui.ttk.Button(
-        gui.server_url_row, text="Discover", command=gui._start_discovery
-    )
-    gui.server_discover_button.pack(side=gui.tk.LEFT, padx=(8, 0))
 
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
         row=9, column=0, sticky="w", pady=(8, 0)
@@ -1319,18 +1327,26 @@ def update_processing_mode_visibility(
     URL text must never move the row, only a mode switch may. Do not remove
     this parameter or make URL edits recompute the row again.
 
-    The row is grid-managed inside ``basic_options_frame`` while the status
-    label is packed inside ``mode_choice``, so each is hidden with its own
-    geometry manager.
+    The row and the status label are both packed inside ``mode_choice``, so both
+    hide with ``pack_forget``. Re-packing appends to the end of the container,
+    which would put the address field *after* the readiness text, so the row is
+    re-packed ``before`` that label to keep the Local/Remote → address →
+    Discover → status order.
     """
 
     remote = gui.processing_mode_var.get() == "remote"
     row = getattr(gui, "server_url_row", None)
+    label = getattr(gui, "remote_status_label", None)
     if update_row and row is not None:
         has_url = bool(gui.server_url_var.get().strip())
         show_row = remote or not has_url
-        row.grid() if show_row else row.grid_remove()
-    label = getattr(gui, "remote_status_label", None)
+        if show_row:
+            if label is not None:
+                row.pack(side=gui.tk.LEFT, padx=(12, 0), before=label)
+            else:
+                row.pack(side=gui.tk.LEFT, padx=(12, 0))
+        else:
+            row.pack_forget()
     if label is not None:
         if remote:
             label.pack(side=gui.tk.LEFT, padx=(12, 0))
@@ -1399,10 +1415,10 @@ def add_segmented(
         help_button = gui.ttk.Button(
             label_frame,
             text="?",
-            style="Link.TButton",
+            style="HelpLink.TButton",
             command=lambda: webbrowser.open(help_url),
         )
-        help_button.pack(side=gui.tk.LEFT, padx=(4, 0))
+        help_button.pack(side=gui.tk.LEFT)
         label_frame.grid(row=row, column=0, sticky="w", pady=pady)
     else:
         gui.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=pady)

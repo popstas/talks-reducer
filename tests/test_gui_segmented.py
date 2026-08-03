@@ -225,13 +225,13 @@ def test_custom_slot_is_absent_without_a_spec():
 def test_custom_slot_renders_ellipsis_when_value_matches_an_option():
     control, _ = _build(variable=_Var(5.0), custom=SPEED_CUSTOM)
     assert control.custom_button.text == "…"
-    assert control.custom_button.style == "Segment.TButton"
+    assert control.custom_button.style == "CustomSegment.TButton"
 
 
 def test_unlisted_initial_value_lands_in_the_custom_slot():
     control, _ = _build(variable=_Var(3.5), custom=SPEED_CUSTOM)
     assert control.custom_button.text == "3.5"
-    assert control.custom_button.style == "SelectedSegment.TButton"
+    assert control.custom_button.style == "SelectedCustomSegment.TButton"
 
 
 def test_clicking_custom_swaps_in_an_entry():
@@ -250,7 +250,7 @@ def test_committing_a_custom_value_updates_variable_and_label():
     control.custom_entry.bindings["<Return>"](None)
     assert variable.get() == 3.5
     assert control.custom_button.text == "3.5"
-    assert control.custom_button.style == "SelectedSegment.TButton"
+    assert control.custom_button.style == "SelectedCustomSegment.TButton"
     assert control.custom_entry.packed is False
 
 
@@ -290,7 +290,7 @@ def test_selecting_an_option_resets_the_custom_slot():
     assert control.custom_button.text == "3.5"
     control.buttons[0].kwargs["command"]()
     assert control.custom_button.text == "…"
-    assert control.custom_button.style == "Segment.TButton"
+    assert control.custom_button.style == "CustomSegment.TButton"
 
 
 def test_unbound_group_highlights_via_set_selected():
@@ -345,7 +345,7 @@ def test_set_value_leaves_an_in_range_custom_value_unchanged():
     control.set_value(3.5)
     assert variable.get() == 3.5
     assert control.custom_button.text == "3.5"
-    assert control.custom_button.style == "SelectedSegment.TButton"
+    assert control.custom_button.style == "SelectedCustomSegment.TButton"
 
 
 def test_custom_slot_button_and_entry_share_a_width():
