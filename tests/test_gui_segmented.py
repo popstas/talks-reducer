@@ -229,9 +229,16 @@ def test_custom_slot_renders_ellipsis_when_value_matches_an_option():
 
 
 def test_unlisted_initial_value_lands_in_the_custom_slot():
+    """A value matching no button shows as an editable entry, not a button.
+
+    The slot stays an entry for as long as a custom value is in play, so the
+    number can be adjusted in place.
+    """
+
     control, _ = _build(variable=_Var(3.5), custom=SPEED_CUSTOM)
-    assert control.custom_button.text == "3.5"
-    assert control.custom_button.style == "SelectedCustomSegment.TButton"
+    assert control.custom_entry.packed is True
+    assert control.custom_button.packed is False
+    assert control.custom_var.get() == "3.5"
 
 
 def test_clicking_custom_swaps_in_an_entry():
@@ -249,9 +256,10 @@ def test_committing_a_custom_value_updates_variable_and_label():
     control.custom_var.set("3.5")
     control.custom_entry.bindings["<Return>"](None)
     assert variable.get() == 3.5
-    assert control.custom_button.text == "3.5"
-    assert control.custom_button.style == "SelectedCustomSegment.TButton"
-    assert control.custom_entry.packed is False
+    # The entry survives the commit instead of collapsing back to a button.
+    assert control.custom_entry.packed is True
+    assert control.custom_button.packed is False
+    assert control.custom_var.get() == "3.5"
 
 
 def test_committing_an_out_of_range_custom_value_clamps_it():
@@ -287,8 +295,10 @@ def test_escape_cancels_the_edit():
 def test_selecting_an_option_resets_the_custom_slot():
     variable = _Var(3.5)
     control, _ = _build(variable=variable, custom=SPEED_CUSTOM)
-    assert control.custom_button.text == "3.5"
+    assert control.custom_entry.packed is True
     control.buttons[0].kwargs["command"]()
+    assert control.custom_entry.packed is False
+    assert control.custom_button.packed is True
     assert control.custom_button.text == "…"
     assert control.custom_button.style == "CustomSegment.TButton"
 
@@ -344,8 +354,8 @@ def test_set_value_leaves_an_in_range_custom_value_unchanged():
     control, _ = _build(variable=variable, custom=SPEED_CUSTOM)
     control.set_value(3.5)
     assert variable.get() == 3.5
-    assert control.custom_button.text == "3.5"
-    assert control.custom_button.style == "SelectedCustomSegment.TButton"
+    assert control.custom_entry.packed is True
+    assert control.custom_var.get() == "3.5"
 
 
 def test_custom_slot_button_and_entry_share_a_width():

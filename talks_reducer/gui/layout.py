@@ -1337,21 +1337,31 @@ def update_processing_mode_visibility(
     remote = gui.processing_mode_var.get() == "remote"
     row = getattr(gui, "server_url_row", None)
     label = getattr(gui, "remote_status_label", None)
-    if update_row and row is not None:
-        has_url = bool(gui.server_url_var.get().strip())
-        show_row = remote or not has_url
-        if show_row:
-            if label is not None:
-                row.pack(side=gui.tk.LEFT, padx=(12, 0), before=label)
-            else:
-                row.pack(side=gui.tk.LEFT, padx=(12, 0))
-        else:
-            row.pack_forget()
+
+    # The status label is settled first, because the row is inserted relative to
+    # it below. ``pack(before=w)`` requires *w* to be currently managed by pack:
+    # packing the row before a label that local mode had just forgotten raises
+    # TclError and leaves the whole remote group unpacked, which looked like
+    # "Remote stops showing its controls after switching modes twice".
     if label is not None:
         if remote:
             label.pack(side=gui.tk.LEFT, padx=(12, 0))
         else:
             label.pack_forget()
+
+    if update_row and row is not None:
+        has_url = bool(gui.server_url_var.get().strip())
+        show_row = remote or not has_url
+        if show_row:
+            # ``before`` only when the label is actually packed — otherwise the
+            # row simply goes last, which is the right order with no label.
+            if label is not None and remote:
+                row.pack(side=gui.tk.LEFT, padx=(12, 0), before=label)
+            else:
+                row.pack(side=gui.tk.LEFT, padx=(12, 0))
+        else:
+            row.pack_forget()
+
     if not remote and hasattr(gui, "remote_status_var"):
         gui.remote_status_var.set("")
 

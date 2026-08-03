@@ -49,7 +49,10 @@ Look at the commit history to get more examples.
   `pack_forget` and re-packs the row `before=remote_status_label` to keep that order. **Theme**
   offers OS/Light/Dark. A trailing `…` slot on the custom-range controls swaps itself for an
   inline `ttk.Entry` — Enter commits (clamped to the control's bounds), Escape/focus-out cancels,
-  a non-number cancels. Every bound control traces its variable and is registered into
+  a non-number cancels. Once a value is committed the slot **stays** an entry so it can be edited
+  in place; only clicking a preset option clears it back to `…`. Button and entry are sized to
+  match (`CUSTOM_SLOT_WIDTH` plus the near-padless `CustomSegment.TButton`/`SegmentEntry.TEntry`
+  styles) so the swap never reflows the row. Every bound control traces its variable and is registered into
   `gui._slider_updaters` through `layout.add_segmented`'s `apply_and_persist` wrapper, so
   `apply_preset_to_gui` and presets applied on other surfaces keep moving the buttons exactly as
   they moved the sliders they replaced. The "Basic options" macro row (**No speedup** /
@@ -139,6 +142,10 @@ launches.
 
 ## GUI Layout Convention
 - **The GUI test suite runs against hand-written widget stubs (`WidgetStub`/`WidgetFactory` in `tests/test_gui_layout.py`), never real Tk, and those stubs model widget *API calls* but not *geometry*.** Cell occupancy under `columnspan`, slack distribution from `columnconfigure(weight=...)`, and the `TclError` from calling `grid()` on a `pack`-managed widget are invisible to them. Every layout defect that reached review on the segmented-settings branch was in that class: two controls on one grid row, a `?` button drifting ~680px right because a `columnspan=2` neighbour absorbed the row's slack, and a status label hidden with the wrong geometry manager. A green suite says nothing about layout — check a real window, and prefer extending `test_basic_options_frame_grid_positions_do_not_collide` (which expands `columnspan`/`rowspan` into per-cell occupancy) over another stub assertion.
+- **ttk's `TButton` style carries `width: -11`** — a minimum of eleven characters that every
+derived style inherits. A one-glyph "?" rendered 89px wide until `HelpLink.TButton` set
+`width=0`, and segment buttons were 103px instead of 32px. Any content-width button style in
+this project must set `width=0` explicitly.
 - **Never mix geometry managers on one widget.** Hide a grid-managed widget with `grid_remove()` and a packed one with `pack_forget()`; the stubs accept either, real Tk raises.
 - **Before hiding a control, enumerate every path that could still need it.** Hiding the Server URL row outside remote mode made remote mode permanently unreachable on a fresh config: that row holds the only URL entry and **Discover** button, while **Remote** disables itself until a URL exists. The row now also shows whenever `server_url_var` is empty. Two individually reasonable rules produced a deadlock.
 - **Recompute visibility on the state that owns it, not on every write.** `server_url_var` traces into `_update_processing_mode_state`, so recomputing the row on URL changes hid the field mid-keystroke; `on_server_url_change` passes `update_row=False` to keep row visibility a function of the *mode* alone.

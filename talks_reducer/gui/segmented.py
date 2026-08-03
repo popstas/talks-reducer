@@ -84,7 +84,9 @@ SELECTED_SEGMENT_STYLE = "SelectedSegment.TButton"
 # the entry that replaces it, and a segment's horizontal padding would make it
 # noticeably wider than that entry.
 CUSTOM_SEGMENT_STYLE = "CustomSegment.TButton"
-SELECTED_CUSTOM_SEGMENT_STYLE = "SelectedCustomSegment.TButton"
+# TEntry's default 1px horizontal padding makes the entry 2px wider than the
+# button at the same character count; this style drops it so both measure 52px.
+CUSTOM_ENTRY_STYLE = "SegmentEntry.TEntry"
 CUSTOM_PLACEHOLDER = "…"
 
 # The ``…`` slot's button and its inline entry share this width (in text units)
@@ -154,6 +156,7 @@ class SegmentedChoice:
                 textvariable=self.custom_var,
                 width=CUSTOM_SLOT_WIDTH,
                 justify="center",
+                style=CUSTOM_ENTRY_STYLE,
             )
             self.custom_entry.bind("<Return>", self._commit_custom_edit)
             self.custom_entry.bind("<Escape>", self._cancel_custom_edit)
@@ -201,8 +204,13 @@ class SegmentedChoice:
         self._build_buttons()
 
         if self.custom_button is not None:
+            # Both are forgotten first so whichever the slot needs is re-packed
+            # *after* the freshly built buttons; ``pack`` on a still-managed
+            # widget keeps its old position, which would leave the slot on the
+            # left of the row it is supposed to trail.
             self.custom_button.pack_forget()
-            self.custom_button.pack(side=self._tk.LEFT)
+            self.custom_entry.pack_forget()
+            self._refresh_custom_slot()
 
         if self._variable is not None:
             self._sync_from_variable()
@@ -302,15 +310,33 @@ class SegmentedChoice:
             button.configure(style=style)
         if self.custom_button is None:
             return
-        if self._custom_value is None:
-            self.custom_button.configure(
-                text=CUSTOM_PLACEHOLDER, style=CUSTOM_SEGMENT_STYLE
-            )
+        self.custom_button.configure(
+            text=CUSTOM_PLACEHOLDER, style=CUSTOM_SEGMENT_STYLE
+        )
+        self._refresh_custom_slot()
+
+    def _refresh_custom_slot(self) -> None:
+        """Show the entry whenever a custom value is in play, else the button.
+
+        Once a value has been committed the slot stays an editable entry rather
+        than collapsing back into a labelled button, so the number can be
+        adjusted in place without re-opening the editor. Only selecting one of
+        the preset options clears the custom value and returns the slot to its
+        ``…`` button.
+        """
+
+        if self.custom_button is None:
+            return
+        if self._editing or self._custom_value is not None:
+            if not self._editing:
+                self.custom_var.set(
+                    format_custom_label(self._custom_value, self._custom)
+                )
+            self.custom_button.pack_forget()
+            self.custom_entry.pack(side=self._tk.LEFT)
         else:
-            self.custom_button.configure(
-                text=format_custom_label(self._custom_value, self._custom),
-                style=SELECTED_CUSTOM_SEGMENT_STYLE,
-            )
+            self.custom_entry.pack_forget()
+            self.custom_button.pack(side=self._tk.LEFT)
 
     def _on_option_click(self, index: int) -> None:
         """Select the button at *index*, write its value, and notify ``on_change``."""
@@ -336,16 +362,13 @@ class SegmentedChoice:
             else ""
         )
         self.custom_var.set(initial)
-        self.custom_button.pack_forget()
-        self.custom_entry.pack(side=self._tk.LEFT)
+        self._refresh_custom_slot()
         self.custom_entry.focus_set()
 
     def _end_custom_edit(self) -> None:
-        """Swap the entry back out for the custom slot button and repaint styles."""
+        """Leave edit mode and let the slot settle into button or entry."""
 
         self._editing = False
-        self.custom_entry.pack_forget()
-        self.custom_button.pack(side=self._tk.LEFT)
         self._apply_styles()
 
     def _commit_custom_edit(self, _event: Any = None) -> None:
