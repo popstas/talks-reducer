@@ -697,35 +697,25 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.basic_presets_frame = gui.ttk.Frame(basic_label_container)
     gui.basic_presets_frame.pack(side=gui.tk.LEFT, padx=(12, 0))
 
-    gui.basic_preset_buttons: dict[str, "tk.Misc"] = {}
-
-    gui.no_speedup_button = gui.ttk.Button(
+    gui.basic_preset_control = SegmentedChoice(
         gui.basic_presets_frame,
-        text="No speedup, only compress",
-        command=lambda: gui._apply_basic_preset("compress_only"),
-        style="Link.TButton",
+        [
+            Option("compress_only", "No speedup"),
+            Option("defaults", "Silence ×5"),
+            Option("silence_x10", "Silence ×10"),
+        ],
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=None,
+        on_change=lambda value: gui._apply_basic_preset(value),
     )
-    gui.no_speedup_button.pack(side=gui.tk.LEFT, padx=(0, 8))
-    gui.basic_preset_buttons["compress_only"] = gui.no_speedup_button
-
-    gui.reset_basic_button = gui.ttk.Button(
-        gui.basic_presets_frame,
-        text="Speedup silence ×5 (default speed and threshold)",
-        command=lambda: gui._apply_basic_preset("defaults"),
-        state=gui.tk.DISABLED,
-        style="Link.TButton",
-    )
-    gui.reset_basic_button.pack(side=gui.tk.LEFT, padx=(0, 8))
-    gui.basic_preset_buttons["defaults"] = gui.reset_basic_button
-
-    gui.silence_speed_x10_button = gui.ttk.Button(
-        gui.basic_presets_frame,
-        text="Speedup silence ×10",
-        command=lambda: gui._apply_basic_preset("silence_x10"),
-        style="Link.TButton",
-    )
-    gui.silence_speed_x10_button.pack(side=gui.tk.LEFT)
-    gui.basic_preset_buttons["silence_x10"] = gui.silence_speed_x10_button
+    gui.basic_preset_control.frame.pack(side=gui.tk.LEFT)
+    gui.reset_basic_button = gui.basic_preset_control.buttons[1]
+    gui.basic_preset_buttons = {
+        "compress_only": gui.basic_preset_control.buttons[0],
+        "defaults": gui.basic_preset_control.buttons[1],
+        "silence_x10": gui.basic_preset_control.buttons[2],
+    }
 
     gui.basic_options_frame = gui.ttk.Labelframe(
         gui.options_frame, padding=0, labelwidget=basic_label_container
@@ -795,54 +785,48 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         custom=CustomSpec(minimum=0.0, maximum=1.0, display_format="{:.2f}"),
     )
 
-    gui.ttk.Label(gui.basic_options_frame, text="Video codec").grid(
+    gui.ttk.Label(gui.basic_options_frame, text="Codec").grid(
         row=5, column=0, sticky="w", pady=(8, 0)
     )
     codec_choice = gui.ttk.Frame(gui.basic_options_frame)
     codec_choice.grid(row=5, column=1, columnspan=2, sticky="w", pady=(8, 0))
-    gui.video_codec_buttons = {}
-    for value, label in (
-        ("h264", "h.264 (faster)"),
-        ("hevc", "h.265 (25% smaller)"),
-        ("av1", "av1 (no advantages)"),
-        ("mp3", "mp3 (audio only)"),
-    ):
-        button = gui.ttk.Radiobutton(
-            codec_choice,
-            text=label,
-            value=value,
-            variable=gui.video_codec_var,
-        )
-        button.pack(side=gui.tk.LEFT, padx=(0, 8))
-        gui.video_codec_buttons[value] = button
-
+    gui.video_codec_control = SegmentedChoice(
+        codec_choice,
+        [
+            Option("h264", "h.264", tooltip="Faster"),
+            Option("hevc", "h.265", tooltip="25% smaller"),
+            Option("av1", "av1", tooltip="No advantages"),
+            Option("mp3", "mp3", tooltip="Audio only"),
+        ],
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=gui.video_codec_var,
+        default_value="h264",
+    )
+    gui.video_codec_control.frame.pack(side=gui.tk.LEFT)
     gui.add_codec_suffix_check = gui.ttk.Checkbutton(
         codec_choice,
-        text="Add codec suffix to filename",
+        text="Add codec suffix",
         variable=gui.add_codec_suffix_var,
     )
-    gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(0, 8))
+    gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(12, 0))
 
-    gui.ttk.Label(gui.basic_options_frame, text="Processing mode").grid(
+    gui.ttk.Label(gui.basic_options_frame, text="Mode").grid(
         row=7, column=0, sticky="w", pady=(8, 0)
     )
     mode_choice = gui.ttk.Frame(gui.basic_options_frame)
     mode_choice.grid(row=7, column=1, sticky="w", pady=(8, 0))
-
-    gui.ttk.Radiobutton(
+    gui.processing_mode_control = SegmentedChoice(
         mode_choice,
-        text="Local",
-        value="local",
+        [Option("local", "Local"), Option("remote", "Remote")],
+        tk=gui.tk,
+        ttk=gui.ttk,
         variable=gui.processing_mode_var,
-    ).pack(side=gui.tk.LEFT, padx=(0, 8))
-
-    gui.remote_mode_button = gui.ttk.Radiobutton(
-        mode_choice,
-        text="Remote",
-        value="remote",
-        variable=gui.processing_mode_var,
+        default_value="local",
+        on_change=lambda _value: gui._update_processing_mode_state(),
     )
-    gui.remote_mode_button.pack(side=gui.tk.LEFT, padx=(0, 8))
+    gui.processing_mode_control.frame.pack(side=gui.tk.LEFT)
+    gui.remote_mode_button = gui.processing_mode_control.buttons[1]
 
     server_managed = bool(getattr(gui, "server_managed", False))
     local_server_url = getattr(gui, "local_server_url", None)
@@ -878,14 +862,16 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     theme_choice = gui.ttk.Frame(gui.basic_options_frame)
     theme_choice.grid(row=9, column=1, columnspan=2, sticky="w", pady=(8, 0))
-    for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
-        gui.ttk.Radiobutton(
-            theme_choice,
-            text=label,
-            value=value,
-            variable=gui.theme_var,
-            command=gui._refresh_theme,
-        ).pack(side=gui.tk.LEFT, padx=(0, 8))
+    gui.theme_control = SegmentedChoice(
+        theme_choice,
+        [Option("os", "OS"), Option("light", "Light"), Option("dark", "Dark")],
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=gui.theme_var,
+        default_value="os",
+        on_change=lambda _value: gui._refresh_theme(),
+    )
+    gui.theme_control.frame.pack(side=gui.tk.LEFT)
 
     # Button frame for Advanced, Check updates button, and status label
     gui.button_frame = gui.ttk.Frame(gui.options_frame)
@@ -1328,27 +1314,17 @@ def add_segmented(
 
 
 def update_basic_reset_state(gui: "TalksReducerGUI") -> None:
-    """Enable or disable the reset control based on slider values."""
+    """Refresh the basic-preset highlight and the Advanced dropdown selection.
+
+    The reset macro used to disable itself when the sliders already matched
+    the defaults, but it is now a member of the "Basic options" segmented
+    group, where the same state means "selected" — disabling it would
+    contradict its own highlight. Only the highlight is recomputed here.
+    """
 
     if not hasattr(gui, "reset_basic_button"):
         return
 
-    should_enable = False
-    for key, default_value in gui._basic_defaults.items():
-        variable = gui._basic_variables.get(key)
-        if variable is None:
-            continue
-        try:
-            current_value = float(variable.get())
-        except (TypeError, ValueError):
-            should_enable = True
-            break
-        if abs(current_value - default_value) > 1e-9:
-            should_enable = True
-            break
-
-    state = gui.tk.NORMAL if should_enable else gui.tk.DISABLED
-    gui.reset_basic_button.configure(state=state)
     update_basic_preset_highlight(gui)
     refresh_advanced_preset_selection(gui)
 
@@ -1382,14 +1358,10 @@ def update_basic_preset_highlight(gui: "TalksReducerGUI") -> None:
             active = preset
             break
 
-    for preset, button in buttons.items():
-        try:
-            style = "SelectedLink.TButton" if preset == active else "Link.TButton"
-            button.configure(style=style)
-        except Exception:
-            continue
-
     gui._active_basic_preset = active
+    control = getattr(gui, "basic_preset_control", None)
+    if control is not None:
+        control.set_selected(active)
 
 
 def reset_basic_defaults(gui: "TalksReducerGUI") -> None:

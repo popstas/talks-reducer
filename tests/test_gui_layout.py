@@ -592,11 +592,9 @@ def test_build_layout_initializes_widgets(monkeypatch):
     configure_drop_targets.assert_any_call(gui.drop_hint_button)
     assert gui.drop_hint_button.grid_remove_calls
 
-    assert hasattr(gui, "video_codec_buttons")
-    assert set(gui.video_codec_buttons) == {"h264", "hevc", "av1", "mp3"}
-    for value, button in gui.video_codec_buttons.items():
-        assert button.kwargs["variable"] is gui.video_codec_var
-        assert button.kwargs["value"] == value
+    assert hasattr(gui, "video_codec_control")
+    codec_labels = [button.kwargs["text"] for button in gui.video_codec_control.buttons]
+    assert codec_labels == ["h.264", "h.265", "av1", "mp3"]
     assert gui.video_codec_var.get() == "hevc"
     assert hasattr(gui, "add_codec_suffix_check")
     assert gui.add_codec_suffix_check.kwargs["variable"] is gui.add_codec_suffix_var
@@ -932,13 +930,33 @@ def test_add_segmented_registers_updater_and_persists_on_change(monkeypatch):
     preferences.update.assert_called_with("silent_speed", 5.0)
 
 
-def test_update_basic_reset_state_updates_state_and_highlight():
+class _BasicPresetControlStub:
+    """Records ``set_selected`` calls in place of a real ``SegmentedChoice``."""
+
+    def __init__(self) -> None:
+        self.selected_calls: list[str | None] = []
+
+    def set_selected(self, value: str | None) -> None:
+        self.selected_calls.append(value)
+
+
+def test_update_basic_reset_state_updates_highlight():
+    """The reset macro no longer has a ``state``; only the highlight moves.
+
+    Once the reset button is a member of the segmented macro group, disabling
+    it would contradict its own "selected" highlight, so
+    ``update_basic_reset_state`` must drive ``basic_preset_control.set_selected``
+    and leave ``configure`` untouched (see
+    ``test_update_basic_reset_state_no_longer_disables_the_default_macro`` for
+    the end-to-end version of this behavior change).
+    """
+
     silent_var = DummyVar(5.0)
     sounded_var = DummyVar(1.0)
     threshold_var = DummyVar(0.01)
     defaults_button = make_widget_mock()
-    compress_button = make_widget_mock()
-    silence_button = make_widget_mock()
+
+    control = _BasicPresetControlStub()
     gui = SimpleNamespace(
         _basic_defaults={
             "silent_speed": 5.0,
@@ -951,51 +969,23 @@ def test_update_basic_reset_state_updates_state_and_highlight():
             "silent_threshold": threshold_var,
         },
         reset_basic_button=defaults_button,
-        basic_preset_buttons={
-            "compress_only": compress_button,
-            "defaults": defaults_button,
-            "silence_x10": silence_button,
-        },
+        basic_preset_buttons={"defaults": defaults_button},
+        basic_preset_control=control,
         tk=SimpleNamespace(NORMAL="normal", DISABLED="disabled"),
     )
 
     layout.update_basic_reset_state(gui)
 
-    assert any(
-        call.kwargs == {"state": "disabled"}
-        for call in defaults_button.configure.call_args_list
-    )
-    assert any(
-        call.kwargs == {"style": "SelectedLink.TButton"}
-        for call in defaults_button.configure.call_args_list
-    )
-    assert any(
-        call.kwargs == {"style": "Link.TButton"}
-        for call in compress_button.configure.call_args_list
-    )
     assert gui._active_basic_preset == "defaults"
-
-    defaults_button.configure.reset_mock()
-    compress_button.configure.reset_mock()
-    silence_button.configure.reset_mock()
+    assert control.selected_calls[-1] == "defaults"
+    assert defaults_button.configure.call_args_list == []
 
     silent_var.set(2.0)
     layout.update_basic_reset_state(gui)
 
-    assert defaults_button.configure.call_args_list[0].kwargs == {"state": "normal"}
-    assert all(
-        call.kwargs == {"style": "Link.TButton"}
-        for call in defaults_button.configure.call_args_list[1:]
-    )
-    assert any(
-        call.kwargs == {"style": "Link.TButton"}
-        for call in compress_button.configure.call_args_list
-    )
-    assert any(
-        call.kwargs == {"style": "Link.TButton"}
-        for call in silence_button.configure.call_args_list
-    )
     assert gui._active_basic_preset is None
+    assert control.selected_calls[-1] is None
+    assert defaults_button.configure.call_args_list == []
 
 
 def test_reset_basic_defaults_updates_variables(monkeypatch):
@@ -1132,10 +1122,7 @@ def test_update_basic_preset_highlight_selects_active_button():
     sounded_var = DummyVar(1.0)
     threshold_var = DummyVar(0.01)
 
-    compress_button = make_widget_mock()
-    defaults_button = make_widget_mock()
-    silence_button = make_widget_mock()
-
+    control = _BasicPresetControlStub()
     gui = SimpleNamespace(
         _basic_variables={
             "silent_speed": silent_var,
@@ -1143,27 +1130,70 @@ def test_update_basic_preset_highlight_selects_active_button():
             "silent_threshold": threshold_var,
         },
         basic_preset_buttons={
-            "compress_only": compress_button,
-            "defaults": defaults_button,
-            "silence_x10": silence_button,
+            "compress_only": make_widget_mock(),
+            "defaults": make_widget_mock(),
+            "silence_x10": make_widget_mock(),
         },
+        basic_preset_control=control,
     )
 
     layout.update_basic_preset_highlight(gui)
 
     assert gui._active_basic_preset == "silence_x10"
-    assert any(
-        call.kwargs == {"style": "SelectedLink.TButton"}
-        for call in silence_button.configure.call_args_list
-    )
-    assert all(
-        call.kwargs == {"style": "Link.TButton"}
-        for call in compress_button.configure.call_args_list
-    )
-    assert all(
-        call.kwargs == {"style": "Link.TButton"}
-        for call in defaults_button.configure.call_args_list
-    )
+    assert control.selected_calls == ["silence_x10"]
+
+    silent_var.set(1.0)
+    layout.update_basic_preset_highlight(gui)
+
+    assert gui._active_basic_preset == "compress_only"
+    assert control.selected_calls[-1] == "compress_only"
+
+
+def test_basic_macro_group_is_highlighted_by_matching_values():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.silent_speed_var.set(10.0)
+    gui.sounded_speed_var.set(1.0)
+    gui.silent_threshold_var.set(0.01)
+    layout.update_basic_preset_highlight(gui)
+    assert gui._active_basic_preset == "silence_x10"
+
+
+def test_update_basic_reset_state_no_longer_disables_the_default_macro():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.silent_speed_var.set(5.0)
+    gui.sounded_speed_var.set(1.0)
+    gui.silent_threshold_var.set(0.01)
+    layout.update_basic_reset_state(gui)
+    states = [
+        kwargs.get("state")
+        for _args, kwargs in gui.reset_basic_button.configure_calls
+        if "state" in kwargs
+    ]
+    assert states == []
+
+
+def test_clicking_a_theme_button_applies_the_theme():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui._refresh_theme.reset_mock()
+    gui.theme_control.buttons[2].kwargs["command"]()  # "Dark"
+    assert gui.theme_var.get() == "dark"
+    gui._refresh_theme.assert_called_once()
+
+
+def test_clicking_a_codec_button_writes_the_codec_var():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.video_codec_control.buttons[0].kwargs["command"]()  # "h.264"
+    assert gui.video_codec_var.get() == "h264"
+
+
+def test_remote_mode_button_is_still_exposed_for_state_updates():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    assert gui.remote_mode_button is gui.processing_mode_control.buttons[1]
 
 
 def test_apply_window_icon_prefers_windows_ico(monkeypatch):
@@ -2209,4 +2239,4 @@ def test_basic_options_frame_grid_positions_do_not_collide():
                 return widget.grid_calls[0][1]["row"]
         raise AssertionError(f"no {text!r} label found on basic_options_frame")
 
-    assert _label_row("Threshold") != _label_row("Video codec")
+    assert _label_row("Threshold") != _label_row("Codec")
