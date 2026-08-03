@@ -796,10 +796,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
 
     gui.ttk.Label(gui.basic_options_frame, text="Video codec").grid(
-        row=3, column=0, sticky="w", pady=(8, 0)
+        row=5, column=0, sticky="w", pady=(8, 0)
     )
     codec_choice = gui.ttk.Frame(gui.basic_options_frame)
-    codec_choice.grid(row=3, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    codec_choice.grid(row=5, column=1, columnspan=2, sticky="w", pady=(8, 0))
     gui.video_codec_buttons = {}
     for value, label in (
         ("h264", "h.264 (faster)"),
@@ -824,10 +824,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(0, 8))
 
     gui.ttk.Label(gui.basic_options_frame, text="Processing mode").grid(
-        row=4, column=0, sticky="w", pady=(8, 0)
+        row=7, column=0, sticky="w", pady=(8, 0)
     )
     mode_choice = gui.ttk.Frame(gui.basic_options_frame)
-    mode_choice.grid(row=4, column=1, sticky="w", pady=(8, 0))
+    mode_choice.grid(row=7, column=1, sticky="w", pady=(8, 0))
 
     gui.ttk.Radiobutton(
         mode_choice,
@@ -851,33 +851,33 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text=format_local_server_url(local_server_url) if server_managed else "",
     )
     gui.local_server_url_label.grid(
-        row=4, column=2, sticky="w", padx=(8, 0), pady=(8, 0)
+        row=7, column=2, sticky="w", padx=(8, 0), pady=(8, 0)
     )
     if not (server_managed and local_server_url):
         gui.local_server_url_label.grid_remove()
 
     gui.ttk.Label(gui.basic_options_frame, text="Server URL").grid(
-        row=5, column=0, sticky="w", pady=(8, 0)
+        row=8, column=0, sticky="w", pady=(8, 0)
     )
     gui.server_entry = gui.ttk.Entry(
         gui.basic_options_frame,
         textvariable=gui.server_url_var,
         width=40,
     )
-    gui.server_entry.grid(row=5, column=1, sticky="ew", pady=(8, 0))
+    gui.server_entry.grid(row=8, column=1, sticky="ew", pady=(8, 0))
 
     gui.server_discover_button = gui.ttk.Button(
         gui.basic_options_frame, text="Discover", command=gui._start_discovery
     )
     gui.server_discover_button.grid(
-        row=5, column=2, padx=(8, 0), pady=(8, 0), sticky="ew"
+        row=8, column=2, padx=(8, 0), pady=(8, 0), sticky="ew"
     )
 
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
-        row=6, column=0, sticky="w", pady=(8, 0)
+        row=9, column=0, sticky="w", pady=(8, 0)
     )
     theme_choice = gui.ttk.Frame(gui.basic_options_frame)
-    theme_choice.grid(row=6, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    theme_choice.grid(row=9, column=1, columnspan=2, sticky="w", pady=(8, 0))
     for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
         gui.ttk.Radiobutton(
             theme_choice,
@@ -1306,7 +1306,20 @@ def add_segmented(
     )
     control.frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=pady)
 
-    gui._slider_updaters[setting_key] = control.set_value
+    def apply_and_persist(value) -> None:
+        """Set the control and persist, for callers that drive it programmatically.
+
+        ``reset_basic_defaults`` and ``apply_preset_to_gui`` reach the knobs only
+        through ``_slider_updaters`` and rely on that call to write the new value
+        to ``settings.json`` — the slider's own ``update()`` used to do both.
+        ``SegmentedChoice.set_value`` deliberately does not fire ``on_change``, so
+        the persistence half is restored here rather than in the widget.
+        """
+
+        control.set_value(value)
+        persist(value)
+
+    gui._slider_updaters[setting_key] = apply_and_persist
     gui._basic_defaults[setting_key] = default_value
     gui._basic_variables[setting_key] = variable
     gui._segmented_controls[setting_key] = control

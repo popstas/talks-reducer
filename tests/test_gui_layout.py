@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -446,7 +446,7 @@ def test_build_layout_aligns_server_entry_and_discover_button(monkeypatch):
 
     # The entry and the Discover button share a row and must align vertically:
     # same top padding so their baselines match.
-    assert entry_grid["row"] == button_grid["row"] == 5
+    assert entry_grid["row"] == button_grid["row"] == 8
     assert entry_grid["pady"] == button_grid["pady"] == (8, 0)
     assert button_grid["sticky"] == "ew"
 
@@ -900,7 +900,11 @@ def test_add_segmented_registers_updater_and_persists_on_change(monkeypatch):
         custom=layout.CustomSpec(minimum=1.0, maximum=10.0),
     )
 
-    assert gui._slider_updaters["silent_speed"] == control.set_value
+    # The registered updater is a wrapper, not ``control.set_value`` directly:
+    # ``SegmentedChoice.set_value`` deliberately never persists, so callers that
+    # drive the knob programmatically (reset, preset application) need the
+    # wrapper to do both halves of the job.
+    assert gui._slider_updaters["silent_speed"] is not control.set_value
     assert gui._basic_defaults["silent_speed"] == 5.0
     assert gui._basic_variables["silent_speed"] is variable
     assert gui._segmented_controls["silent_speed"] is control
@@ -918,6 +922,14 @@ def test_add_segmented_registers_updater_and_persists_on_change(monkeypatch):
     assert variable.get() == 2.0
     # Programmatic ``set_value`` (used by preset application) must not persist.
     preferences.update.assert_not_called()
+
+    # But the registered updater (what reset/preset code actually calls) must
+    # persist, since it wraps ``control.set_value`` with the same ``persist``
+    # used by button clicks.
+    preferences.update.reset_mock()
+    gui._slider_updaters["silent_speed"]("5.0")
+    assert variable.get() == 5.0
+    preferences.update.assert_called_with("silent_speed", 5.0)
 
 
 def test_update_basic_reset_state_updates_state_and_highlight():
@@ -1015,6 +1027,65 @@ def test_reset_basic_defaults_updates_variables(monkeypatch):
     assert second.get() == pytest.approx(3.0)
     assert third.get() == pytest.approx(3.0)
     update_state.assert_called_once()
+
+
+def test_reset_basic_defaults_persists_through_real_segmented_updater(monkeypatch):
+    """Regression: resetting a segmented knob must persist the default value.
+
+    ``SegmentedChoice.set_value`` deliberately never fires ``on_change``, so
+    if ``_slider_updaters`` registered it directly, clicking the reset macro
+    would restyle the buttons but never write ``settings.json`` — the old
+    value would silently return after a restart. This exercises the real
+    ``add_segmented`` registration end-to-end instead of a hand-rolled stub
+    updater.
+    """
+
+    update_state = Mock()
+    monkeypatch.setattr(layout, "update_basic_reset_state", update_state)
+
+    ttk = SimpleNamespace(
+        Label=WidgetFactory("Label"),
+        Frame=WidgetFactory("Frame"),
+        Button=WidgetFactory("Button"),
+        Entry=WidgetFactory("Entry"),
+    )
+    tk = SimpleNamespace(StringVar=StringVarStub, LEFT="left")
+    preferences = SimpleNamespace(update=Mock())
+
+    gui = SimpleNamespace(
+        ttk=ttk,
+        tk=tk,
+        preferences=preferences,
+        _slider_updaters={},
+        _basic_defaults={},
+        _basic_variables={},
+        _segmented_controls={},
+    )
+
+    variable = DummyVar(5.0)
+    layout.add_segmented(
+        gui,
+        Mock(),
+        "Silent",
+        variable,
+        row=1,
+        setting_key="silent_speed",
+        options=[
+            layout.Option(1.0, "1"),
+            layout.Option(5.0, "5"),
+            layout.Option(10.0, "10"),
+        ],
+        default_value=5.0,
+        custom=layout.CustomSpec(minimum=1.0, maximum=10.0),
+    )
+
+    variable.set(10.0)
+    preferences.update.reset_mock()
+
+    layout.reset_basic_defaults(gui)
+
+    assert variable.get() == pytest.approx(5.0)
+    preferences.update.assert_any_call("silent_speed", 5.0)
 
 
 def test_apply_basic_preset_updates_values(monkeypatch):
@@ -1491,6 +1562,62 @@ def test_apply_preset_to_gui_prefers_slider_updaters():
     assert gui.small_480_var.get() is False
 
 
+def test_apply_preset_to_gui_persists_through_real_segmented_updater(monkeypatch):
+    """Regression: applying a preset must persist the applied speed/threshold.
+
+    Before the fix, ``_slider_updaters`` registered ``control.set_value``
+    directly, which restyles the buttons but never calls ``preferences.update``
+    — so a stored preset would visually apply but silently fail to persist.
+    This exercises the real ``add_segmented`` registration, not a stub.
+    """
+
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+
+    gui = _make_preset_target_gui()
+    gui.ttk = SimpleNamespace(
+        Label=WidgetFactory("Label"),
+        Frame=WidgetFactory("Frame"),
+        Button=WidgetFactory("Button"),
+        Entry=WidgetFactory("Entry"),
+    )
+    gui.tk = SimpleNamespace(StringVar=StringVarStub, LEFT="left")
+    gui.preferences = SimpleNamespace(update=Mock())
+    gui._slider_updaters = {}
+    gui._basic_defaults = {}
+    gui._basic_variables = {}
+    gui._segmented_controls = {}
+
+    layout.add_segmented(
+        gui,
+        Mock(),
+        "Silent",
+        gui.silent_speed_var,
+        row=1,
+        setting_key="silent_speed",
+        options=[
+            layout.Option(1.0, "1"),
+            layout.Option(5.0, "5"),
+            layout.Option(10.0, "10"),
+        ],
+        default_value=5.0,
+        custom=layout.CustomSpec(minimum=1.0, maximum=10.0),
+    )
+
+    preset = Preset(
+        name="720p",
+        resolution="720p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="h264",
+    )
+
+    layout.apply_preset_to_gui(gui, preset)
+
+    assert gui.silent_speed_var.get() == pytest.approx(10.0)
+    gui.preferences.update.assert_any_call("silent_speed", 10.0)
+
+
 def test_build_layout_populates_preset_dropdown(monkeypatch):
     monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
@@ -1819,11 +1946,13 @@ def test_refresh_advanced_preset_selection_skips_redundant_persist(monkeypatch):
 
 
 def test_refresh_advanced_preset_selection_skips_before_knobs_exist():
-    """``add_slider`` builds sliders before every knob var exists.
+    """Basic knobs are built one at a time, so mid-build state must not crash.
 
-    The first slider's build-time ``update()`` reaches this helper while
-    ``sounded_speed_var``/``silent_threshold_var`` are still missing, so the
-    reverse-match must no-op instead of raising ``AttributeError``.
+    While ``build_layout`` is still wiring up the basic controls,
+    ``sounded_speed_var``/``silent_threshold_var`` may not exist yet even
+    though ``silent_speed_var`` does. If anything reaches this helper in that
+    window, the reverse-match must no-op instead of raising
+    ``AttributeError``.
     """
 
     gui = SimpleNamespace(
@@ -2035,3 +2164,49 @@ def test_apply_preset_to_gui_still_lands_values_through_segmented_updaters():
     assert gui.silent_speed_var.get() == pytest.approx(10.0)
     assert gui.sounded_speed_var.get() == pytest.approx(1.0)
     assert gui.silent_threshold_var.get() == pytest.approx(0.01)
+
+
+def test_basic_options_frame_grid_positions_do_not_collide():
+    """Regression: Threshold and Video codec once shared a grid row/column.
+
+    ``add_segmented`` moved Silent/Sounded/Threshold onto rows 1-3 but left
+    Video codec, Processing mode, Server URL and Theme at their old rows, so
+    Threshold's control frame and the Video codec choice frame both landed on
+    row 3 column 1 and rendered stacked on top of each other. This builds the
+    real layout (no ``add_segmented``/widget mocking) and asserts every widget
+    gridded directly onto ``basic_options_frame`` occupies a unique
+    ``(row, column)`` cell.
+    """
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    frame = gui.basic_options_frame
+    positions: list[tuple[int, int]] = []
+    for factory in (gui.ttk.Label, gui.ttk.Frame, gui.ttk.Entry, gui.ttk.Button):
+        for widget in factory.created:
+            if not widget.args or widget.args[0] is not frame:
+                continue
+            for _args, kwargs in widget.grid_calls:
+                row = kwargs.get("row")
+                column = kwargs.get("column")
+                if row is None or column is None:
+                    continue
+                positions.append((row, column))
+
+    duplicates = {pos for pos in positions if positions.count(pos) > 1}
+    assert not duplicates, f"Colliding (row, column) grid positions: {duplicates}"
+
+    # Also pin the exact collision the review reported, in case the frame
+    # gains enough widgets later that the general check above gets noisy.
+    def _label_row(text: str) -> int:
+        for widget in gui.ttk.Label.created:
+            if (
+                widget.args
+                and widget.args[0] is frame
+                and widget.kwargs.get("text") == text
+            ):
+                return widget.grid_calls[0][1]["row"]
+        raise AssertionError(f"no {text!r} label found on basic_options_frame")
+
+    assert _label_row("Threshold") != _label_row("Video codec")
