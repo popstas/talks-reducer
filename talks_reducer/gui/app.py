@@ -398,6 +398,7 @@ class TalksReducerGUI:
             value=str(self.preferences.get("server_url", ""))
         )
         self.server_url_var.trace_add("write", self._on_server_url_change)
+        self.remote_status_var = self.tk.StringVar(value="")
         self._discovery_thread: Optional[threading.Thread] = None
 
         self._basic_defaults: dict[str, float] = {}
@@ -408,7 +409,6 @@ class TalksReducerGUI:
 
         self._build_layout()
         layout_helpers.seed_initial_preset(self)
-        self._update_small_variant_state()
         self._apply_simple_mode(initial=True)
         self._apply_status_style(self._status_state)
         self._refresh_theme()
@@ -659,7 +659,16 @@ class TalksReducerGUI:
             label.configure(text="")
             label.grid_remove()
 
-    def _update_processing_mode_state(self) -> None:
+    def _update_processing_mode_state(self, *, update_row: bool = True) -> None:
+        """Refresh the Remote segment's enabled state and (usually) its row.
+
+        *update_row* is forwarded to ``update_processing_mode_visibility``. It
+        is forced to ``False`` by ``_on_server_url_change`` (a per-keystroke
+        write-trace callback) so editing the URL text never moves the Server
+        URL row; only an explicit mode switch or the initial build recomputes
+        its visibility. See that function's docstring for why.
+        """
+
         has_url = bool(self.server_url_var.get().strip())
         if not has_url and self.processing_mode_var.get() == "remote":
             self.processing_mode_var.set("local")
@@ -668,6 +677,13 @@ class TalksReducerGUI:
         if hasattr(self, "remote_mode_button"):
             state = self.tk.NORMAL if has_url else self.tk.DISABLED
             self.remote_mode_button.configure(state=state)
+        layout_helpers.update_processing_mode_visibility(self, update_row=update_row)
+
+    def _set_remote_status(self, message: str) -> None:
+        """Show *message* beside the processing-mode buttons."""
+
+        if hasattr(self, "remote_status_var"):
+            self.remote_status_var.set(message)
 
     def _normalize_server_url(self, server_url: str) -> str:
         return self.remote_controller.normalize_server_url(server_url)
@@ -1242,9 +1258,6 @@ class TalksReducerGUI:
 
     def _on_small_480_change(self, *_: object) -> None:
         self.preference_controller.on_small_480_change(*_)
-
-    def _update_small_variant_state(self) -> None:
-        self.preference_controller.update_small_variant_state()
 
     def _on_open_after_convert_change(self, *_: object) -> None:
         self.preference_controller.on_open_after_convert_change(*_)

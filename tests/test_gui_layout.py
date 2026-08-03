@@ -7,7 +7,10 @@ from unittest.mock import Mock
 import pytest
 
 import talks_reducer.gui.layout as layout
-from talks_reducer.presets import Preset
+import talks_reducer.gui.segmented as segmented
+from talks_reducer.gui.app import TalksReducerGUI
+from talks_reducer.gui.preferences import PreferenceController
+from talks_reducer.presets import CUSTOM_LABEL, Preset
 
 _TEST_PRESETS = [
     Preset(
@@ -70,6 +73,8 @@ class VarStub:
 
     def set(self, value):
         self._value = value
+        for _mode, callback in list(self.trace_calls):
+            callback()
 
     def trace_add(self, mode: str, callback):
         self.trace_calls.append((mode, callback))
@@ -115,6 +120,7 @@ class WidgetStub:
         self.yview_calls: list[tuple[tuple, dict]] = []
         self.set_calls: list[tuple[tuple, dict]] = []
         self.focused = False
+        self.destroyed = False
 
     def grid(self, *args, **kwargs):
         self.grid_calls.append((args, kwargs))
@@ -129,6 +135,9 @@ class WidgetStub:
 
     def pack_forget(self):
         self.pack_forget_calls.append(None)
+
+    def destroy(self):
+        self.destroyed = True
 
     def configure(self, *args, **kwargs):
         self.configure_calls.append((args, kwargs))
@@ -281,6 +290,7 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         ),
         processing_mode_var=StringVarStub(value="local"),
         server_url_var=StringVarStub(value=""),
+        remote_status_var=StringVarStub(value=""),
         theme_var=StringVarStub(value="os"),
         status_var=StringVarStub(value="Idle"),
         progress_var=DoubleVarStub(value=0.0),
@@ -291,6 +301,10 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         watch_enabled_var=BooleanVarStub(value=False),
         watch_directory_var=StringVarStub(value=""),
         global_ffmpeg_available=True,
+        _sliders=[],
+        _slider_updaters={},
+        _basic_defaults={},
+        _basic_variables={},
     )
     for key, value in overrides.items():
         setattr(gui, key, value)
@@ -329,7 +343,7 @@ def test_format_activity_line_tolerates_missing_fields():
 
 
 def test_build_layout_shows_activity_log_in_managed_mode(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -344,7 +358,7 @@ def test_build_layout_shows_activity_log_in_managed_mode(monkeypatch):
 
 
 def test_build_layout_hides_activity_log_in_standalone_mode(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -358,7 +372,7 @@ def test_build_layout_hides_activity_log_in_standalone_mode(monkeypatch):
 
 
 def test_build_layout_shows_local_server_url_in_managed_mode(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -379,7 +393,7 @@ def test_build_layout_shows_local_server_url_in_managed_mode(monkeypatch):
 
 
 def test_build_layout_hides_local_server_url_in_standalone_mode(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -396,7 +410,7 @@ def test_build_layout_hides_local_server_url_in_standalone_mode(monkeypatch):
 
 
 def test_build_layout_creates_watch_widgets(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -412,7 +426,7 @@ def test_build_layout_creates_watch_widgets(monkeypatch):
 
 
 def test_build_layout_adds_optimize_tooltip(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -427,7 +441,7 @@ def test_build_layout_adds_optimize_tooltip(monkeypatch):
 
 
 def test_build_layout_aligns_server_entry_and_discover_button(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -436,21 +450,29 @@ def test_build_layout_aligns_server_entry_and_discover_button(monkeypatch):
 
     layout.build_layout(gui)
 
-    entry_grid = gui.server_entry.grid_calls[-1][1]
-    button_grid = gui.server_discover_button.grid_calls[-1][1]
+    row_pack = gui.server_url_row.pack_calls[-1][1]
+    entry_pack = gui.server_entry.pack_calls[-1][1]
+    button_pack = gui.server_discover_button.pack_calls[-1][1]
 
-    # The entry and the Discover button share a row and must align vertically:
-    # same top padding so their baselines match.
-    assert entry_grid["row"] == button_grid["row"] == 5
-    assert entry_grid["pady"] == button_grid["pady"] == (8, 0)
-    assert button_grid["sticky"] == "ew"
+    # The entry and the Discover button are packed side-by-side inside the
+    # shared ``server_url_row`` frame, which now rides in the Mode row itself
+    # rather than occupying a line of its own, so the whole group hides together
+    # in local mode.
+    assert row_pack["side"] == gui.tk.LEFT
+    assert entry_pack["side"] == gui.tk.LEFT
+    assert button_pack["side"] == gui.tk.LEFT
+
+    # Both the address group and the readiness text live in the Mode row's own
+    # frame, not in basic_options_frame — that is what moved them onto one line.
+    assert gui.server_url_row.args[0] is gui.remote_status_label.args[0]
+    assert gui.server_url_row.args[0] is not gui.basic_options_frame
 
 
 def test_build_layout_initializes_widgets(monkeypatch):
-    add_slider_mock = Mock()
+    add_segmented_mock = Mock()
     add_entry_mock = Mock()
     update_reset_mock = Mock()
-    monkeypatch.setattr(layout, "add_slider", add_slider_mock)
+    monkeypatch.setattr(layout, "add_segmented", add_segmented_mock)
     monkeypatch.setattr(layout, "add_entry", add_entry_mock)
     monkeypatch.setattr(layout, "update_basic_reset_state", update_reset_mock)
 
@@ -545,6 +567,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         preferences=preferences,
         processing_mode_var=StringVarStub(value="local"),
         server_url_var=StringVarStub(value=""),
+        remote_status_var=StringVarStub(value=""),
         theme_var=StringVarStub(value="os"),
         status_var=StringVarStub(value="Idle"),
         progress_var=DoubleVarStub(value=0.0),
@@ -587,11 +610,9 @@ def test_build_layout_initializes_widgets(monkeypatch):
     configure_drop_targets.assert_any_call(gui.drop_hint_button)
     assert gui.drop_hint_button.grid_remove_calls
 
-    assert hasattr(gui, "video_codec_buttons")
-    assert set(gui.video_codec_buttons) == {"h264", "hevc", "av1", "mp3"}
-    for value, button in gui.video_codec_buttons.items():
-        assert button.kwargs["variable"] is gui.video_codec_var
-        assert button.kwargs["value"] == value
+    assert hasattr(gui, "video_codec_control")
+    codec_labels = [button.kwargs["text"] for button in gui.video_codec_control.buttons]
+    assert codec_labels == ["h.264", "h.265", "av1", "mp3"]
     assert gui.video_codec_var.get() == "hevc"
     assert hasattr(gui, "add_codec_suffix_check")
     assert gui.add_codec_suffix_check.kwargs["variable"] is gui.add_codec_suffix_var
@@ -606,7 +627,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
 
 
 def test_build_layout_adds_macos_update_button_under_advanced(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -636,7 +657,7 @@ def test_build_layout_adds_macos_update_button_under_advanced(monkeypatch):
 
 
 def test_build_layout_omits_update_button_on_linux(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -651,7 +672,7 @@ def test_build_layout_omits_update_button_on_linux(monkeypatch):
 
 
 def _build_layout_with_cut(monkeypatch, *, cut_enabled: bool):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -659,6 +680,40 @@ def _build_layout_with_cut(monkeypatch, *, cut_enabled: bool):
     gui = _make_layout_gui(cut_enabled_var=BooleanVarStub(value=cut_enabled))
     layout.build_layout(gui)
     return gui
+
+
+def test_simple_mode_open_output_and_cut_share_one_row():
+    """The three checkboxes sit in one packed row, Simple mode first.
+
+    Simple mode leads because ``apply_simple_mode`` re-``pack``s the other two
+    when leaving Simple mode, and a re-packed widget lands at the end of the
+    row — a widget packed after them would move on every toggle.
+    """
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    row = gui.simple_mode_check.args[0]
+    assert gui.open_output_check.args[0] is row
+    assert gui.cut_check.args[0] is row
+
+    # Each checkbox is packed immediately after it is created, so creation order
+    # among this row's children is the left-to-right order Tk lays them out in.
+    siblings = [
+        widget
+        for widget in gui.ttk.Checkbutton.created
+        if widget.args and widget.args[0] is row
+    ]
+    assert [widget.kwargs["text"] for widget in siblings] == [
+        "Simple mode",
+        "Open output",
+        "Cut video",
+    ]
+    assert all(
+        call[1].get("side") == "left"
+        for widget in siblings
+        for call in widget.pack_calls
+    )
 
 
 def test_build_cut_panel_constructs_widgets(monkeypatch):
@@ -707,7 +762,7 @@ def test_build_cut_panel_sliders_forward_to_handler(monkeypatch):
 
 
 def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -787,6 +842,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         ),
         processing_mode_var=StringVarStub(value="local"),
         server_url_var=StringVarStub(value=""),
+        remote_status_var=StringVarStub(value=""),
         theme_var=StringVarStub(value="os"),
         status_var=StringVarStub(value="Idle"),
         progress_var=DoubleVarStub(value=0.0),
@@ -852,19 +908,17 @@ def test_add_entry_without_browse():
     ttk.Button.assert_not_called()
 
 
-def test_add_slider_quantizes_and_updates_preferences(monkeypatch):
+def test_add_segmented_registers_updater_and_persists_on_change(monkeypatch):
     update_state = Mock()
     monkeypatch.setattr(layout, "update_basic_reset_state", update_state)
 
-    main_label = Mock()
-    value_label = Mock()
-    slider_widget = Mock()
-
-    ttk_label = Mock(side_effect=[main_label, value_label])
-    ttk = SimpleNamespace(Label=ttk_label)
-    tk = SimpleNamespace(
-        Scale=Mock(return_value=slider_widget), HORIZONTAL="horizontal"
+    ttk = SimpleNamespace(
+        Label=WidgetFactory("Label"),
+        Frame=WidgetFactory("Frame"),
+        Button=WidgetFactory("Button"),
+        Entry=WidgetFactory("Entry"),
     )
+    tk = SimpleNamespace(StringVar=StringVarStub, LEFT="left")
     preferences = SimpleNamespace(update=Mock())
 
     gui = SimpleNamespace(
@@ -874,63 +928,86 @@ def test_add_slider_quantizes_and_updates_preferences(monkeypatch):
         _slider_updaters={},
         _basic_defaults={},
         _basic_variables={},
-        _sliders=[],
     )
 
     variable = DummyVar(5.0)
     parent = Mock()
 
-    layout.add_slider(
+    control = layout.add_segmented(
         gui,
         parent,
-        "Silent speed",
+        "Silent",
         variable,
-        row=0,
+        row=1,
         setting_key="silent_speed",
-        minimum=1.0,
-        maximum=10.0,
-        resolution=0.5,
-        display_format="{:.1f}×",
+        options=[
+            layout.Option(1.0, "1"),
+            layout.Option(2.0, "2"),
+            layout.Option(5.0, "5"),
+            layout.Option(10.0, "10"),
+        ],
         default_value=5.0,
+        custom=layout.CustomSpec(minimum=1.0, maximum=10.0),
     )
 
-    ttk_label.assert_has_calls(
-        [
-            ((parent,), {"text": "Silent speed"}),
-            ((parent,), {}),
-        ]
-    )
-    main_label.grid.assert_called_once_with(row=0, column=0, sticky="w", pady=4)
-    value_label.grid.assert_called_once_with(row=0, column=2, sticky="e", pady=4)
-
-    slider_widget.grid.assert_called_once_with(
-        row=0, column=1, sticky="ew", pady=4, padx=(0, 8)
-    )
-    assert gui._sliders == [slider_widget]
+    # The registered updater is a wrapper, not ``control.set_value`` directly:
+    # ``SegmentedChoice.set_value`` deliberately never persists, so callers that
+    # drive the knob programmatically (reset, preset application) need the
+    # wrapper to do both halves of the job.
+    assert gui._slider_updaters["silent_speed"] is not control.set_value
     assert gui._basic_defaults["silent_speed"] == 5.0
     assert gui._basic_variables["silent_speed"] is variable
-    assert "silent_speed" in gui._slider_updaters
-    assert variable.traces and variable.traces[0][0] == "write"
+    assert variable.traces and variable.traces[-1][0] == "write"
 
-    value_label.configure.assert_called_with(text="5.0×")
-    preferences.update.assert_called_with("silent_speed", 5.0)
+    # Clicking the "10" button both writes the variable and persists/refreshes
+    # the reset state, mirroring what the old slider's ``command`` callback did.
+    control.buttons[3].kwargs["command"]()
+    assert variable.get() == 10.0
+    preferences.update.assert_called_with("silent_speed", 10.0)
     update_state.assert_called()
 
     preferences.update.reset_mock()
-    layout_update = gui._slider_updaters["silent_speed"]
-    layout_update("9.949")
-    assert pytest.approx(variable.get(), rel=1e-9) == 10.0
-    preferences.update.assert_called_with("silent_speed", 10.0)
-    assert value_label.configure.call_args_list[-1].kwargs["text"] == "10.0×"
+    control.set_value(2.0)
+    assert variable.get() == 2.0
+    # Programmatic ``set_value`` (used by preset application) must not persist.
+    preferences.update.assert_not_called()
+
+    # But the registered updater (what reset/preset code actually calls) must
+    # persist, since it wraps ``control.set_value`` with the same ``persist``
+    # used by button clicks.
+    preferences.update.reset_mock()
+    gui._slider_updaters["silent_speed"]("5.0")
+    assert variable.get() == 5.0
+    preferences.update.assert_called_with("silent_speed", 5.0)
 
 
-def test_update_basic_reset_state_updates_state_and_highlight():
+class _BasicPresetControlStub:
+    """Records ``set_selected`` calls in place of a real ``SegmentedChoice``."""
+
+    def __init__(self) -> None:
+        self.selected_calls: list[str | None] = []
+
+    def set_selected(self, value: str | None) -> None:
+        self.selected_calls.append(value)
+
+
+def test_update_basic_reset_state_updates_highlight():
+    """The reset macro no longer has a ``state``; only the highlight moves.
+
+    Once the reset button is a member of the segmented macro group, disabling
+    it would contradict its own "selected" highlight, so
+    ``update_basic_reset_state`` must drive ``basic_preset_control.set_selected``
+    and leave ``configure`` untouched (see
+    ``test_update_basic_reset_state_no_longer_disables_the_default_macro`` for
+    the end-to-end version of this behavior change).
+    """
+
     silent_var = DummyVar(5.0)
     sounded_var = DummyVar(1.0)
     threshold_var = DummyVar(0.01)
     defaults_button = make_widget_mock()
-    compress_button = make_widget_mock()
-    silence_button = make_widget_mock()
+
+    control = _BasicPresetControlStub()
     gui = SimpleNamespace(
         _basic_defaults={
             "silent_speed": 5.0,
@@ -943,51 +1020,23 @@ def test_update_basic_reset_state_updates_state_and_highlight():
             "silent_threshold": threshold_var,
         },
         reset_basic_button=defaults_button,
-        basic_preset_buttons={
-            "compress_only": compress_button,
-            "defaults": defaults_button,
-            "silence_x10": silence_button,
-        },
+        basic_preset_buttons={"silence_x5": defaults_button},
+        basic_preset_control=control,
         tk=SimpleNamespace(NORMAL="normal", DISABLED="disabled"),
     )
 
     layout.update_basic_reset_state(gui)
 
-    assert any(
-        call.kwargs == {"state": "disabled"}
-        for call in defaults_button.configure.call_args_list
-    )
-    assert any(
-        call.kwargs == {"style": "SelectedLink.TButton"}
-        for call in defaults_button.configure.call_args_list
-    )
-    assert any(
-        call.kwargs == {"style": "Link.TButton"}
-        for call in compress_button.configure.call_args_list
-    )
-    assert gui._active_basic_preset == "defaults"
-
-    defaults_button.configure.reset_mock()
-    compress_button.configure.reset_mock()
-    silence_button.configure.reset_mock()
+    assert gui._active_basic_preset == "silence_x5"
+    assert control.selected_calls[-1] == "silence_x5"
+    assert defaults_button.configure.call_args_list == []
 
     silent_var.set(2.0)
     layout.update_basic_reset_state(gui)
 
-    assert defaults_button.configure.call_args_list[0].kwargs == {"state": "normal"}
-    assert all(
-        call.kwargs == {"style": "Link.TButton"}
-        for call in defaults_button.configure.call_args_list[1:]
-    )
-    assert any(
-        call.kwargs == {"style": "Link.TButton"}
-        for call in compress_button.configure.call_args_list
-    )
-    assert any(
-        call.kwargs == {"style": "Link.TButton"}
-        for call in silence_button.configure.call_args_list
-    )
     assert gui._active_basic_preset is None
+    assert control.selected_calls[-1] is None
+    assert defaults_button.configure.call_args_list == []
 
 
 def test_reset_basic_defaults_updates_variables(monkeypatch):
@@ -1019,6 +1068,64 @@ def test_reset_basic_defaults_updates_variables(monkeypatch):
     assert second.get() == pytest.approx(3.0)
     assert third.get() == pytest.approx(3.0)
     update_state.assert_called_once()
+
+
+def test_reset_basic_defaults_persists_through_real_segmented_updater(monkeypatch):
+    """Regression: resetting a segmented knob must persist the default value.
+
+    ``SegmentedChoice.set_value`` deliberately never fires ``on_change``, so
+    if ``_slider_updaters`` registered it directly, clicking the reset macro
+    would restyle the buttons but never write ``settings.json`` — the old
+    value would silently return after a restart. This exercises the real
+    ``add_segmented`` registration end-to-end instead of a hand-rolled stub
+    updater.
+    """
+
+    update_state = Mock()
+    monkeypatch.setattr(layout, "update_basic_reset_state", update_state)
+
+    ttk = SimpleNamespace(
+        Label=WidgetFactory("Label"),
+        Frame=WidgetFactory("Frame"),
+        Button=WidgetFactory("Button"),
+        Entry=WidgetFactory("Entry"),
+    )
+    tk = SimpleNamespace(StringVar=StringVarStub, LEFT="left")
+    preferences = SimpleNamespace(update=Mock())
+
+    gui = SimpleNamespace(
+        ttk=ttk,
+        tk=tk,
+        preferences=preferences,
+        _slider_updaters={},
+        _basic_defaults={},
+        _basic_variables={},
+    )
+
+    variable = DummyVar(5.0)
+    layout.add_segmented(
+        gui,
+        Mock(),
+        "Silent",
+        variable,
+        row=1,
+        setting_key="silent_speed",
+        options=[
+            layout.Option(1.0, "1"),
+            layout.Option(5.0, "5"),
+            layout.Option(10.0, "10"),
+        ],
+        default_value=5.0,
+        custom=layout.CustomSpec(minimum=1.0, maximum=10.0),
+    )
+
+    variable.set(10.0)
+    preferences.update.reset_mock()
+
+    layout.reset_basic_defaults(gui)
+
+    assert variable.get() == pytest.approx(5.0)
+    preferences.update.assert_any_call("silent_speed", 5.0)
 
 
 def test_apply_basic_preset_updates_values(monkeypatch):
@@ -1065,10 +1172,7 @@ def test_update_basic_preset_highlight_selects_active_button():
     sounded_var = DummyVar(1.0)
     threshold_var = DummyVar(0.01)
 
-    compress_button = make_widget_mock()
-    defaults_button = make_widget_mock()
-    silence_button = make_widget_mock()
-
+    control = _BasicPresetControlStub()
     gui = SimpleNamespace(
         _basic_variables={
             "silent_speed": silent_var,
@@ -1076,27 +1180,143 @@ def test_update_basic_preset_highlight_selects_active_button():
             "silent_threshold": threshold_var,
         },
         basic_preset_buttons={
-            "compress_only": compress_button,
-            "defaults": defaults_button,
-            "silence_x10": silence_button,
+            "compress_only": make_widget_mock(),
+            "silence_x5": make_widget_mock(),
+            "silence_x10": make_widget_mock(),
         },
+        basic_preset_control=control,
     )
 
     layout.update_basic_preset_highlight(gui)
 
     assert gui._active_basic_preset == "silence_x10"
-    assert any(
-        call.kwargs == {"style": "SelectedLink.TButton"}
-        for call in silence_button.configure.call_args_list
+    assert control.selected_calls == ["silence_x10"]
+
+    silent_var.set(1.0)
+    layout.update_basic_preset_highlight(gui)
+
+    assert gui._active_basic_preset == "compress_only"
+    assert control.selected_calls[-1] == "compress_only"
+
+
+def test_basic_macro_group_is_highlighted_by_matching_values():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.silent_speed_var.set(10.0)
+    gui.sounded_speed_var.set(1.0)
+    gui.silent_threshold_var.set(0.01)
+    layout.update_basic_preset_highlight(gui)
+    assert gui._active_basic_preset == "silence_x10"
+
+
+def test_update_basic_reset_state_no_longer_disables_the_default_macro():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.silent_speed_var.set(5.0)
+    gui.sounded_speed_var.set(1.0)
+    gui.silent_threshold_var.set(0.01)
+    layout.update_basic_reset_state(gui)
+    states = [
+        kwargs.get("state")
+        for _args, kwargs in gui.reset_basic_button.configure_calls
+        if "state" in kwargs
+    ]
+    assert states == []
+
+
+def test_clicking_a_theme_button_applies_the_theme():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui._refresh_theme.reset_mock()
+    gui.theme_control.buttons[2].kwargs["command"]()  # "Dark"
+    assert gui.theme_var.get() == "dark"
+    gui._refresh_theme.assert_called_once()
+
+
+def test_clicking_a_codec_button_writes_the_codec_var():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.video_codec_control.buttons[0].kwargs["command"]()  # "h.264"
+    assert gui.video_codec_var.get() == "h264"
+
+
+def test_remote_mode_button_is_still_exposed_for_state_updates():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    assert gui.remote_mode_button is gui.processing_mode_control.buttons[1]
+
+
+def test_server_url_row_is_hidden_in_local_mode_with_a_configured_url():
+    """Local mode hides the row once a URL already exists (the steady state)."""
+
+    gui = _make_layout_gui(
+        server_url_var=StringVarStub(value="http://192.168.1.5:9005")
     )
-    assert all(
-        call.kwargs == {"style": "Link.TButton"}
-        for call in compress_button.configure.call_args_list
+    layout.build_layout(gui)
+    layout.update_processing_mode_visibility(gui)
+    assert gui.server_url_row.pack_forget_calls
+
+
+def test_server_url_row_is_shown_in_remote_mode():
+    gui = _make_layout_gui(processing_mode_var=StringVarStub(value="remote"))
+    layout.build_layout(gui)
+    layout.update_processing_mode_visibility(gui)
+    assert gui.server_url_row.pack_calls
+
+
+def test_server_url_row_is_shown_on_a_fresh_config_with_no_url():
+    """Regression: local mode + no saved URL must not hide the only way in.
+
+    Before the fix, a fresh config (no ``server_url``, mode forced to
+    ``local``) hid ``server_url_row`` — the sole place with the URL entry and
+    the Discover button — while ``_update_processing_mode_state`` also disabled
+    the Remote segment until a URL existed. That interlock made Remote mode
+    permanently unreachable for anyone who had never configured a server.
+    """
+
+    gui = _make_layout_gui(server_url_var=StringVarStub(value=""))
+    layout.build_layout(gui)
+    layout.update_processing_mode_visibility(gui)
+    assert gui.server_url_row.pack_calls
+    assert not gui.server_url_row.pack_forget_calls
+
+
+def test_editing_the_server_url_does_not_hide_the_row():
+    """Regression: a keystroke into the URL field used to hide the row itself.
+
+    ``server_url_var`` is traced on ``write`` (``app.py``, mirrored here by
+    wiring the real ``PreferenceController.on_server_url_change``), so it
+    fires on every character typed and again whenever Discover fills the
+    field in. Before this fix, that write-trace recomputed the Server URL
+    row's visibility on every call: the moment the field became non-empty
+    while still in local mode, ``has_url`` flipped true and the row —
+    Discover button included — vanished out from under whatever the user was
+    doing with it. This wires the real ``PreferenceController`` and the real
+    (unmocked) ``TalksReducerGUI._update_processing_mode_state`` onto the
+    stub GUI, so it exercises the actual production call chain: ``write``
+    trace -> ``on_server_url_change`` -> ``_update_processing_mode_state`` ->
+    ``update_processing_mode_visibility``.
+    """
+
+    gui = _make_layout_gui(server_url_var=StringVarStub(value=""))
+    layout.build_layout(gui)
+    layout.update_processing_mode_visibility(gui)
+    assert gui.server_url_row.pack_calls
+    assert not gui.server_url_row.pack_forget_calls
+
+    # Swap in the real state-updater (the fixture stubs it as a no-op Mock)
+    # and wire the real preference-change handler the way ``TalksReducerGUI``
+    # does at construction time, so the write trace below exercises the
+    # actual production code rather than a hand-rolled stand-in.
+    gui._update_processing_mode_state = (
+        lambda **kwargs: TalksReducerGUI._update_processing_mode_state(gui, **kwargs)
     )
-    assert all(
-        call.kwargs == {"style": "Link.TButton"}
-        for call in defaults_button.configure.call_args_list
-    )
+    controller = PreferenceController(gui)
+    gui.server_url_var.trace_add("write", controller.on_server_url_change)
+
+    gui.server_url_var.set("http://192.168.1.5:9005")
+
+    assert not gui.server_url_row.pack_forget_calls
 
 
 def test_apply_window_icon_prefers_windows_ico(monkeypatch):
@@ -1198,8 +1418,6 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
         _simple_presets=list(_TEST_PRESETS),
-        small_check=make_widget_mock(),
-        small_480_check=make_widget_mock(),
         open_output_check=make_widget_mock(),
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
@@ -1219,10 +1437,8 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     gui.button_frame.grid_remove.assert_called_once()
     gui.advanced_frame.grid_remove.assert_called_once()
     gui.run_after_drop_var.set.assert_called_once_with(True)
-    # With a preset available the manual resolution checkboxes are hidden so the
-    # preset drives resolution.
-    gui.small_check.pack_forget.assert_called_once()
-    gui.small_480_check.pack_forget.assert_called_once()
+    # With a preset available, Open output rides in the preset row instead.
+    gui.open_output_check.pack_forget.assert_called_once()
     # Cut video is hidden in Simple mode regardless of the persisted flag.
     gui.cut_check.pack_forget.assert_called_once()
     gui.cut_panel.grid_remove.assert_called_once()
@@ -1249,8 +1465,6 @@ def test_apply_simple_mode_simple_branch_keeps_checkboxes_without_presets(monkey
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
         _simple_presets=[],
-        small_check=make_widget_mock(),
-        small_480_check=make_widget_mock(),
         open_output_check=make_widget_mock(),
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
@@ -1260,15 +1474,11 @@ def test_apply_simple_mode_simple_branch_keeps_checkboxes_without_presets(monkey
 
     layout.apply_simple_mode(gui, initial=True)
 
-    # The preset selector is hidden when empty, so the manual checkboxes remain
-    # the only resolution control and must stay packed (not forgotten).
-    gui.small_check.pack_forget.assert_not_called()
-    gui.small_480_check.pack_forget.assert_not_called()
-    gui.small_check.pack.assert_called_once_with(
-        side="left", before=gui.open_output_check
-    )
-    gui.small_480_check.pack.assert_called_once_with(
-        side="left", padx=(65, 0), before=gui.open_output_check
+    # The preset row is hidden when empty, so this copy of Open output is the
+    # only one left and must stay packed rather than forgotten.
+    gui.open_output_check.pack_forget.assert_not_called()
+    gui.open_output_check.pack.assert_called_once_with(
+        side="left", padx=layout.CHECKBOX_ROW_GAP
     )
 
 
@@ -1287,8 +1497,6 @@ def test_apply_simple_mode_full_branch(monkeypatch):
         advanced_frame=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: True),
-        small_check=make_widget_mock(),
-        small_480_check=make_widget_mock(),
         open_output_check=make_widget_mock(),
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
@@ -1308,9 +1516,8 @@ def test_apply_simple_mode_full_branch(monkeypatch):
     gui.activity_frame.grid_remove.assert_not_called()
     gui.button_frame.grid.assert_called_once()
     gui.advanced_frame.grid.assert_called_once()
-    # Advanced restores the manual resolution checkboxes ahead of Open output.
-    gui.small_check.pack.assert_called_once()
-    gui.small_480_check.pack.assert_called_once()
+    # Advanced restores its own Open output copy.
+    gui.open_output_check.pack.assert_called_once()
     # Advanced restores the Cut video checkbox; the panel shows because cut is on.
     gui.cut_check.pack.assert_called_once()
     gui.cut_panel.grid.assert_called_once()
@@ -1495,8 +1702,63 @@ def test_apply_preset_to_gui_prefers_slider_updaters():
     assert gui.small_480_var.get() is False
 
 
+def test_apply_preset_to_gui_persists_through_real_segmented_updater(monkeypatch):
+    """Regression: applying a preset must persist the applied speed/threshold.
+
+    Before the fix, ``_slider_updaters`` registered ``control.set_value``
+    directly, which restyles the buttons but never calls ``preferences.update``
+    — so a stored preset would visually apply but silently fail to persist.
+    This exercises the real ``add_segmented`` registration, not a stub.
+    """
+
+    monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
+
+    gui = _make_preset_target_gui()
+    gui.ttk = SimpleNamespace(
+        Label=WidgetFactory("Label"),
+        Frame=WidgetFactory("Frame"),
+        Button=WidgetFactory("Button"),
+        Entry=WidgetFactory("Entry"),
+    )
+    gui.tk = SimpleNamespace(StringVar=StringVarStub, LEFT="left")
+    gui.preferences = SimpleNamespace(update=Mock())
+    gui._slider_updaters = {}
+    gui._basic_defaults = {}
+    gui._basic_variables = {}
+
+    layout.add_segmented(
+        gui,
+        Mock(),
+        "Silent",
+        gui.silent_speed_var,
+        row=1,
+        setting_key="silent_speed",
+        options=[
+            layout.Option(1.0, "1"),
+            layout.Option(5.0, "5"),
+            layout.Option(10.0, "10"),
+        ],
+        default_value=5.0,
+        custom=layout.CustomSpec(minimum=1.0, maximum=10.0),
+    )
+
+    preset = Preset(
+        name="720p",
+        resolution="720p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="h264",
+    )
+
+    layout.apply_preset_to_gui(gui, preset)
+
+    assert gui.silent_speed_var.get() == pytest.approx(10.0)
+    gui.preferences.update.assert_any_call("silent_speed", 10.0)
+
+
 def test_build_layout_populates_preset_dropdown(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -1515,7 +1777,7 @@ def test_build_layout_populates_preset_dropdown(monkeypatch):
 
 
 def test_build_layout_hides_preset_selector_when_empty(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -1823,11 +2085,13 @@ def test_refresh_advanced_preset_selection_skips_redundant_persist(monkeypatch):
 
 
 def test_refresh_advanced_preset_selection_skips_before_knobs_exist():
-    """``add_slider`` builds sliders before every knob var exists.
+    """Basic knobs are built one at a time, so mid-build state must not crash.
 
-    The first slider's build-time ``update()`` reaches this helper while
-    ``sounded_speed_var``/``silent_threshold_var`` are still missing, so the
-    reverse-match must no-op instead of raising ``AttributeError``.
+    While ``build_layout`` is still wiring up the basic controls,
+    ``sounded_speed_var``/``silent_threshold_var`` may not exist yet even
+    though ``silent_speed_var`` does. If anything reaches this helper in that
+    window, the reverse-match must no-op instead of raising
+    ``AttributeError``.
     """
 
     gui = SimpleNamespace(
@@ -1988,7 +2252,7 @@ def test_delete_advanced_preset_removes_selection(monkeypatch):
 
 
 def test_build_layout_creates_advanced_preset_strip(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -1997,10 +2261,10 @@ def test_build_layout_creates_advanced_preset_strip(monkeypatch):
 
     layout.build_layout(gui)
 
-    assert isinstance(gui.advanced_preset_combo, WidgetStub)
-    assert gui.advanced_preset_combo.kwargs["values"] == [
-        preset.name for preset in _TEST_PRESETS
-    ]
+    # One button per stored preset, then "Custom" for "matches nothing stored".
+    assert [
+        button.kwargs["text"] for button in gui.advanced_preset_control.buttons
+    ] == [preset.name for preset in _TEST_PRESETS] + [CUSTOM_LABEL]
     assert gui.advanced_preset_save_button.kwargs["command"] is (
         gui._open_save_preset_dialog
     )
@@ -2012,3 +2276,402 @@ def test_build_layout_creates_advanced_preset_strip(monkeypatch):
     )
     # The strip is created and gridded (visible in the full layout).
     assert gui.advanced_preset_frame.grid_calls
+
+
+def test_basic_options_panel_has_no_empty_caption_gap():
+    """The panel is a plain Frame, so nothing reserves a blank caption line.
+
+    An empty ``labelwidget`` on the old Labelframe reserved a full text line
+    above the border, which — together with the frame's own top padding — is
+    what left a wide gap between the Preset strip and "BASIC OPTIONS".
+    """
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    assert gui.basic_options_frame.widget_type == "Frame"
+    assert "labelwidget" not in gui.basic_options_frame.kwargs
+    assert gui.basic_options_frame.grid_calls[0][1]["pady"] == (0, 0)
+
+
+def test_preset_options_carry_a_summary_tooltip():
+    """Each preset button explains what it applies; "Custom" says why it is on."""
+
+    options = layout.preset_options(_TEST_PRESETS)
+
+    assert [option.tooltip for option in options[:-1]] == [
+        layout.presets.describe_preset(preset) for preset in _TEST_PRESETS
+    ]
+    assert "Resolution: 720p" in options[0].tooltip
+    assert options[-1].value == CUSTOM_LABEL
+    assert options[-1].tooltip
+
+
+def test_build_layout_registers_segmented_updaters():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    for key in ("silent_speed", "sounded_speed", "silent_threshold"):
+        assert key in gui._slider_updaters
+        assert key in gui._basic_variables
+    assert gui._basic_defaults["silent_speed"] == 10.0
+    assert gui._basic_defaults["sounded_speed"] == 1.0
+    assert gui._basic_defaults["silent_threshold"] == 0.01
+
+
+def test_build_layout_no_longer_creates_sliders_for_basic_options():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    # Just the two Cut video sliders; keyframe interval moved to buttons in Task 8.
+    assert len(gui._sliders) == 2
+
+
+def test_estimate_keyframe_overhead_matches_known_samples():
+    assert layout.estimate_keyframe_overhead(60.0) == pytest.approx(0.5)
+    assert layout.estimate_keyframe_overhead(30.0) == pytest.approx(1.4)
+    assert layout.estimate_keyframe_overhead(1.0) == pytest.approx(44.0)
+
+
+def test_estimate_keyframe_overhead_clamps_out_of_range_input():
+    assert layout.estimate_keyframe_overhead(999.0) == pytest.approx(0.5)
+    assert layout.estimate_keyframe_overhead(0.0) == pytest.approx(44.0)
+
+
+def test_estimate_keyframe_overhead_interpolates_between_samples():
+    value = layout.estimate_keyframe_overhead(20.0)
+    assert 1.4 < value < 4.7
+
+
+def test_format_percent_switches_precision_at_ten():
+    assert layout.format_percent(1.4) == "+1.4%"
+    assert layout.format_percent(44.0) == "+44%"
+
+
+def test_keyframe_interval_label_tracks_the_selected_value():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.keyframe_interval_control.set_value(60.0)
+    texts = [
+        kwargs.get("text")
+        for _args, kwargs in gui.keyframe_interval_value_label.configure_calls
+        if "text" in kwargs
+    ]
+    assert texts[-1] == "+0.5%"
+
+
+def test_keyframe_interval_persists_the_selected_value():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.preferences.update.reset_mock()
+    gui.keyframe_interval_control._on_option_click(0)  # 5 sec
+    gui.preferences.update.assert_any_call("keyframe_interval_seconds", 5.0)
+
+
+def test_apply_preset_to_gui_still_lands_values_through_segmented_updaters():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    layout.apply_preset_to_gui(gui, _TEST_PRESETS[0])
+    assert gui.silent_speed_var.get() == pytest.approx(10.0)
+    assert gui.sounded_speed_var.get() == pytest.approx(1.0)
+    assert gui.silent_threshold_var.get() == pytest.approx(0.01)
+
+
+def test_basic_options_frame_grid_positions_do_not_collide():
+    """Regression: Threshold and Video codec once shared a grid row/column.
+
+    ``add_segmented`` moved Silent/Sounded/Threshold onto rows 1-3 but left
+    Video codec, Processing mode, Server URL and Theme at their old rows, so
+    Threshold's control frame and the Video codec choice frame both landed on
+    row 3 column 1 and rendered stacked on top of each other. This builds the
+    real layout (no ``add_segmented``/widget mocking) and asserts every widget
+    gridded directly onto ``basic_options_frame`` occupies a unique cell.
+
+    A widget's ``(row, column)`` is only its *starting* cell: ``columnspan``
+    (and ``rowspan``, though nothing here uses it) claims more cells than that
+    single pair records, which is exactly how the threshold "?" button used to
+    collide with the Silent/Sounded/Threshold control frame's ``columnspan=2``
+    without either widget sharing a bare ``(row, column)`` pair. Every grid
+    call is expanded into the full set of ``(row, column)`` cells it occupies
+    before checking for overlap.
+    """
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    frame = gui.basic_options_frame
+    occupants: dict[tuple[int, int], list] = {}
+    for factory in (gui.ttk.Label, gui.ttk.Frame, gui.ttk.Entry, gui.ttk.Button):
+        for widget in factory.created:
+            if not widget.args or widget.args[0] is not frame:
+                continue
+            for _args, kwargs in widget.grid_calls:
+                row = kwargs.get("row")
+                column = kwargs.get("column")
+                if row is None or column is None:
+                    continue
+                rowspan = kwargs.get("rowspan", 1)
+                columnspan = kwargs.get("columnspan", 1)
+                for r in range(row, row + rowspan):
+                    for c in range(column, column + columnspan):
+                        occupants.setdefault((r, c), []).append(widget)
+
+    duplicates = {
+        pos: widgets for pos, widgets in occupants.items() if len(widgets) > 1
+    }
+    assert not duplicates, f"Colliding grid cells: {sorted(duplicates)}"
+
+    # Also pin the exact collision the review reported, in case the frame
+    # gains enough widgets later that the general check above gets noisy.
+    def _label_row(text: str) -> int:
+        """Return the ``basic_options_frame`` row a setting's label occupies.
+
+        A label that carries a help link lives inside its own frame, so that the
+        "?" sits beside the text rather than in the value row. For those the row
+        belongs to the wrapping frame, not to the label itself.
+        """
+
+        for widget in gui.ttk.Label.created:
+            if widget.kwargs.get("text") != text:
+                continue
+            parent = widget.args[0] if widget.args else None
+            if parent is frame:
+                return widget.grid_calls[0][1]["row"]
+            for container in gui.ttk.Frame.created:
+                if (
+                    container is parent
+                    and container.args
+                    and container.args[0] is frame
+                ):
+                    return container.grid_calls[0][1]["row"]
+        raise AssertionError(f"no {text!r} label found on basic_options_frame")
+
+    assert _label_row("Threshold") != _label_row("Codec")
+
+
+def test_threshold_help_link_lives_in_the_label_not_the_value_row():
+    """The "?" belongs to the label; the value row holds values only.
+
+    It used to be packed into the control's own frame after the buttons, which
+    put a non-value widget in the value row and made that row wider than the
+    buttons it contains.
+    """
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    help_button = gui.threshold_help_button
+    assert help_button is not None
+
+    # The "?" shares a parent with the "Threshold" text label...
+    parent = help_button.args[0]
+    siblings = [
+        widget
+        for widget in gui.ttk.Label.created
+        if widget.args and widget.args[0] is parent
+    ]
+    assert [widget.kwargs.get("text") for widget in siblings] == ["Threshold"]
+
+    # ...and that parent sits in the label column, not the value column.
+    assert parent.args[0] is gui.basic_options_frame
+    assert parent.grid_calls[0][1]["column"] == 0
+
+
+def test_threshold_custom_range_caps_at_the_documented_maximum():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    assert layout.THRESHOLD_MAXIMUM == 0.9
+    assert (
+        segmented.parse_custom(
+            "5", segmented.CustomSpec(minimum=0.0, maximum=layout.THRESHOLD_MAXIMUM)
+        )
+        == 0.9
+    )
+
+
+def test_threshold_tooltip_lists_every_documented_value():
+    for value in ("0.01", "0.03", "0.05", "0.10"):
+        assert value in layout.THRESHOLD_TOOLTIP
+
+
+def test_threshold_help_button_opens_the_article(monkeypatch):
+    opened = []
+    monkeypatch.setattr(layout.webbrowser, "open", lambda url: opened.append(url))
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.threshold_help_button.kwargs["command"]()
+    assert opened == [layout.THRESHOLD_ARTICLE_URL]
+
+
+def test_threshold_article_url_points_at_the_telegraph_post():
+    assert layout.THRESHOLD_ARTICLE_URL == (
+        "https://telegra.ph/"
+        "How-hard-can-you-trim-silence-before-speech-to-text-breaks-08-03"
+    )
+
+
+def test_refreshing_presets_rebuilds_the_preset_buttons(monkeypatch):
+    """Preset edits change the buttons themselves, not just their labels.
+
+    A dropdown could be reconfigured with a new ``values`` list; a button row has
+    to be torn down and rebuilt, and the old buttons must actually be destroyed
+    rather than left stacked behind the new ones.
+    """
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    original = list(gui.advanced_preset_control.buttons)
+    assert [button.kwargs["text"] for button in original] == [
+        preset.name for preset in _TEST_PRESETS
+    ] + [CUSTOM_LABEL]
+
+    replacement = [Preset(name="Only one", resolution="720p")]
+    monkeypatch.setattr(layout.presets, "load_presets", lambda *a, **k: replacement)
+    layout.refresh_preset_dropdowns(gui)
+
+    assert [
+        button.kwargs["text"] for button in gui.advanced_preset_control.buttons
+    ] == [
+        "Only one",
+        CUSTOM_LABEL,
+    ]
+    assert all(button.destroyed for button in original)
+
+
+def test_reshowing_the_server_url_row_keeps_it_before_the_status_text():
+    """Re-packing appends to the end, which would reorder the Mode row.
+
+    The address group and the readiness text share the Mode row's frame, so a
+    plain ``pack()`` on the row after it was hidden would land it *after* the
+    status label instead of before Discover's neighbour. The row is therefore
+    re-packed with ``before=remote_status_label``.
+    """
+
+    gui = _make_layout_gui(processing_mode_var=StringVarStub(value="local"))
+    gui.server_url_var.set("http://192.168.1.5:9005")
+    layout.build_layout(gui)
+
+    gui.server_url_row.pack_calls.clear()
+    gui.processing_mode_var.set("remote")
+    layout.update_processing_mode_visibility(gui)
+
+    assert gui.server_url_row.pack_calls
+    assert gui.server_url_row.pack_calls[-1][1]["before"] is gui.remote_status_label
+
+
+def test_sounded_speed_custom_range_reaches_ten():
+    """Typed sounded speeds go as high as silent speeds, not just to 2."""
+
+    assert layout.SOUNDED_SPEED_MAXIMUM == 10.0
+    spec = segmented.CustomSpec(
+        minimum=layout.SOUNDED_SPEED_MINIMUM, maximum=layout.SOUNDED_SPEED_MAXIMUM
+    )
+    assert segmented.parse_custom("4", spec) == 4.0
+    assert segmented.parse_custom("99", spec) == 10.0
+    assert segmented.parse_custom("0.1", spec) == 0.75
+
+
+def test_resolution_buttons_replace_the_small_checkboxes():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    assert not hasattr(gui, "small_check")
+    assert not hasattr(gui, "small_480_check")
+    assert [button.kwargs["text"] for button in gui.resolution_control.buttons] == [
+        "720p",
+        "480p",
+        "orig",
+    ]
+
+
+@pytest.mark.parametrize(
+    "index, expected_small, expected_480",
+    [(0, True, False), (1, True, True), (2, False, False)],
+)
+def test_clicking_a_resolution_button_drives_the_small_vars(
+    index, expected_small, expected_480
+):
+    """The booleans stay the source of truth that presets and the CLI read."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    gui.resolution_control.buttons[index].kwargs["command"]()
+
+    assert gui.small_var.get() is expected_small
+    assert gui.small_480_var.get() is expected_480
+
+
+def test_applying_a_preset_moves_the_resolution_buttons():
+    """A preset writes the booleans; the buttons must follow them."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    layout.apply_preset_to_gui(gui, Preset(name="tiny", resolution="480p"))
+    assert gui.resolution_var.get() == "480p"
+
+    layout.apply_preset_to_gui(gui, Preset(name="full", resolution="1080p"))
+    assert gui.resolution_var.get() == "1080p"
+
+
+def test_basic_options_group_leads_the_panel():
+    """The panel opens with a Basic options group holding speedup + resolution."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    headings = [
+        widget.kwargs["text"]
+        for widget in gui.ttk.Label.created
+        if widget.kwargs.get("style") == "Heading.TLabel"
+    ]
+    assert headings[0] == "BASIC OPTIONS"
+    assert headings == [
+        "BASIC OPTIONS",
+        "SPEED & SILENCE",
+        "OUTPUT",
+        "PROCESSING & APPEARANCE",
+    ]
+
+
+def test_option_rows_lead_with_the_strongest_reduction():
+    """Rows are ordered so the most aggressive setting comes first."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    assert [b.kwargs["text"] for b in gui.basic_preset_control.buttons] == [
+        "Silence ×10",
+        "Silence ×5",
+        "No speedup",
+    ]
+    assert [o.label for o in layout.RESOLUTION_OPTIONS] == ["720p", "480p", "orig"]
+
+
+def test_silence_speedup_row_lives_in_the_basic_options_frame():
+    """Regression: the macro row rendered next to the Preset strip instead.
+
+    ``grid`` is handled by a widget's own parent, so a frame created under
+    ``options_frame`` and gridded "into" ``basic_options_frame`` silently landed
+    in the outer grid.
+    """
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    assert gui.basic_presets_frame.args[0] is gui.basic_options_frame
+    assert gui.basic_presets_frame.grid_calls[0][1]["row"] == 1
+
+
+def test_every_row_opens_on_its_first_button():
+    """A fresh install starts on the leading (strongest) option in each row."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    assert gui.silent_speed_var.get() == layout.DEFAULT_SILENT_SPEED == 10.0
+    assert gui._basic_defaults["silent_speed"] == 10.0
+    # The macro that matches those defaults is the first one, Silence x10.
+    layout.update_basic_preset_highlight(gui)
+    assert gui._active_basic_preset == "silence_x10"

@@ -141,7 +141,7 @@ When the tray launches the desktop window, it passes `--server-managed` and
 `--server-url <local url>` so the GUI knows it is running alongside a managed server. In this
 mode the window gains two extra pieces of server-operator feedback:
 
-- A **Server:** label next to the **Processing mode** controls shows the LAN-reachable address
+- A **Server:** label next to the **Mode** controls shows the LAN-reachable address
   (for example `Server: http://192.168.1.42:9005`) so you can read off the URL other machines
   on your network should open. The label is hidden when the GUI runs standalone.
 - A **Connected clients** panel lists recent client activity — each line shows

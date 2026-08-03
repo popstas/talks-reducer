@@ -6,11 +6,13 @@ import math
 import re
 import sys
 import time
+import webbrowser
 from typing import TYPE_CHECKING, Callable, Optional
 
 from .. import presets
 from ..icons import find_icon_path
 from ..models import default_temp_folder
+from .segmented import CustomSpec, Option, SegmentedChoice
 from .tooltips import add_tooltip
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
@@ -52,13 +54,60 @@ def format_activity_line(entry: dict) -> str:
     return f"{clock}  {client_ip}  {action}".rstrip()
 
 
+# Gap between the checkboxes sharing the Simple mode / Open output / Cut video
+# row. Shared with ``apply_simple_mode``, which re-packs two of the three when
+# leaving Simple mode and would otherwise restore them flush against each other.
+CHECKBOX_ROW_GAP = (24, 0)
+
+# Silence is sped up 10x out of the box: every row is ordered strongest-first,
+# and the default is the first button so a fresh install starts there.
+DEFAULT_SILENT_SPEED = 10.0
+
+DEFAULT_RESOLUTION = "1080p"
+
+# "orig" rather than "1080p": the pipeline leaves the source resolution alone in
+# this state, and a 1440p or 4K source is not downscaled to 1080p.
+RESOLUTION_OPTIONS = (
+    Option("720p", "720p"),
+    Option("480p", "480p"),
+    Option(DEFAULT_RESOLUTION, "orig"),
+)
+
+
+def resolution_from_small(gui: "TalksReducerGUI") -> str:
+    """Collapse ``small_var``/``small_480_var`` into the resolution tri-state."""
+
+    if gui.small_var.get():
+        return "480p" if gui.small_480_var.get() else "720p"
+    return DEFAULT_RESOLUTION
+
+
+def apply_resolution_choice(gui: "TalksReducerGUI", value: str) -> None:
+    """Fan a resolution choice back onto the two boolean vars behind it.
+
+    Those booleans remain the source of truth — presets, the CLI seed and
+    ``_collect_arguments`` all read them — so the buttons are a projection of
+    them rather than a third independent piece of state.
+    """
+
+    if value == DEFAULT_RESOLUTION:
+        gui.small_var.set(False)
+        gui.small_480_var.set(False)
+    elif value == "480p":
+        gui.small_var.set(True)
+        gui.small_480_var.set(True)
+    else:
+        gui.small_var.set(True)
+        gui.small_480_var.set(False)
+
+
 BASIC_PRESETS: dict[str, dict[str, float]] = {
     "compress_only": {
         "silent_speed": 1.0,
         "sounded_speed": 1.0,
         "silent_threshold": 0.01,
     },
-    "defaults": {
+    "silence_x5": {
         "silent_speed": 5.0,
         "sounded_speed": 1.0,
         "silent_threshold": 0.01,
@@ -71,6 +120,32 @@ BASIC_PRESETS: dict[str, dict[str, float]] = {
 }
 
 BASIC_PRESET_TOLERANCE = 1e-9
+
+THRESHOLD_ARTICLE_URL = (
+    "https://telegra.ph/"
+    "How-hard-can-you-trim-silence-before-speech-to-text-breaks-08-03"
+)
+
+# Sounded speed offers 1/1.3/1.5/2 as buttons, but the typed range runs to the
+# same ceiling as silent speed: skimming already-watched material at 4x or more
+# is a real use, and nothing downstream caps it.
+SOUNDED_SPEED_MINIMUM = 0.75
+SOUNDED_SPEED_MAXIMUM = 10.0
+
+# Any threshold may be typed, but past ~0.9 the detector treats almost the whole
+# track as silence, so the control caps there rather than at a nominal 1.0.
+THRESHOLD_MAXIMUM = 0.9
+
+# The address field shares the Mode row now, so it is sized to fit beside the
+# mode buttons and Discover rather than to the full width of a dedicated row.
+SERVER_URL_WIDTH = 21
+
+THRESHOLD_TOOLTIP = (
+    "0.01 — never cuts speech; only mutes silence on a good microphone\n"
+    "0.03 — fits most cases and phone video, but may cut quiet speech\n"
+    "0.05 — cuts aggressively\n"
+    "0.10 — the last sane limit for painless silence removal"
+)
 
 
 def apply_preset_to_gui(gui: "TalksReducerGUI", preset: "presets.Preset") -> None:
@@ -143,13 +218,8 @@ def advanced_preset_values(gui: "TalksReducerGUI") -> dict:
     :func:`~talks_reducer.presets.Preset`.
     """
 
-    if gui.small_var.get():
-        resolution = "480p" if gui.small_480_var.get() else "720p"
-    else:
-        resolution = "1080p"
-
     return {
-        "resolution": resolution,
+        "resolution": resolution_from_small(gui),
         "silent_speed": gui.silent_speed_var.get(),
         "sounded_speed": gui.sounded_speed_var.get(),
         "silent_threshold": gui.silent_threshold_var.get(),
@@ -212,8 +282,9 @@ def refresh_advanced_preset_selection(gui: "TalksReducerGUI") -> None:
         "video_codec_var",
     )
     if not all(hasattr(gui, name) for name in required_vars):
-        # ``add_slider`` runs its build-time ``update()`` before every knob var
-        # exists, so skip the reverse-match until the layout is fully built.
+        # The basic-options controls are built one at a time, so a variable
+        # write that lands before every knob var exists must skip the
+        # reverse-match until the layout is fully built.
         return
     values = advanced_preset_values(gui)
     name = presets.match_preset(values, getattr(gui, "_simple_presets", []))
@@ -234,6 +305,31 @@ def refresh_advanced_preset_selection(gui: "TalksReducerGUI") -> None:
             presets.set_selected_preset(name)
 
 
+def preset_options(presets_list) -> list:
+    """Return the button options for a preset row: every preset, then Custom.
+
+    ``CUSTOM_LABEL`` is a real option rather than a fallback so the row can show
+    "no stored preset matches" the same way it shows a match — it is what
+    :func:`refresh_advanced_preset_selection` writes into ``advanced_preset_var``.
+    Each preset button carries a hover summary of the settings it applies (see
+    :func:`~talks_reducer.presets.describe_preset`), since the name alone says
+    nothing about the values behind it.
+    """
+
+    options = [
+        Option(preset.name, preset.name, presets.describe_preset(preset))
+        for preset in presets_list
+    ]
+    options.append(
+        Option(
+            presets.CUSTOM_LABEL,
+            presets.CUSTOM_LABEL,
+            "The current settings match no saved preset",
+        )
+    )
+    return options
+
+
 def refresh_preset_dropdowns(gui: "TalksReducerGUI") -> None:
     """Reload the preset store and repopulate both surface dropdowns.
 
@@ -249,8 +345,10 @@ def refresh_preset_dropdowns(gui: "TalksReducerGUI") -> None:
 
     if hasattr(gui, "simple_preset_combo"):
         gui.simple_preset_combo.configure(values=names)
-    if hasattr(gui, "advanced_preset_combo"):
-        gui.advanced_preset_combo.configure(values=names)
+    if hasattr(gui, "advanced_preset_control"):
+        # The button row is rebuilt, not reconfigured: presets can be added,
+        # renamed, reordered or deleted, so the buttons themselves change.
+        gui.advanced_preset_control.set_options(preset_options(loaded))
 
     if hasattr(gui, "simple_preset_frame"):
         if loaded and gui.simple_mode_var.get():
@@ -501,6 +599,55 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
     gui._update_cut_convert_button()
 
 
+KEYFRAME_INTERVAL_MIN = 1.0
+KEYFRAME_INTERVAL_MAX = 60.0
+KEYFRAME_INTERVAL_DEFAULT = 30.0
+KEYFRAME_INTERVAL_SAMPLES = [
+    (60.0, 0.5),
+    (30.0, 1.4),
+    (10.0, 4.7),
+    (5.0, 9.6),
+    (1.0, 44.0),
+]
+
+
+def estimate_keyframe_overhead(interval_seconds: float) -> float:
+    """Estimate percent size increase vs. encoding with no extra keyframes.
+
+    Values between the measured samples are interpolated in log space, which
+    matches how the overhead actually scales with the interval.
+    """
+
+    bounded = max(KEYFRAME_INTERVAL_MIN, min(KEYFRAME_INTERVAL_MAX, interval_seconds))
+    samples = KEYFRAME_INTERVAL_SAMPLES
+    if bounded >= samples[0][0]:
+        return samples[0][1]
+    if bounded <= samples[-1][0]:
+        return samples[-1][1]
+
+    for upper_idx in range(len(samples) - 1):
+        upper_interval, upper_percent = samples[upper_idx]
+        lower_interval, lower_percent = samples[upper_idx + 1]
+        if lower_interval <= bounded <= upper_interval:
+            ratio = (math.log(bounded) - math.log(upper_interval)) / (
+                math.log(lower_interval) - math.log(upper_interval)
+            )
+            return math.exp(
+                math.log(upper_percent)
+                + ratio * (math.log(lower_percent) - math.log(upper_percent))
+            )
+
+    return samples[-1][1]
+
+
+def format_percent(delta_percent: float) -> str:
+    """Format an overhead estimate, dropping the decimal above ten percent."""
+
+    if abs(delta_percent) >= 10.0:
+        return f"{delta_percent:+.0f}%"
+    return f"{delta_percent:+.1f}%"
+
+
 def build_layout(gui: "TalksReducerGUI") -> None:
     """Construct the main layout for the GUI."""
 
@@ -580,26 +727,27 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     if not gui._simple_presets:
         simple_row.grid_remove()
 
+    # Simple mode, Open output and Cut video share one row. Simple mode leads
+    # because it is the only one of the three that is never hidden: the other two
+    # are ``pack_forget``-ed in Simple mode and re-packed on the way back, and a
+    # re-``pack``ed widget goes to the end of the row — so anything packed after
+    # them would jump position on every toggle.
     checkbox_row1 = gui.ttk.Frame(checkbox_frame)
     checkbox_row1.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
-    gui.small_check = gui.ttk.Checkbutton(
+    gui.simple_mode_check = gui.ttk.Checkbutton(
         checkbox_row1,
-        text="Small video",
-        variable=gui.small_var,
+        text="Simple mode",
+        variable=gui.simple_mode_var,
+        command=gui._toggle_simple_mode,
     )
-    gui.small_check.pack(side=gui.tk.LEFT)
-    gui.small_480_check = gui.ttk.Checkbutton(
-        checkbox_row1,
-        text="480p",
-        variable=gui.small_480_var,
-    )
-    gui.small_480_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+    gui.simple_mode_check.pack(side=gui.tk.LEFT)
+
     gui.open_output_check = gui.ttk.Checkbutton(
         checkbox_row1,
         text="Open output",
         variable=gui.open_after_convert_var,
     )
-    gui.open_output_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+    gui.open_output_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
 
     gui.cut_check = gui.ttk.Checkbutton(
         checkbox_row1,
@@ -607,17 +755,9 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=gui.cut_enabled_var,
         command=gui._toggle_cut_panel,
     )
-    gui.cut_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+    gui.cut_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
 
     build_cut_panel(gui, checkbox_frame, row=2)
-
-    gui.simple_mode_check = gui.ttk.Checkbutton(
-        checkbox_frame,
-        text="Simple mode",
-        variable=gui.simple_mode_var,
-        command=gui._toggle_simple_mode,
-    )
-    gui.simple_mode_check.grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
     # The whole simple row (dropdown + Open output) shows/hides together.
     gui.simple_preset_frame = simple_row
@@ -630,27 +770,33 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     # Save as… / Update / Delete. It authors the shared preset store and is
     # hidden in Simple mode (where the read-only Simple dropdown applies instead).
     advanced_preset_frame = gui.ttk.Frame(gui.options_frame)
-    advanced_preset_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
+    advanced_preset_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 6))
     gui.ttk.Label(advanced_preset_frame, text="Preset:").pack(
         side=gui.tk.LEFT, padx=(0, 2)
     )
-    gui.advanced_preset_combo = gui.ttk.Combobox(
+    # Rendered as buttons rather than a dropdown so every preset is visible at a
+    # glance. Widths come from the button labels, so the row is as wide as its
+    # content needs. "Custom" is a real option here: it is what
+    # ``refresh_advanced_preset_selection`` selects when the live knobs match no
+    # stored preset, and clicking it is a no-op (``apply_advanced_preset``
+    # returns early on the sentinel).
+    gui.advanced_preset_control = SegmentedChoice(
         advanced_preset_frame,
-        textvariable=gui.advanced_preset_var,
-        values=[preset.name for preset in gui._simple_presets],
-        state="readonly",
-        width=28,
+        preset_options(gui._simple_presets),
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=gui.advanced_preset_var,
+        on_change=lambda _value: apply_advanced_preset(gui),
     )
-    gui.advanced_preset_combo.pack(side=gui.tk.LEFT)
-    gui.advanced_preset_combo.bind(
-        "<<ComboboxSelected>>", lambda e: apply_advanced_preset(gui)
-    )
+    gui.advanced_preset_control.frame.pack(side=gui.tk.LEFT)
     gui.advanced_preset_save_button = gui.ttk.Button(
         advanced_preset_frame,
         text="Save as…",
         command=gui._open_save_preset_dialog,
     )
-    gui.advanced_preset_save_button.pack(side=gui.tk.LEFT, padx=(8, 0))
+    # Wider than the gaps between the management buttons themselves, so the
+    # preset row reads as a separate group from the actions that edit it.
+    gui.advanced_preset_save_button.pack(side=gui.tk.LEFT, padx=(24, 0))
     gui.advanced_preset_update_button = gui.ttk.Button(
         advanced_preset_frame,
         text="Update",
@@ -688,151 +834,224 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             "write", lambda *_: refresh_advanced_preset_selection(gui)
         )
 
-    basic_label_container = gui.ttk.Frame(gui.options_frame)
-    basic_label = gui.ttk.Label(basic_label_container, text="Basic options")
-    basic_label.pack(side=gui.tk.LEFT)
-
-    gui.basic_presets_frame = gui.ttk.Frame(basic_label_container)
-    gui.basic_presets_frame.pack(side=gui.tk.LEFT, padx=(12, 0))
-
-    gui.basic_preset_buttons: dict[str, "tk.Misc"] = {}
-
-    gui.no_speedup_button = gui.ttk.Button(
-        gui.basic_presets_frame,
-        text="No speedup, only compress",
-        command=lambda: gui._apply_basic_preset("compress_only"),
-        style="Link.TButton",
-    )
-    gui.no_speedup_button.pack(side=gui.tk.LEFT, padx=(0, 8))
-    gui.basic_preset_buttons["compress_only"] = gui.no_speedup_button
-
-    gui.reset_basic_button = gui.ttk.Button(
-        gui.basic_presets_frame,
-        text="Speedup silence ×5 (default speed and threshold)",
-        command=lambda: gui._apply_basic_preset("defaults"),
-        state=gui.tk.DISABLED,
-        style="Link.TButton",
-    )
-    gui.reset_basic_button.pack(side=gui.tk.LEFT, padx=(0, 8))
-    gui.basic_preset_buttons["defaults"] = gui.reset_basic_button
-
-    gui.silence_speed_x10_button = gui.ttk.Button(
-        gui.basic_presets_frame,
-        text="Speedup silence ×10",
-        command=lambda: gui._apply_basic_preset("silence_x10"),
-        style="Link.TButton",
-    )
-    gui.silence_speed_x10_button.pack(side=gui.tk.LEFT)
-    gui.basic_preset_buttons["silence_x10"] = gui.silence_speed_x10_button
-
-    gui.basic_options_frame = gui.ttk.Labelframe(
-        gui.options_frame, padding=0, labelwidget=basic_label_container
-    )
+    # A plain Frame rather than a Labelframe: the panel's four groups each carry
+    # their own heading now, so the caption was left empty — but an empty
+    # ``labelwidget`` still reserved a full text line above the border, which is
+    # most of the dead space that used to separate the Preset row from "BASIC
+    # OPTIONS". The macro row the caption used to host moved into that group as a
+    # normal labelled row.
+    gui.basic_options_frame = gui.ttk.Frame(gui.options_frame, padding=0)
     gui.basic_options_frame.grid(
-        row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        row=2, column=0, columnspan=2, sticky="ew", pady=(0, 0)
     )
     gui.basic_options_frame.columnconfigure(1, weight=1)
 
-    gui.silent_speed_var = gui.tk.DoubleVar(
-        value=min(max(gui.preferences.get_float("silent_speed", 5.0), 1.0), 10.0)
+    # The first heading sits directly under the Preset row, so it skips the
+    # inter-group top padding the later headings need to separate them from the
+    # rows above.
+    add_group_heading(gui, gui.basic_options_frame, "Basic options", row=0, pady=(4, 2))
+
+    gui.ttk.Label(gui.basic_options_frame, text="Silence speedup").grid(
+        row=1, column=0, sticky="w", pady=(8, 0)
     )
-    add_slider(
+    # Parented on ``basic_options_frame``, not merely gridded into it: ``grid``
+    # is handled by the widget's own parent, so a frame created under
+    # ``options_frame`` would land in *that* grid — which is what once pushed
+    # this row up next to the Preset strip.
+    gui.basic_presets_frame = gui.ttk.Frame(gui.basic_options_frame)
+    gui.basic_presets_frame.grid(row=1, column=1, columnspan=2, sticky="w", pady=(8, 0))
+
+    gui.basic_preset_control = SegmentedChoice(
+        gui.basic_presets_frame,
+        [
+            Option("silence_x10", "Silence ×10"),
+            Option("silence_x5", "Silence ×5"),
+            Option("compress_only", "No speedup"),
+        ],
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=None,
+        on_change=lambda value: gui._apply_basic_preset(value),
+    )
+    gui.basic_preset_control.frame.pack(side=gui.tk.LEFT)
+    gui.basic_preset_buttons = {
+        "silence_x10": gui.basic_preset_control.buttons[0],
+        "silence_x5": gui.basic_preset_control.buttons[1],
+        "compress_only": gui.basic_preset_control.buttons[2],
+    }
+    # The macro that restores the defaults is now x10, not x5.
+    gui.reset_basic_button = gui.basic_preset_buttons["silence_x10"]
+
+    gui.ttk.Label(gui.basic_options_frame, text="Resolution").grid(
+        row=2, column=0, sticky="w", pady=(8, 0)
+    )
+    resolution_choice = gui.ttk.Frame(gui.basic_options_frame)
+    resolution_choice.grid(row=2, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    gui.resolution_var = gui.tk.StringVar(value=resolution_from_small(gui))
+    gui.resolution_control = SegmentedChoice(
+        resolution_choice,
+        list(RESOLUTION_OPTIONS),
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=gui.resolution_var,
+        default_value=DEFAULT_RESOLUTION,
+        on_change=lambda value: apply_resolution_choice(gui, value),
+    )
+    gui.resolution_control.frame.pack(side=gui.tk.LEFT)
+    # ``small_var``/``small_480_var`` stay the source of truth — presets, the
+    # CLI seed and ``_collect_arguments`` all read them — so the buttons follow
+    # whatever writes those, and writing them back here would loop.
+    for _small_var in (gui.small_var, gui.small_480_var):
+        _small_var.trace_add(
+            "write", lambda *_: gui.resolution_var.set(resolution_from_small(gui))
+        )
+
+    add_group_heading(gui, gui.basic_options_frame, "Speed & silence", row=3)
+
+    gui.silent_speed_var = gui.tk.DoubleVar(
+        value=min(
+            max(gui.preferences.get_float("silent_speed", DEFAULT_SILENT_SPEED), 1.0),
+            10.0,
+        )
+    )
+    add_segmented(
         gui,
         gui.basic_options_frame,
-        "Silent speed",
+        "Silent",
         gui.silent_speed_var,
-        row=0,
+        row=4,
         setting_key="silent_speed",
-        minimum=1.0,
-        maximum=10.0,
-        resolution=0.5,
-        display_format="{:.1f}×",
-        default_value=5.0,
+        options=[
+            Option(10.0, "10"),
+            Option(5.0, "5"),
+            Option(2.0, "2"),
+            Option(1.0, "1"),
+        ],
+        default_value=DEFAULT_SILENT_SPEED,
+        custom=CustomSpec(minimum=1.0, maximum=10.0),
     )
 
     gui.sounded_speed_var = gui.tk.DoubleVar(
-        value=min(max(gui.preferences.get_float("sounded_speed", 1.0), 0.75), 2.0)
+        value=min(
+            max(
+                gui.preferences.get_float("sounded_speed", 1.0),
+                SOUNDED_SPEED_MINIMUM,
+            ),
+            SOUNDED_SPEED_MAXIMUM,
+        )
     )
-    add_slider(
+    add_segmented(
         gui,
         gui.basic_options_frame,
-        "Sounded speed",
+        "Sounded",
         gui.sounded_speed_var,
-        row=1,
+        row=5,
         setting_key="sounded_speed",
-        minimum=0.75,
-        maximum=2.0,
-        resolution=0.25,
-        display_format="{:.2f}×",
+        options=[
+            Option(1.0, "1"),
+            Option(1.3, "1.3"),
+            Option(1.5, "1.5"),
+            Option(2.0, "2"),
+        ],
         default_value=1.0,
+        custom=CustomSpec(minimum=SOUNDED_SPEED_MINIMUM, maximum=SOUNDED_SPEED_MAXIMUM),
     )
 
     gui.silent_threshold_var = gui.tk.DoubleVar(
-        value=min(max(gui.preferences.get_float("silent_threshold", 0.01), 0.0), 1.0)
+        value=min(
+            max(gui.preferences.get_float("silent_threshold", 0.01), 0.0),
+            THRESHOLD_MAXIMUM,
+        )
     )
-    add_slider(
+    threshold_control = add_segmented(
         gui,
         gui.basic_options_frame,
-        "Silent threshold",
+        "Threshold",
         gui.silent_threshold_var,
-        row=2,
+        row=6,
         setting_key="silent_threshold",
-        minimum=0.0,
-        maximum=1.0,
-        resolution=0.01,
-        display_format="{:.2f}",
+        options=[
+            Option(0.01, "0.01"),
+            Option(0.03, "0.03"),
+            Option(0.05, "0.05"),
+            Option(0.10, "0.10"),
+        ],
         default_value=0.01,
-        pady=(4, 12),
+        custom=CustomSpec(
+            minimum=0.0, maximum=THRESHOLD_MAXIMUM, display_format="{:.2f}"
+        ),
+        tooltip=THRESHOLD_TOOLTIP,
+        help_url=THRESHOLD_ARTICLE_URL,
     )
+    gui.threshold_help_button = threshold_control.help_button
 
-    gui.ttk.Label(gui.basic_options_frame, text="Video codec").grid(
-        row=3, column=0, sticky="w", pady=(8, 0)
+    add_group_heading(gui, gui.basic_options_frame, "Output", row=7)
+
+    gui.ttk.Label(gui.basic_options_frame, text="Codec").grid(
+        row=8, column=0, sticky="w", pady=(8, 0)
     )
     codec_choice = gui.ttk.Frame(gui.basic_options_frame)
-    codec_choice.grid(row=3, column=1, columnspan=2, sticky="w", pady=(8, 0))
-    gui.video_codec_buttons = {}
-    for value, label in (
-        ("h264", "h.264 (faster)"),
-        ("hevc", "h.265 (25% smaller)"),
-        ("av1", "av1 (no advantages)"),
-        ("mp3", "mp3 (audio only)"),
-    ):
-        button = gui.ttk.Radiobutton(
-            codec_choice,
-            text=label,
-            value=value,
-            variable=gui.video_codec_var,
-        )
-        button.pack(side=gui.tk.LEFT, padx=(0, 8))
-        gui.video_codec_buttons[value] = button
-
+    codec_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    gui.video_codec_control = SegmentedChoice(
+        codec_choice,
+        [
+            Option("h264", "h.264", tooltip="Faster"),
+            Option("hevc", "h.265", tooltip="25% smaller"),
+            Option("av1", "av1", tooltip="No advantages"),
+            Option("mp3", "mp3", tooltip="Audio only"),
+        ],
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=gui.video_codec_var,
+        default_value="h264",
+    )
+    gui.video_codec_control.frame.pack(side=gui.tk.LEFT)
     gui.add_codec_suffix_check = gui.ttk.Checkbutton(
         codec_choice,
-        text="Add codec suffix to filename",
+        text="Add codec suffix",
         variable=gui.add_codec_suffix_var,
     )
-    gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(0, 8))
+    gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(12, 0))
 
-    gui.ttk.Label(gui.basic_options_frame, text="Processing mode").grid(
-        row=4, column=0, sticky="w", pady=(8, 0)
+    add_group_heading(gui, gui.basic_options_frame, "Processing & appearance", row=9)
+
+    gui.ttk.Label(gui.basic_options_frame, text="Mode").grid(
+        row=10, column=0, sticky="w", pady=(8, 0)
     )
     mode_choice = gui.ttk.Frame(gui.basic_options_frame)
-    mode_choice.grid(row=4, column=1, sticky="w", pady=(8, 0))
-
-    gui.ttk.Radiobutton(
+    mode_choice.grid(row=10, column=1, sticky="w", pady=(8, 0))
+    gui.processing_mode_control = SegmentedChoice(
         mode_choice,
-        text="Local",
-        value="local",
+        [Option("local", "Local"), Option("remote", "Remote")],
+        tk=gui.tk,
+        ttk=gui.ttk,
         variable=gui.processing_mode_var,
-    ).pack(side=gui.tk.LEFT, padx=(0, 8))
-
-    gui.remote_mode_button = gui.ttk.Radiobutton(
-        mode_choice,
-        text="Remote",
-        value="remote",
-        variable=gui.processing_mode_var,
+        default_value="local",
+        on_change=lambda _value: gui._update_processing_mode_state(),
     )
-    gui.remote_mode_button.pack(side=gui.tk.LEFT, padx=(0, 8))
+    gui.processing_mode_control.frame.pack(side=gui.tk.LEFT)
+    gui.remote_mode_button = gui.processing_mode_control.buttons[1]
+
+    # The address field rides in the Mode row rather than on a line of its own:
+    # it only matters alongside Local/Remote, and a dedicated row left a wide
+    # gap whenever it was hidden. The explanatory "Server URL" caption is gone
+    # with it — the field sits next to the mode buttons, which is context enough.
+    gui.server_url_row = gui.ttk.Frame(mode_choice)
+    gui.server_url_row.pack(side=gui.tk.LEFT, padx=(12, 0))
+    gui.server_entry = gui.ttk.Entry(
+        gui.server_url_row, textvariable=gui.server_url_var, width=SERVER_URL_WIDTH
+    )
+    gui.server_entry.pack(side=gui.tk.LEFT)
+    gui.server_discover_button = gui.ttk.Button(
+        gui.server_url_row, text="Discover", command=gui._start_discovery
+    )
+    gui.server_discover_button.pack(side=gui.tk.LEFT, padx=(8, 0))
+
+    # Packed last so the readiness text reads after the Discover button.
+    gui.remote_status_label = gui.ttk.Label(
+        mode_choice, textvariable=gui.remote_status_var
+    )
+    gui.remote_status_label.pack(side=gui.tk.LEFT, padx=(12, 0))
 
     server_managed = bool(getattr(gui, "server_managed", False))
     local_server_url = getattr(gui, "local_server_url", None)
@@ -841,41 +1060,26 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text=format_local_server_url(local_server_url) if server_managed else "",
     )
     gui.local_server_url_label.grid(
-        row=4, column=2, sticky="w", padx=(8, 0), pady=(8, 0)
+        row=10, column=2, sticky="w", padx=(8, 0), pady=(8, 0)
     )
     if not (server_managed and local_server_url):
         gui.local_server_url_label.grid_remove()
 
-    gui.ttk.Label(gui.basic_options_frame, text="Server URL").grid(
-        row=5, column=0, sticky="w", pady=(8, 0)
-    )
-    gui.server_entry = gui.ttk.Entry(
-        gui.basic_options_frame,
-        textvariable=gui.server_url_var,
-        width=40,
-    )
-    gui.server_entry.grid(row=5, column=1, sticky="ew", pady=(8, 0))
-
-    gui.server_discover_button = gui.ttk.Button(
-        gui.basic_options_frame, text="Discover", command=gui._start_discovery
-    )
-    gui.server_discover_button.grid(
-        row=5, column=2, padx=(8, 0), pady=(8, 0), sticky="ew"
-    )
-
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
-        row=6, column=0, sticky="w", pady=(8, 0)
+        row=11, column=0, sticky="w", pady=(8, 0)
     )
     theme_choice = gui.ttk.Frame(gui.basic_options_frame)
-    theme_choice.grid(row=6, column=1, columnspan=2, sticky="w", pady=(8, 0))
-    for value, label in ("os", "OS"), ("light", "Light"), ("dark", "Dark"):
-        gui.ttk.Radiobutton(
-            theme_choice,
-            text=label,
-            value=value,
-            variable=gui.theme_var,
-            command=gui._refresh_theme,
-        ).pack(side=gui.tk.LEFT, padx=(0, 8))
+    theme_choice.grid(row=11, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    gui.theme_control = SegmentedChoice(
+        theme_choice,
+        [Option("os", "OS"), Option("light", "Light"), Option("dark", "Dark")],
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=gui.theme_var,
+        default_value="os",
+        on_change=lambda _value: gui._refresh_theme(),
+    )
+    gui.theme_control.frame.pack(side=gui.tk.LEFT)
 
     # Button frame for Advanced, Check updates button, and status label
     gui.button_frame = gui.ttk.Frame(gui.options_frame)
@@ -998,101 +1202,62 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.frame_margin_var = gui.tk.StringVar(value=str(frame_margin_default))
     add_entry(gui, gui.advanced_frame, "Frame margin", gui.frame_margin_var, row=6)
 
-    min_interval = 1.0
-    max_interval = 60.0
-    interval_resolution = 1.0
-    default_keyframe_interval = 30.0
-    keyframe_interval_setting = gui.preferences.get_float(
-        "keyframe_interval_seconds", default_keyframe_interval
+    keyframe_setting = gui.preferences.get_float(
+        "keyframe_interval_seconds", KEYFRAME_INTERVAL_DEFAULT
     )
     try:
-        validated_interval = float(keyframe_interval_setting)
+        validated_interval = float(keyframe_setting)
     except (TypeError, ValueError):
-        validated_interval = default_keyframe_interval
-    if not (min_interval <= validated_interval <= max_interval):
-        validated_interval = max(min_interval, min(max_interval, validated_interval))
-        gui.preferences.update(
-            "keyframe_interval_seconds", float(f"{validated_interval:.6f}")
-        )
-
-    gui.ttk.Label(gui.advanced_frame, text="Keyframe interval").grid(
-        row=7, column=0, sticky="w", pady=4
+        validated_interval = KEYFRAME_INTERVAL_DEFAULT
+    validated_interval = max(
+        KEYFRAME_INTERVAL_MIN, min(KEYFRAME_INTERVAL_MAX, validated_interval)
     )
 
     gui.keyframe_interval_var = gui.tk.DoubleVar(value=validated_interval)
 
-    gui.keyframe_interval_value_label = gui.ttk.Label(gui.advanced_frame)
-    gui.keyframe_interval_value_label.grid(row=7, column=2, sticky="e", pady=4)
-
-    keyframe_percent_samples = [
-        (60.0, 0.5),
-        (30.0, 1.4),
-        (10.0, 4.7),
-        (5.0, 9.6),
-        (1.0, 44.0),
-    ]
-
-    def estimate_keyframe_overhead(interval_seconds: float) -> float:
-        """Estimate percent size increase vs. encoding with no extra keyframes."""
-
-        bounded = max(min_interval, min(max_interval, interval_seconds))
-        samples = keyframe_percent_samples
-        if bounded >= samples[0][0]:
-            return samples[0][1]
-        if bounded <= samples[-1][0]:
-            return samples[-1][1]
-
-        for upper_idx in range(len(samples) - 1):
-            upper_interval, upper_percent = samples[upper_idx]
-            lower_interval, lower_percent = samples[upper_idx + 1]
-            if lower_interval <= bounded <= upper_interval:
-                ratio = (math.log(bounded) - math.log(upper_interval)) / (
-                    math.log(lower_interval) - math.log(upper_interval)
-                )
-                interpolated = math.exp(
-                    math.log(upper_percent)
-                    + ratio * (math.log(lower_percent) - math.log(upper_percent))
-                )
-                return interpolated
-
-        return samples[-1][1]
-
-    def format_percent(delta_percent: float) -> str:
-        if abs(delta_percent) >= 10.0:
-            return f"{delta_percent:+.0f}%"
-        return f"{delta_percent:+.1f}%"
-
-    def update_keyframe_interval(value: str) -> None:
-        numeric = float(value)
-        clamped = max(min_interval, min(max_interval, numeric))
-        steps = round((clamped - min_interval) / interval_resolution)
-        quantized = min_interval + steps * interval_resolution
-        if abs(gui.keyframe_interval_var.get() - quantized) > 1e-9:
-            gui.keyframe_interval_var.set(quantized)
-        delta_percent = estimate_keyframe_overhead(quantized)
-        gui.keyframe_interval_value_label.configure(
-            text=f"{quantized:.0f}s, {format_percent(delta_percent)}"
-        )
-        gui.preferences.update("keyframe_interval_seconds", float(f"{quantized:.6f}"))
-
-    gui.keyframe_interval_slider = gui.tk.Scale(
-        gui.advanced_frame,
-        variable=gui.keyframe_interval_var,
-        from_=min_interval,
-        to=max_interval,
-        orient=gui.tk.HORIZONTAL,
-        resolution=interval_resolution,
-        showvalue=False,
-        command=update_keyframe_interval,
-        length=240,
-        highlightthickness=0,
+    gui.ttk.Label(gui.advanced_frame, text="Keyframe interval").grid(
+        row=7, column=0, sticky="w", pady=4
     )
-    gui.keyframe_interval_slider.grid(row=7, column=1, sticky="ew", pady=4, padx=(0, 8))
+    keyframe_row = gui.ttk.Frame(gui.advanced_frame)
+    keyframe_row.grid(row=7, column=1, columnspan=2, sticky="w", pady=4)
 
-    update_keyframe_interval(str(validated_interval))
-    sliders = getattr(gui, "_sliders", None)
-    if isinstance(sliders, list):
-        sliders.append(gui.keyframe_interval_slider)
+    gui.keyframe_interval_value_label = gui.ttk.Label(keyframe_row)
+
+    def update_keyframe_interval(value) -> None:
+        """Persist the chosen interval and refresh the size-overhead label."""
+
+        numeric = max(KEYFRAME_INTERVAL_MIN, min(KEYFRAME_INTERVAL_MAX, float(value)))
+        gui.keyframe_interval_value_label.configure(
+            text=format_percent(estimate_keyframe_overhead(numeric))
+        )
+        gui.preferences.update("keyframe_interval_seconds", float(f"{numeric:.6f}"))
+
+    gui.keyframe_interval_control = SegmentedChoice(
+        keyframe_row,
+        [
+            Option(5.0, "5 sec"),
+            Option(10.0, "10 sec"),
+            Option(30.0, "30 sec"),
+            Option(60.0, "60 sec"),
+        ],
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=gui.keyframe_interval_var,
+        default_value=KEYFRAME_INTERVAL_DEFAULT,
+        custom=CustomSpec(
+            minimum=KEYFRAME_INTERVAL_MIN,
+            maximum=KEYFRAME_INTERVAL_MAX,
+            display_format="{:g} sec",
+        ),
+    )
+    gui.keyframe_interval_control.frame.pack(side=gui.tk.LEFT)
+    gui.keyframe_interval_value_label.pack(side=gui.tk.LEFT, padx=(12, 0))
+
+    gui.keyframe_interval_var.trace_add(
+        "write", lambda *_: update_keyframe_interval(gui.keyframe_interval_var.get())
+    )
+
+    update_keyframe_interval(validated_interval)
 
     gui.start_in_server_tray_check = gui.ttk.Checkbutton(
         gui.advanced_frame,
@@ -1232,6 +1397,76 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         watch.start()
 
 
+def update_processing_mode_visibility(
+    gui: "TalksReducerGUI", *, update_row: bool = True
+) -> None:
+    """Show the Server URL row in remote mode, or whenever no URL is set yet.
+
+    Local processing has no server to address, so the readiness text is hidden
+    whenever the mode is not remote. The Server URL row is different: it is the
+    *only* way to reach the URL entry and the Discover button, and the Remote
+    segment disables itself until a URL exists (see
+    ``_update_processing_mode_state``). Hiding the row whenever the mode is
+    local would therefore make Remote mode permanently unreachable on a fresh
+    config — local forced by default, row hidden by default, Remote disabled
+    until a URL is typed into a row nobody can see. The row is shown when the
+    mode is remote *or* when ``server_url_var`` is still empty, so the escape
+    hatch stays open until a URL is configured; once one exists, the row goes
+    back to being remote-only. Do not simplify this back to ``remote`` alone.
+
+    *update_row* gates whether the row's own visibility is recomputed at all;
+    it defaults to ``True`` for the mode-change and initial-build callers. The
+    escape hatch is meant to be evaluated when the **mode** changes or at
+    build time — never while the user is editing the URL text itself, since
+    ``server_url_var`` is traced on every keystroke (and again when Discover
+    fills it in). Recomputing on every character would flip ``has_url`` true
+    the instant a single character lands, hiding the row — Discover button
+    included — out from under whatever the user was doing to it. The
+    server-URL write handler (``_on_server_url_change`` /
+    ``on_server_url_change``) calls ``_update_processing_mode_state`` with
+    *update_row* forced to ``False`` for exactly this reason: an edit to the
+    URL text must never move the row, only a mode switch may. Do not remove
+    this parameter or make URL edits recompute the row again.
+
+    The row and the status label are both packed inside ``mode_choice``, so both
+    hide with ``pack_forget``. Re-packing appends to the end of the container,
+    which would put the address field *after* the readiness text, so the row is
+    re-packed ``before`` that label to keep the Local/Remote → address →
+    Discover → status order.
+    """
+
+    remote = gui.processing_mode_var.get() == "remote"
+    row = getattr(gui, "server_url_row", None)
+    label = getattr(gui, "remote_status_label", None)
+
+    # The status label is settled first, because the row is inserted relative to
+    # it below. ``pack(before=w)`` requires *w* to be currently managed by pack:
+    # packing the row before a label that local mode had just forgotten raises
+    # TclError and leaves the whole remote group unpacked, which looked like
+    # "Remote stops showing its controls after switching modes twice".
+    if label is not None:
+        if remote:
+            label.pack(side=gui.tk.LEFT, padx=(12, 0))
+        else:
+            label.pack_forget()
+
+    if update_row and row is not None:
+        has_url = bool(gui.server_url_var.get().strip())
+        show_row = remote or not has_url
+        if show_row:
+            # ``before`` only when the label is actually packed — otherwise the
+            # row simply goes last, which is the right order with no label.
+            if label is not None and remote:
+                row.pack(side=gui.tk.LEFT, padx=(12, 0), before=label)
+            else:
+                row.pack(side=gui.tk.LEFT, padx=(12, 0))
+        else:
+            row.pack_forget()
+
+    if not remote and hasattr(gui, "remote_status_var"):
+        gui.remote_status_var.set("")
+
+
 def add_entry(
     gui: "TalksReducerGUI",
     parent: "tk.Misc",
@@ -1255,7 +1490,7 @@ def add_entry(
         button.grid(row=row, column=2, padx=(8, 0))
 
 
-def add_slider(
+def add_segmented(
     gui: "TalksReducerGUI",
     parent: "tk.Misc",
     label: str,
@@ -1263,76 +1498,111 @@ def add_slider(
     *,
     row: int,
     setting_key: str,
-    minimum: float,
-    maximum: float,
-    resolution: float,
-    display_format: str,
+    options: list,
     default_value: float,
+    custom: "CustomSpec | None" = None,
+    tooltip: str | None = None,
+    help_url: str | None = None,
     pady: int | tuple[int, int] = 4,
-) -> None:
-    """Add a labeled slider to the given *parent* container."""
+) -> "SegmentedChoice":
+    """Add a labeled row of choice buttons to *parent* and wire it into presets.
 
-    gui.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=pady)
+    The control is registered under *setting_key* in ``_slider_updaters``,
+    ``_basic_defaults`` and ``_basic_variables`` so preset application, the
+    reset-state bookkeeping and the reverse preset match keep working exactly as
+    they did with the slider this replaces.
 
-    value_label = gui.ttk.Label(parent)
-    value_label.grid(row=row, column=2, sticky="e", pady=pady)
+    *help_url* appends a ``?`` link to the setting's label. The link belongs to
+    the label rather than the value row: the value row holds values, and a
+    trailing widget there competes with the buttons for the row's width.
+    The created button is exposed as ``control.help_button`` so callers can
+    keep a reference to it.
+    """
 
-    def update(value: str) -> None:
-        numeric = float(value)
-        clamped = max(minimum, min(maximum, numeric))
-        steps = round((clamped - minimum) / resolution)
-        quantized = minimum + steps * resolution
-        if abs(variable.get() - quantized) > 1e-9:
-            variable.set(quantized)
-        value_label.configure(text=display_format.format(quantized))
-        gui.preferences.update(setting_key, float(f"{quantized:.6f}"))
+    help_button = None
+    if help_url:
+        label_frame = gui.ttk.Frame(parent)
+        gui.ttk.Label(label_frame, text=label).pack(side=gui.tk.LEFT)
+        help_button = gui.ttk.Button(
+            label_frame,
+            text="?",
+            style="HelpLink.TButton",
+            command=lambda: webbrowser.open(help_url),
+        )
+        help_button.pack(side=gui.tk.LEFT)
+        label_frame.grid(row=row, column=0, sticky="w", pady=pady)
+    else:
+        gui.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=pady)
+
+    def persist(value: float) -> None:
+        gui.preferences.update(setting_key, float(f"{float(value):.6f}"))
         update_basic_reset_state(gui)
 
-    slider = gui.tk.Scale(
+    control = SegmentedChoice(
         parent,
+        options,
+        tk=gui.tk,
+        ttk=gui.ttk,
         variable=variable,
-        from_=minimum,
-        to=maximum,
-        orient=gui.tk.HORIZONTAL,
-        resolution=resolution,
-        showvalue=False,
-        command=update,
-        length=240,
-        highlightthickness=0,
+        default_value=default_value,
+        custom=custom,
+        tooltip=tooltip,
+        on_change=persist,
     )
-    slider.grid(row=row, column=1, sticky="ew", pady=pady, padx=(0, 8))
+    control.frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=pady)
+    control.help_button = help_button
 
-    update(str(variable.get()))
+    def apply_and_persist(value) -> None:
+        """Set the control and persist, for callers that drive it programmatically.
 
-    gui._slider_updaters[setting_key] = update
+        ``reset_basic_defaults`` and ``apply_preset_to_gui`` reach the knobs only
+        through ``_slider_updaters`` and rely on that call to write the new value
+        to ``settings.json`` — the slider's own ``update()`` used to do both.
+        ``SegmentedChoice.set_value`` deliberately does not fire ``on_change``, so
+        the persistence half is restored here rather than in the widget.
+        """
+
+        control.set_value(value)
+        persist(value)
+
+    gui._slider_updaters[setting_key] = apply_and_persist
     gui._basic_defaults[setting_key] = default_value
     gui._basic_variables[setting_key] = variable
     variable.trace_add("write", lambda *_: update_basic_reset_state(gui))
-    gui._sliders.append(slider)
+    return control
+
+
+def add_group_heading(
+    gui: "TalksReducerGUI",
+    parent: "tk.Misc",
+    text: str,
+    *,
+    row: int,
+    pady: tuple = (10, 2),
+):
+    """Add a quiet section heading above a run of related settings rows.
+
+    *pady* is overridable so the panel's first heading, which has no settings
+    rows above it to separate itself from, can drop the leading gap.
+    """
+
+    heading = gui.ttk.Label(parent, text=text.upper(), style="Heading.TLabel")
+    heading.grid(row=row, column=0, columnspan=3, sticky="w", pady=pady)
+    return heading
 
 
 def update_basic_reset_state(gui: "TalksReducerGUI") -> None:
-    """Enable or disable the reset control based on slider values."""
+    """Refresh the basic-preset highlight and the Advanced dropdown selection.
+
+    The reset macro used to disable itself when the sliders already matched
+    the defaults, but it is now a member of the "Basic options" segmented
+    group, where the same state means "selected" — disabling it would
+    contradict its own highlight. Only the highlight is recomputed here.
+    """
 
     if not hasattr(gui, "reset_basic_button"):
         return
 
-    should_enable = False
-    for key, default_value in gui._basic_defaults.items():
-        variable = gui._basic_variables.get(key)
-        if variable is None:
-            continue
-        try:
-            current_value = float(variable.get())
-        except (TypeError, ValueError):
-            should_enable = True
-            break
-        if abs(current_value - default_value) > 1e-9:
-            should_enable = True
-            break
-
-    state = gui.tk.NORMAL if should_enable else gui.tk.DISABLED
-    gui.reset_basic_button.configure(state=state)
     update_basic_preset_highlight(gui)
     refresh_advanced_preset_selection(gui)
 
@@ -1366,14 +1636,10 @@ def update_basic_preset_highlight(gui: "TalksReducerGUI") -> None:
             active = preset
             break
 
-    for preset, button in buttons.items():
-        try:
-            style = "SelectedLink.TButton" if preset == active else "Link.TButton"
-            button.configure(style=style)
-        except Exception:
-            continue
-
     gui._active_basic_preset = active
+    control = getattr(gui, "basic_preset_control", None)
+    if control is not None:
+        control.set_selected(active)
 
 
 def reset_basic_defaults(gui: "TalksReducerGUI") -> None:
@@ -1532,33 +1798,15 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui, "_simple_presets", None
         ):
             gui.simple_preset_frame.grid()
-        # Resolution is driven read-only by the selected preset in Simple mode,
-        # so the manual Small video / 480p checkboxes are hidden while a preset
-        # exists (they would otherwise silently override the preset while it still
-        # shows selected). When ``load_presets()`` returns an empty list the
-        # selector is hidden, so the checkboxes must stay visible as the only
-        # resolution control Simple mode has left.
-        if getattr(gui, "_simple_presets", None):
-            if hasattr(gui, "small_check"):
-                gui.small_check.pack_forget()
-            if hasattr(gui, "small_480_check"):
-                gui.small_480_check.pack_forget()
-            # Open output rides inside the preset row (shown via
-            # ``simple_preset_frame``); hide the full-layout copy so it does not
-            # also appear on its own line.
-            if hasattr(gui, "open_output_check"):
+        # Open output rides inside the preset row (shown via
+        # ``simple_preset_frame``) whenever presets exist, so the full-layout
+        # copy is hidden to keep it off its own line. With no presets that row
+        # is gone, and this copy is the only Open output left.
+        if hasattr(gui, "open_output_check"):
+            if getattr(gui, "_simple_presets", None):
                 gui.open_output_check.pack_forget()
-        else:
-            # No preset selector, so the preset row is hidden; keep Open output in
-            # its full-layout row alongside the manual resolution checkboxes.
-            if hasattr(gui, "open_output_check"):
-                gui.open_output_check.pack(side=gui.tk.LEFT, padx=(65, 0))
-            if hasattr(gui, "small_check") and hasattr(gui, "open_output_check"):
-                gui.small_check.pack(side=gui.tk.LEFT, before=gui.open_output_check)
-            if hasattr(gui, "small_480_check") and hasattr(gui, "open_output_check"):
-                gui.small_480_check.pack(
-                    side=gui.tk.LEFT, padx=(65, 0), before=gui.open_output_check
-                )
+            else:
+                gui.open_output_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
         # Cut video is an Advanced-only feature: hide its checkbox and panel.
         if hasattr(gui, "cut_check"):
             gui.cut_check.pack_forget()
@@ -1585,20 +1833,15 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
         if hasattr(gui, "simple_preset_frame"):
             # Hides the whole preset row, including its Open output copy.
             gui.simple_preset_frame.grid_remove()
-        # Restore the full-layout Open output (Simple mode may have forgotten it)
-        # then pack the manual resolution checkboxes ahead of it so the full layout
-        # keeps its original Small video / 480p / Open output order.
+        # Restore the full-layout Open output (Simple mode may have forgotten it),
+        # then Cut video after it. Both re-pack at the end of the row, so the
+        # order of these two calls is what puts them back in their build order
+        # behind the never-hidden Simple mode checkbox.
         if hasattr(gui, "open_output_check"):
-            gui.open_output_check.pack(side=gui.tk.LEFT, padx=(65, 0))
-        if hasattr(gui, "small_check") and hasattr(gui, "open_output_check"):
-            gui.small_check.pack(side=gui.tk.LEFT, before=gui.open_output_check)
-        if hasattr(gui, "small_480_check") and hasattr(gui, "open_output_check"):
-            gui.small_480_check.pack(
-                side=gui.tk.LEFT, padx=(65, 0), before=gui.open_output_check
-            )
+            gui.open_output_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
         # Restore the Advanced-only Cut video checkbox and (if enabled) its panel.
         if hasattr(gui, "cut_check"):
-            gui.cut_check.pack(side=gui.tk.LEFT, padx=(65, 0))
+            gui.cut_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
         if hasattr(gui, "cut_panel"):
             if (
                 getattr(gui, "cut_enabled_var", None) is not None

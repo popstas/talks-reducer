@@ -203,7 +203,7 @@ def test_match_preset_exact_match_within_tolerance():
         "video_codec": "hevc",
     }
 
-    assert match_preset(values, DEFAULT_PRESETS) == "480p 10x speedup H.265"
+    assert match_preset(values, DEFAULT_PRESETS) == "Smallest"
 
 
 def test_match_preset_returns_none_when_custom():
@@ -243,7 +243,7 @@ def test_match_preset_invalid_number_returns_none():
 
 
 def test_find_preset():
-    assert find_preset("720p no speedup H.264", DEFAULT_PRESETS).resolution == "720p"
+    assert find_preset("Compress", DEFAULT_PRESETS).resolution == "720p"
     assert find_preset("missing", DEFAULT_PRESETS) is None
 
 
@@ -459,3 +459,35 @@ def test_move_preset_does_not_mutate_source():
     presets.move_preset(original, "A", 1)
 
     assert [p.name for p in original] == ["A", "B"]
+
+
+def test_describe_preset_lists_every_applied_field():
+    preset = Preset(
+        name="Optimal",
+        resolution="720p",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="hevc",
+    )
+
+    assert presets.describe_preset(preset) == (
+        "Resolution: 720p\n"
+        "Silent speed: 10×\n"
+        "Sounded speed: 1×\n"
+        "Silent threshold: 0.01\n"
+        "Codec: h.265"
+    )
+
+
+def test_describe_preset_omits_absent_fields():
+    preset = Preset(name="mp3", silent_speed=10.0, video_codec="mp3")
+
+    assert presets.describe_preset_fields(preset) == [
+        "Silent speed: 10×",
+        "Codec: mp3",
+    ]
+
+
+def test_describe_preset_without_values_is_not_blank():
+    assert presets.describe_preset(Preset(name="empty")) == "Applies no settings"

@@ -12,13 +12,15 @@ applied read-only on every other surface, including the CLI. Presets live in the
 appears everywhere.
 
 - `--list-presets` prints the stored preset names, one per line, and exits (no input file
-  required). On a fresh install the three seeded defaults are printed:
+  required). On a fresh install the five seeded defaults are printed:
 
   ```sh
   talks-reducer --list-presets
-  # 720p 10x speedup H.264
-  # 480p 10x speedup H.265
-  # 720p no speedup H.264
+  # Compatible
+  # Optimal
+  # Smallest
+  # Compress
+  # mp3
   ```
 
 - `--preset "NAME"` loads that preset and applies its fields as the **base configuration**
@@ -26,8 +28,8 @@ appears everywhere.
   **explicit flag > preset > default**:
 
   ```sh
-  talks-reducer --preset "480p 10x speedup H.265" talk.mp4          # apply the whole preset
-  talks-reducer --preset "480p 10x speedup H.265" --silent-speed 8 talk.mp4  # override just the speed
+  talks-reducer --preset "Smallest" talk.mp4                   # apply the whole preset
+  talks-reducer --preset "Smallest" --silent-speed 8 talk.mp4  # override just the speed
   ```
 
 The preset's resolution is expanded to the explicit tri-state (`1080p` → `--no-small`,

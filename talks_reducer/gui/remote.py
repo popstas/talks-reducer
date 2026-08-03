@@ -176,6 +176,7 @@ def check_remote_server_for_gui(
 
     def status_callback(status: str, message: str) -> None:
         gui._schedule_on_ui_thread(lambda s=status, m=message: gui._set_status(s, m))
+        gui._schedule_on_ui_thread(lambda m=message: gui._set_remote_status(m))
 
     if switch_to_local_on_failure:
 

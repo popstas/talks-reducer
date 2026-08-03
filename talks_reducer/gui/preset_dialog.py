@@ -15,18 +15,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Mapping, Optional, Sequence, Set
 
+from .. import presets
 from .shortcut import _apply_dialog_theme, _center_dialog_on_root
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from .app import TalksReducerGUI
 
 # The tunable params a preset can carry, in dialog order, with display labels.
-FIELD_SPECS: Sequence[tuple[str, str]] = (
-    ("resolution", "Resolution"),
-    ("silent_speed", "Silent speed"),
-    ("sounded_speed", "Sounded speed"),
-    ("silent_threshold", "Silent threshold"),
-    ("video_codec", "Codec"),
+# Sourced from the preset store so the checkbox captions and the preset
+# summaries shown as tooltips never drift apart.
+FIELD_SPECS: Sequence[tuple[str, str]] = tuple(
+    (key, presets.PRESET_FIELD_LABELS[key]) for key in presets.PRESET_VALUE_FIELDS
 )
 
 

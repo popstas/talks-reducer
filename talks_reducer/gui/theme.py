@@ -269,6 +269,112 @@ def apply_theme(
         ],
     )
     style.configure(
+        "Segment.TButton",
+        width=0,
+        background=palette["surface"],
+        foreground=palette["foreground"],
+        borderwidth=1,
+        relief="solid",
+        padding=(10, 2),
+        font=("TkDefaultFont", 8),
+    )
+    style.map(
+        "Segment.TButton",
+        background=[
+            ("active", palette.get("hover", palette["surface"])),
+            ("disabled", palette["surface"]),
+        ],
+        foreground=[
+            ("active", palette.get("hover_text", palette["foreground"])),
+            # Dimmed rather than the normal foreground, so a disabled segment
+            # (e.g. the Remote mode button before a server URL is set) actually
+            # reads as unavailable instead of looking identical to an enabled
+            # one. ``border`` is the same muted tone already used for other
+            # disabled indicators in this stylesheet (see the TCombobox
+            # ``arrowcolor`` map below).
+            ("disabled", palette["border"]),
+        ],
+    )
+    # The "…" slot swaps itself for an entry of the same character width, but a
+    # segment button's 10px horizontal padding makes it render far wider than
+    # that entry. The slot therefore uses its own near-padless variants so the
+    # button and the entry occupy the same space and the row never jumps.
+    style.configure(
+        "CustomSegment.TButton",
+        width=0,
+        background=palette["surface"],
+        foreground=palette["foreground"],
+        borderwidth=1,
+        relief="solid",
+        padding=(2, 2),
+        font=("TkDefaultFont", 8),
+    )
+    style.map(
+        "CustomSegment.TButton",
+        background=[
+            ("active", palette.get("hover", palette["surface"])),
+            ("disabled", palette["surface"]),
+        ],
+        foreground=[
+            ("active", palette.get("hover_text", palette["foreground"])),
+            ("disabled", palette["border"]),
+        ],
+    )
+    # A "?" help link is one glyph wide; the default Link padding leaves it
+    # looking like a button, so it gets a tighter horizontal inset and takes its
+    # width from its content.
+    # ``width=0`` overrides ttk's inherited ``TButton`` minimum of 11
+    # characters, which would otherwise pad a one-glyph "?" out to ~89px.
+    style.configure(
+        "HelpLink.TButton",
+        width=0,
+        background=palette["background"],
+        foreground=palette["accent"],
+        borderwidth=0,
+        relief="flat",
+        highlightthickness=0,
+        padding=(5, 0),
+        font=("TkDefaultFont", 8, "underline"),
+    )
+    style.map(
+        "HelpLink.TButton",
+        background=[
+            ("active", palette.get("hover", palette["background"])),
+            ("disabled", palette["background"]),
+        ],
+        foreground=[
+            ("active", palette.get("accent", palette["foreground"])),
+            ("disabled", palette["foreground"]),
+        ],
+    )
+    style.configure(
+        "SelectedSegment.TButton",
+        width=0,
+        background=selected_background,
+        foreground=selected_foreground,
+        borderwidth=1,
+        relief="solid",
+        padding=(10, 2),
+        font=("TkDefaultFont", 8),
+    )
+    style.map(
+        "SelectedSegment.TButton",
+        background=[
+            ("active", selected_background),
+            ("disabled", selected_background),
+        ],
+        foreground=[
+            ("active", selected_foreground),
+            ("disabled", selected_foreground),
+        ],
+    )
+    style.configure(
+        "Heading.TLabel",
+        background=palette["background"],
+        foreground=palette["foreground"],
+        font=("TkDefaultFont", 7),
+    )
+    style.configure(
         "TButton",
         background=palette["surface"],
         foreground=palette["foreground"],
@@ -285,6 +391,12 @@ def apply_theme(
             ("active", palette.get("hover_text", "#000000")),
             ("disabled", palette["foreground"]),
         ],
+    )
+    style.configure(
+        "SegmentEntry.TEntry",
+        fieldbackground=palette["background"],
+        foreground=palette["foreground"],
+        padding=(0, 1),
     )
     style.configure(
         "TEntry",

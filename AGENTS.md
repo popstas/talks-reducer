@@ -26,7 +26,53 @@ Look at the commit history to get more examples.
 - **Input drop zone** — drag files or folders from your desktop, click to open
   the system file picker, or add them via the Explorer/Finder dialog; duplicates
   are ignored.
-- **Small video** — toggles the `--small` preset used by the CLI.
+- **Basic options** — the panel (`layout.py`, inside `options_frame`) renders its choice-style
+  settings as `SegmentedChoice` (`talks_reducer/gui/segmented.py`) — one `ttk.Button` per option,
+  styled `Segment.TButton`/`SelectedSegment.TButton` (added in `theme.py` alongside
+  `Heading.TLabel`, used for the panel's four group headings: **Basic options** (holding **Silence
+speedup** and **Resolution**), **Speed & silence**, **Output**,
+  **Processing & appearance**) — instead of the `tk.Scale` sliders it used to use. **Silent**
+  speed offers 10/5/2/1 (custom 1–10, default 10 — every row leads with its
+  strongest option and opens on it); **Sounded** speed offers 1/1.3/1.5/2 (custom
+  0.75–10, default 1 — 1.3 and 1.5 are newly reachable now that the old slider's 0.25 quantization
+  is gone); **Threshold** offers 0.01/0.03/0.05/0.10 (custom 0–`THRESHOLD_MAXIMUM`, which is 0.9 —
+  past that the detector calls almost the whole track silence — default 0.01), the group carries
+  one tooltip listing what each value trims, and a narrow `?` link (`HelpLink.TButton`,
+  `webbrowser.open` on
+  `THRESHOLD_ARTICLE_URL`, the telegra.ph write-up on trimming silence before speech-to-text
+  breaks) sits in the setting's **label**, not in the value row — `add_segmented`'s `help_url`
+  builds the label as a frame holding the text plus the link and exposes it as
+  `control.help_button`. **Codec** offers h.264/h.265/av1/mp3, each with its own tooltip ("Faster", "25%
+  smaller", "No advantages", "Audio only" — text that used to sit in parentheses in the label);
+  **Add codec suffix** sits to its right. **Mode** offers Local/Remote and carries the whole
+  remote group on its own line — the address `ttk.Entry` (`SERVER_URL_WIDTH`), **Discover**, then
+  the readiness text, in that order; `server_url_row` and `remote_status_label` are both packed
+  into the Mode row's frame, so `update_processing_mode_visibility` hides them with
+  `pack_forget` and re-packs the row `before=remote_status_label` to keep that order. **Theme**
+  offers OS/Light/Dark. A trailing `…` slot on the custom-range controls swaps itself for an
+  inline `ttk.Entry` — Enter **and focus-out** both commit (clamped to the control's bounds), so
+  clicking away never discards a typed value; only Escape cancels, and a non-number falls back to
+  the last committed value. Once a value is committed the slot **stays** an entry so it can be edited
+  in place; only clicking a preset option clears it back to `…`. Button and entry are sized to
+  match (`CUSTOM_SLOT_WIDTH` plus the near-padless `CustomSegment.TButton`/`SegmentEntry.TEntry`
+  styles) so the swap never reflows the row. Every bound control traces its variable and is registered into
+  `gui._slider_updaters` through `layout.add_segmented`'s `apply_and_persist` wrapper, so
+  `apply_preset_to_gui` and presets applied on other surfaces keep moving the buttons exactly as
+  they moved the sliders they replaced. The "Basic options" macro row (**Silence ×10** /
+  **Silence ×5** / **No speedup**) is also a `SegmentedChoice` (`gui.basic_preset_control`,
+  `variable=None`); **Silence ×5** (`gui.reset_basic_button`) used to disable itself when the
+  sliders already matched the defaults, but a button rendered as "selected" must not
+  simultaneously be disabled, so it no longer does — clicking it always re-applies the defaults.
+- **Resolution** — a `SegmentedChoice` (**720p** / **480p** / **orig**) in the **Basic options**
+  group, replacing the old **Small video** + **480p** checkboxes. `orig` leaves the source
+  resolution untouched and corresponds to the CLI's `--no-small`. The control is a *projection*:
+  `small_var`/`small_480_var` remain the source of truth that presets, the seeded-launch CLI
+  flags and `_collect_arguments` read, so clicking a button fans onto them
+  (`layout.apply_resolution_choice`) and a trace on both booleans writes `resolution_var` back
+  (`layout.resolution_from_small`) — that is what makes an applied preset move the buttons.
+  Because the control lives inside `basic_options_frame`, which Simple mode hides, a Simple-mode
+  session with **zero** presets now has no resolution control at all (the checkboxes used to
+  cover that case).
 - **Open after convert** — controls whether the exported file is revealed in
   your system file manager as soon as each job finishes.
 - **Cut video** — an **Advanced-only** checkbox (`apply_simple_mode` hides it and
@@ -63,7 +109,7 @@ Look at the commit history to get more examples.
   that can force dark or light mode or follow your operating system.
 - **Server mode (`--server-managed`)** — when the tray launches the GUI it passes
   `--server-managed` and `--server-url <local url>`. The window then shows a
-  **Server:** label near **Processing mode** with the LAN-reachable address and a
+  **Server:** label near **Mode** with the LAN-reachable address and a
   **Connected clients** panel that polls the server's `GET /activity` endpoint
   (~5s) and renders recent client requests as `HH:MM:SS  <ip>  <action>`. Both
   are hidden in the standalone GUI. While downloading a remote result the GUI
@@ -86,6 +132,7 @@ launches.
   - `audio.py` handles audio validation, volume analysis, and phase vocoder processing.
   - `chunks.py` builds timing metadata and FFmpeg expressions for frame selection.
   - `ffmpeg.py` discovers the FFmpeg binary, checks CUDA availability, and assembles command strings.
+  - `gui/segmented.py` defines `SegmentedChoice`, the button-row control (with an optional custom-value `…` slot) used throughout the Advanced "Basic options" panel in place of `tk.Scale` sliders.
 - `requirements.txt` — Python dependencies for local development.
 - `default.nix` — reproducible environment definition for Nix users.
 - `CONTRIBUTION.md` — development workflow, formatting expectations, and release checklist.
@@ -104,3 +151,22 @@ launches.
 2. Extract audio and calculate loudness to identify silent regions.
 3. Stretch the non-silent segments with `audiotsm` to maintain speech clarity.
 4. Stitch the processed audio and video together with FFmpeg, using NVENC if the GPU encoders are detected.
+
+## GUI Layout Convention
+- **The GUI test suite runs against hand-written widget stubs (`WidgetStub`/`WidgetFactory` in `tests/test_gui_layout.py`), never real Tk, and those stubs model widget *API calls* but not *geometry*.** Cell occupancy under `columnspan`, slack distribution from `columnconfigure(weight=...)`, and the `TclError` from calling `grid()` on a `pack`-managed widget are invisible to them. Every layout defect that reached review on the segmented-settings branch was in that class: two controls on one grid row, a `?` button drifting ~680px right because a `columnspan=2` neighbour absorbed the row's slack, and a status label hidden with the wrong geometry manager. A green suite says nothing about layout — check a real window, and prefer extending `test_basic_options_frame_grid_positions_do_not_collide` (which expands `columnspan`/`rowspan` into per-cell occupancy) over another stub assertion.
+- **ttk's `TButton` style carries `width: -11`** — a minimum of eleven characters that every
+derived style inherits. A one-glyph "?" rendered 89px wide until `HelpLink.TButton` set
+`width=0`, and segment buttons were 103px instead of 32px. Any content-width button style in
+this project must set `width=0` explicitly.
+- **Never mix geometry managers on one widget.** Hide a grid-managed widget with `grid_remove()` and a packed one with `pack_forget()`; the stubs accept either, real Tk raises.
+- **Before hiding a control, enumerate every path that could still need it.** Hiding the Server URL row outside remote mode made remote mode permanently unreachable on a fresh config: that row holds the only URL entry and **Discover** button, while **Remote** disables itself until a URL exists. The row now also shows whenever `server_url_var` is empty. Two individually reasonable rules produced a deadlock.
+- **Recompute visibility on the state that owns it, not on every write.** `server_url_var` traces into `_update_processing_mode_state`, so recomputing the row on URL changes hid the field mid-keystroke; `on_server_url_change` passes `update_row=False` to keep row visibility a function of the *mode* alone.
+
+## Segmented Control Conventions
+Rules for `SegmentedChoice` (`talks_reducer/gui/segmented.py`) and its `layout.add_segmented` wrapper.
+- The inline `ttk.Entry` that replaces the `…` button must match that button's width, so committing or cancelling an edit never reflows the row.
+- Help and article links belong on the setting's **label**, not as an extra widget in the value row. The value row holds values.
+- A choice control sizes itself to its content plus 10px padding rather than a fixed width.
+- A control backed by user-authored options (presets) carries a **Custom** entry that selects itself whenever the live values match no stored option — the same reverse-match `presets.match_preset` already drives for the Advanced dropdown.
+- `set_value` must clamp to the control's `CustomSpec` bounds. It is the programmatic entry point presets arrive through, and an unclamped value silently diverges from what the buttons display and from what gets persisted.
+- `set_value` deliberately does **not** fire `on_change`; `layout.add_segmented`'s `apply_and_persist` wrapper restores the persistence half at the integration layer. Keep that split — firing `on_change` from `set_value` would re-enter through the variable trace.
