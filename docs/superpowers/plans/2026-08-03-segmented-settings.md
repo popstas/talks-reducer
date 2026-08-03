@@ -148,9 +148,7 @@ control can be exercised with widget stubs in tests.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Sequence, Union
-
-from .tooltips import add_tooltip
+from typing import Optional, Sequence, Union
 
 TOLERANCE = 1e-9
 
@@ -498,7 +496,15 @@ Expected: FAIL — `ImportError: cannot import name 'SegmentedChoice'`
 
 - [ ] **Step 3: Implement the widget**
 
-Append to `talks_reducer/gui/segmented.py`:
+First extend the imports at the top of `talks_reducer/gui/segmented.py` — Task 1 deliberately imported only what its pure helpers used, so the names the widget needs are not there yet:
+
+```python
+from typing import Any, Callable, Optional, Sequence, Union
+
+from .tooltips import add_tooltip
+```
+
+Then append to `talks_reducer/gui/segmented.py`:
 
 ```python
 SEGMENT_STYLE = "Segment.TButton"
