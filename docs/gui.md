@@ -56,7 +56,8 @@ Hovering the **Threshold** row shows a tooltip explaining what each preset trims
 - **0.05** — cuts aggressively.
 - **0.10** — the last sane limit for painless silence removal.
 
-A **?** button beside the row opens a longer write-up on choosing a threshold in your browser.
+A **?** button immediately beside the threshold buttons opens a longer write-up on choosing a
+threshold in your browser.
 
 ## Presets
 

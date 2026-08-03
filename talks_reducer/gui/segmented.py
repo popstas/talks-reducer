@@ -173,8 +173,12 @@ class SegmentedChoice:
     def set_value(self, value: Value) -> None:
         """Write *value* into the bound variable and restyle the buttons.
 
-        Registered into ``gui._slider_updaters`` so ``apply_preset_to_gui`` keeps
-        applying stored presets exactly as it did with the sliders it replaces.
+        ``layout.add_segmented`` wraps this in an ``apply_and_persist`` helper
+        and registers *that* wrapper into ``gui._slider_updaters`` — not this
+        method directly — because ``set_value`` deliberately never persists or
+        fires ``on_change``. Out-of-range values are clamped to the custom
+        slot's bounds (when one is configured) so the bound variable never
+        diverges from what the buttons/custom slot display.
         """
 
         coerced = self._coerce(value)
@@ -191,18 +195,33 @@ class SegmentedChoice:
         self._apply_styles()
 
     def _coerce(self, value: Value) -> Value:
-        """Return *value* as a float when the options are numeric."""
+        """Return *value* as a float when the options are numeric, clamped to range.
+
+        When a :class:`CustomSpec` is configured the numeric result is clamped
+        to its ``minimum``/``maximum`` so ``set_value`` can never write
+        something out of range: ``_sync_from_variable`` already clamps for
+        *display* purposes via :func:`parse_custom`, but it never writes the
+        clamped value back, so without this the bound variable (and anything
+        persisting it, e.g. ``settings.json``) could silently diverge from
+        what the control shows. Values already inside the bounds — including
+        every button's own value — pass through unchanged.
+        """
 
         if self._options and isinstance(self._options[0].value, str):
             return str(value)
         try:
-            return float(value)
+            numeric = float(value)
         except (TypeError, ValueError):
             if self._default_value is not None:
                 return self._default_value
             return value
+        if self._custom is not None:
+            numeric = max(self._custom.minimum, min(self._custom.maximum, numeric))
+        return numeric
 
     def _on_variable_write(self, *_args: Any) -> None:
+        """Resync the selection whenever something else writes the bound variable."""
+
         self._sync_from_variable()
 
     def _sync_from_variable(self) -> None:
@@ -245,6 +264,8 @@ class SegmentedChoice:
             )
 
     def _on_option_click(self, index: int) -> None:
+        """Select the button at *index*, write its value, and notify ``on_change``."""
+
         value = self._options[index].value
         self._custom_value = None
         self._selected_index = index
@@ -271,6 +292,8 @@ class SegmentedChoice:
         self.custom_entry.focus_set()
 
     def _end_custom_edit(self) -> None:
+        """Swap the entry back out for the custom slot button and repaint styles."""
+
         self._editing = False
         self.custom_entry.pack_forget()
         self.custom_button.pack(side=self._tk.LEFT)

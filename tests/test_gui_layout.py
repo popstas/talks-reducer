@@ -298,7 +298,6 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         _slider_updaters={},
         _basic_defaults={},
         _basic_variables={},
-        _segmented_controls={},
     )
     for key, value in overrides.items():
         setattr(gui, key, value)
@@ -883,7 +882,6 @@ def test_add_segmented_registers_updater_and_persists_on_change(monkeypatch):
         _slider_updaters={},
         _basic_defaults={},
         _basic_variables={},
-        _segmented_controls={},
     )
 
     variable = DummyVar(5.0)
@@ -913,7 +911,6 @@ def test_add_segmented_registers_updater_and_persists_on_change(monkeypatch):
     assert gui._slider_updaters["silent_speed"] is not control.set_value
     assert gui._basic_defaults["silent_speed"] == 5.0
     assert gui._basic_variables["silent_speed"] is variable
-    assert gui._segmented_controls["silent_speed"] is control
     assert variable.traces and variable.traces[-1][0] == "write"
 
     # Clicking the "10" button both writes the variable and persists/refreshes
@@ -1057,7 +1054,6 @@ def test_reset_basic_defaults_persists_through_real_segmented_updater(monkeypatc
         _slider_updaters={},
         _basic_defaults={},
         _basic_variables={},
-        _segmented_controls={},
     )
 
     variable = DummyVar(5.0)
@@ -1204,8 +1200,12 @@ def test_remote_mode_button_is_still_exposed_for_state_updates():
     assert gui.remote_mode_button is gui.processing_mode_control.buttons[1]
 
 
-def test_server_url_row_is_hidden_in_local_mode():
-    gui = _make_layout_gui()
+def test_server_url_row_is_hidden_in_local_mode_with_a_configured_url():
+    """Local mode hides the row once a URL already exists (the steady state)."""
+
+    gui = _make_layout_gui(
+        server_url_var=StringVarStub(value="http://192.168.1.5:9005")
+    )
     layout.build_layout(gui)
     layout.update_processing_mode_visibility(gui)
     assert gui.server_url_row.grid_remove_calls
@@ -1216,6 +1216,23 @@ def test_server_url_row_is_shown_in_remote_mode():
     layout.build_layout(gui)
     layout.update_processing_mode_visibility(gui)
     assert gui.server_url_row.grid_calls
+
+
+def test_server_url_row_is_shown_on_a_fresh_config_with_no_url():
+    """Regression: local mode + no saved URL must not hide the only way in.
+
+    Before the fix, a fresh config (no ``server_url``, mode forced to
+    ``local``) hid ``server_url_row`` — the sole place with the URL entry and
+    the Discover button — while ``_update_processing_mode_state`` also disabled
+    the Remote segment until a URL existed. That interlock made Remote mode
+    permanently unreachable for anyone who had never configured a server.
+    """
+
+    gui = _make_layout_gui(server_url_var=StringVarStub(value=""))
+    layout.build_layout(gui)
+    layout.update_processing_mode_visibility(gui)
+    assert gui.server_url_row.grid_calls
+    assert not gui.server_url_row.grid_remove_calls
 
 
 def test_apply_window_icon_prefers_windows_ico(monkeypatch):
@@ -1637,7 +1654,6 @@ def test_apply_preset_to_gui_persists_through_real_segmented_updater(monkeypatch
     gui._slider_updaters = {}
     gui._basic_defaults = {}
     gui._basic_variables = {}
-    gui._segmented_controls = {}
 
     layout.add_segmented(
         gui,
@@ -2267,15 +2283,22 @@ def test_basic_options_frame_grid_positions_do_not_collide():
     Threshold's control frame and the Video codec choice frame both landed on
     row 3 column 1 and rendered stacked on top of each other. This builds the
     real layout (no ``add_segmented``/widget mocking) and asserts every widget
-    gridded directly onto ``basic_options_frame`` occupies a unique
-    ``(row, column)`` cell.
+    gridded directly onto ``basic_options_frame`` occupies a unique cell.
+
+    A widget's ``(row, column)`` is only its *starting* cell: ``columnspan``
+    (and ``rowspan``, though nothing here uses it) claims more cells than that
+    single pair records, which is exactly how the threshold "?" button used to
+    collide with the Silent/Sounded/Threshold control frame's ``columnspan=2``
+    without either widget sharing a bare ``(row, column)`` pair. Every grid
+    call is expanded into the full set of ``(row, column)`` cells it occupies
+    before checking for overlap.
     """
 
     gui = _make_layout_gui()
     layout.build_layout(gui)
 
     frame = gui.basic_options_frame
-    positions: list[tuple[int, int]] = []
+    occupants: dict[tuple[int, int], list] = {}
     for factory in (gui.ttk.Label, gui.ttk.Frame, gui.ttk.Entry, gui.ttk.Button):
         for widget in factory.created:
             if not widget.args or widget.args[0] is not frame:
@@ -2285,10 +2308,16 @@ def test_basic_options_frame_grid_positions_do_not_collide():
                 column = kwargs.get("column")
                 if row is None or column is None:
                     continue
-                positions.append((row, column))
+                rowspan = kwargs.get("rowspan", 1)
+                columnspan = kwargs.get("columnspan", 1)
+                for r in range(row, row + rowspan):
+                    for c in range(column, column + columnspan):
+                        occupants.setdefault((r, c), []).append(widget)
 
-    duplicates = {pos for pos in positions if positions.count(pos) > 1}
-    assert not duplicates, f"Colliding (row, column) grid positions: {duplicates}"
+    duplicates = {
+        pos: widgets for pos, widgets in occupants.items() if len(widgets) > 1
+    }
+    assert not duplicates, f"Colliding grid cells: {sorted(duplicates)}"
 
     # Also pin the exact collision the review reported, in case the frame
     # gains enough widgets later that the general check above gets noisy.

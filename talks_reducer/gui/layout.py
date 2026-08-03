@@ -832,7 +832,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.silent_threshold_var = gui.tk.DoubleVar(
         value=min(max(gui.preferences.get_float("silent_threshold", 0.01), 0.0), 1.0)
     )
-    add_segmented(
+    threshold_control = add_segmented(
         gui,
         gui.basic_options_frame,
         "Threshold",
@@ -849,13 +849,18 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         custom=CustomSpec(minimum=0.0, maximum=1.0, display_format="{:.2f}"),
         tooltip=THRESHOLD_TOOLTIP,
     )
+    # Packed into the control's own (packed) frame, right after its buttons, so
+    # the "?" stays visually adjacent to the threshold buttons at any window
+    # width instead of landing wherever grid column 2 happens to fall (it used
+    # to sit under a separate grid column that ``basic_options_frame``'s
+    # weighted column 1 could stretch arbitrarily far away from the buttons).
     gui.threshold_help_button = gui.ttk.Button(
-        gui.basic_options_frame,
+        threshold_control.frame,
         text="?",
         style="Link.TButton",
         command=lambda: webbrowser.open(THRESHOLD_ARTICLE_URL),
     )
-    gui.threshold_help_button.grid(row=3, column=2, sticky="w", padx=(8, 0))
+    gui.threshold_help_button.pack(side=gui.tk.LEFT, padx=(8, 0))
 
     add_group_heading(gui, gui.basic_options_frame, "Output", row=4)
 
@@ -1158,7 +1163,6 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     gui._toggle_advanced(initial=True)
     gui._update_processing_mode_state()
-    update_processing_mode_visibility(gui)
     update_basic_reset_state(gui)
 
     # Action buttons and log output
@@ -1267,18 +1271,31 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
 
 def update_processing_mode_visibility(gui: "TalksReducerGUI") -> None:
-    """Show the Server URL row and connection status only in remote mode.
+    """Show the Server URL row in remote mode, or whenever no URL is set yet.
 
-    Local processing has no server to address, so both the address field and the
-    readiness text are hidden rather than left blank. The row is grid-managed
-    inside ``basic_options_frame`` while the status label is packed inside
-    ``mode_choice``, so each is hidden with its own geometry manager.
+    Local processing has no server to address, so the readiness text is hidden
+    whenever the mode is not remote. The Server URL row is different: it is the
+    *only* way to reach the URL entry and the Discover button, and the Remote
+    segment disables itself until a URL exists (see
+    ``_update_processing_mode_state``). Hiding the row whenever the mode is
+    local would therefore make Remote mode permanently unreachable on a fresh
+    config — local forced by default, row hidden by default, Remote disabled
+    until a URL is typed into a row nobody can see. The row is shown when the
+    mode is remote *or* when ``server_url_var`` is still empty, so the escape
+    hatch stays open until a URL is configured; once one exists, the row goes
+    back to being remote-only. Do not simplify this back to ``remote`` alone.
+
+    The row is grid-managed inside ``basic_options_frame`` while the status
+    label is packed inside ``mode_choice``, so each is hidden with its own
+    geometry manager.
     """
 
     remote = gui.processing_mode_var.get() == "remote"
+    has_url = bool(gui.server_url_var.get().strip())
+    show_row = remote or not has_url
     row = getattr(gui, "server_url_row", None)
     if row is not None:
-        row.grid() if remote else row.grid_remove()
+        row.grid() if show_row else row.grid_remove()
     label = getattr(gui, "remote_status_label", None)
     if label is not None:
         if remote:
@@ -1369,7 +1386,6 @@ def add_segmented(
     gui._slider_updaters[setting_key] = apply_and_persist
     gui._basic_defaults[setting_key] = default_value
     gui._basic_variables[setting_key] = variable
-    gui._segmented_controls[setting_key] = control
     variable.trace_add("write", lambda *_: update_basic_reset_state(gui))
     return control
 

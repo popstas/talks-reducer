@@ -303,3 +303,45 @@ def test_unbound_group_highlights_via_set_selected():
 def test_unparseable_variable_falls_back_to_default_value():
     control, _ = _build(variable=_Var("nonsense"), default_value=5.0)
     assert control.buttons[2].style == "SelectedSegment.TButton"
+
+
+def test_set_value_clamps_above_the_custom_maximum():
+    """Regression: ``set_value`` used to skip clamping entirely.
+
+    ``control.set_value(15.0)`` on a 1-10 control used to leave the bound
+    variable holding the raw ``15.0`` while the display (correctly) clamped to
+    ``10`` via ``parse_custom`` in ``_sync_from_variable`` — a persisted preset
+    or hand-edited ``settings.json`` value outside the range would silently
+    diverge from what the control showed. ``15`` clamped to ``10`` lands
+    exactly on the "10" button (a real option), so the fix is visible as the
+    variable now also reading ``10`` rather than the unclamped ``15``.
+    """
+
+    variable = _Var(5.0)
+    control, _ = _build(variable=variable, custom=SPEED_CUSTOM)
+    control.set_value(15.0)
+    assert variable.get() == 10.0
+    assert control.buttons[3].style == "SelectedSegment.TButton"
+
+
+def test_set_value_clamps_below_the_custom_minimum():
+    variable = _Var(5.0)
+    control, _ = _build(variable=variable, custom=SPEED_CUSTOM)
+    control.set_value(-5.0)
+    assert variable.get() == 1.0
+    assert control.buttons[0].style == "SelectedSegment.TButton"
+
+
+def test_set_value_leaves_an_in_range_custom_value_unchanged():
+    """An in-range, unlisted value must still reach the custom slot unchanged.
+
+    Clamping in ``_coerce`` must not tighten the range or otherwise disturb a
+    value that already fits inside ``minimum``/``maximum``.
+    """
+
+    variable = _Var(5.0)
+    control, _ = _build(variable=variable, custom=SPEED_CUSTOM)
+    control.set_value(3.5)
+    assert variable.get() == 3.5
+    assert control.custom_button.text == "3.5"
+    assert control.custom_button.style == "SelectedSegment.TButton"

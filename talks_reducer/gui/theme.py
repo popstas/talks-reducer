@@ -285,7 +285,13 @@ def apply_theme(
         ],
         foreground=[
             ("active", palette.get("hover_text", palette["foreground"])),
-            ("disabled", palette["foreground"]),
+            # Dimmed rather than the normal foreground, so a disabled segment
+            # (e.g. the Remote mode button before a server URL is set) actually
+            # reads as unavailable instead of looking identical to an enabled
+            # one. ``border`` is the same muted tone already used for other
+            # disabled indicators in this stylesheet (see the TCombobox
+            # ``arrowcolor`` map below).
+            ("disabled", palette["border"]),
         ],
     )
     style.configure(

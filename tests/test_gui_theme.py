@@ -23,6 +23,12 @@ def _configured_styles(style: Mock) -> dict[str, dict]:
     }
 
 
+def _mapped_styles(style: Mock) -> dict[str, dict]:
+    """Map style name to kwargs for every ``style.map(name, **kwargs)`` call."""
+
+    return {call.args[0]: call.kwargs for call in style.map.call_args_list if call.args}
+
+
 def test_detect_system_theme_windows(monkeypatch):
     reader = Mock(return_value=0)
     runner = Mock()
@@ -146,3 +152,12 @@ def test_segment_styles_are_configured():
         != configured["Segment.TButton"]["background"]
     )
     assert "Heading.TLabel" in configured
+
+    # A disabled Segment.TButton (e.g. the Remote mode button before a server
+    # URL is set) must not look identical to an enabled one: the ``disabled``
+    # foreground has to differ from the normal (enabled) foreground, or the
+    # button silently does nothing with no visual cue that it is unavailable.
+    mapped = _mapped_styles(style)
+    assert "Segment.TButton" in mapped
+    disabled_foreground = dict(mapped["Segment.TButton"]["foreground"])["disabled"]
+    assert disabled_foreground != configured["Segment.TButton"]["foreground"]
