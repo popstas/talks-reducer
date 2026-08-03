@@ -281,6 +281,7 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         ),
         processing_mode_var=StringVarStub(value="local"),
         server_url_var=StringVarStub(value=""),
+        remote_status_var=StringVarStub(value=""),
         theme_var=StringVarStub(value="os"),
         status_var=StringVarStub(value="Idle"),
         progress_var=DoubleVarStub(value=0.0),
@@ -441,14 +442,17 @@ def test_build_layout_aligns_server_entry_and_discover_button(monkeypatch):
 
     layout.build_layout(gui)
 
-    entry_grid = gui.server_entry.grid_calls[-1][1]
-    button_grid = gui.server_discover_button.grid_calls[-1][1]
+    row_grid = gui.server_url_row.grid_calls[-1][1]
+    entry_pack = gui.server_entry.pack_calls[-1][1]
+    button_pack = gui.server_discover_button.pack_calls[-1][1]
 
-    # The entry and the Discover button share a row and must align vertically:
-    # same top padding so their baselines match.
-    assert entry_grid["row"] == button_grid["row"] == 8
-    assert entry_grid["pady"] == button_grid["pady"] == (8, 0)
-    assert button_grid["sticky"] == "ew"
+    # The entry and the Discover button are packed side-by-side inside the
+    # shared ``server_url_row`` frame, which itself carries the row/padding so
+    # both widgets align vertically and hide together in local mode.
+    assert row_grid["row"] == 8
+    assert row_grid["pady"] == (8, 0)
+    assert entry_pack["side"] == gui.tk.LEFT
+    assert button_pack["side"] == gui.tk.LEFT
 
 
 def test_build_layout_initializes_widgets(monkeypatch):
@@ -550,6 +554,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         preferences=preferences,
         processing_mode_var=StringVarStub(value="local"),
         server_url_var=StringVarStub(value=""),
+        remote_status_var=StringVarStub(value=""),
         theme_var=StringVarStub(value="os"),
         status_var=StringVarStub(value="Idle"),
         progress_var=DoubleVarStub(value=0.0),
@@ -790,6 +795,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         ),
         processing_mode_var=StringVarStub(value="local"),
         server_url_var=StringVarStub(value=""),
+        remote_status_var=StringVarStub(value=""),
         theme_var=StringVarStub(value="os"),
         status_var=StringVarStub(value="Idle"),
         progress_var=DoubleVarStub(value=0.0),
@@ -1194,6 +1200,20 @@ def test_remote_mode_button_is_still_exposed_for_state_updates():
     gui = _make_layout_gui()
     layout.build_layout(gui)
     assert gui.remote_mode_button is gui.processing_mode_control.buttons[1]
+
+
+def test_server_url_row_is_hidden_in_local_mode():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    layout.update_processing_mode_visibility(gui)
+    assert gui.server_url_row.grid_remove_calls
+
+
+def test_server_url_row_is_shown_in_remote_mode():
+    gui = _make_layout_gui(processing_mode_var=StringVarStub(value="remote"))
+    layout.build_layout(gui)
+    layout.update_processing_mode_visibility(gui)
+    assert gui.server_url_row.grid_calls
 
 
 def test_apply_window_icon_prefers_windows_ico(monkeypatch):

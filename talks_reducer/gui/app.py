@@ -400,6 +400,7 @@ class TalksReducerGUI:
             value=str(self.preferences.get("server_url", ""))
         )
         self.server_url_var.trace_add("write", self._on_server_url_change)
+        self.remote_status_var = self.tk.StringVar(value="")
         self._discovery_thread: Optional[threading.Thread] = None
 
         self._basic_defaults: dict[str, float] = {}
@@ -671,6 +672,13 @@ class TalksReducerGUI:
         if hasattr(self, "remote_mode_button"):
             state = self.tk.NORMAL if has_url else self.tk.DISABLED
             self.remote_mode_button.configure(state=state)
+        layout_helpers.update_processing_mode_visibility(self)
+
+    def _set_remote_status(self, message: str) -> None:
+        """Show *message* beside the processing-mode buttons."""
+
+        if hasattr(self, "remote_status_var"):
+            self.remote_status_var.set(message)
 
     def _normalize_server_url(self, server_url: str) -> str:
         return self.remote_controller.normalize_server_url(server_url)

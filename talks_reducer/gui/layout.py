@@ -855,6 +855,11 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.processing_mode_control.frame.pack(side=gui.tk.LEFT)
     gui.remote_mode_button = gui.processing_mode_control.buttons[1]
 
+    gui.remote_status_label = gui.ttk.Label(
+        mode_choice, textvariable=gui.remote_status_var
+    )
+    gui.remote_status_label.pack(side=gui.tk.LEFT, padx=(12, 0))
+
     server_managed = bool(getattr(gui, "server_managed", False))
     local_server_url = getattr(gui, "local_server_url", None)
     gui.local_server_url_label = gui.ttk.Label(
@@ -867,22 +872,17 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     if not (server_managed and local_server_url):
         gui.local_server_url_label.grid_remove()
 
-    gui.ttk.Label(gui.basic_options_frame, text="Server URL").grid(
-        row=8, column=0, sticky="w", pady=(8, 0)
-    )
+    gui.server_url_row = gui.ttk.Frame(gui.basic_options_frame)
+    gui.server_url_row.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+    gui.ttk.Label(gui.server_url_row, text="Server URL").pack(side=gui.tk.LEFT)
     gui.server_entry = gui.ttk.Entry(
-        gui.basic_options_frame,
-        textvariable=gui.server_url_var,
-        width=40,
+        gui.server_url_row, textvariable=gui.server_url_var, width=40
     )
-    gui.server_entry.grid(row=8, column=1, sticky="ew", pady=(8, 0))
-
+    gui.server_entry.pack(side=gui.tk.LEFT, padx=(8, 0))
     gui.server_discover_button = gui.ttk.Button(
-        gui.basic_options_frame, text="Discover", command=gui._start_discovery
+        gui.server_url_row, text="Discover", command=gui._start_discovery
     )
-    gui.server_discover_button.grid(
-        row=8, column=2, padx=(8, 0), pady=(8, 0), sticky="ew"
-    )
+    gui.server_discover_button.pack(side=gui.tk.LEFT, padx=(8, 0))
 
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
         row=9, column=0, sticky="w", pady=(8, 0)
@@ -1148,6 +1148,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     gui._toggle_advanced(initial=True)
     gui._update_processing_mode_state()
+    update_processing_mode_visibility(gui)
     update_basic_reset_state(gui)
 
     # Action buttons and log output
@@ -1253,6 +1254,29 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     watch = getattr(gui, "watch", None)
     if watch is not None and gui.watch_enabled_var.get():
         watch.start()
+
+
+def update_processing_mode_visibility(gui: "TalksReducerGUI") -> None:
+    """Show the Server URL row and connection status only in remote mode.
+
+    Local processing has no server to address, so both the address field and the
+    readiness text are hidden rather than left blank. The row is grid-managed
+    inside ``basic_options_frame`` while the status label is packed inside
+    ``mode_choice``, so each is hidden with its own geometry manager.
+    """
+
+    remote = gui.processing_mode_var.get() == "remote"
+    row = getattr(gui, "server_url_row", None)
+    if row is not None:
+        row.grid() if remote else row.grid_remove()
+    label = getattr(gui, "remote_status_label", None)
+    if label is not None:
+        if remote:
+            label.pack(side=gui.tk.LEFT, padx=(12, 0))
+        else:
+            label.pack_forget()
+    if not remote and hasattr(gui, "remote_status_var"):
+        gui.remote_status_var.set("")
 
 
 def add_entry(

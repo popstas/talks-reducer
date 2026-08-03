@@ -8,6 +8,7 @@ import pytest
 from talks_reducer.gui import remote as remote_module
 from talks_reducer.gui.remote import (
     check_remote_server,
+    check_remote_server_for_gui,
     format_server_host,
     normalize_server_url,
 )
@@ -272,6 +273,45 @@ def test_check_remote_server_failure_switches_and_alerts(
     assert switch_called is True
     assert alerts and alerts[0].title == "Server unavailable"
     assert alerts[0].message == "Server example.com unreachable after 3 tries"
+
+
+def test_check_remote_server_for_gui_mirrors_status_into_remote_status() -> None:
+    gui = StubGUI()
+    messages: list[str] = []
+    gui._ping_server = lambda url, timeout=5.0: True
+    gui._set_remote_status = messages.append
+
+    success = check_remote_server_for_gui(
+        gui,
+        "http://192.168.1.5:9005",
+        success_status="Idle",
+        waiting_status="Error",
+        failure_status="Error",
+        max_attempts=1,
+    )
+
+    assert success is True
+    assert messages
+    assert messages[-1].endswith("is ready")
+
+
+def test_check_remote_server_for_gui_mirrors_failure_into_remote_status() -> None:
+    gui = StubGUI()
+    messages: list[str] = []
+    gui._ping_server = lambda url, timeout=5.0: False
+    gui._set_remote_status = messages.append
+
+    success = check_remote_server_for_gui(
+        gui,
+        "http://192.168.1.5:9005",
+        success_status="Idle",
+        waiting_status="Error",
+        failure_status="Error",
+        max_attempts=1,
+    )
+
+    assert success is False
+    assert messages[-1].endswith("is unreachable")
 
 
 def test_process_files_via_server_handles_missing_client_module(tmp_path: Path) -> None:
