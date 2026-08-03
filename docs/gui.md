@@ -21,15 +21,42 @@ re-selects the preset you used last, or the first preset when none is remembered
 presets exist (you deleted them all) the dropdown is hidden entirely and the manual resolution
 checkboxes return.
 
-In **Advanced mode** the basic options mirror the CLI presets directly: **Small video**, a
-**Video codec** picker that swaps between h.265 (25% smaller), h.264 (10% faster), av1 (no
-advantages), and mp3 (audio only), and the timing/audio sliders.
+In **Advanced mode** the basic options mirror the CLI presets directly: **Small video**, plus
+a "Basic options" panel of button rows grouped under three quiet headings — **Speed &
+silence**, **Output**, and **Processing & appearance**:
 
-**Advanced** settings reveal the output path, temp folder, the timing/audio knobs mirrored
-from the command line, **Keyframe interval (s)** to balance scroll smoothness against output
-size, a **Use global FFmpeg** toggle (disabled automatically when no system binary is
-detected) that prioritises the system binary when you need encoders the bundled build lacks,
-and an appearance picker that can force dark or light mode or follow your operating system.
+- **Silent** and **Sounded** speed each offer four preset buttons (silent: 1, 2, 5, 10; sounded:
+  1, 1.3, 1.5, 2) plus a trailing **…** button. Clicking **…** swaps it for an inline entry —
+  type any other value in range (1–10 for silent speed, 0.75–2 for sounded speed), press Enter
+  to commit and re-label the slot, or press Escape/click away to cancel. Clicking any preset
+  button resets the slot back to **…**.
+- **Threshold** works the same way, with buttons for 0.01, 0.03, 0.05, 0.10 and a **…** slot for
+  any value from 0 to 1. See the threshold guidance below for what each value does.
+- **Codec** offers buttons for h.264, h.265, av1, and mp3; hover each one for its own tooltip
+  (Faster / 25% smaller / No advantages / Audio only). The **Add codec suffix** checkbox sits to
+  the right of the buttons.
+- **Mode** and **Theme** are also button rows — see [Mode and Discover](#mode-and-discover)
+  below for Mode; Theme offers **OS**, **Light**, and **Dark**.
+
+Any value entered through a **…** slot is clamped to that control's valid range — for example,
+typing `99` into the Silent speed slot commits as `10`.
+
+**Advanced** settings reveal the output path, temp folder, and a **Use global FFmpeg** toggle
+(disabled automatically when no system binary is detected) that prioritises the system binary
+when you need encoders the bundled build lacks. **Keyframe interval** sits here too, as four
+buttons — **5 sec**, **10 sec**, **30 sec**, **60 sec** — plus a **…** slot for any value from 1
+to 60 seconds, to balance scroll smoothness against output size. A label beside the buttons
+shows the estimated size overhead for the selected interval (for example `+1.4%` at 30 seconds,
+`+0.5%` at 60 seconds); it updates as soon as you pick a different value.
+
+Hovering the **Threshold** row shows a tooltip explaining what each preset trims:
+
+- **0.01** — never cuts speech; only mutes silence on a good microphone.
+- **0.03** — fits most cases and phone video, but may cut quiet speech.
+- **0.05** — cuts aggressively.
+- **0.10** — the last sane limit for painless silence removal.
+
+A **?** button beside the row opens a longer write-up on choosing a threshold in your browser.
 
 ## Presets
 
@@ -63,16 +90,19 @@ Editing any knob so the values no longer match the selected preset flips the dro
 **Custom**. Every save/update/delete refreshes the dropdowns on both the Simple and Advanced
 layouts.
 
-## Processing mode and Discover
+## Mode and Discover
 
-Open **Advanced** settings to provide a server URL and click **Discover** to scan your local
-network for Talks Reducer instances listening on port `9005`. The button updates with the
-discovery progress, showing the scanned/total host count as `scanned / total`.
+A **Mode** button row (**Local** / **Remote**) decides whether work stays on this machine or
+uploads to a configured server — the **Remote** button is disabled until a server URL is
+supplied. Leave **Local** selected to keep rendering on this machine even if a server is saved;
+switch to **Remote** to hand jobs off while the GUI downloads the finished files automatically.
 
-A **Processing mode** toggle decides whether work stays local or uploads to the configured
-server — the **Remote** option becomes available as soon as a URL is supplied. Leave the
-toggle on **Local** to keep rendering on this machine even if a server is saved; switch to
-**Remote** to hand jobs off while the GUI downloads the finished files automatically.
+The **Server URL** field and its **Discover** button only appear once **Remote** is selected;
+they stay hidden entirely while **Local** is active. Click **Discover** to scan your local
+network for Talks Reducer instances listening on port `9005` — the button updates with the
+discovery progress, showing the scanned/total host count as `scanned / total`. Once the server
+responds, a status next to the Mode buttons reads `Server <host> is ready` (or `Server <host> is
+unreachable` if the ping fails).
 
 ## Cut video
 

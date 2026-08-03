@@ -64,6 +64,34 @@ from the default preset and persists selection on change. The OBS dock serves
 **Custom** (`dock.html`, `obsDock.preset` `localStorage`), sending a `preset` field
 that `dock_server.build_args` maps to `--preset NAME`. The dock's controls use
 squared 4px corners to match OBS and cap the preset select width for a single-line row.
+- **Basic options** — the panel (`layout.py`, inside `options_frame`) renders its choice-style
+settings as `SegmentedChoice` (`talks_reducer/gui/segmented.py`) — one `ttk.Button` per option,
+styled `Segment.TButton`/`SelectedSegment.TButton` (added in `theme.py` alongside
+`Heading.TLabel`, used for the panel's three group headings: **Speed & silence**, **Output**,
+**Processing & appearance**) — instead of the `tk.Scale` sliders it used to use. **Silent**
+speed offers 1/2/5/10 (custom 1–10, default 5); **Sounded** speed offers 1/1.3/1.5/2 (custom
+0.75–2, default 1 — 1.3 and 1.5 are newly reachable now that the old slider's 0.25 quantization
+is gone); **Threshold** offers 0.01/0.03/0.05/0.10 (custom 0–1, default 0.01), the group carries
+one tooltip listing what each value trims, and a `?` link (`webbrowser.open`) opens
+`THRESHOLD_ARTICLE_URL` (the telegra.ph write-up on trimming silence before speech-to-text
+breaks). **Codec** offers h.264/h.265/av1/mp3, each with its own tooltip ("Faster", "25%
+smaller", "No advantages", "Audio only" — text that used to sit in parentheses in the label);
+**Add codec suffix** sits to its right. **Mode** offers Local/Remote (see below); **Theme**
+offers OS/Light/Dark. A trailing `…` slot on the custom-range controls swaps itself for an
+inline `ttk.Entry` — Enter commits (clamped to the control's bounds), Escape/focus-out cancels,
+a non-number cancels. Every bound control traces its variable and is registered into
+`gui._slider_updaters` through `layout.add_segmented`'s `apply_and_persist` wrapper, so
+`apply_preset_to_gui` and presets applied on other surfaces keep moving the buttons exactly as
+they moved the sliders they replaced — losing a key from `_slider_updaters` makes presets stop
+applying silently, with no error. `gui._sliders` — the list `theme.py` iterates to restyle
+`tk.Scale` widgets — now holds only the two Cut video range sliders (`cut_start_slider`,
+`cut_end_slider`); a continuous time position stayed a slider because it isn't a small set of
+choices. The "Basic options" macro row (**No speedup** / **Silence ×5** / **Silence ×10**) is
+also a `SegmentedChoice` (`gui.basic_preset_control`, `variable=None`, highlighted externally via
+`update_basic_preset_highlight`); **Silence ×5** (`gui.reset_basic_button`) used to disable
+itself when the sliders already matched the defaults, but a button rendered as "selected" must
+not simultaneously be disabled, so `update_basic_reset_state` no longer disables it — clicking
+it always re-applies the defaults.
 - **Small video** — toggles the `--small` preset used by the CLI.
 - **Open after convert** — controls whether the exported file is revealed in
 your system file manager as soon as each job finishes.
@@ -147,7 +175,7 @@ cannot coexist in one process, so the toggle relaunches the app into whichever
 arrangement is requested rather than spawning a tray thread.
 - **Server mode (`--server-managed`)** — when the tray launches the GUI it passes
 `--server-managed` and `--server-url <local url>`. The window then shows a
-**Server:** label near **Processing mode** with the LAN-reachable address and a
+**Server:** label near **Mode** with the LAN-reachable address and a
 **Connected clients** panel that polls the server's `GET /activity` endpoint
 (~5s) and renders recent client requests as `HH:MM:SS  <ip>  <action>`. The
 LAN-reachable address comes from `_resolve_host_ip()` in `server.py`, which
@@ -189,6 +217,7 @@ launches.
   - `chunks.py` builds timing metadata and FFmpeg expressions for frame selection.
   - `ffmpeg.py` discovers the FFmpeg binary, checks CUDA availability, and assembles command strings.
   - `gui/progress.py` defines `STAGE_PROGRESS_RANGES` and `map_stage_progress()`, which map each remote pipeline stage onto fixed GUI percentage bands (`Uploading:` 0–5%, `Extracting audio:` 5–20%, `Audio processing:` 20–35%, `Generating final` 35–100%).
+  - `gui/segmented.py` defines `SegmentedChoice`, the button-row control (with an optional custom-value `…` slot) used throughout the Advanced "Basic options" panel in place of `tk.Scale` sliders.
 - `requirements.txt` — Python dependencies for local development.
 - `default.nix` — reproducible environment definition for Nix users.
 - `CONTRIBUTION.md` — development workflow, formatting expectations, and release checklist.
