@@ -9,9 +9,7 @@ control can be exercised with widget stubs in tests.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Sequence, Union
-
-from .tooltips import add_tooltip
+from typing import Optional, Sequence, Union
 
 TOLERANCE = 1e-9
 
