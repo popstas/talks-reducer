@@ -1198,10 +1198,10 @@ Processing mode:
 
 ```python
     gui.ttk.Label(gui.basic_options_frame, text="Mode").grid(
-        row=6, column=0, sticky="w", pady=(8, 0)
+        row=7, column=0, sticky="w", pady=(8, 0)
     )
     mode_choice = gui.ttk.Frame(gui.basic_options_frame)
-    mode_choice.grid(row=6, column=1, sticky="w", pady=(8, 0))
+    mode_choice.grid(row=7, column=1, sticky="w", pady=(8, 0))
     gui.processing_mode_control = SegmentedChoice(
         mode_choice,
         [Option("local", "Local"), Option("remote", "Remote")],
@@ -1221,10 +1221,10 @@ Theme:
 
 ```python
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
-        row=8, column=0, sticky="w", pady=(8, 0)
+        row=9, column=0, sticky="w", pady=(8, 0)
     )
     theme_choice = gui.ttk.Frame(gui.basic_options_frame)
-    theme_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=(8, 0))
+    theme_choice.grid(row=9, column=1, columnspan=2, sticky="w", pady=(8, 0))
     gui.theme_control = SegmentedChoice(
         theme_choice,
         [Option("os", "OS"), Option("light", "Light"), Option("dark", "Dark")],
