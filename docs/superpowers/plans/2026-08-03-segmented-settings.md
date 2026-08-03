@@ -1767,21 +1767,20 @@ Replace the slider block in `advanced_frame` with:
             maximum=KEYFRAME_INTERVAL_MAX,
             display_format="{:g} sec",
         ),
-        on_change=update_keyframe_interval,
     )
     gui.keyframe_interval_control.frame.pack(side=gui.tk.LEFT)
     gui.keyframe_interval_value_label.pack(side=gui.tk.LEFT, padx=(12, 0))
 
-    update_keyframe_interval(validated_interval)
-```
-
-`set_value` does not call `on_change` (only clicks and custom commits do), so `test_keyframe_interval_label_tracks_the_selected_value` requires the label to also update on a variable write. Add a trace next to the control:
-
-```python
     gui.keyframe_interval_var.trace_add(
         "write", lambda *_: update_keyframe_interval(gui.keyframe_interval_var.get())
     )
+
+    update_keyframe_interval(validated_interval)
 ```
+
+**Drive the label and the persistence from the variable trace alone — do not also pass `on_change`.** The trace fires on every path that changes the value: a button click and a committed custom value both write the variable, and so does a programmatic `set_value`. Passing `on_change` as well would run `update_keyframe_interval` twice per click, and would still miss `set_value`. One trace covers all three cases.
+
+This is why `add_segmented` (Task 4) needs its `apply_and_persist` wrapper but this control does not: `add_segmented` routes through `_slider_updaters` for the preset system, whereas the keyframe interval has no preset integration and only needs its own label and preference kept in step.
 
 Delete the now-unused `gui.keyframe_interval_slider` and its `gui._sliders.append(...)`. Confirm `_sliders` now holds exactly the two Cut video sliders and update the count asserted in Task 4's `test_build_layout_no_longer_creates_sliders_for_basic_options` to `2`.
 
