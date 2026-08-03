@@ -741,7 +741,9 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text="Save as…",
         command=gui._open_save_preset_dialog,
     )
-    gui.advanced_preset_save_button.pack(side=gui.tk.LEFT, padx=(8, 0))
+    # Wider than the gaps between the management buttons themselves, so the
+    # preset row reads as a separate group from the actions that edit it.
+    gui.advanced_preset_save_button.pack(side=gui.tk.LEFT, padx=(24, 0))
     gui.advanced_preset_update_button = gui.ttk.Button(
         advanced_preset_frame,
         text="Update",

@@ -28,9 +28,9 @@ silence**, **Output**, and **Processing & appearance**:
 - **Silent** and **Sounded** speed each offer four preset buttons (silent: 1, 2, 5, 10; sounded:
   1, 1.3, 1.5, 2) plus a trailing **…** button. Clicking **…** swaps it for an inline entry —
   type any other value in range (1–10 for silent speed, 0.75–2 for sounded speed), press Enter
-  to commit, or press Escape/click away to cancel. A committed value keeps its input box, so you
-  can adjust it without reopening the editor; clicking any preset button resets the slot back
-  to **…**.
+  to commit — clicking away commits too — or press Escape to cancel. A committed value keeps its
+  input box, so you can adjust it without reopening the editor; clicking any preset button
+  resets the slot back to **…**.
 - **Threshold** works the same way, with buttons for 0.01, 0.03, 0.05, 0.10 and a **…** slot for
   any value from 0 to 0.9. Above roughly 0.9 the detector treats almost the whole track as
   silence, so the control stops there. See the threshold guidance below for what each value does.

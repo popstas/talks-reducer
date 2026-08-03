@@ -48,8 +48,9 @@ Look at the commit history to get more examples.
   into the Mode row's frame, so `update_processing_mode_visibility` hides them with
   `pack_forget` and re-packs the row `before=remote_status_label` to keep that order. **Theme**
   offers OS/Light/Dark. A trailing `…` slot on the custom-range controls swaps itself for an
-  inline `ttk.Entry` — Enter commits (clamped to the control's bounds), Escape/focus-out cancels,
-  a non-number cancels. Once a value is committed the slot **stays** an entry so it can be edited
+  inline `ttk.Entry` — Enter **and focus-out** both commit (clamped to the control's bounds), so
+  clicking away never discards a typed value; only Escape cancels, and a non-number falls back to
+  the last committed value. Once a value is committed the slot **stays** an entry so it can be edited
   in place; only clicking a preset option clears it back to `…`. Button and entry are sized to
   match (`CUSTOM_SLOT_WIDTH` plus the near-padless `CustomSegment.TButton`/`SegmentEntry.TEntry`
   styles) so the swap never reflows the row. Every bound control traces its variable and is registered into

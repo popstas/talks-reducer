@@ -160,7 +160,7 @@ class SegmentedChoice:
             )
             self.custom_entry.bind("<Return>", self._commit_custom_edit)
             self.custom_entry.bind("<Escape>", self._cancel_custom_edit)
-            self.custom_entry.bind("<FocusOut>", self._cancel_custom_edit)
+            self.custom_entry.bind("<FocusOut>", self._commit_custom_edit)
 
         if tooltip:
             add_tooltip(self.frame, tooltip, tk_module=tk)
@@ -371,10 +371,26 @@ class SegmentedChoice:
         self._editing = False
         self._apply_styles()
 
-    def _commit_custom_edit(self, _event: Any = None) -> None:
-        """Validate the typed value and adopt it, or cancel on bad input."""
+    def _slot_accepts_input(self) -> bool:
+        """Return whether the slot is currently showing its entry.
 
-        if not self._editing:
+        The guard is deliberately not ``self._editing``: a committed value keeps
+        its entry on screen, and clicking straight into it to retype never goes
+        through :meth:`_begin_custom_edit`. Keying off what is on screen means
+        those edits still commit.
+        """
+
+        return self._editing or self._custom_value is not None
+
+    def _commit_custom_edit(self, _event: Any = None) -> None:
+        """Adopt the typed value, or fall back to the previous one on bad input.
+
+        Bound to both ``<Return>`` and ``<FocusOut>``: leaving the field commits
+        exactly as pressing Enter does, so a value typed and then clicked away
+        from is not silently discarded.
+        """
+
+        if not self._slot_accepts_input():
             return
         try:
             value = parse_custom(self.custom_var.get(), self._custom)
@@ -390,8 +406,11 @@ class SegmentedChoice:
             self._on_change(value)
 
     def _cancel_custom_edit(self, _event: Any = None) -> None:
-        """Abandon the edit and restore the slot to its previous state."""
+        """Discard the edit and restore the last committed value.
 
-        if not self._editing:
+        Only ``<Escape>`` reaches this — focus-out commits instead.
+        """
+
+        if not self._slot_accepts_input():
             return
         self._end_custom_edit()

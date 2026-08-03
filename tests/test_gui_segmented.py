@@ -368,3 +368,45 @@ def test_custom_slot_button_and_entry_share_a_width():
     control, _ = _build(variable=_Var(5.0), custom=SPEED_CUSTOM)
     assert control.custom_button.kwargs["width"] == CUSTOM_SLOT_WIDTH
     assert control.custom_entry.kwargs["width"] == CUSTOM_SLOT_WIDTH
+
+
+def test_focus_out_commits_the_typed_value_like_enter():
+    """Leaving the field must not silently discard what was typed."""
+
+    variable = _Var(5.0)
+    control, _ = _build(variable=variable, custom=SPEED_CUSTOM)
+    control.custom_button.kwargs["command"]()
+    control.custom_var.set("3.5")
+
+    control.custom_entry.bindings["<FocusOut>"](None)
+
+    assert variable.get() == 3.5
+    assert control.custom_entry.packed is True
+
+
+def test_escape_still_discards_the_edit():
+    variable = _Var(5.0)
+    control, _ = _build(variable=variable, custom=SPEED_CUSTOM)
+    control.custom_button.kwargs["command"]()
+    control.custom_var.set("3.5")
+
+    control.custom_entry.bindings["<Escape>"](None)
+
+    assert variable.get() == 5.0
+    assert control.custom_button.packed is True
+
+
+def test_retyping_in_a_persistent_entry_commits_without_reopening():
+    """A committed value keeps its entry, so edits skip ``_begin_custom_edit``.
+
+    Guarding the commit on ``_editing`` would drop those keystrokes entirely.
+    """
+
+    variable = _Var(3.5)
+    control, _ = _build(variable=variable, custom=SPEED_CUSTOM)
+    assert control.custom_entry.packed is True  # no button click involved
+
+    control.custom_var.set("7.25")
+    control.custom_entry.bindings["<Return>"](None)
+
+    assert variable.get() == 7.25

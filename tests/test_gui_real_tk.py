@@ -164,7 +164,7 @@ def test_a_committed_custom_value_keeps_its_entry_on_focus_out(root, themed):
     assert variable.get() == pytest.approx(3.5)
     assert slot_shows_entry()
 
-    control._cancel_custom_edit()  # what <FocusOut> is bound to
+    control._commit_custom_edit()  # what <FocusOut> is bound to
     root.update_idletasks()
     assert slot_shows_entry(), "focus-out collapsed a committed custom value"
     assert variable.get() == pytest.approx(3.5)
