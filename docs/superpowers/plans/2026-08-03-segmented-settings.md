@@ -1531,7 +1531,9 @@ def update_processing_mode_visibility(gui: "TalksReducerGUI") -> None:
     """Show the Server URL row and connection status only in remote mode.
 
     Local processing has no server to address, so both the address field and the
-    readiness text are removed from the grid rather than left blank.
+    readiness text are hidden rather than left blank. The row is grid-managed
+    inside ``basic_options_frame`` while the status label is packed inside
+    ``mode_choice``, so each is hidden with its own geometry manager.
     """
 
     remote = gui.processing_mode_var.get() == "remote"
@@ -1540,10 +1542,17 @@ def update_processing_mode_visibility(gui: "TalksReducerGUI") -> None:
         row.grid() if remote else row.grid_remove()
     label = getattr(gui, "remote_status_label", None)
     if label is not None:
-        label.grid() if remote else label.grid_remove()
+        if remote:
+            label.pack(side=gui.tk.LEFT, padx=(12, 0))
+        else:
+            label.pack_forget()
     if not remote and hasattr(gui, "remote_status_var"):
         gui.remote_status_var.set("")
 ```
+
+**The two widgets use different geometry managers and must be hidden differently.** `server_url_row` is grid-managed directly in `basic_options_frame`, so `grid()`/`grid_remove()` is right. `remote_status_label` is packed inside `mode_choice`, which is itself a packed container — calling `grid()` on it raises `TclError: cannot use geometry manager grid inside ... which already has slaves managed by pack`. Use `pack()`/`pack_forget()` for the label.
+
+Match the test assertions to that: assert `pack_forget_calls` / `pack_calls` on the label, and `grid_remove_calls` / `grid_calls` on the row.
 
 Call it at the end of `build_layout` (next to the existing `gui._update_processing_mode_state()`) and from `TalksReducerGUI._update_processing_mode_state`.
 
