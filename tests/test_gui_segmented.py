@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from talks_reducer.gui.segmented import (
+    CUSTOM_SLOT_WIDTH,
     CustomSpec,
     Option,
     format_custom_label,
@@ -345,3 +346,15 @@ def test_set_value_leaves_an_in_range_custom_value_unchanged():
     assert variable.get() == 3.5
     assert control.custom_button.text == "3.5"
     assert control.custom_button.style == "SelectedSegment.TButton"
+
+
+def test_custom_slot_button_and_entry_share_a_width():
+    """The inline entry must not resize the row when it replaces the button.
+
+    Both are given ``CUSTOM_SLOT_WIDTH`` so swapping one for the other during an
+    edit leaves the row's geometry untouched.
+    """
+
+    control, _ = _build(variable=_Var(5.0), custom=SPEED_CUSTOM)
+    assert control.custom_button.kwargs["width"] == CUSTOM_SLOT_WIDTH
+    assert control.custom_entry.kwargs["width"] == CUSTOM_SLOT_WIDTH

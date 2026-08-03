@@ -82,6 +82,11 @@ SEGMENT_STYLE = "Segment.TButton"
 SELECTED_SEGMENT_STYLE = "SelectedSegment.TButton"
 CUSTOM_PLACEHOLDER = "…"
 
+# The ``…`` slot's button and its inline entry share this width (in text units)
+# so swapping one for the other never reflows the row mid-edit. It also has to
+# fit the widest committed label a control can show, e.g. ``60 sec``.
+CUSTOM_SLOT_WIDTH = 6
+
 
 class SegmentedChoice:
     """Render *options* as a row of buttons acting like radio buttons.
@@ -124,15 +129,7 @@ class SegmentedChoice:
 
         self.frame = ttk.Frame(parent)
         self.buttons = []
-        for index, option in enumerate(self._options):
-            button = ttk.Button(
-                self.frame,
-                text=option.label,
-                style=SEGMENT_STYLE,
-                command=lambda i=index: self._on_option_click(i),
-            )
-            button.pack(side=tk.LEFT)
-            self.buttons.append(button)
+        self._build_buttons()
 
         self.custom_button = None
         self.custom_entry = None
@@ -143,25 +140,70 @@ class SegmentedChoice:
                 self.frame,
                 text=CUSTOM_PLACEHOLDER,
                 style=SEGMENT_STYLE,
+                width=CUSTOM_SLOT_WIDTH,
                 command=self._begin_custom_edit,
             )
             self.custom_button.pack(side=tk.LEFT)
             self.custom_entry = ttk.Entry(
-                self.frame, textvariable=self.custom_var, width=6
+                self.frame,
+                textvariable=self.custom_var,
+                width=CUSTOM_SLOT_WIDTH,
+                justify="center",
             )
             self.custom_entry.bind("<Return>", self._commit_custom_edit)
             self.custom_entry.bind("<Escape>", self._cancel_custom_edit)
             self.custom_entry.bind("<FocusOut>", self._cancel_custom_edit)
 
-        for option, button in zip(self._options, self.buttons):
-            if option.tooltip:
-                add_tooltip(button, option.tooltip, tk_module=tk)
         if tooltip:
             add_tooltip(self.frame, tooltip, tk_module=tk)
 
         if variable is not None:
             variable.trace_add("write", self._on_variable_write)
             self._sync_from_variable()
+
+    def _build_buttons(self) -> None:
+        """Create one button per option, packed left to right in option order.
+
+        Split out of ``__init__`` so :meth:`set_options` can rebuild the row.
+        """
+
+        for index, option in enumerate(self._options):
+            button = self._ttk.Button(
+                self.frame,
+                text=option.label,
+                style=SEGMENT_STYLE,
+                command=lambda i=index: self._on_option_click(i),
+            )
+            button.pack(side=self._tk.LEFT)
+            if option.tooltip:
+                add_tooltip(button, option.tooltip, tk_module=self._tk)
+            self.buttons.append(button)
+
+    def set_options(self, options: Sequence[Option]) -> None:
+        """Replace the option list and rebuild the buttons.
+
+        Controls whose options are user-authored — the preset row, whose entries
+        can be added, renamed, reordered or deleted while the window is open —
+        need the row rebuilt rather than merely restyled. The custom slot is
+        repacked afterwards so it stays last, and the selection is re-derived
+        from the bound variable so a surviving option stays highlighted.
+        """
+
+        for button in self.buttons:
+            button.destroy()
+        self.buttons = []
+        self._options = list(options)
+        self._build_buttons()
+
+        if self.custom_button is not None:
+            self.custom_button.pack_forget()
+            self.custom_button.pack(side=self._tk.LEFT)
+
+        if self._variable is not None:
+            self._sync_from_variable()
+        else:
+            self._selected_index = None
+            self._apply_styles()
 
     def get_value(self) -> Optional[Value]:
         """Return the currently selected value, or ``None`` when unbound."""

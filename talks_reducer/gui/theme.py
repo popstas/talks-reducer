@@ -274,7 +274,7 @@ def apply_theme(
         foreground=palette["foreground"],
         borderwidth=1,
         relief="solid",
-        padding=(9, 2),
+        padding=(10, 2),
         font=("TkDefaultFont", 8),
     )
     style.map(
@@ -300,7 +300,7 @@ def apply_theme(
         foreground=selected_foreground,
         borderwidth=1,
         relief="solid",
-        padding=(9, 2),
+        padding=(10, 2),
         font=("TkDefaultFont", 8),
     )
     style.map(

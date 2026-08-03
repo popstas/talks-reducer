@@ -31,7 +31,8 @@ silence**, **Output**, and **Processing & appearance**:
   to commit and re-label the slot, or press Escape/click away to cancel. Clicking any preset
   button resets the slot back to **…**.
 - **Threshold** works the same way, with buttons for 0.01, 0.03, 0.05, 0.10 and a **…** slot for
-  any value from 0 to 1. See the threshold guidance below for what each value does.
+  any value from 0 to 0.9. Above roughly 0.9 the detector treats almost the whole track as
+  silence, so the control stops there. See the threshold guidance below for what each value does.
 - **Codec** offers buttons for h.264, h.265, av1, and mp3; hover each one for its own tooltip
   (Faster / 25% smaller / No advantages / Audio only). The **Add codec suffix** checkbox sits to
   the right of the buttons.
@@ -56,8 +57,9 @@ Hovering the **Threshold** row shows a tooltip explaining what each preset trims
 - **0.05** — cuts aggressively.
 - **0.10** — the last sane limit for painless silence removal.
 
-A **?** button immediately beside the threshold buttons opens a longer write-up on choosing a
-threshold in your browser.
+A **?** link next to the **Threshold** label opens a longer write-up on choosing a threshold in
+your browser. It sits on the label rather than in the row of values, so it never competes with
+the buttons for width.
 
 ## Presets
 
@@ -74,8 +76,9 @@ used last (or the first preset when none is remembered).
 **Simple mode** exposes only a **Preset** dropdown; selecting a preset applies its fields and
 persists the choice (it is re-selected on the next launch).
 
-**Advanced mode** adds a management strip above the encoding knobs with a **Preset** dropdown
-and **Save as… / Update / Delete** buttons:
+**Advanced mode** adds a management strip above the encoding knobs with a row of **Preset**
+buttons — one per saved preset, plus **Custom**, which selects itself whenever the current
+settings match no saved preset — and **Save as… / Update / Delete** buttons:
 
 - **Save as…** opens a dialog with a name field plus a checkbox per setting (resolution, silent
   speed, sounded speed, silent threshold, codec) — like the "Create link" dialog. Only the

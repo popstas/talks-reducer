@@ -7,9 +7,10 @@ from unittest.mock import Mock
 import pytest
 
 import talks_reducer.gui.layout as layout
+import talks_reducer.gui.segmented as segmented
 from talks_reducer.gui.app import TalksReducerGUI
 from talks_reducer.gui.preferences import PreferenceController
-from talks_reducer.presets import Preset
+from talks_reducer.presets import CUSTOM_LABEL, Preset
 
 _TEST_PRESETS = [
     Preset(
@@ -119,6 +120,7 @@ class WidgetStub:
         self.yview_calls: list[tuple[tuple, dict]] = []
         self.set_calls: list[tuple[tuple, dict]] = []
         self.focused = False
+        self.destroyed = False
 
     def grid(self, *args, **kwargs):
         self.grid_calls.append((args, kwargs))
@@ -133,6 +135,9 @@ class WidgetStub:
 
     def pack_forget(self):
         self.pack_forget_calls.append(None)
+
+    def destroy(self):
+        self.destroyed = True
 
     def configure(self, *args, **kwargs):
         self.configure_calls.append((args, kwargs))
@@ -2230,10 +2235,10 @@ def test_build_layout_creates_advanced_preset_strip(monkeypatch):
 
     layout.build_layout(gui)
 
-    assert isinstance(gui.advanced_preset_combo, WidgetStub)
-    assert gui.advanced_preset_combo.kwargs["values"] == [
-        preset.name for preset in _TEST_PRESETS
-    ]
+    # One button per stored preset, then "Custom" for "matches nothing stored".
+    assert [
+        button.kwargs["text"] for button in gui.advanced_preset_control.buttons
+    ] == [preset.name for preset in _TEST_PRESETS] + [CUSTOM_LABEL]
     assert gui.advanced_preset_save_button.kwargs["command"] is (
         gui._open_save_preset_dialog
     )
@@ -2362,16 +2367,70 @@ def test_basic_options_frame_grid_positions_do_not_collide():
     # Also pin the exact collision the review reported, in case the frame
     # gains enough widgets later that the general check above gets noisy.
     def _label_row(text: str) -> int:
+        """Return the ``basic_options_frame`` row a setting's label occupies.
+
+        A label that carries a help link lives inside its own frame, so that the
+        "?" sits beside the text rather than in the value row. For those the row
+        belongs to the wrapping frame, not to the label itself.
+        """
+
         for widget in gui.ttk.Label.created:
-            if (
-                widget.args
-                and widget.args[0] is frame
-                and widget.kwargs.get("text") == text
-            ):
+            if widget.kwargs.get("text") != text:
+                continue
+            parent = widget.args[0] if widget.args else None
+            if parent is frame:
                 return widget.grid_calls[0][1]["row"]
+            for container in gui.ttk.Frame.created:
+                if (
+                    container is parent
+                    and container.args
+                    and container.args[0] is frame
+                ):
+                    return container.grid_calls[0][1]["row"]
         raise AssertionError(f"no {text!r} label found on basic_options_frame")
 
     assert _label_row("Threshold") != _label_row("Codec")
+
+
+def test_threshold_help_link_lives_in_the_label_not_the_value_row():
+    """The "?" belongs to the label; the value row holds values only.
+
+    It used to be packed into the control's own frame after the buttons, which
+    put a non-value widget in the value row and made that row wider than the
+    buttons it contains.
+    """
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    help_button = gui.threshold_help_button
+    assert help_button is not None
+
+    # The "?" shares a parent with the "Threshold" text label...
+    parent = help_button.args[0]
+    siblings = [
+        widget
+        for widget in gui.ttk.Label.created
+        if widget.args and widget.args[0] is parent
+    ]
+    assert [widget.kwargs.get("text") for widget in siblings] == ["Threshold"]
+
+    # ...and that parent sits in the label column, not the value column.
+    assert parent.args[0] is gui.basic_options_frame
+    assert parent.grid_calls[0][1]["column"] == 0
+
+
+def test_threshold_custom_range_caps_at_the_documented_maximum():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    assert layout.THRESHOLD_MAXIMUM == 0.9
+    assert (
+        segmented.parse_custom(
+            "5", segmented.CustomSpec(minimum=0.0, maximum=layout.THRESHOLD_MAXIMUM)
+        )
+        == 0.9
+    )
 
 
 def test_threshold_tooltip_lists_every_documented_value():
@@ -2393,3 +2452,32 @@ def test_threshold_article_url_points_at_the_telegraph_post():
         "https://telegra.ph/"
         "How-hard-can-you-trim-silence-before-speech-to-text-breaks-08-03"
     )
+
+
+def test_refreshing_presets_rebuilds_the_preset_buttons(monkeypatch):
+    """Preset edits change the buttons themselves, not just their labels.
+
+    A dropdown could be reconfigured with a new ``values`` list; a button row has
+    to be torn down and rebuilt, and the old buttons must actually be destroyed
+    rather than left stacked behind the new ones.
+    """
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    original = list(gui.advanced_preset_control.buttons)
+    assert [button.kwargs["text"] for button in original] == [
+        preset.name for preset in _TEST_PRESETS
+    ] + [CUSTOM_LABEL]
+
+    replacement = [Preset(name="Only one", resolution="720p")]
+    monkeypatch.setattr(layout.presets, "load_presets", lambda *a, **k: replacement)
+    layout.refresh_preset_dropdowns(gui)
+
+    assert [
+        button.kwargs["text"] for button in gui.advanced_preset_control.buttons
+    ] == [
+        "Only one",
+        CUSTOM_LABEL,
+    ]
+    assert all(button.destroyed for button in original)

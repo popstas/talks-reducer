@@ -79,6 +79,10 @@ THRESHOLD_ARTICLE_URL = (
     "How-hard-can-you-trim-silence-before-speech-to-text-breaks-08-03"
 )
 
+# Any threshold may be typed, but past ~0.9 the detector treats almost the whole
+# track as silence, so the control caps there rather than at a nominal 1.0.
+THRESHOLD_MAXIMUM = 0.9
+
 THRESHOLD_TOOLTIP = (
     "0.01 — never cuts speech; only mutes silence on a good microphone\n"
     "0.03 — fits most cases and phone video, but may cut quiet speech\n"
@@ -249,6 +253,19 @@ def refresh_advanced_preset_selection(gui: "TalksReducerGUI") -> None:
             presets.set_selected_preset(name)
 
 
+def preset_options(presets_list) -> list:
+    """Return the button options for a preset row: every preset, then Custom.
+
+    ``CUSTOM_LABEL`` is a real option rather than a fallback so the row can show
+    "no stored preset matches" the same way it shows a match — it is what
+    :func:`refresh_advanced_preset_selection` writes into ``advanced_preset_var``.
+    """
+
+    options = [Option(preset.name, preset.name) for preset in presets_list]
+    options.append(Option(presets.CUSTOM_LABEL, presets.CUSTOM_LABEL))
+    return options
+
+
 def refresh_preset_dropdowns(gui: "TalksReducerGUI") -> None:
     """Reload the preset store and repopulate both surface dropdowns.
 
@@ -264,8 +281,10 @@ def refresh_preset_dropdowns(gui: "TalksReducerGUI") -> None:
 
     if hasattr(gui, "simple_preset_combo"):
         gui.simple_preset_combo.configure(values=names)
-    if hasattr(gui, "advanced_preset_combo"):
-        gui.advanced_preset_combo.configure(values=names)
+    if hasattr(gui, "advanced_preset_control"):
+        # The button row is rebuilt, not reconfigured: presets can be added,
+        # renamed, reordered or deleted, so the buttons themselves change.
+        gui.advanced_preset_control.set_options(preset_options(loaded))
 
     if hasattr(gui, "simple_preset_frame"):
         if loaded and gui.simple_mode_var.get():
@@ -698,17 +717,21 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.ttk.Label(advanced_preset_frame, text="Preset:").pack(
         side=gui.tk.LEFT, padx=(0, 2)
     )
-    gui.advanced_preset_combo = gui.ttk.Combobox(
+    # Rendered as buttons rather than a dropdown so every preset is visible at a
+    # glance. Widths come from the button labels, so the row is as wide as its
+    # content needs. "Custom" is a real option here: it is what
+    # ``refresh_advanced_preset_selection`` selects when the live knobs match no
+    # stored preset, and clicking it is a no-op (``apply_advanced_preset``
+    # returns early on the sentinel).
+    gui.advanced_preset_control = SegmentedChoice(
         advanced_preset_frame,
-        textvariable=gui.advanced_preset_var,
-        values=[preset.name for preset in gui._simple_presets],
-        state="readonly",
-        width=28,
+        preset_options(gui._simple_presets),
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=gui.advanced_preset_var,
+        on_change=lambda _value: apply_advanced_preset(gui),
     )
-    gui.advanced_preset_combo.pack(side=gui.tk.LEFT)
-    gui.advanced_preset_combo.bind(
-        "<<ComboboxSelected>>", lambda e: apply_advanced_preset(gui)
-    )
+    gui.advanced_preset_control.frame.pack(side=gui.tk.LEFT)
     gui.advanced_preset_save_button = gui.ttk.Button(
         advanced_preset_frame,
         text="Save as…",
@@ -830,7 +853,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
 
     gui.silent_threshold_var = gui.tk.DoubleVar(
-        value=min(max(gui.preferences.get_float("silent_threshold", 0.01), 0.0), 1.0)
+        value=min(
+            max(gui.preferences.get_float("silent_threshold", 0.01), 0.0),
+            THRESHOLD_MAXIMUM,
+        )
     )
     threshold_control = add_segmented(
         gui,
@@ -846,21 +872,13 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             Option(0.10, "0.10"),
         ],
         default_value=0.01,
-        custom=CustomSpec(minimum=0.0, maximum=1.0, display_format="{:.2f}"),
+        custom=CustomSpec(
+            minimum=0.0, maximum=THRESHOLD_MAXIMUM, display_format="{:.2f}"
+        ),
         tooltip=THRESHOLD_TOOLTIP,
+        help_url=THRESHOLD_ARTICLE_URL,
     )
-    # Packed into the control's own (packed) frame, right after its buttons, so
-    # the "?" stays visually adjacent to the threshold buttons at any window
-    # width instead of landing wherever grid column 2 happens to fall (it used
-    # to sit under a separate grid column that ``basic_options_frame``'s
-    # weighted column 1 could stretch arbitrarily far away from the buttons).
-    gui.threshold_help_button = gui.ttk.Button(
-        threshold_control.frame,
-        text="?",
-        style="Link.TButton",
-        command=lambda: webbrowser.open(THRESHOLD_ARTICLE_URL),
-    )
-    gui.threshold_help_button.pack(side=gui.tk.LEFT, padx=(8, 0))
+    gui.threshold_help_button = threshold_control.help_button
 
     add_group_heading(gui, gui.basic_options_frame, "Output", row=4)
 
@@ -1357,6 +1375,7 @@ def add_segmented(
     default_value: float,
     custom: "CustomSpec | None" = None,
     tooltip: str | None = None,
+    help_url: str | None = None,
     pady: int | tuple[int, int] = 4,
 ) -> "SegmentedChoice":
     """Add a labeled row of choice buttons to *parent* and wire it into presets.
@@ -1365,9 +1384,28 @@ def add_segmented(
     ``_basic_defaults`` and ``_basic_variables`` so preset application, the
     reset-state bookkeeping and the reverse preset match keep working exactly as
     they did with the slider this replaces.
+
+    *help_url* appends a ``?`` link to the setting's label. The link belongs to
+    the label rather than the value row: the value row holds values, and a
+    trailing widget there competes with the buttons for the row's width.
+    The created button is exposed as ``control.help_button`` so callers can
+    keep a reference to it.
     """
 
-    gui.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=pady)
+    help_button = None
+    if help_url:
+        label_frame = gui.ttk.Frame(parent)
+        gui.ttk.Label(label_frame, text=label).pack(side=gui.tk.LEFT)
+        help_button = gui.ttk.Button(
+            label_frame,
+            text="?",
+            style="Link.TButton",
+            command=lambda: webbrowser.open(help_url),
+        )
+        help_button.pack(side=gui.tk.LEFT, padx=(4, 0))
+        label_frame.grid(row=row, column=0, sticky="w", pady=pady)
+    else:
+        gui.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=pady)
 
     def persist(value: float) -> None:
         gui.preferences.update(setting_key, float(f"{float(value):.6f}"))
@@ -1385,6 +1423,7 @@ def add_segmented(
         on_change=persist,
     )
     control.frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=pady)
+    control.help_button = help_button
 
     def apply_and_persist(value) -> None:
         """Set the control and persist, for callers that drive it programmatically.

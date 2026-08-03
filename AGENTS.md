@@ -33,10 +33,13 @@ Look at the commit history to get more examples.
   **Processing & appearance**) — instead of the `tk.Scale` sliders it used to use. **Silent**
   speed offers 1/2/5/10 (custom 1–10, default 5); **Sounded** speed offers 1/1.3/1.5/2 (custom
   0.75–2, default 1 — 1.3 and 1.5 are newly reachable now that the old slider's 0.25 quantization
-  is gone); **Threshold** offers 0.01/0.03/0.05/0.10 (custom 0–1, default 0.01), the group carries
-  one tooltip listing what each value trims, and a `?` link (`webbrowser.open`) opens
-  `THRESHOLD_ARTICLE_URL` (the telegra.ph write-up on trimming silence before speech-to-text
-  breaks). **Codec** offers h.264/h.265/av1/mp3, each with its own tooltip ("Faster", "25%
+  is gone); **Threshold** offers 0.01/0.03/0.05/0.10 (custom 0–`THRESHOLD_MAXIMUM`, which is 0.9 —
+  past that the detector calls almost the whole track silence — default 0.01), the group carries
+  one tooltip listing what each value trims, and a `?` link (`webbrowser.open` on
+  `THRESHOLD_ARTICLE_URL`, the telegra.ph write-up on trimming silence before speech-to-text
+  breaks) sits in the setting's **label**, not in the value row — `add_segmented`'s `help_url`
+  builds the label as a frame holding the text plus the link and exposes it as
+  `control.help_button`. **Codec** offers h.264/h.265/av1/mp3, each with its own tooltip ("Faster", "25%
   smaller", "No advantages", "Audio only" — text that used to sit in parentheses in the label);
   **Add codec suffix** sits to its right. **Mode** offers Local/Remote (see below); **Theme**
   offers OS/Light/Dark. A trailing `…` slot on the custom-range controls swaps itself for an
@@ -128,3 +131,18 @@ launches.
 2. Extract audio and calculate loudness to identify silent regions.
 3. Stretch the non-silent segments with `audiotsm` to maintain speech clarity.
 4. Stitch the processed audio and video together with FFmpeg, using NVENC if the GPU encoders are detected.
+
+## GUI Layout Convention
+- **The GUI test suite runs against hand-written widget stubs (`WidgetStub`/`WidgetFactory` in `tests/test_gui_layout.py`), never real Tk, and those stubs model widget *API calls* but not *geometry*.** Cell occupancy under `columnspan`, slack distribution from `columnconfigure(weight=...)`, and the `TclError` from calling `grid()` on a `pack`-managed widget are invisible to them. Every layout defect that reached review on the segmented-settings branch was in that class: two controls on one grid row, a `?` button drifting ~680px right because a `columnspan=2` neighbour absorbed the row's slack, and a status label hidden with the wrong geometry manager. A green suite says nothing about layout — check a real window, and prefer extending `test_basic_options_frame_grid_positions_do_not_collide` (which expands `columnspan`/`rowspan` into per-cell occupancy) over another stub assertion.
+- **Never mix geometry managers on one widget.** Hide a grid-managed widget with `grid_remove()` and a packed one with `pack_forget()`; the stubs accept either, real Tk raises.
+- **Before hiding a control, enumerate every path that could still need it.** Hiding the Server URL row outside remote mode made remote mode permanently unreachable on a fresh config: that row holds the only URL entry and **Discover** button, while **Remote** disables itself until a URL exists. The row now also shows whenever `server_url_var` is empty. Two individually reasonable rules produced a deadlock.
+- **Recompute visibility on the state that owns it, not on every write.** `server_url_var` traces into `_update_processing_mode_state`, so recomputing the row on URL changes hid the field mid-keystroke; `on_server_url_change` passes `update_row=False` to keep row visibility a function of the *mode* alone.
+
+## Segmented Control Conventions
+Rules for `SegmentedChoice` (`talks_reducer/gui/segmented.py`) and its `layout.add_segmented` wrapper.
+- The inline `ttk.Entry` that replaces the `…` button must match that button's width, so committing or cancelling an edit never reflows the row.
+- Help and article links belong on the setting's **label**, not as an extra widget in the value row. The value row holds values.
+- A choice control sizes itself to its content plus 10px padding rather than a fixed width.
+- A control backed by user-authored options (presets) carries a **Custom** entry that selects itself whenever the live values match no stored option — the same reverse-match `presets.match_preset` already drives for the Advanced dropdown.
+- `set_value` must clamp to the control's `CustomSpec` bounds. It is the programmatic entry point presets arrive through, and an unclamped value silently diverges from what the buttons display and from what gets persisted.
+- `set_value` deliberately does **not** fire `on_change`; `layout.add_segmented`'s `apply_and_persist` wrapper restores the persistence half at the integration layer. Keep that split — firing `on_change` from `set_value` would re-enter through the variable trace.

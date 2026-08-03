@@ -45,8 +45,13 @@ dock `populatePresetDropdown`). **Simple mode** replaces the old
 fans its fields onto the underlying vars via `layout.apply_preset_to_gui` and
 persists the choice via `set_selected_preset`. The selector is hidden when
 `load_presets()` returns `[]` (manual resolution checkboxes return). **Advanced
-mode** adds a management strip (`Preset` dropdown + **Save as… / Update / Delete**):
-editing any knob flips the dropdown to **"Custom"** via `presets.match_preset`.
+mode** adds a management strip (a `SegmentedChoice` preset row + **Save as… / Update / Delete**):
+editing any knob flips the selection to **"Custom"** via `presets.match_preset`. That row is
+buttons rather than a dropdown so every preset is visible at once; **Custom** is a real option in
+it, and because presets can be added, renamed, reordered or deleted while the window is open,
+`refresh_preset_dropdowns` calls `advanced_preset_control.set_options(preset_options(...))`, which
+destroys and rebuilds the buttons instead of reconfiguring a `values` list. Simple mode keeps its
+`ttk.Combobox` — its 470px-wide window has no room for a row of preset-name buttons.
 Save/Update open `preset_dialog.open_save_preset_dialog` — a name field plus a
 checkbox per param (Create-link style) returning `(name, selected_fields)`;
 `layout.build_sparse_preset` captures only the checked fields, so presets can be
@@ -71,10 +76,13 @@ styled `Segment.TButton`/`SelectedSegment.TButton` (added in `theme.py` alongsid
 **Processing & appearance**) — instead of the `tk.Scale` sliders it used to use. **Silent**
 speed offers 1/2/5/10 (custom 1–10, default 5); **Sounded** speed offers 1/1.3/1.5/2 (custom
 0.75–2, default 1 — 1.3 and 1.5 are newly reachable now that the old slider's 0.25 quantization
-is gone); **Threshold** offers 0.01/0.03/0.05/0.10 (custom 0–1, default 0.01), the group carries
-one tooltip listing what each value trims, and a `?` link (`webbrowser.open`) opens
-`THRESHOLD_ARTICLE_URL` (the telegra.ph write-up on trimming silence before speech-to-text
-breaks). **Codec** offers h.264/h.265/av1/mp3, each with its own tooltip ("Faster", "25%
+is gone); **Threshold** offers 0.01/0.03/0.05/0.10 (custom 0–`THRESHOLD_MAXIMUM`, which is
+0.9 — past that the detector calls almost the whole track silence — default 0.01), the group
+carries one tooltip listing what each value trims, and a `?` link (`webbrowser.open` on
+`THRESHOLD_ARTICLE_URL`, the telegra.ph write-up on trimming silence before speech-to-text
+breaks) sits in the setting's **label**, not in the value row — `add_segmented`'s `help_url`
+builds the label as a frame holding the text plus the link and exposes it as
+`control.help_button`. **Codec** offers h.264/h.265/av1/mp3, each with its own tooltip ("Faster", "25%
 smaller", "No advantages", "Audio only" — text that used to sit in parentheses in the label);
 **Add codec suffix** sits to its right. **Mode** offers Local/Remote (see below); **Theme**
 offers OS/Light/Dark. A trailing `…` slot on the custom-range controls swaps itself for an
@@ -249,4 +257,22 @@ launches.
 - `_set_status` also calls `_ring_completion_bell()`, which rings Tk's `root.bell()` on a success or `Error` status and stays silent for `Aborted`, for every non-terminal status, and whenever `_is_window_focused()` is true. It is cross-platform (unlike the taskbar) and `suppress(Exception)`-guarded, since a display without a bell raises rather than staying quiet.
 - `_is_window_focused()` wraps `root.focus_displayof()` — `None` for another app's window, and it *raises* when the focused window is one Tk cannot name. Both mean "not us", and a raise reports unfocused so an outcome is announced rather than silently swallowed. Both `_update_taskbar_for_status()` and the bell gate on it.
 - `TaskbarProgress.clear()` deactivates the indicator rather than merely releasing the hold, and only `begin()` reactivates it. A finished run reports itself as `_set_status("success")` immediately followed by `_set_progress(100)` (`summaries.py`), both queued through `root.after`; without the gate the trailing progress update repaints the bar a focused status just cleared, stranding a 100% indicator forever.
+
+## GUI Layout Convention
+
+- **The GUI test suite runs against hand-written widget stubs (`WidgetStub`/`WidgetFactory` in `tests/test_gui_layout.py`), never real Tk, and those stubs model widget *API calls* but not *geometry*.** Cell occupancy under `columnspan`, slack distribution from `columnconfigure(weight=...)`, and the `TclError` from calling `grid()` on a `pack`-managed widget are all invisible to them. Every layout defect that reached review on the segmented-settings branch was in that one class: two controls landing on the same grid row, a `?` button drifting ~680px right because a `columnspan=2` neighbour absorbed the row's slack, and a status label hidden with the wrong geometry manager. Assume a green suite says nothing about layout; check a real window, and prefer extending `test_basic_options_frame_grid_positions_do_not_collide` (which expands `columnspan`/`rowspan` into per-cell occupancy) over adding another stub assertion.
+- **Never mix geometry managers on one widget.** Hide a grid-managed widget with `grid_remove()` and a packed one with `pack_forget()`; the stubs accept either, real Tk raises.
+- **Before hiding a control, enumerate every path that could still need it.** `update_processing_mode_visibility` hides the Server URL row outside remote mode, but that row holds the only URL entry and the only **Discover** button, and `_update_processing_mode_state` disables **Remote** until a URL exists — hiding it unconditionally made remote mode permanently unreachable on a fresh config. The row therefore also shows whenever `server_url_var` is empty. Two individually reasonable rules produced a deadlock; a hidden control is only safe when some other path can still reveal it.
+- **Recompute visibility on the state that owns it, not on every write.** `server_url_var` traces into `_update_processing_mode_state`, so recomputing the row on URL changes hid the field mid-keystroke. `_update_processing_mode_state(update_row=False)` from `on_server_url_change` keeps row visibility a function of the *mode* alone.
+
+## Segmented Control Conventions
+
+Rules for `SegmentedChoice` (`talks_reducer/gui/segmented.py`) and its `layout.add_segmented` wrapper.
+
+- The inline `ttk.Entry` that replaces the `…` button must match that button's width, so committing or cancelling an edit never reflows the row.
+- Help and article links belong on the setting's **label**, not as an extra widget in the value row. The value row holds values.
+- A choice control sizes itself to its content plus 10px padding rather than a fixed width.
+- A control backed by user-authored options (presets) carries a **Custom** entry that selects itself whenever the live values match no stored option — the same reverse-match `presets.match_preset` already drives for the Advanced dropdown.
+- `set_value` must clamp to the control's `CustomSpec` bounds. It is the programmatic entry point presets arrive through, and an unclamped value silently diverges from what the buttons display and from what gets persisted.
+- `set_value` deliberately does **not** fire `on_change`; `layout.add_segmented`'s `apply_and_persist` wrapper restores the persistence half at the integration layer. Keep that split — firing `on_change` from `set_value` would re-enter through the variable trace.
 
