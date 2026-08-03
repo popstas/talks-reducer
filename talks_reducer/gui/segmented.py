@@ -9,7 +9,9 @@ control can be exercised with widget stubs in tests.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Sequence, Union
+from typing import Any, Callable, Optional, Sequence, Union
+
+from .tooltips import add_tooltip
 
 TOLERANCE = 1e-9
 
@@ -74,3 +76,227 @@ def format_custom_label(value: float, spec: CustomSpec) -> str:
     """Return the button label for a committed custom *value*."""
 
     return spec.display_format.format(value)
+
+
+SEGMENT_STYLE = "Segment.TButton"
+SELECTED_SEGMENT_STYLE = "SelectedSegment.TButton"
+CUSTOM_PLACEHOLDER = "…"
+
+
+class SegmentedChoice:
+    """Render *options* as a row of buttons acting like radio buttons.
+
+    When *variable* is given the control both writes it on click and traces it,
+    so a preset applied elsewhere restyles the buttons without the caller doing
+    anything. Passing ``variable=None`` yields a display-only group whose
+    highlight is driven externally through :meth:`set_selected` — used by the
+    "Basic options" macro row, where the selected entry is derived from several
+    other variables at once.
+
+    *custom* enables a trailing ``…`` slot that swaps itself for an entry so any
+    value inside the spec's bounds can be typed. *default_value* is the fallback
+    used when the bound variable holds something unparseable.
+    """
+
+    def __init__(
+        self,
+        parent: Any,
+        options: Sequence[Option],
+        *,
+        tk: Any,
+        ttk: Any,
+        variable: Any = None,
+        default_value: Optional[Value] = None,
+        custom: Optional[CustomSpec] = None,
+        tooltip: Optional[str] = None,
+        on_change: Optional[Callable[[Value], None]] = None,
+    ) -> None:
+        self._tk = tk
+        self._ttk = ttk
+        self._options = list(options)
+        self._variable = variable
+        self._default_value = default_value
+        self._custom = custom
+        self._on_change = on_change
+        self._custom_value: Optional[float] = None
+        self._selected_index: Optional[int] = None
+        self._editing = False
+
+        self.frame = ttk.Frame(parent)
+        self.buttons = []
+        for index, option in enumerate(self._options):
+            button = ttk.Button(
+                self.frame,
+                text=option.label,
+                style=SEGMENT_STYLE,
+                command=lambda i=index: self._on_option_click(i),
+            )
+            button.pack(side=tk.LEFT)
+            self.buttons.append(button)
+
+        self.custom_button = None
+        self.custom_entry = None
+        self.custom_var = None
+        if custom is not None:
+            self.custom_var = tk.StringVar(value="")
+            self.custom_button = ttk.Button(
+                self.frame,
+                text=CUSTOM_PLACEHOLDER,
+                style=SEGMENT_STYLE,
+                command=self._begin_custom_edit,
+            )
+            self.custom_button.pack(side=tk.LEFT)
+            self.custom_entry = ttk.Entry(
+                self.frame, textvariable=self.custom_var, width=6
+            )
+            self.custom_entry.bind("<Return>", self._commit_custom_edit)
+            self.custom_entry.bind("<Escape>", self._cancel_custom_edit)
+            self.custom_entry.bind("<FocusOut>", self._cancel_custom_edit)
+
+        for option, button in zip(self._options, self.buttons):
+            if option.tooltip:
+                add_tooltip(button, option.tooltip, tk_module=tk)
+        if tooltip:
+            add_tooltip(self.frame, tooltip, tk_module=tk)
+
+        if variable is not None:
+            variable.trace_add("write", self._on_variable_write)
+            self._sync_from_variable()
+
+    def get_value(self) -> Optional[Value]:
+        """Return the currently selected value, or ``None`` when unbound."""
+
+        if self._variable is None:
+            return None
+        return self._variable.get()
+
+    def set_value(self, value: Value) -> None:
+        """Write *value* into the bound variable and restyle the buttons.
+
+        Registered into ``gui._slider_updaters`` so ``apply_preset_to_gui`` keeps
+        applying stored presets exactly as it did with the sliders it replaces.
+        """
+
+        coerced = self._coerce(value)
+        if self._variable is not None:
+            self._variable.set(coerced)
+        else:
+            self.set_selected(coerced)
+
+    def set_selected(self, value: Optional[Value]) -> None:
+        """Highlight the button matching *value* without writing any variable."""
+
+        index = None if value is None else resolve_selection(value, self._options)
+        self._selected_index = index
+        self._apply_styles()
+
+    def _coerce(self, value: Value) -> Value:
+        """Return *value* as a float when the options are numeric."""
+
+        if self._options and isinstance(self._options[0].value, str):
+            return str(value)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            if self._default_value is not None:
+                return self._default_value
+            return value
+
+    def _on_variable_write(self, *_args: Any) -> None:
+        self._sync_from_variable()
+
+    def _sync_from_variable(self) -> None:
+        """Recompute the selection and custom slot from the bound variable."""
+
+        raw = self._variable.get()
+        index = resolve_selection(raw, self._options)
+        if index is None and self._custom is not None:
+            try:
+                self._custom_value = parse_custom(str(raw), self._custom)
+            except ValueError:
+                self._custom_value = None
+                if self._default_value is not None:
+                    index = resolve_selection(self._default_value, self._options)
+        elif index is None and self._default_value is not None:
+            index = resolve_selection(self._default_value, self._options)
+        else:
+            self._custom_value = None
+        self._selected_index = index
+        self._apply_styles()
+
+    def _apply_styles(self) -> None:
+        """Repaint every button so exactly one carries the selected style."""
+
+        for position, button in enumerate(self.buttons):
+            style = (
+                SELECTED_SEGMENT_STYLE
+                if position == self._selected_index
+                else SEGMENT_STYLE
+            )
+            button.configure(style=style)
+        if self.custom_button is None:
+            return
+        if self._custom_value is None:
+            self.custom_button.configure(text=CUSTOM_PLACEHOLDER, style=SEGMENT_STYLE)
+        else:
+            self.custom_button.configure(
+                text=format_custom_label(self._custom_value, self._custom),
+                style=SELECTED_SEGMENT_STYLE,
+            )
+
+    def _on_option_click(self, index: int) -> None:
+        value = self._options[index].value
+        self._custom_value = None
+        self._selected_index = index
+        if self._variable is not None:
+            self._variable.set(value)
+        self._apply_styles()
+        if self._on_change is not None:
+            self._on_change(value)
+
+    def _begin_custom_edit(self) -> None:
+        """Swap the custom slot button for an entry and focus it."""
+
+        if self._editing:
+            return
+        self._editing = True
+        initial = (
+            format_custom_label(self._custom_value, self._custom)
+            if self._custom_value is not None
+            else ""
+        )
+        self.custom_var.set(initial)
+        self.custom_button.pack_forget()
+        self.custom_entry.pack(side=self._tk.LEFT)
+        self.custom_entry.focus_set()
+
+    def _end_custom_edit(self) -> None:
+        self._editing = False
+        self.custom_entry.pack_forget()
+        self.custom_button.pack(side=self._tk.LEFT)
+        self._apply_styles()
+
+    def _commit_custom_edit(self, _event: Any = None) -> None:
+        """Validate the typed value and adopt it, or cancel on bad input."""
+
+        if not self._editing:
+            return
+        try:
+            value = parse_custom(self.custom_var.get(), self._custom)
+        except ValueError:
+            self._end_custom_edit()
+            return
+        self._custom_value = value
+        self._selected_index = None
+        if self._variable is not None:
+            self._variable.set(value)
+        self._end_custom_edit()
+        if self._on_change is not None:
+            self._on_change(value)
+
+    def _cancel_custom_edit(self, _event: Any = None) -> None:
+        """Abandon the edit and restore the slot to its previous state."""
+
+        if not self._editing:
+            return
+        self._end_custom_edit()
