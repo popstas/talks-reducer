@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
 
+    from .segmented import SegmentedChoice
+
 try:
     from .. import presets
     from ..cli import gather_input_files
@@ -404,6 +406,7 @@ class TalksReducerGUI:
         self._basic_variables: dict[str, tk.DoubleVar] = {}
         self._slider_updaters: dict[str, Callable[[str], None]] = {}
         self._sliders: list[tk.Scale] = []
+        self._segmented_controls: dict[str, "SegmentedChoice"] = {}
         self._cut_duration: float = 0.0
 
         self._build_layout()

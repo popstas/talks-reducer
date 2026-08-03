@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -291,6 +291,11 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         watch_enabled_var=BooleanVarStub(value=False),
         watch_directory_var=StringVarStub(value=""),
         global_ffmpeg_available=True,
+        _sliders=[],
+        _slider_updaters={},
+        _basic_defaults={},
+        _basic_variables={},
+        _segmented_controls={},
     )
     for key, value in overrides.items():
         setattr(gui, key, value)
@@ -329,7 +334,7 @@ def test_format_activity_line_tolerates_missing_fields():
 
 
 def test_build_layout_shows_activity_log_in_managed_mode(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -344,7 +349,7 @@ def test_build_layout_shows_activity_log_in_managed_mode(monkeypatch):
 
 
 def test_build_layout_hides_activity_log_in_standalone_mode(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -358,7 +363,7 @@ def test_build_layout_hides_activity_log_in_standalone_mode(monkeypatch):
 
 
 def test_build_layout_shows_local_server_url_in_managed_mode(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -379,7 +384,7 @@ def test_build_layout_shows_local_server_url_in_managed_mode(monkeypatch):
 
 
 def test_build_layout_hides_local_server_url_in_standalone_mode(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -396,7 +401,7 @@ def test_build_layout_hides_local_server_url_in_standalone_mode(monkeypatch):
 
 
 def test_build_layout_creates_watch_widgets(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -412,7 +417,7 @@ def test_build_layout_creates_watch_widgets(monkeypatch):
 
 
 def test_build_layout_adds_optimize_tooltip(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -427,7 +432,7 @@ def test_build_layout_adds_optimize_tooltip(monkeypatch):
 
 
 def test_build_layout_aligns_server_entry_and_discover_button(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -447,10 +452,10 @@ def test_build_layout_aligns_server_entry_and_discover_button(monkeypatch):
 
 
 def test_build_layout_initializes_widgets(monkeypatch):
-    add_slider_mock = Mock()
+    add_segmented_mock = Mock()
     add_entry_mock = Mock()
     update_reset_mock = Mock()
-    monkeypatch.setattr(layout, "add_slider", add_slider_mock)
+    monkeypatch.setattr(layout, "add_segmented", add_segmented_mock)
     monkeypatch.setattr(layout, "add_entry", add_entry_mock)
     monkeypatch.setattr(layout, "update_basic_reset_state", update_reset_mock)
 
@@ -606,7 +611,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
 
 
 def test_build_layout_adds_macos_update_button_under_advanced(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -636,7 +641,7 @@ def test_build_layout_adds_macos_update_button_under_advanced(monkeypatch):
 
 
 def test_build_layout_omits_update_button_on_linux(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -651,7 +656,7 @@ def test_build_layout_omits_update_button_on_linux(monkeypatch):
 
 
 def _build_layout_with_cut(monkeypatch, *, cut_enabled: bool):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -707,7 +712,7 @@ def test_build_cut_panel_sliders_forward_to_handler(monkeypatch):
 
 
 def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -852,19 +857,17 @@ def test_add_entry_without_browse():
     ttk.Button.assert_not_called()
 
 
-def test_add_slider_quantizes_and_updates_preferences(monkeypatch):
+def test_add_segmented_registers_updater_and_persists_on_change(monkeypatch):
     update_state = Mock()
     monkeypatch.setattr(layout, "update_basic_reset_state", update_state)
 
-    main_label = Mock()
-    value_label = Mock()
-    slider_widget = Mock()
-
-    ttk_label = Mock(side_effect=[main_label, value_label])
-    ttk = SimpleNamespace(Label=ttk_label)
-    tk = SimpleNamespace(
-        Scale=Mock(return_value=slider_widget), HORIZONTAL="horizontal"
+    ttk = SimpleNamespace(
+        Label=WidgetFactory("Label"),
+        Frame=WidgetFactory("Frame"),
+        Button=WidgetFactory("Button"),
+        Entry=WidgetFactory("Entry"),
     )
+    tk = SimpleNamespace(StringVar=StringVarStub, LEFT="left")
     preferences = SimpleNamespace(update=Mock())
 
     gui = SimpleNamespace(
@@ -874,54 +877,47 @@ def test_add_slider_quantizes_and_updates_preferences(monkeypatch):
         _slider_updaters={},
         _basic_defaults={},
         _basic_variables={},
-        _sliders=[],
+        _segmented_controls={},
     )
 
     variable = DummyVar(5.0)
     parent = Mock()
 
-    layout.add_slider(
+    control = layout.add_segmented(
         gui,
         parent,
-        "Silent speed",
+        "Silent",
         variable,
-        row=0,
+        row=1,
         setting_key="silent_speed",
-        minimum=1.0,
-        maximum=10.0,
-        resolution=0.5,
-        display_format="{:.1f}×",
+        options=[
+            layout.Option(1.0, "1"),
+            layout.Option(2.0, "2"),
+            layout.Option(5.0, "5"),
+            layout.Option(10.0, "10"),
+        ],
         default_value=5.0,
+        custom=layout.CustomSpec(minimum=1.0, maximum=10.0),
     )
 
-    ttk_label.assert_has_calls(
-        [
-            ((parent,), {"text": "Silent speed"}),
-            ((parent,), {}),
-        ]
-    )
-    main_label.grid.assert_called_once_with(row=0, column=0, sticky="w", pady=4)
-    value_label.grid.assert_called_once_with(row=0, column=2, sticky="e", pady=4)
-
-    slider_widget.grid.assert_called_once_with(
-        row=0, column=1, sticky="ew", pady=4, padx=(0, 8)
-    )
-    assert gui._sliders == [slider_widget]
+    assert gui._slider_updaters["silent_speed"] == control.set_value
     assert gui._basic_defaults["silent_speed"] == 5.0
     assert gui._basic_variables["silent_speed"] is variable
-    assert "silent_speed" in gui._slider_updaters
-    assert variable.traces and variable.traces[0][0] == "write"
+    assert gui._segmented_controls["silent_speed"] is control
+    assert variable.traces and variable.traces[-1][0] == "write"
 
-    value_label.configure.assert_called_with(text="5.0×")
-    preferences.update.assert_called_with("silent_speed", 5.0)
+    # Clicking the "10" button both writes the variable and persists/refreshes
+    # the reset state, mirroring what the old slider's ``command`` callback did.
+    control.buttons[3].kwargs["command"]()
+    assert variable.get() == 10.0
+    preferences.update.assert_called_with("silent_speed", 10.0)
     update_state.assert_called()
 
     preferences.update.reset_mock()
-    layout_update = gui._slider_updaters["silent_speed"]
-    layout_update("9.949")
-    assert pytest.approx(variable.get(), rel=1e-9) == 10.0
-    preferences.update.assert_called_with("silent_speed", 10.0)
-    assert value_label.configure.call_args_list[-1].kwargs["text"] == "10.0×"
+    control.set_value(2.0)
+    assert variable.get() == 2.0
+    # Programmatic ``set_value`` (used by preset application) must not persist.
+    preferences.update.assert_not_called()
 
 
 def test_update_basic_reset_state_updates_state_and_highlight():
@@ -1496,7 +1492,7 @@ def test_apply_preset_to_gui_prefers_slider_updaters():
 
 
 def test_build_layout_populates_preset_dropdown(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -1515,7 +1511,7 @@ def test_build_layout_populates_preset_dropdown(monkeypatch):
 
 
 def test_build_layout_hides_preset_selector_when_empty(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -1988,7 +1984,7 @@ def test_delete_advanced_preset_removes_selection(monkeypatch):
 
 
 def test_build_layout_creates_advanced_preset_strip(monkeypatch):
-    monkeypatch.setattr(layout, "add_slider", Mock())
+    monkeypatch.setattr(layout, "add_segmented", Mock())
     monkeypatch.setattr(layout, "add_entry", Mock())
     monkeypatch.setattr(layout, "update_basic_reset_state", Mock())
     monkeypatch.setattr(layout, "default_temp_folder", lambda: Path("/tmp/mock"))
@@ -2012,3 +2008,30 @@ def test_build_layout_creates_advanced_preset_strip(monkeypatch):
     )
     # The strip is created and gridded (visible in the full layout).
     assert gui.advanced_preset_frame.grid_calls
+
+
+def test_build_layout_registers_segmented_updaters():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    for key in ("silent_speed", "sounded_speed", "silent_threshold"):
+        assert key in gui._slider_updaters
+        assert key in gui._basic_variables
+    assert gui._basic_defaults["silent_speed"] == 5.0
+    assert gui._basic_defaults["sounded_speed"] == 1.0
+    assert gui._basic_defaults["silent_threshold"] == 0.01
+
+
+def test_build_layout_no_longer_creates_sliders_for_basic_options():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    # Keyframe interval (removed in Task 8) plus the two Cut video sliders.
+    assert len(gui._sliders) == 3
+
+
+def test_apply_preset_to_gui_still_lands_values_through_segmented_updaters():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    layout.apply_preset_to_gui(gui, _TEST_PRESETS[0])
+    assert gui.silent_speed_var.get() == pytest.approx(10.0)
+    assert gui.sounded_speed_var.get() == pytest.approx(1.0)
+    assert gui.silent_threshold_var.get() == pytest.approx(0.01)

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 from .. import presets
 from ..icons import find_icon_path
 from ..models import default_temp_folder
+from .segmented import CustomSpec, Option, SegmentedChoice
 from .tooltips import add_tooltip
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
@@ -212,8 +213,9 @@ def refresh_advanced_preset_selection(gui: "TalksReducerGUI") -> None:
         "video_codec_var",
     )
     if not all(hasattr(gui, name) for name in required_vars):
-        # ``add_slider`` runs its build-time ``update()`` before every knob var
-        # exists, so skip the reverse-match until the layout is fully built.
+        # The basic-options controls are built one at a time, so a variable
+        # write that lands before every knob var exists must skip the
+        # reverse-match until the layout is fully built.
         return
     values = advanced_preset_values(gui)
     name = presets.match_preset(values, getattr(gui, "_simple_presets", []))
@@ -736,53 +738,61 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.silent_speed_var = gui.tk.DoubleVar(
         value=min(max(gui.preferences.get_float("silent_speed", 5.0), 1.0), 10.0)
     )
-    add_slider(
+    add_segmented(
         gui,
         gui.basic_options_frame,
-        "Silent speed",
+        "Silent",
         gui.silent_speed_var,
-        row=0,
+        row=1,
         setting_key="silent_speed",
-        minimum=1.0,
-        maximum=10.0,
-        resolution=0.5,
-        display_format="{:.1f}×",
+        options=[
+            Option(1.0, "1"),
+            Option(2.0, "2"),
+            Option(5.0, "5"),
+            Option(10.0, "10"),
+        ],
         default_value=5.0,
+        custom=CustomSpec(minimum=1.0, maximum=10.0),
     )
 
     gui.sounded_speed_var = gui.tk.DoubleVar(
         value=min(max(gui.preferences.get_float("sounded_speed", 1.0), 0.75), 2.0)
     )
-    add_slider(
+    add_segmented(
         gui,
         gui.basic_options_frame,
-        "Sounded speed",
+        "Sounded",
         gui.sounded_speed_var,
-        row=1,
+        row=2,
         setting_key="sounded_speed",
-        minimum=0.75,
-        maximum=2.0,
-        resolution=0.25,
-        display_format="{:.2f}×",
+        options=[
+            Option(1.0, "1"),
+            Option(1.3, "1.3"),
+            Option(1.5, "1.5"),
+            Option(2.0, "2"),
+        ],
         default_value=1.0,
+        custom=CustomSpec(minimum=0.75, maximum=2.0),
     )
 
     gui.silent_threshold_var = gui.tk.DoubleVar(
         value=min(max(gui.preferences.get_float("silent_threshold", 0.01), 0.0), 1.0)
     )
-    add_slider(
+    add_segmented(
         gui,
         gui.basic_options_frame,
-        "Silent threshold",
+        "Threshold",
         gui.silent_threshold_var,
-        row=2,
+        row=3,
         setting_key="silent_threshold",
-        minimum=0.0,
-        maximum=1.0,
-        resolution=0.01,
-        display_format="{:.2f}",
+        options=[
+            Option(0.01, "0.01"),
+            Option(0.03, "0.03"),
+            Option(0.05, "0.05"),
+            Option(0.10, "0.10"),
+        ],
         default_value=0.01,
-        pady=(4, 12),
+        custom=CustomSpec(minimum=0.0, maximum=1.0, display_format="{:.2f}"),
     )
 
     gui.ttk.Label(gui.basic_options_frame, text="Video codec").grid(
@@ -1255,7 +1265,7 @@ def add_entry(
         button.grid(row=row, column=2, padx=(8, 0))
 
 
-def add_slider(
+def add_segmented(
     gui: "TalksReducerGUI",
     parent: "tk.Misc",
     label: str,
@@ -1263,52 +1273,45 @@ def add_slider(
     *,
     row: int,
     setting_key: str,
-    minimum: float,
-    maximum: float,
-    resolution: float,
-    display_format: str,
+    options: list,
     default_value: float,
+    custom: "CustomSpec | None" = None,
+    tooltip: str | None = None,
     pady: int | tuple[int, int] = 4,
-) -> None:
-    """Add a labeled slider to the given *parent* container."""
+) -> "SegmentedChoice":
+    """Add a labeled row of choice buttons to *parent* and wire it into presets.
+
+    The control is registered under *setting_key* in ``_slider_updaters``,
+    ``_basic_defaults`` and ``_basic_variables`` so preset application, the
+    reset-state bookkeeping and the reverse preset match keep working exactly as
+    they did with the slider this replaces.
+    """
 
     gui.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=pady)
 
-    value_label = gui.ttk.Label(parent)
-    value_label.grid(row=row, column=2, sticky="e", pady=pady)
-
-    def update(value: str) -> None:
-        numeric = float(value)
-        clamped = max(minimum, min(maximum, numeric))
-        steps = round((clamped - minimum) / resolution)
-        quantized = minimum + steps * resolution
-        if abs(variable.get() - quantized) > 1e-9:
-            variable.set(quantized)
-        value_label.configure(text=display_format.format(quantized))
-        gui.preferences.update(setting_key, float(f"{quantized:.6f}"))
+    def persist(value: float) -> None:
+        gui.preferences.update(setting_key, float(f"{float(value):.6f}"))
         update_basic_reset_state(gui)
 
-    slider = gui.tk.Scale(
+    control = SegmentedChoice(
         parent,
+        options,
+        tk=gui.tk,
+        ttk=gui.ttk,
         variable=variable,
-        from_=minimum,
-        to=maximum,
-        orient=gui.tk.HORIZONTAL,
-        resolution=resolution,
-        showvalue=False,
-        command=update,
-        length=240,
-        highlightthickness=0,
+        default_value=default_value,
+        custom=custom,
+        tooltip=tooltip,
+        on_change=persist,
     )
-    slider.grid(row=row, column=1, sticky="ew", pady=pady, padx=(0, 8))
+    control.frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=pady)
 
-    update(str(variable.get()))
-
-    gui._slider_updaters[setting_key] = update
+    gui._slider_updaters[setting_key] = control.set_value
     gui._basic_defaults[setting_key] = default_value
     gui._basic_variables[setting_key] = variable
+    gui._segmented_controls[setting_key] = control
     variable.trace_add("write", lambda *_: update_basic_reset_state(gui))
-    gui._sliders.append(slider)
+    return control
 
 
 def update_basic_reset_state(gui: "TalksReducerGUI") -> None:
