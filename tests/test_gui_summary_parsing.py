@@ -69,7 +69,7 @@ def test_parse_ratios_from_new_server_summary(tmp_path) -> None:
         original_duration=4332.0,
         output_duration=3574.0,
         chunk_count=7,
-        used_cuda=True,
+        used_gpu=True,
         max_audio_volume=0.5,
         time_ratio=0.825,
         size_ratio=0.5,

@@ -133,7 +133,7 @@ launches.
   - `pipeline.py` orchestrates FFmpeg, audio processing, and temporary assets.
   - `audio.py` handles audio validation, volume analysis, and phase vocoder processing.
   - `chunks.py` builds timing metadata and FFmpeg expressions for frame selection.
-  - `ffmpeg.py` discovers the FFmpeg binary, checks CUDA availability, and assembles command strings.
+  - `ffmpeg.py` discovers the FFmpeg binary, checks GPU encoder availability (`check_cuda_available` for NVENC, `check_videotoolbox_available` for Apple VideoToolbox), and assembles command strings.
   - `gui/segmented.py` defines `SegmentedChoice`, the button-row control (with an optional custom-value `…` slot) used throughout the Advanced "Basic options" panel in place of `tk.Scale` sliders.
 - `requirements.txt` — Python dependencies for local development.
 - `default.nix` — reproducible environment definition for Nix users.
@@ -146,13 +146,13 @@ launches.
 - Streams audio transformations in memory to avoid slow intermediate files
 - Accepts multiple inputs or directories of recordings in a single run
 - Provides progress feedback via `tqdm`
-- Automatically detects NVENC availability, so you no longer need to pass `--cuda`
+- Automatically detects GPU encoders — NVENC on NVIDIA hardware, VideoToolbox for HEVC on macOS — so you no longer need to pass `--cuda`
 
 ## Processing Pipeline
 1. Validate that each input file contains an audio stream using `ffprobe`.
 2. Extract audio and calculate loudness to identify silent regions.
 3. Stretch the non-silent segments with `audiotsm` to maintain speech clarity.
-4. Stitch the processed audio and video together with FFmpeg, using NVENC if the GPU encoders are detected.
+4. Stitch the processed audio and video together with FFmpeg, using NVENC if the GPU encoders are detected, or VideoToolbox on macOS for HEVC only (H.264 is faster on `libx264` there, and Apple ships no AV1 encoder).
 
 ## GUI Layout Convention
 - **The GUI test suite runs against hand-written widget stubs (`WidgetStub`/`WidgetFactory` in `tests/test_gui_layout.py`), never real Tk, and those stubs model widget *API calls* but not *geometry*.** Cell occupancy under `columnspan`, slack distribution from `columnconfigure(weight=...)`, and the `TclError` from calling `grid()` on a `pack`-managed widget are invisible to them. Every layout defect that reached review on the segmented-settings branch was in that class: two controls on one grid row, a `?` button drifting ~680px right because a `columnspan=2` neighbour absorbed the row's slack, and a status label hidden with the wrong geometry manager. A green suite says nothing about layout — check a real window, and prefer extending `test_basic_options_frame_grid_positions_do_not_collide` (which expands `columnspan`/`rowspan` into per-cell occupancy) over another stub assertion.

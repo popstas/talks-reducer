@@ -19,6 +19,7 @@ def stub_static_ffmpeg(monkeypatch):
     stub = SimpleNamespace(add_paths=lambda: False)
     monkeypatch.setitem(sys.modules, "static_ffmpeg", stub)
     monkeypatch.setattr(ffmpeg, "_ENCODER_LISTING", {}, raising=False)
+    monkeypatch.setattr(ffmpeg, "_ENCODER_OPTIONS", {}, raising=False)
     monkeypatch.setattr(
         ffmpeg, "_FFMPEG_PATH_CACHE", {False: None, True: None}, raising=False
     )
@@ -349,6 +350,269 @@ def test_check_cuda_available_handles_errors(monkeypatch):
 
     monkeypatch.setattr(ffmpeg.subprocess, "run", raise_file_not_found)
     assert not ffmpeg.check_cuda_available()
+
+
+def _stub_videotoolbox_probe(monkeypatch, *, hwaccels: str, encoders: str) -> None:
+    """Point FFmpeg probes at canned ``-hwaccels``/``-encoders`` listings."""
+
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    def fake_run(args, **kwargs):
+        if "-hwaccels" in args:
+            return SimpleNamespace(stdout=hwaccels, returncode=0)
+        if "-encoders" in args:
+            return SimpleNamespace(stdout=encoders, returncode=0)
+        raise AssertionError(f"Unexpected args: {args}")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+
+
+def test_check_videotoolbox_available_detects_encoder(monkeypatch):
+    monkeypatch.setattr(ffmpeg.sys, "platform", "darwin")
+    _stub_videotoolbox_probe(
+        monkeypatch,
+        hwaccels="videotoolbox\n",
+        encoders="encoder h264_videotoolbox",
+    )
+
+    assert ffmpeg.check_videotoolbox_available()
+
+
+def test_check_videotoolbox_available_requires_encoder(monkeypatch):
+    monkeypatch.setattr(ffmpeg.sys, "platform", "darwin")
+    _stub_videotoolbox_probe(
+        monkeypatch,
+        hwaccels="videotoolbox\n",
+        encoders="encoder libx264",
+    )
+
+    assert not ffmpeg.check_videotoolbox_available()
+
+
+def test_check_videotoolbox_available_requires_hwaccel(monkeypatch):
+    monkeypatch.setattr(ffmpeg.sys, "platform", "darwin")
+    _stub_videotoolbox_probe(
+        monkeypatch,
+        hwaccels="cuda\n",
+        encoders="encoder h264_videotoolbox",
+    )
+
+    assert not ffmpeg.check_videotoolbox_available()
+
+
+def test_check_videotoolbox_available_skips_other_platforms(monkeypatch):
+    monkeypatch.setattr(ffmpeg.sys, "platform", "linux")
+
+    def unexpected_run(*args, **kwargs):
+        raise AssertionError("FFmpeg must not be probed outside macOS")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", unexpected_run)
+
+    assert not ffmpeg.check_videotoolbox_available()
+
+
+def test_encoder_supports_option_reads_encoder_help(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    calls: List[List[str]] = []
+
+    def fake_run(args, **kwargs):
+        calls.append(list(args))
+        return SimpleNamespace(
+            stdout=(
+                "h264_videotoolbox AVOptions:\n"
+                "  -allow_sw   <boolean>  Allow software encoding\n"
+                "  -spatial_aq <int>      Set to 1 to enable spatial AQ\n"
+            ),
+            returncode=0,
+        )
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+
+    assert ffmpeg.encoder_supports_option("h264_videotoolbox", "spatial_aq")
+    assert not ffmpeg.encoder_supports_option("h264_videotoolbox", "prio_speed")
+    # The help output is probed once and reused for both lookups.
+    assert len(calls) == 1
+    assert "-h" in calls[0] and "encoder=h264_videotoolbox" in calls[0]
+
+
+def test_encoder_supports_option_handles_probe_failure(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg.subprocess,
+        "run",
+        lambda args, **kwargs: SimpleNamespace(stdout="", returncode=1),
+    )
+
+    assert not ffmpeg.encoder_supports_option("h264_videotoolbox", "spatial_aq")
+
+
+def test_build_video_commands_videotoolbox_adds_spatial_aq_when_supported(monkeypatch):
+    """FFmpeg 7.1+ gains ``-spatial_aq``, which suits flat screen recordings."""
+
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg,
+        "encoder_available",
+        lambda name, ffmpeg_path=None: name == "hevc_videotoolbox",
+    )
+    monkeypatch.setattr(
+        ffmpeg,
+        "encoder_supports_option",
+        lambda name, option, ffmpeg_path=None: option == "spatial_aq",
+    )
+
+    command, _fallback, use_gpu = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        videotoolbox_available=True,
+        optimize=True,
+        small=False,
+        frame_rate=30.0,
+        video_codec="hevc",
+    )
+
+    assert "-spatial_aq 1" in command
+    assert use_gpu
+
+
+def test_build_video_commands_h264_keeps_software_encoder_on_videotoolbox(monkeypatch):
+    """H.264 stays on libx264: Apple's media engine is the slower option there."""
+
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: True
+    )
+
+    command, fallback, use_gpu = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        videotoolbox_available=True,
+        optimize=True,
+        small=False,
+        frame_rate=30.0,
+    )
+
+    assert "-c:v libx264" in command
+    assert "videotoolbox" not in command
+    assert fallback is None
+    assert not use_gpu
+
+
+def test_build_video_commands_hevc_videotoolbox(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg,
+        "encoder_available",
+        lambda name, ffmpeg_path=None: name == "hevc_videotoolbox",
+    )
+    monkeypatch.setattr(
+        ffmpeg,
+        "encoder_supports_option",
+        lambda name, option, ffmpeg_path=None: True,
+    )
+
+    command, fallback, use_gpu = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        videotoolbox_available=True,
+        optimize=False,
+        small=False,
+        frame_rate=30.0,
+        video_codec="hevc",
+    )
+
+    assert "-c:v hevc_videotoolbox" in command
+    assert "-q:v 68" in command
+    assert "-prio_speed 1" in command
+    assert use_gpu
+    assert fallback is not None
+    assert "-c:v libx265" in fallback
+
+
+def test_build_video_commands_videotoolbox_falls_back_to_cpu(monkeypatch):
+    """A macOS build without the encoder must keep the software plan."""
+
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: False
+    )
+
+    command, fallback, use_gpu = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        videotoolbox_available=True,
+        optimize=True,
+        small=False,
+        frame_rate=30.0,
+        video_codec="hevc",
+    )
+
+    assert "-c:v libx265" in command
+    assert fallback is None
+    assert not use_gpu
+
+
+def test_build_video_commands_cuda_takes_priority_over_videotoolbox(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: True
+    )
+
+    command, _fallback, use_gpu = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=True,
+        videotoolbox_available=True,
+        optimize=True,
+        small=False,
+        frame_rate=30.0,
+        video_codec="hevc",
+    )
+
+    assert "-c:v hevc_nvenc" in command
+    assert "videotoolbox" not in command
+    assert use_gpu
+
+
+def test_build_video_commands_av1_ignores_videotoolbox(monkeypatch):
+    """Apple ships no AV1 encoder, so AV1 must stay on the software plan."""
+
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: True
+    )
+
+    command, fallback, use_gpu = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        cuda_available=False,
+        videotoolbox_available=True,
+        optimize=True,
+        small=False,
+        frame_rate=30.0,
+        video_codec="av1",
+    )
+
+    assert "-c:v libsvtav1" in command
+    assert "videotoolbox" not in command
+    assert fallback is None
+    assert not use_gpu
 
 
 def test_build_extract_audio_command(monkeypatch):

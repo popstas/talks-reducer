@@ -727,7 +727,7 @@ def test_speed_up_video_mp3_uses_audio_only_command(tmp_path, monkeypatch) -> No
     assert audio_kwargs["cut_start_seconds"] == pytest.approx(2.0)
     assert audio_kwargs["cut_end_seconds"] == pytest.approx(5.0)
     assert result.output_file == output_file
-    assert result.used_cuda is False
+    assert result.used_gpu is False
 
 
 def test_speed_up_video_mp3_uses_processed_wav(tmp_path, monkeypatch) -> None:

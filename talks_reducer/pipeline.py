@@ -23,6 +23,7 @@ from .ffmpeg import (
     build_extract_audio_command,
     build_video_commands,
     check_cuda_available,
+    check_videotoolbox_available,
     get_ffmpeg_path,
     run_timed_ffmpeg_command,
 )
@@ -40,6 +41,7 @@ class PipelineDependencies:
 
     get_ffmpeg_path: Callable[[bool], str] = get_ffmpeg_path
     check_cuda_available: Callable[[str], bool] = check_cuda_available
+    check_videotoolbox_available: Callable[[str], bool] = check_videotoolbox_available
     build_extract_audio_command: Callable[..., str] = build_extract_audio_command
     build_video_commands: Callable[..., tuple[str, str | None, bool]] = (
         build_video_commands
@@ -282,6 +284,9 @@ def speed_up_video(
     output_path = Path(output_path)
 
     cuda_available = dependencies.check_cuda_available(ffmpeg_path)
+    videotoolbox_available = (
+        not cuda_available and dependencies.check_videotoolbox_available(ffmpeg_path)
+    )
 
     base_temp_path = Path(options.temp_folder)
     dependencies.create_path(base_temp_path)
@@ -331,7 +336,12 @@ def speed_up_video(
         reporter,
     )
 
-    reporter.log("Processing on: {}".format("GPU (CUDA)" if cuda_available else "CPU"))
+    if cuda_available:
+        gpu_backend: str | None = "CUDA"
+    elif videotoolbox_available:
+        gpu_backend = "VideoToolbox"
+    else:
+        gpu_backend = None
     if options.optimize:
         reporter.log("Optimized encoding enabled")
     else:
@@ -522,9 +532,9 @@ def speed_up_video(
             cut_end_seconds=cut_end_seconds,
         )
         fallback_command_str = None
-        use_cuda_encoder = False
+        use_gpu_encoder = False
     else:
-        command_str, fallback_command_str, use_cuda_encoder = (
+        command_str, fallback_command_str, use_gpu_encoder = (
             dependencies.build_video_commands(
                 os.fspath(input_path),
                 os.fspath(audio_new_path) if audio_new_path else None,
@@ -532,6 +542,7 @@ def speed_up_video(
                 os.fspath(output_path),
                 ffmpeg_path=ffmpeg_path,
                 cuda_available=cuda_available,
+                videotoolbox_available=videotoolbox_available,
                 optimize=options.optimize,
                 small=options.small,
                 frame_rate=frame_rate,
@@ -542,14 +553,19 @@ def speed_up_video(
                 cut_end_seconds=cut_end_seconds,
             )
         )
+    # Logged only once the plan is known: a backend can be available yet unused,
+    # because not every codec is faster on it.
+    reporter.log(
+        "Processing on: {}".format(f"GPU ({gpu_backend})" if use_gpu_encoder else "CPU")
+    )
     reporter.log(
         (
-            "Encoder plan: codec={codec} | CUDA available={cuda} | "
-            "using CUDA encoder={using_cuda} | fallback prepared={has_fallback}"
+            "Encoder plan: codec={codec} | GPU backend available={backend} | "
+            "using GPU encoder={using_gpu} | fallback prepared={has_fallback}"
         ).format(
             codec=options.video_codec,
-            cuda=cuda_available,
-            using_cuda=use_cuda_encoder,
+            backend=gpu_backend or "none",
+            using_gpu=use_gpu_encoder,
             has_fallback=bool(fallback_command_str),
         )
     )
@@ -616,8 +632,10 @@ def speed_up_video(
                 reporter, temp_path=job_temp_path, dependencies=dependencies
             )
 
-            if use_cuda_encoder:
-                reporter.log("CUDA encoding failed, retrying with CPU encoder...")
+            if use_gpu_encoder:
+                reporter.log(
+                    f"{gpu_backend} encoding failed, retrying with CPU encoder..."
+                )
             else:
                 reporter.log(
                     "Primary encoder failed, retrying with fallback settings..."
@@ -648,6 +666,10 @@ def speed_up_video(
                 process_callback=process_callback,
                 stop_requested=stop_cb,
             )
+            # The fallback plan is always the CPU encoder, so the reported
+            # backend must not keep claiming the GPU was used.
+            use_gpu_encoder = False
+            gpu_backend = None
         else:
             raise
     finally:
@@ -668,7 +690,8 @@ def speed_up_video(
         original_duration=original_duration,
         output_duration=output_duration,
         chunk_count=len(updated_chunks) if updated_chunks else 0,
-        used_cuda=use_cuda_encoder,
+        used_gpu=use_gpu_encoder,
+        gpu_backend=gpu_backend if use_gpu_encoder else None,
         max_audio_volume=max_audio_volume,
         time_ratio=time_ratio,
         size_ratio=size_ratio,

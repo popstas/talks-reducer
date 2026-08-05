@@ -15,7 +15,8 @@ re-encoding them to much smaller files.
 
 - **Speeds up the silence** — no montage editing.
 - **Shrinks the file** — typically 8–10× smaller, web-friendly.
-- **Fast** — in-memory audio/video processing, auto GPU encoding.
+- **Fast** — in-memory audio/video processing, auto GPU encoding (NVENC on
+  NVIDIA, VideoToolbox for HEVC on macOS).
 - **Extract audio** — export an audio-only `.mp3` instead of video.
 - **Simple mode** — one drop zone, minimum settings.
 - **Named presets** — save a settings bundle once, apply it on every surface.
