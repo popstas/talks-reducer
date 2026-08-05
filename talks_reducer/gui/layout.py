@@ -151,6 +151,12 @@ THRESHOLD_MAXIMUM = 0.9
 # mode buttons and Discover rather than to the full width of a dedicated row.
 SERVER_URL_WIDTH = 21
 
+# The entry sits between the mode buttons and Discover, all three reading as one
+# control group, so it hugs its neighbours more tightly than the row's other
+# elements do. Both sides share the constant — splitting them lets the field
+# drift off-centre between the two.
+SERVER_URL_GAP = 4
+
 THRESHOLD_TOOLTIP = (
     "0.01 — never cuts speech; only mutes silence on a good microphone\n"
     "0.03 — fits most cases and phone video, but may cut quiet speech\n"
@@ -917,6 +923,32 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             "write", lambda *_: gui.resolution_var.set(resolution_from_small(gui))
         )
 
+    gui.ttk.Label(gui.basic_options_frame, text="Codec").grid(
+        row=2, column=0, sticky="w", pady=SETTING_ROW_PADY
+    )
+    codec_choice = gui.ttk.Frame(gui.basic_options_frame)
+    codec_choice.grid(row=2, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY)
+    gui.video_codec_control = SegmentedChoice(
+        codec_choice,
+        [
+            Option("h264", "h.264", tooltip="Faster"),
+            Option("hevc", "h.265", tooltip="25% smaller"),
+            Option("av1", "av1", tooltip="No advantages"),
+            Option("mp3", "mp3", tooltip="Audio only"),
+        ],
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=gui.video_codec_var,
+        default_value="h264",
+    )
+    gui.video_codec_control.frame.pack(side=gui.tk.LEFT)
+    gui.add_codec_suffix_check = gui.ttk.Checkbutton(
+        codec_choice,
+        text="Add codec suffix",
+        variable=gui.add_codec_suffix_var,
+    )
+    gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(12, 0))
+
     gui.silent_speed_var = gui.tk.DoubleVar(
         value=min(
             max(gui.preferences.get_float("silent_speed", DEFAULT_SILENT_SPEED), 1.0),
@@ -928,7 +960,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Silent",
         gui.silent_speed_var,
-        row=2,
+        row=3,
         setting_key="silent_speed",
         options=[
             Option(10.0, "10"),
@@ -954,7 +986,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Sounded",
         gui.sounded_speed_var,
-        row=3,
+        row=4,
         setting_key="sounded_speed",
         options=[
             Option(1.0, "1"),
@@ -977,7 +1009,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Threshold",
         gui.silent_threshold_var,
-        row=4,
+        row=5,
         setting_key="silent_threshold",
         options=[
             Option(0.01, "0.01"),
@@ -993,32 +1025,6 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         help_url=THRESHOLD_ARTICLE_URL,
     )
     gui.threshold_help_button = threshold_control.help_button
-
-    gui.ttk.Label(gui.basic_options_frame, text="Codec").grid(
-        row=5, column=0, sticky="w", pady=SETTING_ROW_PADY
-    )
-    codec_choice = gui.ttk.Frame(gui.basic_options_frame)
-    codec_choice.grid(row=5, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY)
-    gui.video_codec_control = SegmentedChoice(
-        codec_choice,
-        [
-            Option("h264", "h.264", tooltip="Faster"),
-            Option("hevc", "h.265", tooltip="25% smaller"),
-            Option("av1", "av1", tooltip="No advantages"),
-            Option("mp3", "mp3", tooltip="Audio only"),
-        ],
-        tk=gui.tk,
-        ttk=gui.ttk,
-        variable=gui.video_codec_var,
-        default_value="h264",
-    )
-    gui.video_codec_control.frame.pack(side=gui.tk.LEFT)
-    gui.add_codec_suffix_check = gui.ttk.Checkbutton(
-        codec_choice,
-        text="Add codec suffix",
-        variable=gui.add_codec_suffix_var,
-    )
-    gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(12, 0))
 
     gui.ttk.Label(gui.basic_options_frame, text="Mode").grid(
         row=6, column=0, sticky="w", pady=SETTING_ROW_PADY
@@ -1042,15 +1048,22 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     # gap whenever it was hidden. The explanatory "Server URL" caption is gone
     # with it — the field sits next to the mode buttons, which is context enough.
     gui.server_url_row = gui.ttk.Frame(mode_choice)
-    gui.server_url_row.pack(side=gui.tk.LEFT, padx=(12, 0))
+    gui.server_url_row.pack(side=gui.tk.LEFT, padx=(SERVER_URL_GAP, 0))
     gui.server_entry = gui.ttk.Entry(
         gui.server_url_row, textvariable=gui.server_url_var, width=SERVER_URL_WIDTH
     )
     gui.server_entry.pack(side=gui.tk.LEFT)
+    # Styled as a segment so it matches the height and inset of the Local/Remote
+    # buttons it shares the row with; a plain ``TButton`` inherits ttk's eleven
+    # character minimum width and a taller default padding, which made it stand
+    # a few pixels above the rest of the row.
     gui.server_discover_button = gui.ttk.Button(
-        gui.server_url_row, text="Discover", command=gui._start_discovery
+        gui.server_url_row,
+        text="Discover",
+        command=gui._start_discovery,
+        style="Segment.TButton",
     )
-    gui.server_discover_button.pack(side=gui.tk.LEFT, padx=(8, 0))
+    gui.server_discover_button.pack(side=gui.tk.LEFT, padx=(SERVER_URL_GAP, 0))
 
     # Packed last so the readiness text reads after the Discover button.
     gui.remote_status_label = gui.ttk.Label(

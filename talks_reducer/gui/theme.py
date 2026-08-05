@@ -28,6 +28,7 @@ LIGHT_THEME = {
     "border": "#cbd5e1",
     "hover": "#efefef",
     "hover_text": "#000000",
+    "disabled_foreground": "#6b7280",
     "selection_background": "#2563eb",
     "selection_foreground": "#ffffff",
 }
@@ -35,11 +36,12 @@ LIGHT_THEME = {
 DARK_THEME = {
     "background": "#1e1e28",
     "foreground": "#f3f4f6",
-    "accent": "#60a5fa",
+    "accent": "#2563eb",
     "surface": "#2b2b3c",
     "border": "#4b5563",
     "hover": "#333333",
     "hover_text": "#ffffff",
+    "disabled_foreground": "#9ca3af",
     "selection_background": "#1e1e28",
     "selection_foreground": "#f3f4f6",
 }
@@ -289,10 +291,11 @@ def apply_theme(
             # Dimmed rather than the normal foreground, so a disabled segment
             # (e.g. the Remote mode button before a server URL is set) actually
             # reads as unavailable instead of looking identical to an enabled
-            # one. ``border`` is the same muted tone already used for other
-            # disabled indicators in this stylesheet (see the TCombobox
-            # ``arrowcolor`` map below).
-            ("disabled", palette["border"]),
+            # one. It is a dedicated muted *text* tone rather than ``border``:
+            # the border colour sits barely above the surface it is drawn on
+            # (1.5:1 in the dark palette), which made the label unreadable
+            # instead of merely muted.
+            ("disabled", palette.get("disabled_foreground", palette["border"])),
         ],
     )
     # The "…" slot swaps itself for an entry of the same character width, but a
@@ -317,7 +320,7 @@ def apply_theme(
         ],
         foreground=[
             ("active", palette.get("hover_text", palette["foreground"])),
-            ("disabled", palette["border"]),
+            ("disabled", palette.get("disabled_foreground", palette["border"])),
         ],
     )
     # A "?" help link is one glyph wide; the default Link padding leaves it

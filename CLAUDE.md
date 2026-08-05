@@ -93,7 +93,11 @@ that hardcodes its own gap drifts out of the rhythm the moment either constant c
 The panel renders its choice-style
 settings as `SegmentedChoice` (`talks_reducer/gui/segmented.py`) — one `ttk.Button` per option,
 styled `Segment.TButton`/`SelectedSegment.TButton` (added in `theme.py`)
-— instead of the `tk.Scale` sliders it used to use. **Silent**
+— instead of the `tk.Scale` sliders it used to use. **Codec** leads the rows, directly under
+**Resolution**: the two together describe the output file, so they read as a pair before the
+timing knobs. It offers h.264/h.265/av1/mp3, each with its own tooltip ("Faster", "25%
+smaller", "No advantages", "Audio only" — text that used to sit in parentheses in the label);
+**Add codec suffix** sits to its right. **Silent**
 speed offers 10/5/2/1 (custom 1–10, default 10 — every row leads with its
 strongest option and opens on it); **Sounded** speed offers 1/1.3/1.5/2 (custom
 0.75–10, default 1 — 1.3 and 1.5 are newly reachable now that the old slider's 0.25 quantization
@@ -104,11 +108,13 @@ carries one tooltip listing what each value trims, and a narrow `?` link (`HelpL
 `THRESHOLD_ARTICLE_URL`, the telegra.ph write-up on trimming silence before speech-to-text
 breaks) sits in the setting's **label**, not in the value row — `add_segmented`'s `help_url`
 builds the label as a frame holding the text plus the link and exposes it as
-`control.help_button`. **Codec** offers h.264/h.265/av1/mp3, each with its own tooltip ("Faster", "25%
-smaller", "No advantages", "Audio only" — text that used to sit in parentheses in the label);
-**Add codec suffix** sits to its right. **Mode** offers Local/Remote and carries the whole
+`control.help_button`. **Mode** offers Local/Remote and carries the whole
 remote group on its own line — the address `ttk.Entry` (`SERVER_URL_WIDTH`), **Discover**, then
-the readiness text, in that order; `server_url_row` and `remote_status_label` are both packed
+the readiness text, in that order. **Discover** is styled `Segment.TButton` so it matches the
+height and inset of the mode buttons beside it (a plain `ttk.Button` inherits ttk's eleven-character
+minimum width and a taller padding, leaving it standing above the row), and the entry hugs both
+neighbours with the shared `SERVER_URL_GAP` (4px) instead of the row's wider spacing, so mode
+buttons + entry + Discover read as one control group. `server_url_row` and `remote_status_label` are both packed
 into the Mode row's frame, so `update_processing_mode_visibility` hides them with
 `pack_forget` and re-packs the row `before=remote_status_label` to keep that order. **Theme**
 offers OS/Light/Dark. A trailing `…` slot on the custom-range controls swaps itself for an
@@ -313,6 +319,7 @@ derived style inherits. A one-glyph "?" rendered 89px wide until `HelpLink.TButt
 `width=0`, and segment buttons were 103px instead of 32px. Any content-width button style in
 this project must set `width=0` explicitly.
 - **Never mix geometry managers on one widget.** Hide a grid-managed widget with `grid_remove()` and a packed one with `pack_forget()`; the stubs accept either, real Tk raises.
+- **A muted colour is not automatically a readable one.** Both palettes in `theme.py` carry the same `accent` (`#2563eb`) so the selected-segment blue is identical in light and dark, and a dedicated `disabled_foreground` (`#6b7280` light, `#9ca3af` dark) that the `Segment`/`CustomSegment` disabled maps use. They used to reuse `border`, which is a *line* colour: at 1.5:1 against the dark surface it left disabled **Remote** unreadable rather than merely dimmed. Pick disabled text from a text ramp, not from the border tone.
 - **Before hiding a control, enumerate every path that could still need it.** `update_processing_mode_visibility` hides the Server URL row outside remote mode, but that row holds the only URL entry and the only **Discover** button, and `_update_processing_mode_state` disables **Remote** until a URL exists — hiding it unconditionally made remote mode permanently unreachable on a fresh config. The row therefore also shows whenever `server_url_var` is empty. Two individually reasonable rules produced a deadlock; a hidden control is only safe when some other path can still reveal it.
 - **Recompute visibility on the state that owns it, not on every write.** `server_url_var` traces into `_update_processing_mode_state`, so recomputing the row on URL changes hid the field mid-keystroke. `_update_processing_mode_state(update_row=False)` from `on_server_url_change` keeps row visibility a function of the *mode* alone.
 
