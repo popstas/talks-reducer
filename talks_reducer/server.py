@@ -840,7 +840,7 @@ def _format_details(result: ProcessingResult) -> str:
             f"**Input:** `{result.input_file.name}`",
             f"**Output:** `{result.output_file.name}`",
             f"**Chunks merged:** {result.chunk_count}",
-            f"**Encoder:** {'CUDA' if result.used_cuda else 'CPU'}",
+            f"**Encoder:** {(result.gpu_backend or 'GPU') if result.used_gpu else 'CPU'}",
         ]
     )
 
@@ -1399,16 +1399,14 @@ def build_interface(
             gr.HTML(f"<style>{_WEB_UI_CSS}</style>")
         gr.Markdown(f"## Talks Reducer Web UI{version_suffix}")
         with gr.Accordion("About", open=False):
-            gr.Markdown(
-                f"""
+            gr.Markdown(f"""
                 Drop a video or audio file below. Pick a **Resolution** and
                 **Speedup**, choose the **Video codec**, and processing starts on
                 upload. Open **Advanced** for encoder toggles and fine-grained
                 speed/threshold controls.
 
                 Video will be rendered on server **{server_identity}**.
-                """.strip()
-            )
+                """.strip())
 
         file_input = gr.File(
             label="Video or audio file",

@@ -142,6 +142,7 @@ def test_speed_up_video_returns_result(monkeypatch, tmp_path):
     dependencies = PipelineDependencies(
         get_ffmpeg_path=positional_get_ffmpeg_path,
         check_cuda_available=lambda _path: False,
+        check_videotoolbox_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
         run_timed_ffmpeg_command=fake_run,
@@ -227,6 +228,7 @@ def test_speed_up_video_reports_audio_processing_progress(monkeypatch, tmp_path)
     dependencies = PipelineDependencies(
         get_ffmpeg_path=lambda prefer=False: "ffmpeg",
         check_cuda_available=lambda _path: False,
+        check_videotoolbox_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
         run_timed_ffmpeg_command=fake_run,
@@ -330,6 +332,7 @@ def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
     dependencies = PipelineDependencies(
         get_ffmpeg_path=positional_get_ffmpeg_path,
         check_cuda_available=lambda _path: True,
+        check_videotoolbox_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", "render-cpu", True),
         run_timed_ffmpeg_command=fake_run,
@@ -411,6 +414,7 @@ def test_speed_up_video_falls_back_without_cuda(monkeypatch, tmp_path):
     dependencies = PipelineDependencies(
         get_ffmpeg_path=lambda flag: "ffmpeg",
         check_cuda_available=lambda _path: False,
+        check_videotoolbox_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: (
             "render-fast",
@@ -465,6 +469,7 @@ def test_speed_up_video_cleans_temp_on_abort(monkeypatch, tmp_path):
     dependencies = PipelineDependencies(
         get_ffmpeg_path=positional_get_ffmpeg_path,
         check_cuda_available=lambda _path: False,
+        check_videotoolbox_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
         run_timed_ffmpeg_command=lambda *args, **kwargs: None,
@@ -551,6 +556,7 @@ def test_speed_up_video_computes_ratios(monkeypatch, tmp_path):
     dependencies = PipelineDependencies(
         get_ffmpeg_path=lambda prefer=False: "ffmpeg",
         check_cuda_available=lambda _path: False,
+        check_videotoolbox_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
         run_timed_ffmpeg_command=fake_run,
@@ -640,6 +646,7 @@ def test_small_mode_preserves_lower_resolution(monkeypatch, tmp_path):
     dependencies = PipelineDependencies(
         get_ffmpeg_path=lambda prefer=False: "ffmpeg",
         check_cuda_available=lambda _path: False,
+        check_videotoolbox_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda input_file, audio_file, filter_script, output_file, **kwargs: (
             f"ffmpeg -i {input_file} -i {audio_file} -filter_script:v {filter_script} {output_file}",
@@ -741,6 +748,7 @@ def test_small_mode_scales_down_when_larger(monkeypatch, tmp_path):
     dependencies = PipelineDependencies(
         get_ffmpeg_path=lambda prefer=False: "ffmpeg",
         check_cuda_available=lambda _path: False,
+        check_videotoolbox_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda input_file, audio_file, filter_script, output_file, **kwargs: (
             f"ffmpeg -i {input_file} -i {audio_file} -filter_script:v {filter_script} {output_file}",
@@ -818,6 +826,7 @@ def _stub_pipeline_externals(monkeypatch, options):
     return PipelineDependencies(
         get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
         check_cuda_available=lambda _path: False,
+        check_videotoolbox_available=lambda _path: False,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
         run_timed_ffmpeg_command=fake_run,
@@ -904,6 +913,7 @@ def test_speed_up_video_skips_audio_when_speeds_neutral(monkeypatch, tmp_path):
     dependencies = PipelineDependencies(
         get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
         check_cuda_available=lambda _path: False,
+        check_videotoolbox_available=lambda _path: False,
         build_extract_audio_command=fake_build_extract,
         build_video_commands=fake_build_video_commands,
         run_timed_ffmpeg_command=fake_run,

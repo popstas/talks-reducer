@@ -270,7 +270,7 @@ launches.
   - `pipeline.py` orchestrates FFmpeg, audio processing, and temporary assets.
   - `audio.py` handles audio validation, volume analysis, and phase vocoder processing.
   - `chunks.py` builds timing metadata and FFmpeg expressions for frame selection.
-  - `ffmpeg.py` discovers the FFmpeg binary, checks CUDA availability, and assembles command strings.
+  - `ffmpeg.py` discovers the FFmpeg binary, checks GPU encoder availability (`check_cuda_available` for NVENC, `check_videotoolbox_available` for Apple VideoToolbox), and assembles command strings.
   - `gui/progress.py` defines `STAGE_PROGRESS_RANGES` and `map_stage_progress()`, which map each remote pipeline stage onto fixed GUI percentage bands (`Uploading:` 0–5%, `Extracting audio:` 5–20%, `Audio processing:` 20–35%, `Generating final` 35–100%).
   - `gui/segmented.py` defines `SegmentedChoice`, the button-row control (with an optional custom-value `…` slot) used throughout the Advanced "Basic options" panel in place of `tk.Scale` sliders.
 - `requirements.txt` — Python dependencies for local development.
@@ -286,14 +286,14 @@ launches.
 - Streams audio transformations in memory to avoid slow intermediate files
 - Accepts multiple inputs or directories of recordings in a single run
 - Provides progress feedback via `tqdm`
-- Automatically detects NVENC availability, so you no longer need to pass `--cuda`
+- Automatically detects GPU encoders — NVENC on NVIDIA hardware, VideoToolbox for HEVC on macOS — so you no longer need to pass `--cuda`
 
 ## Processing Pipeline
 
 1. Validate that each input file contains an audio stream using `ffprobe`.
 2. Extract audio and calculate loudness to identify silent regions.
 3. Stretch the non-silent segments with `audiotsm` to maintain speech clarity.
-4. Stitch the processed audio and video together with FFmpeg, using NVENC if the GPU encoders are detected.
+4. Stitch the processed audio and video together with FFmpeg, using NVENC if the GPU encoders are detected, or VideoToolbox on macOS for HEVC only (H.264 is faster on `libx264` there, and Apple ships no AV1 encoder).
 
 ## GUI Progress Convention
 

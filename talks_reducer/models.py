@@ -78,7 +78,9 @@ class ProcessingResult:
     original_duration: float
     output_duration: float
     chunk_count: int
-    used_cuda: bool
+    used_gpu: bool
     max_audio_volume: float
     time_ratio: Optional[float]
     size_ratio: Optional[float]
+    gpu_backend: Optional[str] = None
+    """Name of the hardware encoder family used, e.g. ``CUDA`` or ``VideoToolbox``."""

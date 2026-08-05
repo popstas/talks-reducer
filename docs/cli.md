@@ -121,12 +121,22 @@ optional Silero VAD integration keeps the install lightweight and avoids pulling
 When CUDA-capable hardware is available the pipeline leans on GPU encoders to keep export
 times low, but it still runs great on CPUs.
 
+On macOS the pipeline uses Apple VideoToolbox for `--codec hevc` only, and falls back to
+`libx265` if the hardware encoder rejects the job. H.264 stays on `libx264` even though
+`h264_videotoolbox` exists: Apple's media engine tops out near 290 fps at 1080p regardless
+of the requested quality, while `libx264 -preset veryfast` spreads across the CPU cores and
+reaches roughly twice that, so at matched output size the hardware encoder finishes later.
+HEVC is the reverse — `libx265 -preset medium` is the slow part of the export, and moving it
+onto the media engine cut a 29-minute 1080p30 recording from 387 s to 107 s at the same
+output size. AV1 always uses the software encoder because Apple ships no AV1 encoder.
+
 ## FFmpeg selection
 
 Bundled FFmpeg builds prioritise compatibility, but they may lack newer GPU encoders such as
-`av1_nvenc`. When your local FFmpeg install exposes additional hardware options, add
-`--prefer-global-ffmpeg` so the CLI and GUI prefer the binary on your `PATH` before falling
-back to the static package.
+`av1_nvenc`. The bundled `static-ffmpeg` package currently ships FFmpeg 7.0, so the
+VideoToolbox commands stay within the options that release understands. When your local
+FFmpeg install exposes additional hardware options, add `--prefer-global-ffmpeg` so the CLI
+and GUI prefer the binary on your `PATH` before falling back to the static package.
 
 ## Remote processing
 

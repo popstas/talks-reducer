@@ -253,6 +253,7 @@ def is_global_ffmpeg_available() -> bool:
 
 
 _ENCODER_LISTING: dict[str, str] = {}
+_ENCODER_OPTIONS: dict[tuple[str, str], str] = {}
 
 
 def _probe_ffmpeg_output(args: List[str]) -> Optional[str]:
@@ -312,6 +313,36 @@ def encoder_available(encoder_name: str, ffmpeg_path: Optional[str] = None) -> b
     return re.search(pattern, listing) is not None
 
 
+def encoder_supports_option(
+    encoder_name: str, option: str, ffmpeg_path: Optional[str] = None
+) -> bool:
+    """Return True if *encoder_name* accepts ``-option`` in this FFmpeg build.
+
+    Encoder options come and go between FFmpeg releases — ``-spatial_aq`` only
+    reached the VideoToolbox encoders in 7.1, while ``static-ffmpeg`` still
+    bundles 7.0 — and an unknown option makes FFmpeg reject the whole command
+    line rather than ignore it. The per-encoder help output is cached because
+    each probe spawns a process.
+    """
+
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+    cache_key = (os.path.abspath(ffmpeg_path), encoder_name.lower())
+    listing = _ENCODER_OPTIONS.get(cache_key)
+    if listing is None:
+        output = _probe_ffmpeg_output(
+            [ffmpeg_path, "-hide_banner", "-h", f"encoder={encoder_name}"]
+        )
+        if output is None:
+            return False
+        listing = output.lower()
+        _ENCODER_OPTIONS[cache_key] = listing
+
+    return (
+        re.search(rf"^\s*-{re.escape(option.lower())}\b", listing, re.MULTILINE)
+        is not None
+    )
+
+
 def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
     """Return whether CUDA hardware encoders are usable in the FFmpeg build."""
 
@@ -329,6 +360,62 @@ def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
         encoder in encoder_output
         for encoder in ["h264_nvenc", "hevc_nvenc", "av1_nvenc", "nvenc"]
     )
+
+
+def check_videotoolbox_available(ffmpeg_path: Optional[str] = None) -> bool:
+    """Return whether Apple VideoToolbox encoders are usable in the FFmpeg build.
+
+    VideoToolbox only exists on macOS, so the platform is checked first to avoid
+    probing FFmpeg on systems that can never provide it.
+    """
+
+    if sys.platform != "darwin":
+        return False
+
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+
+    hwaccels_output = _probe_ffmpeg_output([ffmpeg_path, "-hide_banner", "-hwaccels"])
+    if not hwaccels_output or "videotoolbox" not in hwaccels_output.lower():
+        return False
+
+    return any(
+        encoder_available(encoder, ffmpeg_path=ffmpeg_path)
+        for encoder in ("hevc_videotoolbox", "h264_videotoolbox")
+    )
+
+
+# Quality on the VideoToolbox 1-100 scale that matches the size the software
+# encoder produces for the same clip. Only HEVC is listed because only HEVC uses
+# the hardware encoder — see ``resolve_encoder_plan``.
+_VIDEOTOOLBOX_QUALITY = {"hevc": 68}
+
+
+def _videotoolbox_encoder_args(
+    encoder: str,
+    *,
+    profile: str,
+    quality: int,
+    extra_keyframe_args: Sequence[str],
+    ffmpeg_path: Optional[str] = None,
+) -> List[str]:
+    """Return VideoToolbox encoder flags for the requested quality *profile*.
+
+    VideoToolbox exposes neither ``-crf`` nor ``-preset``: quality is requested
+    through ``-q:v`` on a 1-100 scale where higher means better, and extra speed
+    is requested through ``-prio_speed``.
+
+    ``-spatial_aq`` spends more bits on the flat areas that dominate slide and
+    screen recordings, but it only exists from FFmpeg 7.1 onwards while
+    ``static-ffmpeg`` still bundles 7.0, so it is probed rather than assumed.
+    """
+
+    args = [f"-c:v {encoder}", f"-q:v {quality}"]
+    if profile == "fast":
+        args.append("-prio_speed 1")
+    elif encoder_supports_option(encoder, "spatial_aq", ffmpeg_path=ffmpeg_path):
+        args.append("-spatial_aq 1")
+
+    return args + list(extra_keyframe_args)
 
 
 def _force_kill_process(process: subprocess.Popen) -> None:
@@ -716,6 +803,7 @@ def build_video_commands(
     *,
     ffmpeg_path: Optional[str] = None,
     cuda_available: bool,
+    videotoolbox_available: bool = False,
     optimize: bool,
     small: bool,
     frame_rate: Optional[float] = None,
@@ -733,6 +821,10 @@ def build_video_commands(
             ``keep_input_audio`` is False, the video is encoded without audio.
         filter_script: Optional path to the filter script file. If None, video will be re-encoded without speed modification.
         output_file: Path to the output video file.
+        cuda_available: Whether NVENC encoders may be used for the primary command.
+        videotoolbox_available: Whether Apple VideoToolbox encoders may be used for
+            the primary command. Ignored when ``cuda_available`` is True, since a
+            machine never has both backends.
         frame_rate: Optional source frame rate used to size GOP/keyframe spacing for
             the small preset when generating hardware/software encoder commands.
         keep_input_audio: When True and ``audio_file`` is None, map the audio
@@ -770,7 +862,7 @@ def build_video_commands(
 
     video_encoder_args: List[str]
     fallback_encoder_args: List[str] = []
-    use_cuda_encoder = False
+    use_gpu_encoder = False
 
     keyframe_args: List[str] = []
     quality_profile = "optimized"
@@ -794,13 +886,14 @@ def build_video_commands(
     def resolve_encoder_plan(
         *,
         prefer_cuda: bool,
+        prefer_videotoolbox: bool,
         codec: str,
         extra_keyframe_args: Sequence[str],
         profile: str,
     ) -> Tuple[List[str], List[str], bool]:
         primary_args: List[str]
         fallback_args: List[str] = []
-        uses_cuda = False
+        uses_gpu = False
 
         if codec == "av1":
             if encoder_available("libsvtav1", ffmpeg_path=ffmpeg_path):
@@ -824,7 +917,7 @@ def build_video_commands(
             primary_args = cpu_encoder_args
 
             if prefer_cuda and encoder_available("av1_nvenc", ffmpeg_path=ffmpeg_path):
-                uses_cuda = True
+                uses_gpu = True
                 if profile == "fast":
                     primary_args = [
                         "-c:v av1_nvenc",
@@ -859,7 +952,7 @@ def build_video_commands(
 
             primary_args = cpu_encoder_args
             if prefer_cuda and encoder_available("hevc_nvenc", ffmpeg_path=ffmpeg_path):
-                uses_cuda = True
+                uses_gpu = True
                 if profile == "fast":
                     primary_args = [
                         "-c:v hevc_nvenc",
@@ -880,6 +973,18 @@ def build_video_commands(
                         "-multipass fullres",
                     ] + list(extra_keyframe_args)
                 fallback_args = cpu_encoder_args
+            elif prefer_videotoolbox and encoder_available(
+                "hevc_videotoolbox", ffmpeg_path=ffmpeg_path
+            ):
+                uses_gpu = True
+                primary_args = _videotoolbox_encoder_args(
+                    "hevc_videotoolbox",
+                    profile=profile,
+                    quality=_VIDEOTOOLBOX_QUALITY["hevc"],
+                    extra_keyframe_args=extra_keyframe_args,
+                    ffmpeg_path=ffmpeg_path,
+                )
+                fallback_args = cpu_encoder_args
         else:
             if profile == "fast":
                 cpu_encoder_args = [
@@ -898,7 +1003,7 @@ def build_video_commands(
 
             primary_args = cpu_encoder_args
             if prefer_cuda:
-                uses_cuda = True
+                uses_gpu = True
                 if profile == "fast":
                     primary_args = [
                         "-c:v h264_nvenc",
@@ -916,11 +1021,17 @@ def build_video_commands(
                         "-forced-idr 1",
                     ] + list(extra_keyframe_args)
                 fallback_args = cpu_encoder_args
+            # H.264 deliberately stays on libx264 even when VideoToolbox is
+            # available: Apple's media engine caps out around 290 fps at 1080p,
+            # while libx264 -preset veryfast reaches ~600 fps across the CPU
+            # cores, so at matched output size the hardware encoder is the
+            # slower option. HEVC is the opposite — see the branch above.
 
-        return primary_args, fallback_args, uses_cuda
+        return primary_args, fallback_args, uses_gpu
 
-    primary_plan, primary_fallback, primary_uses_cuda = resolve_encoder_plan(
+    primary_plan, primary_fallback, primary_uses_gpu = resolve_encoder_plan(
         prefer_cuda=cuda_available,
+        prefer_videotoolbox=videotoolbox_available and not cuda_available,
         codec=codec_choice,
         extra_keyframe_args=keyframe_args,
         profile=quality_profile,
@@ -928,7 +1039,7 @@ def build_video_commands(
 
     video_encoder_args = primary_plan
     fallback_encoder_args = primary_fallback
-    use_cuda_encoder = primary_uses_cuda
+    use_gpu_encoder = primary_uses_gpu
 
     audio_parts: List[str] = []
     if audio_file:
@@ -966,7 +1077,7 @@ def build_video_commands(
         )
         fallback_command_str = " ".join(fallback_parts)
 
-    return command_str, fallback_command_str, use_cuda_encoder
+    return command_str, fallback_command_str, use_gpu_encoder
 
 
 __all__ = [
@@ -978,6 +1089,7 @@ __all__ = [
     "get_ffmpeg_path",
     "get_ffprobe_path",
     "check_cuda_available",
+    "check_videotoolbox_available",
     "run_timed_ffmpeg_command",
     "build_trim_input_args",
     "build_extract_audio_command",
