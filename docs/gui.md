@@ -132,6 +132,19 @@ The keep range matches the CLI's `--cut-start`/`--cut-end` semantics. The checkb
 last start/end values persist across launches; clearing it (or switching to Simple mode)
 omits the trim entirely.
 
+## Gluing several files
+
+Drop or pick more than one file — or a folder that holds several — and Talks Reducer asks
+whether to **glue them into a single video** or to process each file separately. The question
+is asked on every multi-file run; nothing is remembered.
+
+Choosing to glue concatenates the files in the order they were queued *before* processing, so
+silence detection spans the seams and one output is produced, named after the first file and
+saved next to it. Choosing to process separately keeps the familiar per-file run.
+
+Gluing applies in both Local and Remote mode: the parts are joined on your machine and the
+single glued file is what gets uploaded.
+
 ## Watch directory
 
 An Advanced setting: choose a folder and Talks Reducer polls it (~2s) for the

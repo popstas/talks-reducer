@@ -1289,3 +1289,114 @@ def test_should_hide_subprocess_console_returns_false_for_attached_console(
     monkeypatch.setitem(sys.modules, "ctypes", fake_ctypes)
 
     assert cli._should_hide_subprocess_console() is False
+
+
+def test_build_parser_defaults_glue_to_false() -> None:
+    """The glue flag is opt-in so multi-file runs stay per-file by default."""
+
+    parser = cli._build_parser()
+
+    assert parser.parse_args(["input.mp4"]).glue is False
+    assert parser.parse_args(["--glue", "a.mp4", "b.mp4"]).glue is True
+
+
+def test_cli_application_glues_multiple_inputs_into_one_run(tmp_path: Path) -> None:
+    """--glue concatenates the inputs and processes the result once."""
+
+    parsed_args = SimpleNamespace(input_file=["a.mp4", "b.mp4"], glue=True)
+    glued = tmp_path / "glue_dir" / "part1.mp4"
+    glued.parent.mkdir()
+    glued.write_bytes(b"data")
+    glue_calls: list[tuple] = []
+    speed_calls: list[cli.ProcessingOptions] = []
+
+    def fake_glue(inputs, **kwargs):
+        glue_calls.append((list(inputs), kwargs))
+        return glued, glued.parent
+
+    def fake_speed_up(options: cli.ProcessingOptions, reporter: object):
+        speed_calls.append(options)
+        return SimpleNamespace(output_file=Path("/videos/part1_speedup.mp4"))
+
+    class DummyReporter:
+        def log(self, message: str) -> None:
+            pass
+
+    app = cli.CliApplication(
+        gather_files=lambda paths, **_kwargs: [
+            "/videos/part1.mp4",
+            "/videos/part2.mp4",
+        ],
+        send_video=None,
+        speed_up=fake_speed_up,
+        reporter_factory=DummyReporter,
+        glue_inputs=fake_glue,
+    )
+
+    exit_code, error_messages = app.run(parsed_args)
+
+    assert exit_code == 0
+    assert error_messages == []
+    assert glue_calls and glue_calls[0][0] == [
+        "/videos/part1.mp4",
+        "/videos/part2.mp4",
+    ]
+    assert len(speed_calls) == 1
+    assert speed_calls[0].input_file == glued
+    assert speed_calls[0].output_file == Path("/videos/part1_speedup.mp4")
+    assert not glued.parent.exists()
+
+
+def test_cli_application_skips_gluing_a_single_input() -> None:
+    """A lone file needs no concatenation even when --glue is passed."""
+
+    parsed_args = SimpleNamespace(input_file=["a.mp4"], glue=True)
+    glue_calls: list = []
+
+    class DummyReporter:
+        def log(self, message: str) -> None:
+            pass
+
+    app = cli.CliApplication(
+        gather_files=lambda paths, **_kwargs: ["/videos/part1.mp4"],
+        send_video=None,
+        speed_up=lambda options, reporter: SimpleNamespace(
+            output_file=Path("/videos/part1_speedup.mp4")
+        ),
+        reporter_factory=DummyReporter,
+        glue_inputs=lambda *args, **kwargs: glue_calls.append(args),
+    )
+
+    exit_code, _errors = app.run(parsed_args)
+
+    assert exit_code == 0
+    assert glue_calls == []
+
+
+def test_cli_application_reports_a_failed_glue(tmp_path: Path) -> None:
+    """A concatenation failure aborts the run with an error message."""
+
+    parsed_args = SimpleNamespace(input_file=["a.mp4", "b.mp4"], glue=True)
+
+    def failing_glue(inputs, **kwargs):
+        raise RuntimeError("ffmpeg exploded")
+
+    class DummyReporter:
+        def log(self, message: str) -> None:
+            pass
+
+    app = cli.CliApplication(
+        gather_files=lambda paths, **_kwargs: [
+            "/videos/part1.mp4",
+            "/videos/part2.mp4",
+        ],
+        send_video=None,
+        speed_up=lambda options, reporter: None,
+        reporter_factory=DummyReporter,
+        glue_inputs=failing_glue,
+    )
+
+    exit_code, error_messages = app.run(parsed_args)
+
+    assert exit_code == 1
+    assert any("ffmpeg exploded" in message for message in error_messages)

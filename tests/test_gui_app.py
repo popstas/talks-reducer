@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -2406,3 +2407,127 @@ def test_update_selected_preset_noop_on_custom(monkeypatch):
     app.TalksReducerGUI._update_selected_preset(gui)
 
     assert called == []
+
+
+def test_ask_glue_confirmation_asks_on_the_ui_thread():
+    """The worker thread must not touch Tk directly when asking about gluing."""
+
+    asked: list[tuple[str, str]] = []
+
+    def fake_askyesno(title: str, message: str) -> bool:
+        asked.append((title, message))
+        return True
+
+    gui = SimpleNamespace(
+        messagebox=SimpleNamespace(askyesno=fake_askyesno),
+        _schedule_on_ui_thread=lambda callback: callback(),
+    )
+
+    answer = app.TalksReducerGUI._ask_glue_confirmation(gui, 3)
+
+    assert answer is True
+    assert asked and "3" in asked[0][1]
+
+
+def test_ask_glue_confirmation_returns_false_when_declined():
+    gui = SimpleNamespace(
+        messagebox=SimpleNamespace(askyesno=lambda *args, **kwargs: False),
+        _schedule_on_ui_thread=lambda callback: callback(),
+    )
+
+    assert app.TalksReducerGUI._ask_glue_confirmation(gui, 2) is False
+
+
+def test_maybe_glue_inputs_glues_when_confirmed(monkeypatch, tmp_path):
+    """A confirmed multi-file run is concatenated into a single input."""
+
+    glued = tmp_path / "glue_dir" / "part1.mp4"
+    calls: list[dict] = []
+
+    def fake_prepare(inputs, **kwargs):
+        calls.append({"inputs": list(inputs), **kwargs})
+        return glued, glued.parent
+
+    monkeypatch.setattr(app, "prepare_glued_input", fake_prepare)
+
+    gui = SimpleNamespace(
+        _ask_glue_confirmation=lambda count: True,
+        _append_log=lambda message: None,
+        _glue_temp_dir=None,
+    )
+
+    files, glue_source = app.TalksReducerGUI._maybe_glue_inputs(
+        gui,
+        ["/videos/part1.mp4", "/videos/part2.mp4"],
+        {"temp_folder": str(tmp_path)},
+        reporter=object(),
+    )
+
+    assert files == [str(glued)]
+    assert glue_source == Path("/videos/part1.mp4")
+    assert gui._glue_temp_dir == glued.parent
+    assert calls[0]["inputs"] == ["/videos/part1.mp4", "/videos/part2.mp4"]
+    assert calls[0]["temp_folder"] == tmp_path
+
+
+def test_maybe_glue_inputs_keeps_files_when_declined(monkeypatch, tmp_path):
+    """Declining the dialog leaves the per-file loop untouched."""
+
+    monkeypatch.setattr(
+        app,
+        "prepare_glued_input",
+        lambda *args, **kwargs: pytest.fail("gluing should not run"),
+    )
+
+    gui = SimpleNamespace(
+        _ask_glue_confirmation=lambda count: False,
+        _append_log=lambda message: None,
+        _glue_temp_dir=None,
+    )
+    original = ["/videos/part1.mp4", "/videos/part2.mp4"]
+
+    files, glue_source = app.TalksReducerGUI._maybe_glue_inputs(
+        gui, original, {}, reporter=object()
+    )
+
+    assert files == original
+    assert glue_source is None
+    assert gui._glue_temp_dir is None
+
+
+def test_maybe_glue_inputs_never_asks_about_a_single_file(monkeypatch):
+    """One queued file has nothing to glue, so no dialog interrupts the run."""
+
+    monkeypatch.setattr(
+        app,
+        "prepare_glued_input",
+        lambda *args, **kwargs: pytest.fail("gluing should not run"),
+    )
+
+    def fail_ask(count: int) -> bool:
+        pytest.fail("the confirmation must not be shown for a single file")
+
+    gui = SimpleNamespace(
+        _ask_glue_confirmation=fail_ask,
+        _append_log=lambda message: None,
+        _glue_temp_dir=None,
+    )
+
+    files, glue_source = app.TalksReducerGUI._maybe_glue_inputs(
+        gui, ["/videos/part1.mp4"], {}, reporter=object()
+    )
+
+    assert files == ["/videos/part1.mp4"]
+    assert glue_source is None
+
+
+def test_cleanup_glue_workspace_removes_the_temp_directory(tmp_path):
+    temp_dir = tmp_path / "glue_dir"
+    temp_dir.mkdir()
+    (temp_dir / "part1.mp4").write_bytes(b"data")
+    gui = SimpleNamespace(_glue_temp_dir=temp_dir)
+
+    app.TalksReducerGUI._cleanup_glue_workspace(gui)
+
+    assert not temp_dir.exists()
+    assert gui._glue_temp_dir is None

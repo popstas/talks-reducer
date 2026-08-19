@@ -100,6 +100,27 @@ talks-reducer --cut-start 00:00:10 --cut-end 00:01:00 demo.mp4  # keep 10s–60s
 talks-reducer --cut-start 90 demo.mp4  # drop the first 90 seconds, keep to EOF
 ```
 
+## Gluing several parts: `--glue`
+
+A talk recorded in several files becomes one video with `--glue`: the parts are concatenated
+*before* the speed-up pipeline runs, so silence detection spans the seams and a single summary
+describes the whole talk. Without the flag each input is still processed on its own.
+
+The parts are joined in the order you list them and the output is named after the **first**
+one, next to it — `part1.mp4 part2.mp4` produces `part1_speedup.mp4`. Directories expand
+first, so `--glue recordings/` glues everything the folder holds.
+
+```sh
+talks-reducer --glue part1.mp4 part2.mp4 part3.mp4  # one part1_speedup.mp4
+talks-reducer --glue --small recordings/            # glue a folder, scaled to 720p
+```
+
+Parts that share their codec, resolution and audio parameters are stream-copied, which is
+close to instant. When they disagree — a different resolution or frame rate between takes —
+the parts are re-encoded and scaled to the first part's frame size instead, since a
+stream copy would otherwise produce a file that changes size mid-playback. The glued file
+lives in the temporary working folder and is deleted when the run finishes.
+
 ## Timing and silence detection
 
 - `--silent_threshold` (`-t`) — the volume below which a segment counts as silence.

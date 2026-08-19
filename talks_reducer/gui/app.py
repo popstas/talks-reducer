@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -35,8 +37,9 @@ try:
     from .. import presets
     from ..cli import gather_input_files
     from ..ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
-    from ..models import ProcessingOptions
-    from ..pipeline import ProcessingAborted, speed_up_video
+    from ..glue import prepare_glued_input
+    from ..models import ProcessingOptions, default_temp_folder
+    from ..pipeline import ProcessingAborted, resolve_output_path, speed_up_video
     from ..progress import ProgressHandle
     from ..timecode import format_timecode, parse_timecode
     from ..version_utils import resolve_version
@@ -85,6 +88,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer import presets
     from talks_reducer.cli import gather_input_files
     from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
+    from talks_reducer.glue import prepare_glued_input
     from talks_reducer.gui import discovery as discovery_helpers
     from talks_reducer.gui import layout as layout_helpers
     from talks_reducer.gui import preset_dialog, relaunch
@@ -123,8 +127,12 @@ except ImportError:  # pragma: no cover - handled at runtime
         run_defaults_command,
     )
     from talks_reducer.gui.watch import WatchController
-    from talks_reducer.models import ProcessingOptions
-    from talks_reducer.pipeline import ProcessingAborted, speed_up_video
+    from talks_reducer.models import ProcessingOptions, default_temp_folder
+    from talks_reducer.pipeline import (
+        ProcessingAborted,
+        resolve_output_path,
+        speed_up_video,
+    )
     from talks_reducer.progress import ProgressHandle
     from talks_reducer.timecode import format_timecode, parse_timecode
     from talks_reducer.version_utils import resolve_version
@@ -301,6 +309,7 @@ class TalksReducerGUI:
         self._update_link_labels: List[Any] = []
 
         self.input_files: List[str] = []
+        self._glue_temp_dir: Optional[Path] = None
 
         self._dnd_available = self._dnd_runtime_available and DND_FILES is not None
         self.DND_FILES = DND_FILES
@@ -532,12 +541,25 @@ class TalksReducerGUI:
                     self._set_status("Idle")
                     return
 
+                reporter = _TkProgressReporter(
+                    self._append_log,
+                    process_callback=set_process,
+                    stop_callback=lambda: self._stop_requested,
+                    progress_callback=self._set_progress_monotonic,
+                    stage_callback=self._apply_stage_transition,
+                )
+
+                files, glue_source = self._maybe_glue_inputs(
+                    files, args, reporter=reporter
+                )
+
                 if self._current_remote_mode:
                     success = self._process_files_via_server(
                         files,
                         args,
                         server_url,
                         open_after_convert=open_after_convert,
+                        destination_source=glue_source,
                     )
                     if success:
                         self._schedule_on_ui_thread(self._hide_stop_button)
@@ -548,17 +570,17 @@ class TalksReducerGUI:
                     # Update remote_mode variable to reflect the change
                     self._current_remote_mode = False
 
-                reporter = _TkProgressReporter(
-                    self._append_log,
-                    process_callback=set_process,
-                    stop_callback=lambda: self._stop_requested,
-                    progress_callback=self._set_progress_monotonic,
-                    stage_callback=self._apply_stage_transition,
-                )
                 for index, file in enumerate(files, start=1):
                     self._reset_progress_baseline()
                     self._append_log(f"Processing: {os.path.basename(file)}")
                     options = self._create_processing_options(Path(file), args)
+                    if glue_source is not None:
+                        options = dataclasses.replace(
+                            options,
+                            output_file=resolve_output_path(
+                                options, source=glue_source
+                            ),
+                        )
                     result = speed_up_video(options, reporter=reporter)
                     self._last_output = result.output_file
                     self._last_time_ratio = result.time_ratio
@@ -611,6 +633,7 @@ class TalksReducerGUI:
                     )
                     self._set_status("Error")
             finally:
+                self._cleanup_glue_workspace()
                 self._run_start_time = None
                 self._schedule_on_ui_thread(self._hide_stop_button)
 
@@ -1590,17 +1613,93 @@ class TalksReducerGUI:
         server_url: str,
         *,
         open_after_convert: bool,
+        destination_source: Optional[Path] = None,
     ) -> bool:
-        """Send *files* to the configured server for processing."""
+        """Send *files* to the configured server for processing.
+
+        ``destination_source`` names the file the download is named after. It is
+        set for a glued run so the result lands next to the first original part
+        instead of inside the temporary directory holding the glued input.
+        """
+
+        destination_factory = default_remote_destination
+        if destination_source is not None:
+
+            def destination_factory(input_file: Path, **kwargs: object) -> Path:
+                del input_file
+                return default_remote_destination(destination_source, **kwargs)
 
         return self.remote_controller.process_files_via_server(
             files,
             args,
             server_url,
             open_after_convert=open_after_convert,
-            default_remote_destination=default_remote_destination,
+            default_remote_destination=destination_factory,
             parse_summary=parse_ratios_from_summary,
         )
+
+    def _ask_glue_confirmation(self, count: int) -> bool:
+        """Ask on the UI thread whether the queued files should become one video.
+
+        Called from the worker thread, so the dialog is scheduled on the Tk main
+        thread and the worker blocks until the user answers.
+        """
+
+        answer: dict[str, bool] = {}
+        answered = threading.Event()
+
+        def ask() -> None:
+            try:
+                answer["value"] = bool(
+                    self.messagebox.askyesno(
+                        "Glue videos",
+                        f"{count} files are queued.\n\n"
+                        "Yes — glue them into a single video.\n"
+                        "No — process each file separately.",
+                    )
+                )
+            finally:
+                answered.set()
+
+        self._schedule_on_ui_thread(ask)
+        answered.wait()
+        return answer.get("value", False)
+
+    def _maybe_glue_inputs(
+        self,
+        files: List[str],
+        args: dict[str, object],
+        *,
+        reporter: object,
+    ) -> tuple[List[str], Optional[Path]]:
+        """Offer to concatenate *files* and return the queue to process.
+
+        Returns the (possibly single-entry) file list plus the original first
+        file, which names the output when the parts were glued. A single queued
+        file is returned untouched without showing the dialog.
+        """
+
+        if len(files) < 2 or not self._ask_glue_confirmation(len(files)):
+            return files, None
+
+        glue_source = Path(files[0])
+        temp_folder = Path(args.get("temp_folder") or default_temp_folder())
+        glued_file, temp_dir = prepare_glued_input(
+            files,
+            temp_folder=temp_folder,
+            reporter=reporter,
+        )
+        self._glue_temp_dir = Path(temp_dir)
+        self._append_log(f"Glued {len(files)} files into {glued_file.name}")
+        return [str(glued_file)], glue_source
+
+    def _cleanup_glue_workspace(self) -> None:
+        """Delete the temporary directory holding a glued input, if any."""
+
+        temp_dir = getattr(self, "_glue_temp_dir", None)
+        if temp_dir is not None:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            self._glue_temp_dir = None
 
     def _parse_float(self, value: str, label: str) -> float:
         try:
