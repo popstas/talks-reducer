@@ -26,6 +26,11 @@ Look at the commit history to get more examples.
 - **Input drop zone** — drag files or folders from your desktop, click to open
   the system file picker, or add them via the Explorer/Finder dialog; duplicates
   are ignored.
+- **Glue multiple inputs** — 2+ queued files raise a Yes/No dialog
+  (`_ask_glue_confirmation`, marshalled onto the UI thread) offering one glued video or
+  separate runs. Gluing happens before the local/remote branch via
+  `glue.prepare_glued_input`, and the output is named after the first part with
+  `pipeline.resolve_output_path(options, source=...)` so it does not land in the temp folder.
 - **Basic options** — the panel (`layout.py`, inside `options_frame`) is a flat run of labelled
   rows with no group captions: every row is already labelled, so the headings only spent vertical
   space. Row spacing carries the grouping instead — `layout.SETTING_ROW_PADY` above every option
@@ -139,6 +144,7 @@ launches.
   - `pipeline.py` orchestrates FFmpeg, audio processing, and temporary assets.
   - `audio.py` handles audio validation, volume analysis, and phase vocoder processing.
   - `chunks.py` builds timing metadata and FFmpeg expressions for frame selection.
+  - `glue.py` concatenates several inputs into one file before the pipeline runs (`--glue`, GUI confirmation). It stream-copies only when `inputs_can_be_copied` reports matching probes — FFmpeg will happily copy parts of different resolutions into a file whose frames change size mid-playback — and otherwise re-encodes through the concat filter, scaling every part to the first one's frame size.
   - `ffmpeg.py` discovers the FFmpeg binary, checks GPU encoder availability (`check_cuda_available` for NVENC, `check_videotoolbox_available` for Apple VideoToolbox), and assembles command strings.
   - `gui/segmented.py` defines `SegmentedChoice`, the button-row control (with an optional custom-value `…` slot) used throughout the Advanced "Basic options" panel in place of `tk.Scale` sliders.
 - `requirements.txt` — Python dependencies for local development.

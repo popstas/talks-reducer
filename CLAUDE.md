@@ -26,6 +26,22 @@ with file pickers, the Run button, and detailed logging.
 - **Input drop zone** — drag files or folders from your desktop, click to open
 the system file picker, or add them via the Explorer/Finder dialog; duplicates
 are ignored.
+- **Glue multiple inputs** — when a run resolves to 2+ media files (a multi-file
+drop, a picker selection, or a folder that expands), the worker asks
+`_ask_glue_confirmation` — a `messagebox.askyesno` marshalled onto the UI thread
+with the worker blocking on a `threading.Event`, since the dialog cannot be
+raised from the processing thread. **Yes** routes the queue through
+`glue.prepare_glued_input` (`_maybe_glue_inputs`), which concatenates the parts
+into a `glue_*` directory under the temp folder **before** the local/remote
+branch, so remote mode uploads one file too; `_cleanup_glue_workspace` removes
+that directory in the worker's `finally`. The glued temp file keeps the **first**
+part's *name*, and the output is renamed onto the first part's *folder* via
+`pipeline.resolve_output_path(options, source=glue_source)` — without that
+override the result would be written inside the temp directory and deleted with
+it. The remote path gets the same treatment by wrapping
+`default_remote_destination` so it names the download after the glue source
+rather than the temp input. Nothing is persisted: the question is asked on every
+multi-file run, and a single file never triggers it.
 - **Presets** — user-named bundles of processing settings (`resolution`,
 `silent_speed`, `sounded_speed`, `silent_threshold`, `video_codec`) stored in the
 shared `settings.json` (`presets` key) via `talks_reducer/presets.py` and applied
@@ -276,6 +292,7 @@ launches.
   - `pipeline.py` orchestrates FFmpeg, audio processing, and temporary assets.
   - `audio.py` handles audio validation, volume analysis, and phase vocoder processing.
   - `chunks.py` builds timing metadata and FFmpeg expressions for frame selection.
+  - `glue.py` concatenates several inputs into one file before the pipeline runs (`--glue`, GUI confirmation). It stream-copies only when `inputs_can_be_copied` reports matching probes — FFmpeg will happily copy parts of different resolutions into a file whose frames change size mid-playback — and otherwise re-encodes through the concat filter, scaling every part to the first one's frame size.
   - `ffmpeg.py` discovers the FFmpeg binary, checks GPU encoder availability (`check_cuda_available` for NVENC, `check_videotoolbox_available` for Apple VideoToolbox), and assembles command strings.
   - `gui/progress.py` defines `STAGE_PROGRESS_RANGES` and `map_stage_progress()`, which map each remote pipeline stage onto fixed GUI percentage bands (`Uploading:` 0–5%, `Extracting audio:` 5–20%, `Audio processing:` 20–35%, `Generating final` 35–100%).
   - `gui/segmented.py` defines `SegmentedChoice`, the button-row control (with an optional custom-value `…` slot) used throughout the Advanced "Basic options" panel in place of `tk.Scale` sliders.

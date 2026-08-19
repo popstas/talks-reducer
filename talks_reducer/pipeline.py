@@ -239,6 +239,30 @@ def _resolve_trim(
     return cut_start, cut_end, effective_duration, effective_frame_count
 
 
+def resolve_output_path(options: ProcessingOptions, source: Path | None = None) -> Path:
+    """Return the output path *options* writes to.
+
+    ``source`` overrides the file the name is derived from, which is what lets
+    a glued temporary file produce the output name of the first original part
+    instead of one buried in the temporary directory.
+    """
+
+    if options.output_file:
+        return Path(options.output_file)
+
+    return _input_to_output_filename(
+        Path(source or options.input_file),
+        options.small,
+        options.small_target_height,
+        optimize=options.optimize,
+        video_codec=options.video_codec,
+        add_codec_suffix=options.add_codec_suffix,
+        silent_speed=options.silent_speed,
+        sounded_speed=options.sounded_speed,
+        prefer_clean_audio_name=True,
+    )
+
+
 def speed_up_video(
     options: ProcessingOptions,
     reporter: ProgressReporter | None = None,
@@ -270,18 +294,7 @@ def speed_up_video(
         )
     )
 
-    output_path = options.output_file or _input_to_output_filename(
-        input_path,
-        options.small,
-        options.small_target_height,
-        optimize=options.optimize,
-        video_codec=options.video_codec,
-        add_codec_suffix=options.add_codec_suffix,
-        silent_speed=options.silent_speed,
-        sounded_speed=options.sounded_speed,
-        prefer_clean_audio_name=True,
-    )
-    output_path = Path(output_path)
+    output_path = resolve_output_path(options)
 
     cuda_available = dependencies.check_cuda_available(ffmpeg_path)
     videotoolbox_available = (

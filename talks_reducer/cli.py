@@ -9,14 +9,16 @@ import subprocess
 import sys
 import time
 import traceback
+from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import audio
 from .ffmpeg import FFmpegNotFoundError
+from .glue import prepare_glued_input
 from .models import ProcessingOptions, default_temp_folder
-from .pipeline import speed_up_video
+from .pipeline import resolve_output_path, speed_up_video
 from .progress import TqdmProgressReporter
 from .timecode import parse_timecode
 from .version_utils import resolve_version
@@ -165,6 +167,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--prefer-global-ffmpeg",
         action="store_true",
         help="Use an FFmpeg binary from PATH before falling back to the bundled static build.",
+    )
+    parser.add_argument(
+        "--glue",
+        action="store_true",
+        default=False,
+        help="Concatenate every input into a single video before processing it, so the parts of one talk produce one output named after the first part.",
     )
     parser.add_argument(
         "--small",
@@ -371,14 +379,31 @@ class CliApplication:
         speed_up: Callable[[ProcessingOptions, object], object],
         reporter_factory: Callable[[], object],
         remote_error_message: Optional[str] = None,
+        glue_inputs: Callable[..., Tuple[Path, Path]] = prepare_glued_input,
     ) -> None:
         self._gather_files = gather_files
         self._send_video = send_video
         self._speed_up = speed_up
         self._reporter_factory = reporter_factory
         self._remote_error_message = remote_error_message
+        self._glue_inputs = glue_inputs
 
     def run(self, parsed_args: argparse.Namespace) -> Tuple[int, List[str]]:
+        """Execute the CLI pipeline for *parsed_args* and clean up after it."""
+
+        glue_state: Dict[str, Optional[Path]] = {}
+        try:
+            return self._run(parsed_args, glue_state)
+        finally:
+            temp_dir = glue_state.get("temp_dir")
+            if temp_dir is not None:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _run(
+        self,
+        parsed_args: argparse.Namespace,
+        glue_state: Dict[str, Optional[Path]],
+    ) -> Tuple[int, List[str]]:
         """Execute the CLI pipeline for *parsed_args*."""
 
         start_time = time.time()
@@ -425,6 +450,23 @@ class CliApplication:
                         f"Error: '{input_path}' does not exist or is not accessible."
                     )
             return 1, error_messages
+
+        glue_source: Optional[Path] = None
+        if bool(getattr(parsed_args, "glue", False)) and len(files) > 1:
+            glue_source = Path(files[0])
+            temp_folder = Path(
+                getattr(parsed_args, "temp_folder", None) or default_temp_folder()
+            )
+            try:
+                glued_file, glue_temp_dir = self._glue_inputs(
+                    files,
+                    temp_folder=temp_folder,
+                    reporter=self._reporter_factory(),
+                )
+            except Exception as exc:  # pragma: no cover - defensive guard
+                return 1, [f"Error: failed to glue the input files: {exc}"]
+            glue_state["temp_dir"] = Path(glue_temp_dir)
+            files = [str(glued_file)]
 
         args: Dict[str, object] = {
             key: value for key, value in vars(parsed_args).items() if value is not None
@@ -512,6 +554,11 @@ class CliApplication:
                     local_options["cut_end_seconds"]
                 )
             options = ProcessingOptions(**option_kwargs)
+            if glue_source is not None:
+                options = replace(
+                    options,
+                    output_file=resolve_output_path(options, source=glue_source),
+                )
 
             try:
                 result = self._speed_up(options, reporter=reporter)

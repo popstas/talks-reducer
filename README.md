@@ -88,10 +88,13 @@ talks-reducer --video-codec mp3 talk.mp4                   # export audio only, 
 talks-reducer --cut-start 00:00:10 --cut-end 00:01:00 demo.mp4  # keep only 10s–60s
 talks-reducer --url http://localhost:9005 demo.mp4         # process on a remote server
 talks-reducer --preset "Smallest" demo.mp4                 # apply a saved preset
+talks-reducer --glue part1.mp4 part2.mp4                   # join the parts into one video first
 talks-reducer --list-presets                               # print the saved preset names
 ```
 
-Every input can also be a directory, and you can pass as many as you like in one run.
+Every input can also be a directory, and you can pass as many as you like in one run. Each
+one is processed separately unless you add `--glue`, which concatenates them into a single
+video first and names the result after the first part.
 
 **Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec)
 you author once in the desktop GUI's Advanced mode and reuse everywhere — Simple mode, the
