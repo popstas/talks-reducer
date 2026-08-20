@@ -161,11 +161,19 @@ def process_audio_chunks(
                     progress_callback(source_samples)
                 continue
 
-            reader = ArrayReader(np.transpose(audio_chunk))
-            writer = ArrayWriter(reader.channels)
-            tsm = phasevocoder(reader.channels, speed=speeds[int(chunk[2])])
-            tsm.run(reader, writer)
-            altered_audio_data = np.transpose(writer.data)
+            speed = speeds[int(chunk[2])]
+            if math.isclose(speed, 1.0, rel_tol=1e-9, abs_tol=1e-9):
+                # A phase vocoder run at speed 1.0 reproduces its input, so the
+                # samples are copied instead of paying for the STFT round-trip.
+                # The copy is required because the fade envelope below writes in
+                # place and must not reach the source array.
+                altered_audio_data = audio_chunk.astype(np.float32, copy=True)
+            else:
+                reader = ArrayReader(np.transpose(audio_chunk))
+                writer = ArrayWriter(reader.channels)
+                tsm = phasevocoder(reader.channels, speed=speed)
+                tsm.run(reader, writer)
+                altered_audio_data = np.transpose(writer.data)
 
             if altered_audio_data.shape[0] < audio_fade_envelope_size:
                 altered_audio_data[:] = 0
