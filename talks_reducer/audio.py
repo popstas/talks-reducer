@@ -210,9 +210,6 @@ def process_audio_chunks(
     only after the whole audio stage completes.
     """
 
-    audio_buffers: List[np.ndarray] = []
-    output_pointer = 0
-    updated_chunks: List[List[int]] = [list(chunk) for chunk in chunks]
     normaliser = max(max_audio_volume, 1e-9)
 
     jobs, estimated_output = _collect_vocoder_jobs(chunks, samples_per_frame, speeds)
