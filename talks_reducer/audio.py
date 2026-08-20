@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import subprocess
 import sys
@@ -11,7 +12,13 @@ import numpy as np
 from audiotsm import phasevocoder
 from audiotsm.io.array import ArrayReader, ArrayWriter
 
+from . import audio_workers
 from .ffmpeg import get_ffprobe_path
+
+PARALLEL_MIN_OUTPUT_SAMPLES = 2_000_000
+"""Below this much vocoder output the pool costs more to start than it saves."""
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def get_max_volume(samples: np.ndarray) -> float:
@@ -112,6 +119,72 @@ def has_audio_stream(filename: str) -> bool:
     return is_valid_input_file(filename)
 
 
+def render_chunk(
+    audio_chunk: np.ndarray,
+    speed: float,
+    audio_fade_envelope_size: int,
+    normaliser: float,
+) -> np.ndarray:
+    """Return one chunk resampled to ``speed``, faded at both ends and normalised.
+
+    This runs both in the pipeline process and inside the worker processes of
+    :mod:`talks_reducer.audio_workers`, so it must stay free of pipeline state.
+    """
+
+    if math.isclose(speed, 1.0, rel_tol=1e-9, abs_tol=1e-9):
+        # A phase vocoder run at speed 1.0 reproduces its input, so the samples
+        # are copied instead of paying for the STFT round-trip. The copy is
+        # required because the fade envelope below writes in place and must not
+        # reach the source array.
+        altered_audio_data = audio_chunk.astype(np.float32, copy=True)
+    else:
+        reader = ArrayReader(np.transpose(audio_chunk))
+        writer = ArrayWriter(reader.channels)
+        tsm = phasevocoder(reader.channels, speed=speed)
+        tsm.run(reader, writer)
+        altered_audio_data = np.transpose(writer.data)
+
+    if altered_audio_data.shape[0] < audio_fade_envelope_size:
+        altered_audio_data[:] = 0
+    else:
+        premask = np.arange(audio_fade_envelope_size) / audio_fade_envelope_size
+        mask = np.repeat(premask[:, np.newaxis], altered_audio_data.shape[1], axis=1)
+        altered_audio_data[:audio_fade_envelope_size] *= mask
+        altered_audio_data[-audio_fade_envelope_size:] *= 1 - mask
+
+    return altered_audio_data / normaliser
+
+
+def _collect_vocoder_jobs(
+    chunks: Sequence[Sequence[int]],
+    samples_per_frame: float,
+    speeds: Sequence[float],
+) -> Tuple[List[audio_workers.ChunkJob], int]:
+    """Return the chunks needing time-scale modification and their workload.
+
+    Chunks played at normal speed are excluded: copying their samples is cheaper
+    than shipping them to a worker process and back. The workload is measured in
+    samples the vocoder will *emit*, since its cost scales with the synthesis
+    frames it writes — a chunk sped up ten times is a tenth of the work.
+    """
+
+    jobs: List[audio_workers.ChunkJob] = []
+    estimated_output = 0
+
+    for index, chunk in enumerate(chunks):
+        start = int(chunk[0] * samples_per_frame)
+        end = int(chunk[1] * samples_per_frame)
+        if end <= start:
+            continue
+        speed = speeds[int(chunk[2])]
+        if math.isclose(speed, 1.0, rel_tol=1e-9, abs_tol=1e-9):
+            continue
+        jobs.append((index, start, end, speed))
+        estimated_output += int((end - start) / speed)
+
+    return jobs, estimated_output
+
+
 def process_audio_chunks(
     audio_data: np.ndarray,
     chunks: Sequence[Sequence[int]],
@@ -142,11 +215,59 @@ def process_audio_chunks(
     updated_chunks: List[List[int]] = [list(chunk) for chunk in chunks]
     normaliser = max(max_audio_volume, 1e-9)
 
+    jobs, estimated_output = _collect_vocoder_jobs(chunks, samples_per_frame, speeds)
+    pool = None
+    if estimated_output >= PARALLEL_MIN_OUTPUT_SAMPLES:
+        pool = audio_workers.open_chunk_pool(
+            audio_data,
+            jobs,
+            audio_fade_envelope_size=audio_fade_envelope_size,
+            normaliser=normaliser,
+        )
+
+    try:
+        return _render_chunk_list(
+            audio_data,
+            chunks,
+            samples_per_frame,
+            speeds,
+            audio_fade_envelope_size,
+            normaliser,
+            batch_size=batch_size,
+            progress_callback=progress_callback,
+            check_stop=check_stop,
+            pool=pool,
+        )
+    finally:
+        if pool is not None:
+            pool.close()
+
+
+def _render_chunk_list(
+    audio_data: np.ndarray,
+    chunks: Sequence[Sequence[int]],
+    samples_per_frame: float,
+    speeds: Sequence[float],
+    audio_fade_envelope_size: int,
+    normaliser: float,
+    *,
+    batch_size: int,
+    progress_callback: Optional[Callable[[int], None]],
+    check_stop: Optional[Callable[[], None]],
+    pool: Optional["audio_workers.ChunkRenderPool"],
+) -> Tuple[np.ndarray, List[List[int]]]:
+    """Render every chunk in order, taking finished work from ``pool`` when given."""
+
+    audio_buffers: List[np.ndarray] = []
+    output_pointer = 0
+    updated_chunks: List[List[int]] = [list(chunk) for chunk in chunks]
+
     for batch_start in range(0, len(chunks), batch_size):
         batch_chunks = chunks[batch_start : batch_start + batch_size]
         batch_audio: List[np.ndarray] = []
 
-        for chunk in batch_chunks:
+        for position, chunk in enumerate(batch_chunks):
+            index = batch_start + position
             if check_stop is not None:
                 check_stop()
             start = int(chunk[0] * samples_per_frame)
@@ -161,44 +282,43 @@ def process_audio_chunks(
                     progress_callback(source_samples)
                 continue
 
-            speed = speeds[int(chunk[2])]
-            if math.isclose(speed, 1.0, rel_tol=1e-9, abs_tol=1e-9):
-                # A phase vocoder run at speed 1.0 reproduces its input, so the
-                # samples are copied instead of paying for the STFT round-trip.
-                # The copy is required because the fade envelope below writes in
-                # place and must not reach the source array.
-                altered_audio_data = audio_chunk.astype(np.float32, copy=True)
-            else:
-                reader = ArrayReader(np.transpose(audio_chunk))
-                writer = ArrayWriter(reader.channels)
-                tsm = phasevocoder(reader.channels, speed=speed)
-                tsm.run(reader, writer)
-                altered_audio_data = np.transpose(writer.data)
+            altered_audio_data = None
+            if pool is not None and index in pool:
+                try:
+                    altered_audio_data = pool.result(index)
+                except Exception:
+                    # Workers can die on their own (a frozen build that cannot
+                    # spawn, an out-of-memory kill). Rendering the rest of the
+                    # chunks here is slower than the pool but still correct.
+                    _LOGGER.debug(
+                        "Audio worker pool failed; continuing in-process",
+                        exc_info=True,
+                    )
+                    pool.close()
+                    pool = None
 
-            if altered_audio_data.shape[0] < audio_fade_envelope_size:
-                altered_audio_data[:] = 0
-            else:
-                premask = np.arange(audio_fade_envelope_size) / audio_fade_envelope_size
-                mask = np.repeat(
-                    premask[:, np.newaxis], altered_audio_data.shape[1], axis=1
+            if altered_audio_data is None:
+                altered_audio_data = render_chunk(
+                    audio_chunk,
+                    speeds[int(chunk[2])],
+                    audio_fade_envelope_size,
+                    normaliser,
                 )
-                altered_audio_data[:audio_fade_envelope_size] *= mask
-                altered_audio_data[-audio_fade_envelope_size:] *= 1 - mask
 
-            batch_audio.append(altered_audio_data / normaliser)
+            batch_audio.append(altered_audio_data)
 
             if progress_callback is not None:
                 progress_callback(source_samples)
 
-        for index, chunk in enumerate(batch_chunks):
-            altered_audio_data = batch_audio[index]
+        for position, chunk in enumerate(batch_chunks):
+            altered_audio_data = batch_audio[position]
             audio_buffers.append(altered_audio_data)
 
             end_pointer = output_pointer + altered_audio_data.shape[0]
             start_output_frame = int(math.ceil(output_pointer / samples_per_frame))
             end_output_frame = int(math.ceil(end_pointer / samples_per_frame))
 
-            updated_chunks[batch_start + index] = list(chunk[:2]) + [
+            updated_chunks[batch_start + position] = list(chunk[:2]) + [
                 start_output_frame,
                 end_output_frame,
             ]
