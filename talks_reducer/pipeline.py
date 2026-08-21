@@ -467,11 +467,13 @@ def speed_up_video(
         _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
         new_speeds = [options.silent_speed, options.sounded_speed]
-        audio_sample_total = audio_sample_count if audio_sample_count > 0 else None
+        # Counted in chunks: see ``process_audio_chunks`` for why sample counts
+        # stopped tracking elapsed time.
+        audio_chunk_total = len(chunks) if chunks else None
         with reporter.task(
             desc="Audio processing:",
-            total=audio_sample_total,
-            unit="samples",
+            total=audio_chunk_total,
+            unit="chunks",
         ) as audio_task:
             output_audio_data, updated_chunks = audio_utils.process_audio_chunks(
                 audio_data,

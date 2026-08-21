@@ -186,6 +186,33 @@ the finished file being fetched back from the server. The client fetches the pro
 exactly once (it previously downloaded it twice, since the server exposes the same file as
 both a preview and a download), so downloads finish in about half the time.
 
+## Audio processing performance
+
+The audio stage only runs the phase vocoder where it changes something. A chunk played at
+normal speed — which is what `--sounded_speed` defaults to — is copied instead, because a
+phase vocoder at speed 1.0 reproduces its input. That alone takes the stage from roughly 77
+to 3 seconds per hour of video.
+
+When speeds other than 1.0 leave real work to do, the chunks are rendered in worker
+processes: an eight-minute recording processed with `--sounded_speed 1.5` spends 2.6 seconds
+in the audio stage instead of 13.8. The pool starts only when the workload is large enough
+to pay for itself, and a machine that cannot spawn workers falls back to in-process
+rendering with identical output.
+
+Set `TALKS_REDUCER_AUDIO_WORKERS` to choose the worker count yourself; `1` disables the pool
+entirely. Without it, one CPU core is left free and no more than eight workers are used.
+
+Because the pool spawns processes, a script that calls the pipeline as a library has to guard
+its entry point with `if __name__ == "__main__":` — the standard `multiprocessing` requirement.
+Without the guard each worker re-imports the script and runs it again. The CLI, GUI, server and
+frozen builds all guard their entry points already.
+
+The `Audio processing:` bar counts chunks rather than samples: a chunk played at normal speed is
+copied in microseconds while a resampled one runs the vocoder, so a sample-weighted bar would
+race through most of its range and then crawl through the remainder. The desktop progress bar's
+stage bands were rebalanced for the same reason — the encode now holds 20-100% of the bar,
+matching the 83-93% of the wall clock it actually takes.
+
 ## GUI-only flags
 
 `--open-location` and `--auto-close` control what happens after a seeded GUI conversion

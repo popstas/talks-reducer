@@ -450,7 +450,7 @@ def test_process_files_via_server_streams_final_progress(tmp_path: Path) -> None
     assert result is True
     assert captured_callback["callback"] is not None
     # Audio processing complete -> 35, final 30% -> 35 + 0.3 * 65 = 54.5, final done -> 100.
-    assert gui.progress_values == pytest.approx([35.0, 54.5, 100.0])
+    assert gui.progress_values == pytest.approx([20.0, 44.0, 100.0])
     assert ("processing", "Generating final: 30%") in gui.status_history
     assert ("processing", "Audio processing: 100%") in gui.status_history
     # Real streamed audio/final progress must drive the synthetic-timer
@@ -495,7 +495,7 @@ def test_process_files_via_server_progress_never_moves_backwards(
     assert result is True
     # Generating final 50% -> 35 + 0.5 * 65 = 67.5, then both lower-mapped
     # updates are clamped to the running maximum.
-    assert gui.progress_values == pytest.approx([67.5, 67.5, 67.5])
+    assert gui.progress_values == pytest.approx([60.0, 60.0, 60.0])
 
 
 def test_process_files_via_server_resets_progress_between_files(
@@ -534,7 +534,7 @@ def test_process_files_via_server_resets_progress_between_files(
 
     assert result is True
     # File 1 -> 100, baseline reset before file 2 -> 0, file 2 audio -> 35.
-    assert gui.progress_values == pytest.approx([100.0, 0.0, 35.0])
+    assert gui.progress_values == pytest.approx([100.0, 0.0, 20.0])
 
 
 def test_process_files_via_server_includes_small_480_suffix(tmp_path: Path) -> None:

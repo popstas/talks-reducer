@@ -970,6 +970,38 @@ def test_apply_stage_transition_routes_structured_stages():
     gui._complete_audio_phase.assert_called_once()
 
 
+def test_apply_stage_status_shows_real_stage_percentages():
+    """Structured stage progress writes the status text the timer used to own."""
+
+    gui = SimpleNamespace(
+        _cancel_audio_progress=MagicMock(),
+        _set_status=MagicMock(),
+    )
+
+    app.TalksReducerGUI._apply_stage_status(gui, "Audio processing:", 61.4)
+
+    gui._set_status.assert_called_once_with("processing", "Audio processing: 61%")
+
+
+def test_apply_stage_status_retires_the_synthetic_timer_on_extraction():
+    """The first real extraction percent replaces the synthetic fallback count.
+
+    The timer labels its synthetic count ``Audio processing:`` even while
+    extraction is running, so leaving it alive would make the two writers
+    alternate in the status line.
+    """
+
+    gui = SimpleNamespace(
+        _cancel_audio_progress=MagicMock(),
+        _set_status=MagicMock(),
+    )
+
+    app.TalksReducerGUI._apply_stage_status(gui, "Extracting audio:", 42.0)
+
+    gui._cancel_audio_progress.assert_called_once()
+    gui._set_status.assert_called_once_with("processing", "Extracting audio: 42%")
+
+
 def test_summary_manager_generating_final_percent_advances_progress():
     gui = _make_summary_gui(progress_value=10.0)
     manager = summaries.SummaryManager(gui)
@@ -978,7 +1010,7 @@ def test_summary_manager_generating_final_percent_advances_progress():
 
     gui._complete_audio_phase.assert_called_once()
     gui._set_progress.assert_called_once()
-    assert gui._set_progress.call_args[0][0] == pytest.approx(54.5)
+    assert gui._set_progress.call_args[0][0] == pytest.approx(44.0)
 
 
 def test_summary_manager_audio_processing_percent_cancels_synthetic_timer():
@@ -990,7 +1022,7 @@ def test_summary_manager_audio_processing_percent_cancels_synthetic_timer():
     gui._cancel_audio_progress.assert_called_once()
     gui._complete_audio_phase.assert_not_called()
     gui._set_progress.assert_called_once()
-    assert gui._set_progress.call_args[0][0] == pytest.approx(26.75)
+    assert gui._set_progress.call_args[0][0] == pytest.approx(14.5)
 
 
 def test_summary_manager_task_percent_never_moves_backwards():
@@ -1015,7 +1047,7 @@ def test_summary_manager_task_percent_raises_floor_on_log_only_path():
     (which later applies ``AUDIO_PROGRESS_WEIGHT`` through the monotonic clamp)
     before applying the mapped milestone. Unless the milestone writes the floor,
     that trailing callback would clamp against the old floor and regress the bar
-    from 54.5% back to 5%.
+    from 44.0% back to 5%.
     """
 
     gui = _make_summary_gui(progress_value=5.0)
@@ -1026,9 +1058,9 @@ def test_summary_manager_task_percent_raises_floor_on_log_only_path():
 
     # The floor is raised to the mapped milestone, so a subsequent monotonic
     # update at AUDIO_PROGRESS_WEIGHT cannot move the bar backwards.
-    assert gui._progress_floor == pytest.approx(54.5)
+    assert gui._progress_floor == pytest.approx(44.0)
     gui._set_progress_monotonic(gui.AUDIO_PROGRESS_WEIGHT)
-    assert gui._set_progress.call_args[0][0] == pytest.approx(54.5)
+    assert gui._set_progress.call_args[0][0] == pytest.approx(44.0)
 
 
 def test_summary_manager_task_percent_clamps_against_progress_floor():
@@ -1211,6 +1243,32 @@ def test_apply_status_style_ignores_unknown_status():
     app.TalksReducerGUI._apply_status_style(gui, "something else entirely")
 
     assert gui.status_label.calls == []
+
+
+def test_advance_audio_progress_labels_the_stage_it_actually_covers():
+    """The synthetic timer runs during extraction, so it must say so.
+
+    Labelling its ramp ``Audio processing:`` made the real audio stage look
+    like it restarted: the timer stopped at, say, 45% and the real chunk count
+    then began again from 1% under the very same label.
+    """
+
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.AUDIO_PROGRESS_STEPS = app.TalksReducerGUI.AUDIO_PROGRESS_STEPS
+    gui.AUDIO_PROGRESS_WEIGHT = app.TalksReducerGUI.AUDIO_PROGRESS_WEIGHT
+    gui.DEFAULT_AUDIO_INTERVAL_MS = app.TalksReducerGUI.DEFAULT_AUDIO_INTERVAL_MS
+    gui._audio_progress_job = None
+    gui._audio_progress_steps_completed = 44
+    gui._audio_progress_interval_ms = 100
+    gui._progress_floor = 0.0
+    gui.progress_var = SimpleNamespace(get=lambda: 0.0)
+    gui._set_progress = MagicMock()
+    gui._set_status = MagicMock()
+    gui.root = SimpleNamespace(after=lambda *_args, **_kwargs: "job")
+
+    app.TalksReducerGUI._advance_audio_progress(gui)
+
+    gui._set_status.assert_called_once_with("processing", "Extracting audio: 45%")
 
 
 def test_advance_audio_progress_does_not_move_bar_backwards():
@@ -2531,3 +2589,22 @@ def test_cleanup_glue_workspace_removes_the_temp_directory(tmp_path):
 
     assert not temp_dir.exists()
     assert gui._glue_temp_dir is None
+
+
+def test_audio_phase_estimate_matches_measured_stage_cost():
+    """The synthetic timer paces itself on what the audio phase actually costs.
+
+    Extraction plus audio processing measure ~0.3% of the source duration since
+    unit-speed chunks stopped going through the phase vocoder. The timer fills
+    its band in ``AUDIO_PROGRESS_STEPS`` ticks, so an hour of source has to land
+    near a tenth of a second per tick rather than the ~0.7s the old estimate
+    produced.
+    """
+
+    gui = object.__new__(app.TalksReducerGUI)
+    gui._source_duration_seconds = 3600.0
+    gui._video_duration_seconds = None
+
+    interval_ms = app.TalksReducerGUI._compute_audio_progress_interval(gui)
+
+    assert interval_ms == pytest.approx(108, abs=12)

@@ -12,10 +12,18 @@ from ..progress import CallbackProgressHandle, ProgressHandle, SignalProgressRep
 # resetting to zero whenever a new task begins.
 STAGE_PROGRESS_RANGES: tuple[tuple[str, float, float], ...] = (
     ("uploading:", 0.0, 5.0),
-    ("extracting audio:", 5.0, 20.0),
-    ("audio processing:", 20.0, 35.0),
-    ("generating final", 35.0, 100.0),
+    ("extracting audio:", 5.0, 10.0),
+    ("audio processing:", 10.0, 20.0),
+    ("generating final", 20.0, 100.0),
 )
+"""Band widths follow measured stage cost rather than an even split.
+
+On real runs the final encode is 83-93% of the wall clock, extraction 2-5% and
+audio processing 3-9% — the audio stage having shrunk by roughly twenty times
+once unit-speed chunks stopped going through the phase vocoder. The bands the
+audio stage used to hold (15% of the bar) now empty in a blink, which reads as
+the bar jumping rather than progressing.
+"""
 
 
 def map_stage_progress(
@@ -55,16 +63,21 @@ class _GuiProgressHandle(CallbackProgressHandle):
         total: Optional[int] = None,
         progress_callback: Optional[Callable[[float], None]] = None,
         stage_callback: Optional[Callable[[str], None]] = None,
+        status_callback: Optional[Callable[[str, float], None]] = None,
     ) -> None:
         self._log_callback = log_callback
         self._progress_callback = progress_callback
         self._stage_callback = stage_callback
+        self._status_callback = status_callback
         self._last_reported_value: Optional[float] = None
+        self._last_status_percent: Optional[int] = None
         super().__init__(
             desc=desc,
             total=total,
             on_start=self._on_start,
-            on_update=self._on_update if progress_callback else None,
+            on_update=(
+                self._on_update if (progress_callback or status_callback) else None
+            ),
             on_finish=self._on_finish,
         )
 
@@ -79,6 +92,7 @@ class _GuiProgressHandle(CallbackProgressHandle):
             self._log_callback(f"{desc} started")
 
     def _on_update(self, current: int, total: Optional[int], desc: str) -> None:
+        self._report_status(current, total, desc)
         if self._progress_callback is None:
             return
         bar_value = map_stage_progress(desc, current, total)
@@ -86,6 +100,27 @@ class _GuiProgressHandle(CallbackProgressHandle):
             return
         self._last_reported_value = bar_value
         self._progress_callback(bar_value)
+
+    def _report_status(self, current: int, total: Optional[int], desc: str) -> None:
+        """Mirror the task's own completion percentage into the status line.
+
+        The progress bar maps each stage onto its band, but the status text
+        reads better as the stage's own 0-100%, which is also the shape the
+        remote path already shows. Updates are coalesced to whole percents
+        because the audio stage advances once per chunk - thousands of times on
+        a long recording - while the status renders only ``NN%``. A task
+        without a total cannot report a fraction, so it stays silent and leaves
+        the GUI's synthetic fallback timer in charge.
+        """
+
+        if self._status_callback is None or not total or total <= 0 or not desc:
+            return
+        percent = max(0.0, min(1.0, current / total)) * 100.0
+        rounded = round(percent)
+        if rounded == self._last_status_percent:
+            return
+        self._last_status_percent = rounded
+        self._status_callback(desc, percent)
 
     def _on_finish(self, current: int, total: Optional[int], desc: str) -> None:
         del current, total
@@ -104,6 +139,7 @@ class _TkProgressReporter(SignalProgressReporter):
         stop_callback: Optional[Callable[[], bool]] = None,
         progress_callback: Optional[Callable[[float], None]] = None,
         stage_callback: Optional[Callable[[str], None]] = None,
+        status_callback: Optional[Callable[[str, float], None]] = None,
     ) -> None:
         super().__init__()
         self._log_callback = log_callback
@@ -111,6 +147,7 @@ class _TkProgressReporter(SignalProgressReporter):
         self._stop_callback = stop_callback
         self._progress_callback = progress_callback
         self._stage_callback = stage_callback
+        self._status_callback = status_callback
 
     def log(self, message: str) -> None:
         self._log_callback(message)
@@ -126,6 +163,7 @@ class _TkProgressReporter(SignalProgressReporter):
             total=total,
             progress_callback=self._progress_callback,
             stage_callback=self._stage_callback,
+            status_callback=self._status_callback,
         )
 
     def stop_requested(self) -> bool:

@@ -122,7 +122,7 @@ def test_process_audio_chunks_applies_envelope_and_updates_timings(
         stereo_audio,
         prepared_chunks,
         samples_per_frame=2.0,
-        speeds=[1.0, 0.5],
+        speeds=[2.0, 0.5],
         audio_fade_envelope_size=2,
         max_audio_volume=2.0,
     )
@@ -142,10 +142,65 @@ def test_process_audio_chunks_applies_envelope_and_updates_timings(
     assert updated_chunks == [[0, 2, 0, 2], [2, 3, 2, 3], [3, 3, 3, 3]]
 
 
-def test_process_audio_chunks_reports_incremental_progress(
+def test_process_audio_chunks_copies_samples_at_unit_speed(
+    synthetic_audio_samples, fake_phase_vocoder
+):
+    """A chunk played at speed 1.0 copies its samples instead of resampling them."""
+
+    stereo_audio = synthetic_audio_samples["stereo"]
+    # No prepared outputs: the stand-in phase vocoder raises if it is ever run.
+    fake_phase_vocoder([])
+
+    processed_audio, updated_chunks = audio.process_audio_chunks(
+        stereo_audio,
+        [[0, 3, 1]],
+        samples_per_frame=2.0,
+        speeds=[4.0, 1.0],
+        audio_fade_envelope_size=2,
+        max_audio_volume=2.0,
+    )
+
+    expected_audio = np.array(
+        [
+            [0.0, 0.0],
+            [0.25, -0.25],
+            [1.0, -1.0],
+            [1.5, -1.5],
+            [2.0, -2.0],
+            [1.25, -1.25],
+        ],
+        dtype=np.float32,
+    )
+
+    np.testing.assert_allclose(processed_audio, expected_audio)
+    assert updated_chunks == [[0, 3, 0, 3]]
+
+
+def test_process_audio_chunks_at_unit_speed_leaves_source_untouched(
+    synthetic_audio_samples, fake_phase_vocoder
+):
+    """Copying a unit-speed chunk must not apply the fade envelope in place."""
+
+    stereo_audio = synthetic_audio_samples["stereo"]
+    original = stereo_audio.copy()
+    fake_phase_vocoder([])
+
+    audio.process_audio_chunks(
+        stereo_audio,
+        [[0, 3, 1]],
+        samples_per_frame=2.0,
+        speeds=[4.0, 1.0],
+        audio_fade_envelope_size=2,
+        max_audio_volume=2.0,
+    )
+
+    np.testing.assert_array_equal(stereo_audio, original)
+
+
+def test_process_audio_chunks_reports_one_unit_per_chunk(
     synthetic_audio_samples, prepared_chunks, fake_phase_vocoder
 ):
-    """An optional progress callback should fire once per processed chunk."""
+    """Progress counts chunks, since sample counts no longer track elapsed time."""
 
     stereo_audio = synthetic_audio_samples["stereo"]
     chunk_outputs = [
@@ -169,16 +224,16 @@ def test_process_audio_chunks_reports_incremental_progress(
         stereo_audio,
         prepared_chunks,
         samples_per_frame=2.0,
-        speeds=[1.0, 0.5],
+        speeds=[2.0, 0.5],
         audio_fade_envelope_size=2,
         max_audio_volume=2.0,
         progress_callback=increments.append,
     )
 
-    # One increment per chunk: source samples consumed are 4, 2 and 0
-    # (the final zero-length chunk reports 0 rather than a negative count).
-    assert increments == [4, 2, 0]
-    assert all(value >= 0 for value in increments)
+    # One unit per chunk, including the zero-length one: a copied chunk costs
+    # almost nothing while a resampled one costs everything, so weighting the
+    # bar by source samples would sprint through the copies and then crawl.
+    assert increments == [1, 1, 1]
 
 
 def test_process_audio_chunks_check_stop_aborts_between_chunks(
@@ -209,7 +264,7 @@ def test_process_audio_chunks_check_stop_aborts_between_chunks(
             stereo_audio,
             prepared_chunks,
             samples_per_frame=2.0,
-            speeds=[1.0, 0.5],
+            speeds=[2.0, 0.5],
             audio_fade_envelope_size=2,
             max_audio_volume=2.0,
             progress_callback=increments.append,
@@ -218,7 +273,7 @@ def test_process_audio_chunks_check_stop_aborts_between_chunks(
 
     # The stop was checked before each chunk and aborted before the second one,
     # so only the first chunk reported progress.
-    assert increments == [4]
+    assert increments == [1]
 
 
 def test_process_audio_chunks_check_stop_noop_matches_default(
@@ -246,7 +301,7 @@ def test_process_audio_chunks_check_stop_noop_matches_default(
         stereo_audio,
         prepared_chunks,
         samples_per_frame=2.0,
-        speeds=[1.0, 0.5],
+        speeds=[2.0, 0.5],
         audio_fade_envelope_size=2,
         max_audio_volume=2.0,
         check_stop=lambda: None,

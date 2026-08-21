@@ -2,7 +2,14 @@
 """Launcher script for PyInstaller builds."""
 
 import io
+import multiprocessing
 import sys
+
+if __name__ == "__main__":
+    # A frozen build re-executes this launcher for every worker process the
+    # audio stage spawns, so the multiprocessing bootstrap has to run before any
+    # other launcher code. In a worker it never returns.
+    multiprocessing.freeze_support()
 
 # On Windows, if built with --windowed, stdout/stderr might be None
 # Ensure they always have a valid file-like object to prevent attribute errors
