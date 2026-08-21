@@ -217,7 +217,7 @@ newer release is found `_on_update_check_complete` uses
 `update_checker.build_update_message(version, platform)` to show
 `New version {v} is available! Update with: brew upgrade --cask talks-reducer`
 plus a Releases-page link, and never wires `_download_and_install_update`
-(macOS builds are unsigned and installed via the `popstas/homebrew-talks-reducer`
+(macOS builds are unsigned and installed via the `popstas/homebrew-apps`
 Homebrew tap, so no auto-install). Other platforms create neither widget, so the
 status helpers (`_set_update_status*`/`_clear_update_status`, all guarded by
 `hasattr(self, "update_status_label")`) stay no-ops.

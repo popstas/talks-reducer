@@ -206,7 +206,7 @@ jobs:
       - name: Check out tap repo
         uses: actions/checkout@v4
         with:
-          repository: popstas/homebrew-talks-reducer
+          repository: popstas/homebrew-apps
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 

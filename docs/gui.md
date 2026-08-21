@@ -231,7 +231,7 @@ GitHub release and compares it against the running version. When a newer release
 reports the available version with the command to apply it, `brew upgrade --cask
 talks-reducer`, alongside a link to the Releases page. macOS builds are unsigned and
 distributed through the
-[`popstas/homebrew-talks-reducer`](https://github.com/popstas/homebrew-talks-reducer) tap, so
+[`popstas/homebrew-apps`](https://github.com/popstas/homebrew-apps) tap, so
 the button never downloads or installs anything automatically — you upgrade with Homebrew.
 
 The Windows build keeps its own **Check updates** button (next to the run controls) that

@@ -36,14 +36,14 @@ Download the installer from the [releases page](https://github.com/popstas/talks
 ### macOS
 
 ```sh
-brew tap popstas/talks-reducer
-brew trust --cask popstas/talks-reducer/talks-reducer
-brew install --cask talks-reducer
+brew trust --tap popstas/apps
+brew install --cask popstas/apps/talks-reducer
 ```
 
-> Homebrew 6.0.0+ requires `brew trust --cask` to approve a cask from a third-party tap
-> before it can be installed. Without it, the install fails with a "Refusing to load cask
-> from untrusted tap" error.
+> Homebrew 6.0.0+ requires the tap to be trusted before it will load a cask from it.
+> Without `brew trust`, the install fails with a "Refusing to load cask from untrusted
+> tap" error. A separate `brew tap` is not needed — `brew install user/tap/cask` taps
+> the repository itself.
 
 ### pip / pipx / uv (Linux, Windows, macOS)
 
