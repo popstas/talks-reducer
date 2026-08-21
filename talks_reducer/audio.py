@@ -199,10 +199,12 @@ def process_audio_chunks(
 ) -> Tuple[np.ndarray, List[List[int]]]:
     """Return processed audio and updated chunk timings for the provided chunk list.
 
-    When ``progress_callback`` is provided it is invoked once per processed chunk
-    with the number of source audio samples that chunk consumed. The reported
-    increment is never negative, so zero-length chunks contribute ``0`` rather
-    than a negative count.
+    When ``progress_callback`` is provided it is invoked once per processed
+    chunk with a single unit, zero-length chunks included. Progress is counted
+    in chunks rather than samples because the two chunk kinds no longer cost the
+    same: a chunk played at normal speed is copied in microseconds while a
+    resampled one runs the phase vocoder, so a sample-weighted bar would sprint
+    through the copies and then crawl.
 
     When ``check_stop`` is provided it is invoked once per chunk before the
     blocking phase-vocoder pass; the callback is expected to raise when the user
@@ -270,13 +272,12 @@ def _render_chunk_list(
             start = int(chunk[0] * samples_per_frame)
             end = int(chunk[1] * samples_per_frame)
             audio_chunk = audio_data[start:end]
-            source_samples = max(0, end - start)
 
             if audio_chunk.size == 0:
                 channels = audio_data.shape[1] if audio_data.ndim > 1 else 1
                 batch_audio.append(np.zeros((0, channels)))
                 if progress_callback is not None:
-                    progress_callback(source_samples)
+                    progress_callback(1)
                 continue
 
             altered_audio_data = None
@@ -305,7 +306,7 @@ def _render_chunk_list(
             batch_audio.append(altered_audio_data)
 
             if progress_callback is not None:
-                progress_callback(source_samples)
+                progress_callback(1)
 
         for position, chunk in enumerate(batch_chunks):
             altered_audio_data = batch_audio[position]

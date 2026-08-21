@@ -117,7 +117,7 @@ def test_parallel_rendering_reports_progress_in_chunk_order(
         progress_callback=increments.append,
     )
 
-    assert increments == [6400, 6400, 6400, 4800]
+    assert increments == [1, 1, 1, 1]
 
 
 def test_parallel_rendering_falls_back_when_pool_cannot_start(

@@ -201,9 +201,10 @@ def test_speed_up_video_reports_audio_processing_progress(monkeypatch, tmp_path)
 
     def fake_process(*args, progress_callback=None, **kwargs):
         if progress_callback is not None:
-            progress_callback(12)
-            progress_callback(18)
-        return (np.zeros((10, 1)), [[0, 10, 0, 10]])
+            # One unit per chunk, matching ``process_audio_chunks``.
+            progress_callback(1)
+            progress_callback(1)
+        return (np.zeros((10, 1)), [[0, 5, 0, 5], [5, 10, 5, 10]])
 
     monkeypatch.setattr(
         "talks_reducer.pipeline.audio_utils.process_audio_chunks", fake_process
@@ -214,7 +215,7 @@ def test_speed_up_video_reports_audio_processing_progress(monkeypatch, tmp_path)
     )
     monkeypatch.setattr(
         "talks_reducer.pipeline.chunk_utils.build_chunks",
-        lambda *_args, **_kwargs: ([[0, 10, 0]], np.array([True] * 10)),
+        lambda *_args, **_kwargs: ([[0, 5, 0], [5, 10, 1]], np.array([True] * 10)),
     )
     monkeypatch.setattr(
         "talks_reducer.pipeline.chunk_utils.get_tree_expression", lambda _chunks: "X"
@@ -236,10 +237,10 @@ def test_speed_up_video_reports_audio_processing_progress(monkeypatch, tmp_path)
 
     speed_up_video(options, reporter=reporter, dependencies=dependencies)
 
-    assert ("Audio processing:", 30, "samples") in reporter.tasks
+    assert ("Audio processing:", 2, "chunks") in reporter.tasks
     assert reporter.advances == [
-        ("Audio processing:", 12),
-        ("Audio processing:", 18),
+        ("Audio processing:", 1),
+        ("Audio processing:", 1),
     ]
 
 

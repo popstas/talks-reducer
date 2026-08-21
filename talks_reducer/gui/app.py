@@ -185,7 +185,10 @@ class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
 
     PADDING = 10
-    AUDIO_PROCESSING_RATIO = 0.02
+    # Share of the source duration the audio phase (extraction plus processing)
+    # takes: measured at ~0.3% since unit-speed chunks stopped running through
+    # the phase vocoder. It used to be 2%, calibrated against the old cost.
+    AUDIO_PROCESSING_RATIO = 0.003
     AUDIO_PROGRESS_STEPS = 100
     AUDIO_PROGRESS_WEIGHT = 5.0
     MIN_AUDIO_INTERVAL_MS = 10

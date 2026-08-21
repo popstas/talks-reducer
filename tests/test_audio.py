@@ -197,10 +197,10 @@ def test_process_audio_chunks_at_unit_speed_leaves_source_untouched(
     np.testing.assert_array_equal(stereo_audio, original)
 
 
-def test_process_audio_chunks_reports_incremental_progress(
+def test_process_audio_chunks_reports_one_unit_per_chunk(
     synthetic_audio_samples, prepared_chunks, fake_phase_vocoder
 ):
-    """An optional progress callback should fire once per processed chunk."""
+    """Progress counts chunks, since sample counts no longer track elapsed time."""
 
     stereo_audio = synthetic_audio_samples["stereo"]
     chunk_outputs = [
@@ -230,10 +230,10 @@ def test_process_audio_chunks_reports_incremental_progress(
         progress_callback=increments.append,
     )
 
-    # One increment per chunk: source samples consumed are 4, 2 and 0
-    # (the final zero-length chunk reports 0 rather than a negative count).
-    assert increments == [4, 2, 0]
-    assert all(value >= 0 for value in increments)
+    # One unit per chunk, including the zero-length one: a copied chunk costs
+    # almost nothing while a resampled one costs everything, so weighting the
+    # bar by source samples would sprint through the copies and then crawl.
+    assert increments == [1, 1, 1]
 
 
 def test_process_audio_chunks_check_stop_aborts_between_chunks(
@@ -273,7 +273,7 @@ def test_process_audio_chunks_check_stop_aborts_between_chunks(
 
     # The stop was checked before each chunk and aborted before the second one,
     # so only the first chunk reported progress.
-    assert increments == [4]
+    assert increments == [1]
 
 
 def test_process_audio_chunks_check_stop_noop_matches_default(

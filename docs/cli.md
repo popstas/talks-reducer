@@ -202,6 +202,17 @@ rendering with identical output.
 Set `TALKS_REDUCER_AUDIO_WORKERS` to choose the worker count yourself; `1` disables the pool
 entirely. Without it, one CPU core is left free and no more than eight workers are used.
 
+Because the pool spawns processes, a script that calls the pipeline as a library has to guard
+its entry point with `if __name__ == "__main__":` — the standard `multiprocessing` requirement.
+Without the guard each worker re-imports the script and runs it again. The CLI, GUI, server and
+frozen builds all guard their entry points already.
+
+The `Audio processing:` bar counts chunks rather than samples: a chunk played at normal speed is
+copied in microseconds while a resampled one runs the vocoder, so a sample-weighted bar would
+race through most of its range and then crawl through the remainder. The desktop progress bar's
+stage bands were rebalanced for the same reason — the encode now holds 20-100% of the bar,
+matching the 83-93% of the wall clock it actually takes.
+
 ## GUI-only flags
 
 `--open-location` and `--auto-close` control what happens after a seeded GUI conversion

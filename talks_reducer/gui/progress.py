@@ -12,10 +12,18 @@ from ..progress import CallbackProgressHandle, ProgressHandle, SignalProgressRep
 # resetting to zero whenever a new task begins.
 STAGE_PROGRESS_RANGES: tuple[tuple[str, float, float], ...] = (
     ("uploading:", 0.0, 5.0),
-    ("extracting audio:", 5.0, 20.0),
-    ("audio processing:", 20.0, 35.0),
-    ("generating final", 35.0, 100.0),
+    ("extracting audio:", 5.0, 10.0),
+    ("audio processing:", 10.0, 20.0),
+    ("generating final", 20.0, 100.0),
 )
+"""Band widths follow measured stage cost rather than an even split.
+
+On real runs the final encode is 83-93% of the wall clock, extraction 2-5% and
+audio processing 3-9% — the audio stage having shrunk by roughly twenty times
+once unit-speed chunks stopped going through the phase vocoder. The bands the
+audio stage used to hold (15% of the bar) now empty in a blink, which reads as
+the bar jumping rather than progressing.
+"""
 
 
 def map_stage_progress(
