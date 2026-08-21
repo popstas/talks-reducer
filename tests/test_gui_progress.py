@@ -106,3 +106,65 @@ def test_tk_progress_reporter_stop_requested() -> None:
 
     stop_flag["value"] = True
     assert reporter.stop_requested() is True
+
+
+def test_gui_progress_handle_reports_stage_percentages_to_the_status_line() -> None:
+    """Real stage progress must keep the status text counting.
+
+    Opening the structured ``Audio processing:`` stage cancels the synthetic
+    fallback timer, which was the only writer of the ``Audio processing: NN%``
+    status text. Without a status callback the text froze at whatever
+    percentage the timer had reached while the bar kept moving.
+    """
+
+    statuses: list[tuple[str, float]] = []
+    reporter = _TkProgressReporter(
+        lambda _message: None,
+        progress_callback=lambda _value: None,
+        status_callback=lambda desc, percent: statuses.append((desc, percent)),
+    )
+
+    with reporter.task(desc="Audio processing:", total=200) as handle:
+        handle.advance(50)
+        handle.advance(50)
+
+    assert statuses[0] == ("Audio processing:", pytest.approx(25.0))
+    assert statuses[1] == ("Audio processing:", pytest.approx(50.0))
+    assert statuses[-1] == ("Audio processing:", pytest.approx(100.0))
+
+
+def test_gui_progress_handle_coalesces_status_updates_to_whole_percents() -> None:
+    """One status update per displayed percent, not one per chunk.
+
+    The audio stage advances once per chunk — thousands of times on a long
+    recording — while the status text only renders whole percents.
+    """
+
+    statuses: list[float] = []
+    reporter = _TkProgressReporter(
+        lambda _message: None,
+        progress_callback=lambda _value: None,
+        status_callback=lambda _desc, percent: statuses.append(percent),
+    )
+
+    with reporter.task(desc="Audio processing:", total=1000) as handle:
+        for _ in range(5):
+            handle.advance(1)
+
+    assert statuses == [pytest.approx(0.1), pytest.approx(100.0)]
+
+
+def test_gui_progress_handle_skips_status_without_a_total() -> None:
+    """A task with no total cannot report a percentage, so the fallback stands."""
+
+    statuses: list[tuple[str, float]] = []
+    reporter = _TkProgressReporter(
+        lambda _message: None,
+        progress_callback=lambda _value: None,
+        status_callback=lambda desc, percent: statuses.append((desc, percent)),
+    )
+
+    handle = reporter.task(desc="Extracting audio:", total=None)
+    handle.advance(10)
+
+    assert statuses == []

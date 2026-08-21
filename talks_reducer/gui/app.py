@@ -550,6 +550,7 @@ class TalksReducerGUI:
                     stop_callback=lambda: self._stop_requested,
                     progress_callback=self._set_progress_monotonic,
                     stage_callback=self._apply_stage_transition,
+                    status_callback=self._apply_stage_status,
                 )
 
                 files, glue_source = self._maybe_glue_inputs(
@@ -1816,7 +1817,12 @@ class TalksReducerGUI:
         # queue a bump that lands after the real update, snapping the bar back.
         # Clamping against ``_progress_floor`` keeps the real progress instead.
         self._set_progress_monotonic(percentage)
-        self._set_status("processing", f"Audio processing: {audio_percentage:.1f}%")
+        # Labelled for the stage it actually covers. The timer runs from the
+        # ``Extracting audio...`` log until real stage progress arrives, and
+        # audio extraction reports no frame counter of its own, so this ramp is
+        # the only feedback there. It used to read ``Audio processing:``, which
+        # made the real chunk count look like a restart when it took over.
+        self._set_status("processing", f"Extracting audio: {audio_percentage:.0f}%")
 
         if self._audio_progress_steps_completed < self.AUDIO_PROGRESS_STEPS:
             interval_ms = (
@@ -1875,7 +1881,7 @@ class TalksReducerGUI:
     def _apply_stage_transition(self, desc: str) -> None:
         """Stop the synthetic audio timer when real stage progress arrives.
 
-        The synthetic ``Audio processing:`` timer is only a fallback for when the
+        The synthetic ``Extracting audio:`` timer is only a fallback for when the
         pipeline cannot report real audio progress. Every structured progress
         channel — the local pipeline reporter, the remote streaming callback, and
         the log-parsed ``Task: NN%`` milestones — routes its stage label through
@@ -1890,6 +1896,31 @@ class TalksReducerGUI:
             self._complete_audio_phase()
         elif normalized.startswith("audio processing"):
             self._cancel_audio_progress()
+
+    def _apply_stage_status(self, desc: str, percent: float) -> None:
+        """Show a structured stage's own percentage in the status line.
+
+        The synthetic timer is only a fallback for the stretch where no real
+        progress is available. It used to be the sole writer of the status text
+        during the whole audio phase, so opening the real ``Audio processing:``
+        stage cancelled the timer and left the count frozen mid-ramp while the
+        bar carried on alone. Real percentages now take over the text as well,
+        mirroring what :func:`gui.remote._handle_remote_progress` already does
+        for a remote run.
+
+        Extraction retires the timer here rather than in
+        :meth:`_apply_stage_transition`: both cover the same stretch and would
+        otherwise alternate in the status line. Retiring it on the first real
+        *percentage* rather than on the stage opening keeps the fallback alive
+        for an extraction task that reports no total, which is the usual case —
+        FFmpeg emits no frame counter for an audio-only output, so extraction
+        reports nothing until it finishes.
+        """
+
+        normalized = (desc or "").strip().lower()
+        if normalized.startswith("extracting audio"):
+            self._cancel_audio_progress()
+        self._set_status("processing", f"{desc} {percent:.0f}%")
 
     def _begin_download_wait(self) -> None:
         """Show a refreshing "Waiting for download…" status before the download.

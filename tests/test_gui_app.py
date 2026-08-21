@@ -970,6 +970,38 @@ def test_apply_stage_transition_routes_structured_stages():
     gui._complete_audio_phase.assert_called_once()
 
 
+def test_apply_stage_status_shows_real_stage_percentages():
+    """Structured stage progress writes the status text the timer used to own."""
+
+    gui = SimpleNamespace(
+        _cancel_audio_progress=MagicMock(),
+        _set_status=MagicMock(),
+    )
+
+    app.TalksReducerGUI._apply_stage_status(gui, "Audio processing:", 61.4)
+
+    gui._set_status.assert_called_once_with("processing", "Audio processing: 61%")
+
+
+def test_apply_stage_status_retires_the_synthetic_timer_on_extraction():
+    """The first real extraction percent replaces the synthetic fallback count.
+
+    The timer labels its synthetic count ``Audio processing:`` even while
+    extraction is running, so leaving it alive would make the two writers
+    alternate in the status line.
+    """
+
+    gui = SimpleNamespace(
+        _cancel_audio_progress=MagicMock(),
+        _set_status=MagicMock(),
+    )
+
+    app.TalksReducerGUI._apply_stage_status(gui, "Extracting audio:", 42.0)
+
+    gui._cancel_audio_progress.assert_called_once()
+    gui._set_status.assert_called_once_with("processing", "Extracting audio: 42%")
+
+
 def test_summary_manager_generating_final_percent_advances_progress():
     gui = _make_summary_gui(progress_value=10.0)
     manager = summaries.SummaryManager(gui)
@@ -1211,6 +1243,32 @@ def test_apply_status_style_ignores_unknown_status():
     app.TalksReducerGUI._apply_status_style(gui, "something else entirely")
 
     assert gui.status_label.calls == []
+
+
+def test_advance_audio_progress_labels_the_stage_it_actually_covers():
+    """The synthetic timer runs during extraction, so it must say so.
+
+    Labelling its ramp ``Audio processing:`` made the real audio stage look
+    like it restarted: the timer stopped at, say, 45% and the real chunk count
+    then began again from 1% under the very same label.
+    """
+
+    gui = object.__new__(app.TalksReducerGUI)
+    gui.AUDIO_PROGRESS_STEPS = app.TalksReducerGUI.AUDIO_PROGRESS_STEPS
+    gui.AUDIO_PROGRESS_WEIGHT = app.TalksReducerGUI.AUDIO_PROGRESS_WEIGHT
+    gui.DEFAULT_AUDIO_INTERVAL_MS = app.TalksReducerGUI.DEFAULT_AUDIO_INTERVAL_MS
+    gui._audio_progress_job = None
+    gui._audio_progress_steps_completed = 44
+    gui._audio_progress_interval_ms = 100
+    gui._progress_floor = 0.0
+    gui.progress_var = SimpleNamespace(get=lambda: 0.0)
+    gui._set_progress = MagicMock()
+    gui._set_status = MagicMock()
+    gui.root = SimpleNamespace(after=lambda *_args, **_kwargs: "job")
+
+    app.TalksReducerGUI._advance_audio_progress(gui)
+
+    gui._set_status.assert_called_once_with("processing", "Extracting audio: 45%")
 
 
 def test_advance_audio_progress_does_not_move_bar_backwards():
