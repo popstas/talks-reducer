@@ -232,7 +232,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           VERSION="${GITHUB_REF#refs/tags/}"
           git add -A
-          git diff --staged --quiet || git commit -m "Update to ${VERSION}"
+          git diff --staged --quiet || git commit -m "talks-reducer ${VERSION}"
+          # В тап пишет не один репозиторий, а несколько: два тега рядом дают
+          # отказ по non-fast-forward. Каски разные, так что перемотка решает всё сама.
+          git pull --rebase --quiet
           git push
 
   pypi-publish:
