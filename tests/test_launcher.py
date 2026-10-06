@@ -29,12 +29,18 @@ def test_launcher_prepares_multiprocessing_before_starting_the_app(monkeypatch):
     assert events == ["freeze_support", "gui"]
 
 
-def test_launcher_dispatches_dock_server_before_importing_the_gui() -> None:
+def test_launcher_dispatches_dock_server_before_importing_the_gui(
+    tmp_path: Path,
+) -> None:
     """``talks-reducer.exe dock-server`` must not load the GUI, cli or numpy.
 
     Runs in a child interpreter so this process's already-imported modules do
-    not pollute the measurement.
+    not pollute the measurement. The stub reports through a file rather than
+    stdout because the launcher's Windows console-attachment block can reopen
+    ``sys.stdout`` and swallow anything printed afterwards.
     """
+
+    report_path = tmp_path / "report.json"
 
     script = "\n".join(
         [
@@ -44,20 +50,20 @@ def test_launcher_dispatches_dock_server_before_importing_the_gui() -> None:
             "def stub(argv=None):",
             "    report['argv'] = list(argv or [])",
             "    report['modules'] = sorted(sys.modules)",
+            f"    open({json.dumps(str(report_path))}, 'w').write(json.dumps(report))",
             "dock.main = stub",
             f"sys.argv = {json.dumps([str(LAUNCHER), 'dock-server', '--port', '4242'])}",
             f"runpy.run_path({json.dumps(str(LAUNCHER))}, run_name='__main__')",
-            "print(json.dumps(report))",
         ]
     )
-    completed = subprocess.run(
+    subprocess.run(
         [sys.executable, "-c", script],
         cwd=LAUNCHER.parent,
         capture_output=True,
         text=True,
         check=True,
     )
-    report = json.loads(completed.stdout.strip().splitlines()[-1])
+    report = json.loads(report_path.read_text())
 
     assert report["argv"] == ["--port", "4242"]
     heavy = [

@@ -48,11 +48,14 @@ def test_package_main_still_resolves_to_cli_main() -> None:
     assert talks_reducer.main is cli.main
 
 
-def _run_entry_point_with_stubbed_dock(args: list[str], *, runner: str) -> dict:
+def _run_entry_point_with_stubbed_dock(
+    args: list[str], *, runner: str, report_path: Path
+) -> dict:
     """Invoke an entry point with ``dock_server.main`` stubbed; report what loaded.
 
     ``runner`` is Python source that starts the entry point. The stub records
-    the argv it received and the modules present at that moment.
+    the argv it received and the modules present at that moment, writing them
+    to ``report_path`` so entry points that reopen stdout cannot swallow them.
     """
 
     script = "\n".join(
@@ -63,20 +66,20 @@ def _run_entry_point_with_stubbed_dock(args: list[str], *, runner: str) -> dict:
             "def stub(argv=None):",
             "    report['argv'] = list(argv or [])",
             "    report['modules'] = sorted(sys.modules)",
+            f"    open({json.dumps(str(report_path))}, 'w').write(json.dumps(report))",
             "dock.main = stub",
             f"sys.argv = {json.dumps(args)}",
             runner,
-            "print(json.dumps(report))",
         ]
     )
-    completed = subprocess.run(
+    subprocess.run(
         [sys.executable, "-c", script],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=True,
     )
-    return json.loads(completed.stdout.strip().splitlines()[-1])
+    return json.loads(report_path.read_text())
 
 
 def _heavy(loaded: list[str]) -> list[str]:
@@ -87,12 +90,13 @@ def _heavy(loaded: list[str]) -> list[str]:
     ]
 
 
-def test_module_entry_point_dispatches_dock_server_lightly() -> None:
+def test_module_entry_point_dispatches_dock_server_lightly(tmp_path: Path) -> None:
     """``python -m talks_reducer dock-server`` never imports cli, numpy or the GUI."""
 
     report = _run_entry_point_with_stubbed_dock(
         ["talks_reducer", "dock-server", "--port", "4242"],
         runner="import runpy; runpy.run_module('talks_reducer', run_name='__main__')",
+        report_path=tmp_path / "report.json",
     )
 
     assert report["argv"] == ["--port", "4242"]
