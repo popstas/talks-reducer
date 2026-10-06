@@ -46,3 +46,54 @@ def test_package_main_still_resolves_to_cli_main() -> None:
     from talks_reducer import cli
 
     assert talks_reducer.main is cli.main
+
+
+def _run_entry_point_with_stubbed_dock(args: list[str], *, runner: str) -> dict:
+    """Invoke an entry point with ``dock_server.main`` stubbed; report what loaded.
+
+    ``runner`` is Python source that starts the entry point. The stub records
+    the argv it received and the modules present at that moment.
+    """
+
+    script = "\n".join(
+        [
+            "import json, sys",
+            "import talks_reducer.dock_server as dock",
+            "report = {}",
+            "def stub(argv=None):",
+            "    report['argv'] = list(argv or [])",
+            "    report['modules'] = sorted(sys.modules)",
+            "dock.main = stub",
+            f"sys.argv = {json.dumps(args)}",
+            runner,
+            "print(json.dumps(report))",
+        ]
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+def _heavy(loaded: list[str]) -> list[str]:
+    return [
+        name
+        for name in loaded
+        if name in HEAVY_MODULES or name.split(".")[0] in HEAVY_MODULES
+    ]
+
+
+def test_module_entry_point_dispatches_dock_server_lightly() -> None:
+    """``python -m talks_reducer dock-server`` never imports cli, numpy or the GUI."""
+
+    report = _run_entry_point_with_stubbed_dock(
+        ["talks_reducer", "dock-server", "--port", "4242"],
+        runner="import runpy; runpy.run_module('talks_reducer', run_name='__main__')",
+    )
+
+    assert report["argv"] == ["--port", "4242"]
+    assert _heavy(report["modules"]) == []
