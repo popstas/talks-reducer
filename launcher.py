@@ -62,8 +62,31 @@ if sys.platform == "win32" and len(sys.argv) > 1:
             sys.stdin = io.StringIO()
 
 
+def _dispatch_dock_server(argv: "list[str]") -> bool:
+    """Run the OBS dock server and return ``True`` when ``argv`` selects it.
+
+    This runs before the GUI import below. Importing the GUI pulls in
+    tkinter and pystray, and the CLI fallback pulls in numpy and OpenBLAS,
+    whose per-CPU buffer pool alone committed ~550 MB in an idle dock
+    server that only ever spawns child processes.
+    """
+
+    from talks_reducer.dock_server import DOCK_SERVER_COMMANDS
+
+    if not argv or argv[0] not in DOCK_SERVER_COMMANDS:
+        return False
+
+    from talks_reducer.dock_server import main as dock_main
+
+    dock_main(argv[1:])
+    return True
+
+
 def _run_application() -> None:
     """Entry point used by the PyInstaller launcher."""
+
+    if _dispatch_dock_server(sys.argv[1:]):
+        return
 
     try:
         from talks_reducer.gui import main as gui_main

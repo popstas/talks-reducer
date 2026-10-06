@@ -284,3 +284,22 @@ def test_cli_dispatches_dock_server(monkeypatch) -> None:
     cli.main(["dock-server", "--port", "12345"])
 
     assert captured == [["--port", "12345"]]
+
+
+def test_dock_server_commands_constant() -> None:
+    """Every entry point dispatches on one shared keyword set."""
+
+    assert dock_server.DOCK_SERVER_COMMANDS == frozenset({"dock-server", "obs-dock"})
+
+
+def test_cli_dispatches_obs_dock_alias(monkeypatch) -> None:
+    """The ``obs-dock`` alias routes into the dock server too."""
+
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        dock_server, "main", lambda argv=None: captured.append(list(argv or []))
+    )
+
+    cli.main(["obs-dock", "--host", "0.0.0.0"])
+
+    assert captured == [["--host", "0.0.0.0"]]

@@ -163,11 +163,11 @@ hiddenimports.extend(collect_submodules("talks_reducer"))
 # modules. ``pystray`` loads its platform backend lazily, so collect its
 # submodules too.
 hiddenimports.append("talks_reducer.server_tray")
-# ``talks_reducer.dock_server`` is likewise only reached via ``importlib`` (the
-# ``dock-server``/``obs-dock`` CLI subcommand calls
-# ``import_module(".dock_server", ...)``), so name it explicitly for the same
-# reason as ``server_tray`` above — submodule collection can miss modules that
-# nothing statically imports, leaving ``dock-server`` mode unavailable.
+# ``talks_reducer.dock_server`` is imported statically by ``cli`` (for
+# ``DOCK_SERVER_COMMANDS``) and inside functions by ``launcher.py`` and
+# ``__main__.py``, so the analysis should already find it. Keep the explicit
+# hidden import as belt-and-braces, as for ``server_tray`` above, so a missed
+# submodule can never leave ``dock-server`` mode unavailable.
 hiddenimports.append("talks_reducer.dock_server")
 # gradio_client is imported lazily via importlib in the GUI, and fsspec loads
 # backend modules through plugin discovery. Collect both explicitly so remote

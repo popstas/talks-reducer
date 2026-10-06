@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import audio
+from .dock_server import DOCK_SERVER_COMMANDS
 from .ffmpeg import FFmpegNotFoundError
 from .glue import prepare_glued_input
 from .models import ProcessingOptions, default_temp_folder
@@ -786,7 +787,13 @@ def _launch_server(argv: Sequence[str]) -> bool:
 
 
 def _launch_dock_server(argv: Sequence[str]) -> bool:
-    """Launch the OBS processing dock HTTP server in-process."""
+    """Launch the OBS processing dock HTTP server in-process.
+
+    ``dock_server`` is already imported at module load (for
+    ``DOCK_SERVER_COMMANDS``), so the ``ImportError`` guard below only covers a
+    corrupted bundle. The ``import_module`` lookup is kept so ``dock_server.main``
+    is resolved at call time, which tests rely on when monkeypatching it.
+    """
 
     try:
         dock_module = import_module(".dock_server", __package__)
@@ -931,7 +938,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             sys.exit(1)
         return
 
-    if argv_list and argv_list[0] in {"dock-server", "obs-dock"}:
+    if argv_list and argv_list[0] in DOCK_SERVER_COMMANDS:
         if not _launch_dock_server(argv_list[1:]):
             print("Dock server mode is unavailable.", file=sys.stderr)
             sys.exit(1)
