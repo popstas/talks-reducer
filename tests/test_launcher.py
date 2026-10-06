@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import multiprocessing
 import runpy
+import subprocess
+import sys
 from pathlib import Path
 
 LAUNCHER = Path(__file__).resolve().parents[1] / "launcher.py"
+
+HEAVY_MODULES = ("numpy", "tkinter", "gradio", "talks_reducer.cli", "talks_reducer.gui")
 
 
 def test_launcher_prepares_multiprocessing_before_starting_the_app(monkeypatch):
@@ -22,3 +27,42 @@ def test_launcher_prepares_multiprocessing_before_starting_the_app(monkeypatch):
     runpy.run_path(str(LAUNCHER), run_name="__main__")
 
     assert events == ["freeze_support", "gui"]
+
+
+def test_launcher_dispatches_dock_server_before_importing_the_gui() -> None:
+    """``talks-reducer.exe dock-server`` must not load the GUI, cli or numpy.
+
+    Runs in a child interpreter so this process's already-imported modules do
+    not pollute the measurement.
+    """
+
+    script = "\n".join(
+        [
+            "import json, runpy, sys",
+            "import talks_reducer.dock_server as dock",
+            "report = {}",
+            "def stub(argv=None):",
+            "    report['argv'] = list(argv or [])",
+            "    report['modules'] = sorted(sys.modules)",
+            "dock.main = stub",
+            f"sys.argv = {json.dumps([str(LAUNCHER), 'dock-server', '--port', '4242'])}",
+            f"runpy.run_path({json.dumps(str(LAUNCHER))}, run_name='__main__')",
+            "print(json.dumps(report))",
+        ]
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=LAUNCHER.parent,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    report = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    assert report["argv"] == ["--port", "4242"]
+    heavy = [
+        name
+        for name in report["modules"]
+        if name in HEAVY_MODULES or name.split(".")[0] in HEAVY_MODULES
+    ]
+    assert heavy == []
