@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import builtins
 import runpy
 import sys
 
@@ -39,24 +38,35 @@ def test_gui_main_invokes_startup(monkeypatch):
     assert calls == ["gui"]
 
 
-def test_package_main_falls_back_to_absolute_import(monkeypatch):
-    """If the relative import fails, the absolute fallback should execute."""
+def test_package_main_routes_non_dock_argv_to_cli(monkeypatch):
+    """Any argv other than the dock keywords still reaches the CLI entry point."""
 
     calls: list[str] = []
-    original_import = builtins.__import__
 
-    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if level == 1 and name == "cli":
-            raise ImportError("relative import blocked")
-        return original_import(name, globals, locals, fromlist, level)
-
-    def fake_main() -> None:
-        calls.append("cli-fallback")
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-    monkeypatch.setattr("talks_reducer.cli.main", fake_main)
+    monkeypatch.setattr("talks_reducer.cli.main", lambda: calls.append("cli"))
+    monkeypatch.setattr(
+        "talks_reducer.dock_server.main", lambda argv=None: calls.append("dock")
+    )
+    monkeypatch.setattr(sys, "argv", ["talks_reducer", "--version"])
     sys.modules.pop("talks_reducer.__main__", None)
 
     runpy.run_module("talks_reducer.__main__", run_name="__main__")
 
-    assert calls == ["cli-fallback"]
+    assert calls == ["cli"]
+
+
+def test_package_main_routes_obs_dock_alias_to_dock_server(monkeypatch):
+    """The ``obs-dock`` alias reaches the dock server with the trailing argv."""
+
+    calls: list[object] = []
+
+    monkeypatch.setattr("talks_reducer.cli.main", lambda: calls.append("cli"))
+    monkeypatch.setattr(
+        "talks_reducer.dock_server.main", lambda argv=None: calls.append(list(argv))
+    )
+    monkeypatch.setattr(sys, "argv", ["talks_reducer", "obs-dock", "--port", "4242"])
+    sys.modules.pop("talks_reducer.__main__", None)
+
+    runpy.run_module("talks_reducer.__main__", run_name="__main__")
+
+    assert calls == [["--port", "4242"]]
