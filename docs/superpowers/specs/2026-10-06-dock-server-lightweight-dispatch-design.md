@@ -15,6 +15,9 @@ look at the arguments:
    `talks_reducer.cli`, which imports `audio`, `glue` and `pipeline` at
    module level, pulling in numpy and OpenBLAS.
 3. `cli.main` only then notices `dock-server` and imports `dock_server`.
+4. Independently of 1–3, `talks_reducer/__init__.py` imports `.cli` at
+   package level, so even a direct `import talks_reducer.dock_server` pays
+   the full cost.
 
 OpenBLAS commits one buffer per CPU thread on DLL load. With
 `OPENBLAS_NUM_THREADS=1` the same process commits 29 MB, which pins the
@@ -28,6 +31,19 @@ through `subprocess.Popen` without `env=`, so a cap would also throttle the
 real processing runs. A subprocess test guards the regression instead.
 
 ## Changes
+
+### `talks_reducer/__init__.py`
+
+The package `__init__` does `from .cli import main`, so *any*
+`import talks_reducer.<module>` loads `cli` and therefore numpy before the
+submodule runs (verified: `import talks_reducer.dock_server` alone brings in
+`numpy`, `talks_reducer.cli`, `talks_reducer.audio`, `talks_reducer.pipeline`).
+The diagnosis file missed this; the launcher dispatch alone would not help.
+
+Replace the eager import with a PEP 562 module `__getattr__` that imports
+`cli.main` on first access. `__version__` keeps coming from `__about__`,
+which is a bare string. Nothing in the repository reads
+`talks_reducer.main`; the console scripts point at `talks_reducer.cli:main`.
 
 ### `talks_reducer/dock_server.py`
 
