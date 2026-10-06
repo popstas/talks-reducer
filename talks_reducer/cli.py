@@ -787,7 +787,13 @@ def _launch_server(argv: Sequence[str]) -> bool:
 
 
 def _launch_dock_server(argv: Sequence[str]) -> bool:
-    """Launch the OBS processing dock HTTP server in-process."""
+    """Launch the OBS processing dock HTTP server in-process.
+
+    ``dock_server`` is already imported at module load (for
+    ``DOCK_SERVER_COMMANDS``), so the ``ImportError`` guard below only covers a
+    corrupted bundle. The ``import_module`` lookup is kept so ``dock_server.main``
+    is resolved at call time, which tests rely on when monkeypatching it.
+    """
 
     try:
         dock_module = import_module(".dock_server", __package__)
