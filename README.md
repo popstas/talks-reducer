@@ -69,6 +69,10 @@ a take — pick resolution, silent speed, and codec, then click a button.
    talks-reducer dock-server
    ```
 
+   The dock server is a thin HTTP process: it does not load the processing
+   pipeline or the desktop GUI and runs each conversion as a separate
+   `talks-reducer` child, so it idles at a few tens of megabytes.
+
 2. In OBS, enable **Tools → WebSocket Server Settings → Enable WebSocket server** and note
    the password.
 3. In OBS, open **Docks → Custom Browser Docks…** and add a dock with URL
