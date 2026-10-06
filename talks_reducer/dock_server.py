@@ -35,6 +35,12 @@ ALLOWED_CODECS: Tuple[str, ...] = ("h264", "hevc", "av1", "mp3")
 ALLOWED_RESOLUTIONS: Tuple[str, ...] = ("1080p", "720p", "480p")
 ALLOWED_SPEEDS: Tuple[int, ...] = (1, 5, 10)
 MAX_BODY_BYTES = 1024 * 1024
+DOCK_SERVER_COMMANDS = frozenset({"dock-server", "obs-dock"})
+"""Positional keywords that select the dock server in every entry point.
+
+``launcher.py``, ``talks_reducer/__main__.py`` and ``cli.main`` all check
+this set before importing anything heavy, so the three cannot drift apart.
+"""
 
 _CREATE_NO_WINDOW = 0x08000000
 

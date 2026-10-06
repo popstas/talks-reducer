@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import audio
+from .dock_server import DOCK_SERVER_COMMANDS
 from .ffmpeg import FFmpegNotFoundError
 from .glue import prepare_glued_input
 from .models import ProcessingOptions, default_temp_folder
@@ -931,7 +932,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             sys.exit(1)
         return
 
-    if argv_list and argv_list[0] in {"dock-server", "obs-dock"}:
+    if argv_list and argv_list[0] in DOCK_SERVER_COMMANDS:
         if not _launch_dock_server(argv_list[1:]):
             print("Dock server mode is unavailable.", file=sys.stderr)
             sys.exit(1)
