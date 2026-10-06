@@ -48,6 +48,27 @@ def test_package_main_still_resolves_to_cli_main() -> None:
     assert talks_reducer.main is cli.main
 
 
+def test_package_main_is_resolved_lazily() -> None:
+    """Importing the package leaves ``cli`` unloaded until ``main`` is accessed.
+
+    The "not loaded before" half is an inline ``assert`` in the child, so a
+    regression to an eager import fails the subprocess and ``check=True``.
+    """
+
+    loaded = _loaded_modules_after(
+        "\n".join(
+            [
+                "import talks_reducer",
+                "assert 'talks_reducer.cli' not in sys.modules",
+                "talks_reducer.main",
+                "assert 'talks_reducer.cli' in sys.modules",
+            ]
+        )
+    )
+
+    assert "talks_reducer.cli" in loaded
+
+
 def _run_entry_point_with_stubbed_dock(
     args: list[str], *, runner: str, report_path: Path
 ) -> dict:
