@@ -250,7 +250,7 @@ class TalksReducerGUI:
 
         self._apply_window_icon()
 
-        self._full_size = (1200, 900)
+        self._full_size = (1070, 900)
         self._simple_size = (470, 300)
         # Seed the window geometry from the persisted Simple mode preference
         # *before* building the layout so the window opens at its final size
