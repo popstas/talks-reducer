@@ -6,6 +6,8 @@ import subprocess
 import sys
 from typing import Any, Callable, Mapping, Optional, Sequence
 
+from .segmented import CUSTOM_SLOT_FONT
+
 # Desktop Window Manager attributes that toggle the native dark title bar.
 # Windows 10 20H1+ uses attribute 20; earlier 10 builds used 19.
 DWMWA_USE_IMMERSIVE_DARK_MODE = 20
@@ -310,7 +312,7 @@ def apply_theme(
         borderwidth=1,
         relief="solid",
         padding=(2, 2),
-        font=("TkDefaultFont", 8),
+        font=CUSTOM_SLOT_FONT,
     )
     style.map(
         "CustomSegment.TButton",
@@ -393,7 +395,7 @@ def apply_theme(
         "SegmentEntry.TEntry",
         fieldbackground=palette["background"],
         foreground=palette["foreground"],
-        padding=(0, 1),
+        padding=(3, 1),
     )
     style.configure(
         "TEntry",

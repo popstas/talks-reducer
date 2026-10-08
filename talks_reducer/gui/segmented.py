@@ -84,9 +84,13 @@ SELECTED_SEGMENT_STYLE = "SelectedSegment.TButton"
 # the entry that replaces it, and a segment's horizontal padding would make it
 # noticeably wider than that entry.
 CUSTOM_SEGMENT_STYLE = "CustomSegment.TButton"
-# TEntry's default 1px horizontal padding makes the entry 2px wider than the
-# button at the same character count; this style drops it so both measure 52px.
+# The entry's horizontal padding makes up the pixels the button's padding and
+# focus ring add, so at the same character count both measure the same.
 CUSTOM_ENTRY_STYLE = "SegmentEntry.TEntry"
+# Button and entry must share one font: their width is counted in characters of
+# their own font, and an 8pt button beside a 9pt entry only lined up at 125%
+# display scaling (6px apart at 100%).
+CUSTOM_SLOT_FONT = ("TkDefaultFont", 8)
 CUSTOM_PLACEHOLDER = "…"
 
 # The ``…`` slot's button and its inline entry share this width (in text units)
@@ -157,6 +161,7 @@ class SegmentedChoice:
                 width=CUSTOM_SLOT_WIDTH,
                 justify="center",
                 style=CUSTOM_ENTRY_STYLE,
+                font=CUSTOM_SLOT_FONT,
             )
             self.custom_entry.bind("<Return>", self._commit_custom_edit)
             self.custom_entry.bind("<Escape>", self._cancel_custom_edit)

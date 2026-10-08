@@ -68,7 +68,7 @@ Look at the commit history to get more examples.
   the last committed value. Once a value is committed the slot **stays** an entry so it can be edited
   in place; only clicking a preset option clears it back to `…`. Button and entry are sized to
   match (`CUSTOM_SLOT_WIDTH` plus the near-padless `CustomSegment.TButton`/`SegmentEntry.TEntry`
-  styles) so the swap never reflows the row. Every bound control traces its variable and is registered into
+  styles, both in `CUSTOM_SLOT_FONT`) so the swap never reflows the row at any display scaling. Every bound control traces its variable and is registered into
   `gui._slider_updaters` through `layout.add_segmented`'s `apply_and_persist` wrapper, so
   `apply_preset_to_gui` and presets applied on other surfaces keep moving the buttons exactly as
   they moved the sliders they replaced. The **Silence speedup** macro row (**Silence ×10** /

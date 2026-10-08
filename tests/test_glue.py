@@ -54,9 +54,12 @@ def test_build_concat_list_quotes_and_escapes_paths(tmp_path: Path) -> None:
 
     listing = glue.build_concat_list([tricky, plain])
 
+    # The list always uses forward slashes, so compare against the POSIX form;
+    # interpolating ``tmp_path`` directly put backslashes in on Windows.
+    base = tmp_path.resolve().as_posix()
     assert listing.splitlines() == [
-        f"file '{tmp_path}/it'\\''s a part.mp4'",
-        f"file '{tmp_path}/part2.mp4'",
+        f"file '{base}/it'\\''s a part.mp4'",
+        f"file '{base}/part2.mp4'",
     ]
 
 
