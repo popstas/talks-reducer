@@ -382,7 +382,7 @@ def _probe_ffmpeg_output(args: List[str]) -> Optional[str]:
     except (
         subprocess.TimeoutExpired,
         subprocess.CalledProcessError,
-        FileNotFoundError,
+        OSError,
     ):
         return None
 
@@ -513,8 +513,12 @@ def _backend_supported_on_platform(backend: str) -> bool:
     return sys.platform == "win32" or sys.platform.startswith("linux")
 
 
-def _trial_encode(ffmpeg_path: str, encoder: str) -> bool:
-    """Encode one tiny frame with *encoder*; True only when FFmpeg exits 0.
+def _trial_encode(ffmpeg_path: str, encoder: str) -> Optional[bool]:
+    """Encode one tiny frame with *encoder* and report whether FFmpeg succeeded.
+
+    Returns ``True`` when FFmpeg exits 0, ``False`` when it exits non-zero, and
+    ``None`` when the trial could not run to completion (a timeout or a spawn
+    error). ``None`` is inconclusive: a slow first driver start looks the same.
 
     The encoder listing is not a capability signal: the gyan.dev builds that
     ``static-ffmpeg`` bundles list every NVENC, AMF and QSV encoder whatever GPU
@@ -546,21 +550,49 @@ def _trial_encode(ffmpeg_path: str, encoder: str) -> bool:
             creationflags=creationflags,
         )
     except (subprocess.TimeoutExpired, OSError):
-        return False
+        return None
     return result.returncode == 0
 
 
-def _probe_backend(backend: str, codec: str, ffmpeg_path: str) -> bool:
-    """Return whether *backend* can encode *codec* on this machine."""
+def _probe_backend(backend: str, codec: str, ffmpeg_path: str) -> Optional[bool]:
+    """Return whether *backend* can encode *codec*: ``True``, ``False`` or ``None``.
+
+    ``None`` means inconclusive, because the encoder listing could not be
+    obtained or the trial encode could not run. A listed encoder that fails its
+    trial is a conclusive ``False``.
+    """
 
     if not _backend_supported_on_platform(backend):
         return False
     if backend == "videotoolbox":
         return check_videotoolbox_available(ffmpeg_path)
+    if _get_encoder_listing(ffmpeg_path) is None:
+        return None
     encoder = f"{codec}_{_TRIAL_ENCODER_SUFFIXES[backend]}"
-    return encoder_available(encoder, ffmpeg_path=ffmpeg_path) and _trial_encode(
-        ffmpeg_path, encoder
-    )
+    if not encoder_available(encoder, ffmpeg_path=ffmpeg_path):
+        return False
+    return _trial_encode(ffmpeg_path, encoder)
+
+
+def _first_working_backend(
+    candidates: Tuple[str, ...], codec: str, ffmpeg_path: str
+) -> Tuple[Optional[str], bool]:
+    """Return ``(backend, conclusive)`` for the first candidate that works.
+
+    Candidates are tried in priority order and the search stops at the first
+    success. The result is conclusive only when every candidate tried was
+    conclusive, so an inconclusive higher-priority probe keeps a lower-priority
+    success out of the disk cache.
+    """
+
+    conclusive = True
+    for candidate in candidates:
+        result = _probe_backend(candidate, codec, ffmpeg_path)
+        if result is None:
+            conclusive = False
+        elif result:
+            return candidate, conclusive
+    return None, conclusive
 
 
 def _hardware_memory_key(
@@ -582,12 +614,14 @@ def detect_hardware_backend(
     """Return the hardware backend that will encode *codec*, or ``None``.
 
     Candidates are tried in priority order (discrete GPUs before Intel's iGPU)
-    with a one-frame trial encode, and the answer is cached per codec in memory
-    and in ``settings.json`` for :data:`HARDWARE_CACHE_MAX_AGE_SECONDS`, keyed by
-    the FFmpeg binary's fingerprint. Detection is per codec because support
-    differs: Intel before Arc, AMD before RDNA3 and NVIDIA before RTX 40 encode
-    HEVC but not AV1. Non-video codecs such as ``mp3`` return ``None`` without
-    probing.
+    with a one-frame trial encode. The answer is cached per codec in memory, and
+    in ``settings.json`` for :data:`HARDWARE_CACHE_MAX_AGE_SECONDS` keyed by the
+    FFmpeg binary's fingerprint, but only when every probe was conclusive. A
+    timed-out trial or a failed encoder listing is inconclusive: it stays in
+    memory and is re-checked by the next run. Detection is per codec because
+    support differs: Intel before Arc, AMD before RDNA3 and NVIDIA before RTX 40
+    encode HEVC but not AV1. Non-video codecs such as ``mp3`` return ``None``
+    without probing.
     """
 
     codec = (codec or "").strip().lower()
@@ -610,16 +644,9 @@ def detect_hardware_backend(
                 _HARDWARE_BACKEND_CACHE[memory_key] = cached
                 return cached
 
-        backend = next(
-            (
-                candidate
-                for candidate in candidates
-                if _probe_backend(candidate, codec, ffmpeg_path)
-            ),
-            None,
-        )
+        backend, conclusive = _first_working_backend(candidates, codec, ffmpeg_path)
         _HARDWARE_BACKEND_CACHE[memory_key] = backend
-        if fingerprint is not None:
+        if fingerprint is not None and conclusive:
             _write_cached_backend(
                 fingerprint, codec, {"backend": backend, "checked_at": int(now)}
             )

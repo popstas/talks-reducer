@@ -283,7 +283,13 @@ def test_is_global_ffmpeg_available_true_when_both_present(monkeypatch):
 
 
 def _stub_hardware_probe(
-    monkeypatch, *, platform="win32", listed=(), working=(), trial_error=None
+    monkeypatch,
+    *,
+    platform="win32",
+    listed=(),
+    working=(),
+    trial_error=None,
+    timeouts=(),
 ):
     """Fake the encoder listing and trial encodes; return the encoders trialled."""
 
@@ -300,6 +306,8 @@ def _stub_hardware_probe(
         if "-c:v" in args:
             encoder = args[args.index("-c:v") + 1]
             trials.append(encoder)
+            if encoder in timeouts:
+                raise ffmpeg.subprocess.TimeoutExpired(cmd="ffmpeg", timeout=10)
             if trial_error is not None:
                 raise trial_error
             return SimpleNamespace(
@@ -387,14 +395,81 @@ def test_detect_hardware_backend_uses_videotoolbox_on_macos(monkeypatch):
     assert trials == []
 
 
-def test_detect_hardware_backend_treats_timeout_as_unavailable(monkeypatch):
+def test_detect_hardware_backend_timeout_is_not_persisted(monkeypatch, tmp_path):
+    """A timed-out trial may be a slow driver start, so it must not stick for 30 days."""
+
+    binary = _fake_ffmpeg_binary(tmp_path)
+    trials = _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, timeouts=ALL_HEVC)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    assert not ffmpeg._hardware_cache_path().exists()
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    assert trials == ["hevc_nvenc", "hevc_amf", "hevc_qsv"]
+
+    ffmpeg._HARDWARE_BACKEND_CACHE.clear()
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    assert len(trials) == 6
+
+
+def test_detect_hardware_backend_spawn_error_is_not_persisted(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
     _stub_hardware_probe(
-        monkeypatch,
-        listed=ALL_HEVC,
-        trial_error=ffmpeg.subprocess.TimeoutExpired(cmd="ffmpeg", timeout=10),
+        monkeypatch, listed=("hevc_qsv",), trial_error=OSError("spawn failed")
     )
 
-    assert ffmpeg.detect_hardware_backend("hevc") is None
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    assert not ffmpeg._hardware_cache_path().exists()
+
+
+def test_detect_hardware_backend_listing_failure_is_not_persisted(
+    monkeypatch, tmp_path
+):
+    """A failed ``-encoders`` probe says nothing about the GPU, unlike an empty list."""
+
+    binary = _fake_ffmpeg_binary(tmp_path)
+    monkeypatch.setattr(ffmpeg.sys, "platform", "win32")
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    def fake_run(args, **kwargs):
+        if "-encoders" in args:
+            return SimpleNamespace(stdout="", returncode=1)
+        raise AssertionError(f"Unexpected args: {args}")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    assert not ffmpeg._hardware_cache_path().exists()
+
+
+def test_detect_hardware_backend_skips_persisting_after_inconclusive_candidate(
+    monkeypatch, tmp_path
+):
+    """A timed-out NVENC trial must not lock in QSV for 30 days."""
+
+    binary = _fake_ffmpeg_binary(tmp_path)
+    trials = _stub_hardware_probe(
+        monkeypatch,
+        listed=ALL_HEVC,
+        working=("hevc_qsv",),
+        timeouts=("hevc_nvenc",),
+    )
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+    assert not ffmpeg._hardware_cache_path().exists()
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+    assert trials == ["hevc_nvenc", "hevc_amf", "hevc_qsv"]
+
+
+def test_detect_hardware_backend_persists_conclusive_success(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, working=("hevc_qsv",))
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+
+    stored = json.loads(ffmpeg._hardware_cache_path().read_text(encoding="utf-8"))
+    assert stored["hardware_backend"]["codecs"]["hevc"]["backend"] == "qsv"
 
 
 def test_detect_hardware_backend_memoizes_in_process(monkeypatch):

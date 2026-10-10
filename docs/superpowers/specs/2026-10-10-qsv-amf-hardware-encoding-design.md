@@ -115,7 +115,8 @@ Steps:
      with a 10 s timeout.
    - `videotoolbox`: the existing `check_videotoolbox_available` logic (macOS
      only, listing-based, no trial encode — it has no false positives).
-4. Store the result, including `None`, in both caches.
+4. Store the result, including `None`, in the in-process cache. Store it
+   on disk too only when every probe was conclusive (see §3).
 
 Probing is lazy: an H.264 run probes only NVENC (~50 ms); HEVC and AV1 are
 probed the first time they are requested.
@@ -224,6 +225,9 @@ Stored in the shared `settings.json` (`config.determine_config_path()`):
   there is no fingerprint and only the in-process cache is used.
 - `codecs` holds one record per probed codec; `backend` may be `null`, so a
   GPU-less machine is cached too. `checked_at` is a Unix timestamp in seconds.
+  Inconclusive probes (a trial that times out or cannot be spawned, or a
+  failed encoder listing) stay in memory only and are re-checked next run;
+  a codec is written to disk only when every candidate probed conclusively.
 
 A codec record is valid only when the entry's fingerprint matches the current
 binary, the record's age is under **30 days**, and `backend` is `null` or one of
@@ -296,7 +300,10 @@ immediately. This trade-off was accepted in brainstorming.
   a machine whose `av1_qsv` trial fails reports `None` for AV1 and `"qsv"` for
   HEVC; `mp3` returns `None` without running FFmpeg.
 - A backend whose `<codec>_*` encoder is absent from `-encoders` is not trial-run.
-- A trial encode that times out or exits non-zero is treated as unavailable.
+- A trial encode that exits non-zero is treated as unavailable. A trial that
+  times out or cannot be spawned, or a failed `-encoders` listing, is
+  inconclusive: it counts as unavailable for that run, and the answer is
+  kept out of the disk cache.
 - Cache: a valid on-disk entry is used without running ffmpeg; a changed
   fingerprint, an entry older than 30 days, an unknown backend name and a
   malformed entry each trigger re-detection; `None` is cached;
