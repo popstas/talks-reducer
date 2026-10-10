@@ -547,6 +547,19 @@ def test_probe_subprocesses_do_not_inherit_stdin(monkeypatch):
     assert all(call.get("stdin") is ffmpeg.subprocess.DEVNULL for call in calls)
 
 
+def test_detect_hardware_backend_survives_non_utf8_settings(monkeypatch, tmp_path):
+    """An undecodable settings.json must neither crash detection nor be rewritten."""
+
+    binary = _fake_ffmpeg_binary(tmp_path)
+    settings_path = ffmpeg._hardware_cache_path()
+    raw = b'{"theme": "\xe9"}'
+    settings_path.write_bytes(raw)
+    _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, working=("hevc_qsv",))
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+    assert settings_path.read_bytes() == raw
+
+
 def test_detect_hardware_backend_persists_conclusive_success(monkeypatch, tmp_path):
     binary = _fake_ffmpeg_binary(tmp_path)
     _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, working=("hevc_qsv",))

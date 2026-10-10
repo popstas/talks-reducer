@@ -6,8 +6,10 @@ from pathlib import Path
 import pytest
 
 from talks_reducer.config import (
+    SettingsReadError,
     determine_config_path,
     load_settings,
+    read_settings_strict,
     save_settings,
 )
 
@@ -86,3 +88,14 @@ def test_save_settings_reports_failure(tmp_path):
     config_path = blocker / "settings.json"
 
     assert save_settings(config_path, {"a": 1}) is False
+
+
+def test_read_settings_strict_rejects_non_utf8_bytes(tmp_path):
+    """A stray Latin-1 byte is a read failure, not a crash for every caller."""
+
+    config_path = tmp_path / "settings.json"
+    config_path.write_bytes(b'{"a": "\xe9"}')
+
+    with pytest.raises(SettingsReadError):
+        read_settings_strict(config_path)
+    assert load_settings(config_path) == {}

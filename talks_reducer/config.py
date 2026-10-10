@@ -61,7 +61,8 @@ def read_settings_strict(config_path: Path) -> dict[str, object]:
     Returns an empty dict when the file does not exist. Raises
     :class:`SettingsReadError` when the file exists but cannot be read or parsed
     (``OSError`` from a concurrent lock, ``json.JSONDecodeError`` from a
-    partially written file), so a caller must not mistake a transient failure
+    partially written file, ``UnicodeDecodeError`` from a file that is not
+    UTF-8), so a caller must not mistake a transient failure
     for real absence.
     """
 
@@ -70,7 +71,7 @@ def read_settings_strict(config_path: Path) -> dict[str, object]:
             data = json.load(handle)
     except FileNotFoundError:
         return {}
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise SettingsReadError(str(config_path)) from exc
 
     if isinstance(data, dict):
