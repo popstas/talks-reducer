@@ -451,22 +451,14 @@ def encoder_supports_option(
 
 
 def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
-    """Return whether CUDA hardware encoders are usable in the FFmpeg build."""
+    """Return whether NVENC can actually encode on this machine.
 
-    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+    Kept for callers outside the pipeline; it now delegates to the trial-encode
+    detection, because the encoder listing alone reports NVENC on machines
+    without an NVIDIA GPU.
+    """
 
-    hwaccels_output = _probe_ffmpeg_output([ffmpeg_path, "-hide_banner", "-hwaccels"])
-    if not hwaccels_output or "cuda" not in hwaccels_output.lower():
-        return False
-
-    encoder_output = _get_encoder_listing(ffmpeg_path)
-    if not encoder_output:
-        return False
-
-    return any(
-        encoder in encoder_output
-        for encoder in ["h264_nvenc", "hevc_nvenc", "av1_nvenc", "nvenc"]
-    )
+    return detect_hardware_backend("h264", ffmpeg_path) == "cuda"
 
 
 def check_videotoolbox_available(ffmpeg_path: Optional[str] = None) -> bool:
@@ -489,6 +481,169 @@ def check_videotoolbox_available(ffmpeg_path: Optional[str] = None) -> bool:
         encoder_available(encoder, ffmpeg_path=ffmpeg_path)
         for encoder in ("hevc_videotoolbox", "h264_videotoolbox")
     )
+
+
+_HARDWARE_CANDIDATES = {
+    # H.264 lists only NVENC: QSV, AMF and VideoToolbox H.264 stay on libx264
+    # (see ``resolve_encoder_plan``), so probing them would cost time for nothing.
+    "h264": ("cuda",),
+    "hevc": ("cuda", "amf", "qsv", "videotoolbox"),
+    # No Apple AV1 encoder exists.
+    "av1": ("cuda", "amf", "qsv"),
+}
+_TRIAL_ENCODER_SUFFIXES = {"cuda": "nvenc", "amf": "amf", "qsv": "qsv"}
+_TRIAL_ENCODE_TIMEOUT_SECONDS = 10
+
+
+def normalize_video_codec(value: Optional[str]) -> str:
+    """Return ``h264``, ``hevc`` or ``av1`` for a user-supplied codec name.
+
+    Unknown values map to ``h264``, matching the encoder plan's default.
+    """
+
+    codec = (value or "h264").strip().lower()
+    return codec if codec in _HARDWARE_CANDIDATES else "h264"
+
+
+def _backend_supported_on_platform(backend: str) -> bool:
+    """Return whether *backend* can exist on the current operating system."""
+
+    if backend == "videotoolbox":
+        return sys.platform == "darwin"
+    return sys.platform == "win32" or sys.platform.startswith("linux")
+
+
+def _trial_encode(ffmpeg_path: str, encoder: str) -> bool:
+    """Encode one tiny frame with *encoder*; True only when FFmpeg exits 0.
+
+    The encoder listing is not a capability signal: the gyan.dev builds that
+    ``static-ffmpeg`` bundles list every NVENC, AMF and QSV encoder whatever GPU
+    is installed, and only fail once the encoder is opened.
+    """
+
+    creationflags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg_path,
+                "-hide_banner",
+                "-v",
+                "quiet",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=black:size=256x144:duration=0.04",
+                "-frames:v",
+                "1",
+                "-c:v",
+                encoder,
+                "-f",
+                "null",
+                "-",
+            ],
+            capture_output=True,
+            timeout=_TRIAL_ENCODE_TIMEOUT_SECONDS,
+            creationflags=creationflags,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return result.returncode == 0
+
+
+def _probe_backend(backend: str, codec: str, ffmpeg_path: str) -> bool:
+    """Return whether *backend* can encode *codec* on this machine."""
+
+    if not _backend_supported_on_platform(backend):
+        return False
+    if backend == "videotoolbox":
+        return check_videotoolbox_available(ffmpeg_path)
+    encoder = f"{codec}_{_TRIAL_ENCODER_SUFFIXES[backend]}"
+    return encoder_available(encoder, ffmpeg_path=ffmpeg_path) and _trial_encode(
+        ffmpeg_path, encoder
+    )
+
+
+def _hardware_memory_key(
+    ffmpeg_path: str, fingerprint: Optional[dict[str, object]], codec: str
+) -> tuple:
+    """Key the in-process cache by binary identity, falling back to its path."""
+
+    identity = (
+        tuple(sorted(fingerprint.items()))
+        if fingerprint is not None
+        else os.path.abspath(ffmpeg_path)
+    )
+    return (identity, codec)
+
+
+def detect_hardware_backend(
+    codec: str, ffmpeg_path: Optional[str] = None
+) -> Optional[str]:
+    """Return the hardware backend that will encode *codec*, or ``None``.
+
+    Candidates are tried in priority order (discrete GPUs before Intel's iGPU)
+    with a one-frame trial encode, and the answer is cached per codec in memory
+    and in ``settings.json`` for :data:`HARDWARE_CACHE_MAX_AGE_SECONDS`, keyed by
+    the FFmpeg binary's fingerprint. Detection is per codec because support
+    differs: Intel before Arc, AMD before RDNA3 and NVIDIA before RTX 40 encode
+    HEVC but not AV1. Non-video codecs such as ``mp3`` return ``None`` without
+    probing.
+    """
+
+    codec = (codec or "").strip().lower()
+    candidates = _HARDWARE_CANDIDATES.get(codec)
+    if candidates is None:
+        return None
+
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+    fingerprint = _ffmpeg_fingerprint(ffmpeg_path)
+    memory_key = _hardware_memory_key(ffmpeg_path, fingerprint, codec)
+
+    with _HARDWARE_BACKEND_LOCK:
+        if memory_key in _HARDWARE_BACKEND_CACHE:
+            return _HARDWARE_BACKEND_CACHE[memory_key]
+
+        now = time.time()
+        if fingerprint is not None:
+            hit, cached = _read_cached_backend(fingerprint, codec, now)
+            if hit:
+                _HARDWARE_BACKEND_CACHE[memory_key] = cached
+                return cached
+
+        backend = next(
+            (
+                candidate
+                for candidate in candidates
+                if _probe_backend(candidate, codec, ffmpeg_path)
+            ),
+            None,
+        )
+        _HARDWARE_BACKEND_CACHE[memory_key] = backend
+        if fingerprint is not None:
+            _write_cached_backend(
+                fingerprint, codec, {"backend": backend, "checked_at": int(now)}
+            )
+        return backend
+
+
+def invalidate_hardware_backend_cache(
+    codec: str, ffmpeg_path: Optional[str] = None
+) -> None:
+    """Forget the cached backend for *codec* so the next run probes again.
+
+    Called when a GPU encode fails for real, which means the cached answer no
+    longer matches the machine (a removed eGPU, a broken driver).
+    """
+
+    codec = (codec or "").strip().lower()
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+    fingerprint = _ffmpeg_fingerprint(ffmpeg_path)
+    with _HARDWARE_BACKEND_LOCK:
+        _HARDWARE_BACKEND_CACHE.pop(
+            _hardware_memory_key(ffmpeg_path, fingerprint, codec), None
+        )
+        if fingerprint is not None:
+            _write_cached_backend(fingerprint, codec, None)
 
 
 # Quality on the VideoToolbox 1-100 scale that matches the size the software
@@ -1197,6 +1352,10 @@ __all__ = [
     "get_ffprobe_path",
     "check_cuda_available",
     "check_videotoolbox_available",
+    "detect_hardware_backend",
+    "invalidate_hardware_backend_cache",
+    "normalize_video_codec",
+    "HARDWARE_BACKEND_LABELS",
     "run_timed_ffmpeg_command",
     "build_trim_input_args",
     "build_extract_audio_command",

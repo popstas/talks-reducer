@@ -282,77 +282,203 @@ def test_is_global_ffmpeg_available_true_when_both_present(monkeypatch):
     assert ffmpeg.is_global_ffmpeg_available() is True
 
 
-def test_check_cuda_available_detects_nvenc(monkeypatch):
+def _stub_hardware_probe(
+    monkeypatch, *, platform="win32", listed=(), working=(), trial_error=None
+):
+    """Fake the encoder listing and trial encodes; return the encoders trialled."""
+
+    monkeypatch.setattr(ffmpeg.sys, "platform", platform)
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    trials: List[str] = []
 
     def fake_run(args, **kwargs):
-        if "-hwaccels" in args:
-            return SimpleNamespace(stdout="cuda\n", returncode=0)
         if "-encoders" in args:
-            return SimpleNamespace(stdout="encoder h264_nvenc", returncode=0)
+            listing = "\n".join(f" V..... {name}" for name in listed)
+            return SimpleNamespace(stdout=listing, returncode=0)
+        if "-hwaccels" in args:
+            return SimpleNamespace(stdout="videotoolbox\n", returncode=0)
+        if "-c:v" in args:
+            encoder = args[args.index("-c:v") + 1]
+            trials.append(encoder)
+            if trial_error is not None:
+                raise trial_error
+            return SimpleNamespace(
+                stdout="", stderr="", returncode=0 if encoder in working else 1
+            )
         raise AssertionError(f"Unexpected args: {args}")
 
     monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+    return trials
+
+
+ALL_HEVC = ("hevc_nvenc", "hevc_amf", "hevc_qsv")
+
+
+def test_detect_hardware_backend_prefers_first_working_candidate(monkeypatch):
+    trials = _stub_hardware_probe(
+        monkeypatch, listed=ALL_HEVC, working=("hevc_amf", "hevc_qsv")
+    )
+
+    assert ffmpeg.detect_hardware_backend("hevc") == "amf"
+    assert trials == ["hevc_nvenc", "hevc_amf"]
+
+
+def test_detect_hardware_backend_skips_unlisted_encoders(monkeypatch):
+    trials = _stub_hardware_probe(
+        monkeypatch, listed=("hevc_qsv",), working=("hevc_qsv",)
+    )
+
+    assert ffmpeg.detect_hardware_backend("hevc") == "qsv"
+    assert trials == ["hevc_qsv"]
+
+
+def test_detect_hardware_backend_h264_only_probes_nvenc(monkeypatch):
+    """QSV/AMF H.264 stays on libx264, so probing them would be wasted time."""
+
+    trials = _stub_hardware_probe(
+        monkeypatch,
+        listed=("h264_nvenc", "h264_amf", "h264_qsv"),
+        working=("h264_qsv",),
+    )
+
+    assert ffmpeg.detect_hardware_backend("h264") is None
+    assert trials == ["h264_nvenc"]
+
+
+def test_detect_hardware_backend_probes_each_codec_separately(monkeypatch):
+    """Pre-Arc Intel encodes HEVC but not AV1."""
+
+    _stub_hardware_probe(
+        monkeypatch, listed=("hevc_qsv", "av1_qsv"), working=("hevc_qsv",)
+    )
+
+    assert ffmpeg.detect_hardware_backend("hevc") == "qsv"
+    assert ffmpeg.detect_hardware_backend("av1") is None
+
+
+def test_detect_hardware_backend_ignores_non_video_codecs(monkeypatch):
+    def unexpected_run(*args, **kwargs):
+        raise AssertionError("mp3 must not probe GPU encoders")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", unexpected_run)
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    assert ffmpeg.detect_hardware_backend("mp3") is None
+
+
+def test_detect_hardware_backend_normalises_codec_name(monkeypatch):
+    trials = _stub_hardware_probe(
+        monkeypatch, listed=("hevc_qsv",), working=("hevc_qsv",)
+    )
+
+    assert ffmpeg.detect_hardware_backend(" HEVC ") == "qsv"
+    assert trials == ["hevc_qsv"]
+
+
+def test_detect_hardware_backend_uses_videotoolbox_on_macos(monkeypatch):
+    trials = _stub_hardware_probe(
+        monkeypatch,
+        platform="darwin",
+        listed=("hevc_videotoolbox", "hevc_nvenc", "av1_qsv"),
+    )
+
+    assert ffmpeg.detect_hardware_backend("hevc") == "videotoolbox"
+    assert ffmpeg.detect_hardware_backend("av1") is None
+    assert trials == []
+
+
+def test_detect_hardware_backend_treats_timeout_as_unavailable(monkeypatch):
+    _stub_hardware_probe(
+        monkeypatch,
+        listed=ALL_HEVC,
+        trial_error=ffmpeg.subprocess.TimeoutExpired(cmd="ffmpeg", timeout=10),
+    )
+
+    assert ffmpeg.detect_hardware_backend("hevc") is None
+
+
+def test_detect_hardware_backend_memoizes_in_process(monkeypatch):
+    trials = _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, working=("hevc_qsv",))
+
+    assert ffmpeg.detect_hardware_backend("hevc") == "qsv"
+    assert ffmpeg.detect_hardware_backend("hevc") == "qsv"
+    assert trials == ["hevc_nvenc", "hevc_amf", "hevc_qsv"]
+
+
+def test_detect_hardware_backend_reads_disk_cache_without_probing(
+    monkeypatch, tmp_path
+):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    ffmpeg._write_cached_backend(
+        ffmpeg._ffmpeg_fingerprint(binary),
+        "hevc",
+        {"backend": "qsv", "checked_at": int(ffmpeg.time.time())},
+    )
+
+    def unexpected_run(*args, **kwargs):
+        raise AssertionError("a fresh cache entry must not re-probe")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", unexpected_run)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+
+
+def test_detect_hardware_backend_writes_disk_cache(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    _stub_hardware_probe(monkeypatch, listed=ALL_HEVC)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+
+    stored = json.loads(ffmpeg._hardware_cache_path().read_text(encoding="utf-8"))
+    record = stored["hardware_backend"]["codecs"]["hevc"]
+    assert record["backend"] is None
+    assert isinstance(record["checked_at"], int)
+
+
+def test_invalidate_hardware_backend_cache_forces_reprobe(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    trials = _stub_hardware_probe(
+        monkeypatch, listed=("hevc_qsv",), working=("hevc_qsv",)
+    )
+    ffmpeg.detect_hardware_backend("hevc", binary)
+
+    ffmpeg.invalidate_hardware_backend_cache("hevc", binary)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+    assert trials == ["hevc_qsv", "hevc_qsv"]
+
+
+def test_check_cuda_available_requires_working_nvenc(monkeypatch):
+    """Listing NVENC is not enough: gyan.dev builds list it on every machine."""
+
+    _stub_hardware_probe(monkeypatch, listed=("h264_nvenc",))
+
+    assert not ffmpeg.check_cuda_available()
+
+
+def test_check_cuda_available_detects_working_nvenc(monkeypatch):
+    _stub_hardware_probe(monkeypatch, listed=("h264_nvenc",), working=("h264_nvenc",))
 
     assert ffmpeg.check_cuda_available()
 
 
-def test_check_cuda_available_handles_missing_nvenc(monkeypatch):
+def test_check_cuda_available_handles_listing_failure(monkeypatch):
+    monkeypatch.setattr(ffmpeg.sys, "platform", "linux")
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-
-    def fake_run(args, **kwargs):
-        if "-hwaccels" in args:
-            return SimpleNamespace(stdout="cuda\n", returncode=0)
-        if "-encoders" in args:
-            return SimpleNamespace(stdout="encoder libx264", returncode=0)
-        raise AssertionError(f"Unexpected args: {args}")
-
-    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        ffmpeg.subprocess,
+        "run",
+        lambda args, **kwargs: SimpleNamespace(stdout="", returncode=1),
+    )
 
     assert not ffmpeg.check_cuda_available()
 
 
-def test_check_cuda_available_requires_cuda_hwaccel(monkeypatch):
-    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-
-    def fake_run(args, **kwargs):
-        if "-hwaccels" in args:
-            return SimpleNamespace(stdout="qsv\nonevapi", returncode=0)
-        if "-encoders" in args:
-            return SimpleNamespace(stdout="encoder h264_nvenc", returncode=0)
-        raise AssertionError(f"Unexpected args: {args}")
-
-    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
-
-    assert not ffmpeg.check_cuda_available()
-
-
-def test_check_cuda_available_handles_errors(monkeypatch):
-    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-
-    def failing_run(args, **kwargs):
-        return SimpleNamespace(stdout="", returncode=1)
-
-    monkeypatch.setattr(ffmpeg.subprocess, "run", failing_run)
-    assert not ffmpeg.check_cuda_available()
-
-    def raise_timeout(*args, **kwargs):
-        raise ffmpeg.subprocess.TimeoutExpired(cmd=args, timeout=5)
-
-    monkeypatch.setattr(ffmpeg.subprocess, "run", raise_timeout)
-    assert not ffmpeg.check_cuda_available()
-
-    def raise_called_process_error(args, **kwargs):
-        raise ffmpeg.subprocess.CalledProcessError(returncode=1, cmd=args)
-
-    monkeypatch.setattr(ffmpeg.subprocess, "run", raise_called_process_error)
-    assert not ffmpeg.check_cuda_available()
-
-    def raise_file_not_found(args, **kwargs):
-        raise FileNotFoundError
-
-    monkeypatch.setattr(ffmpeg.subprocess, "run", raise_file_not_found)
-    assert not ffmpeg.check_cuda_available()
+def test_normalize_video_codec():
+    assert ffmpeg.normalize_video_codec(" HEVC ") == "hevc"
+    assert ffmpeg.normalize_video_codec("av1") == "av1"
+    assert ffmpeg.normalize_video_codec(None) == "h264"
+    assert ffmpeg.normalize_video_codec("vp9") == "h264"
 
 
 def _stub_videotoolbox_probe(monkeypatch, *, hwaccels: str, encoders: str) -> None:
