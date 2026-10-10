@@ -69,47 +69,80 @@ Out of scope:
 
 ### 1. Backend detection (`talks_reducer/ffmpeg.py`)
 
+Detection is **per codec**. Hardware support differs by codec: Intel before
+Arc, AMD before RDNA3 and NVIDIA before RTX 40 encode HEVC but not AV1. A
+HEVC-only probe would send every AV1 run to a failing GPU encoder on those
+machines and wipe the cache each time.
+
 New public function:
 
 ```python
-def detect_hardware_backend(ffmpeg_path: Optional[str] = None) -> Optional[str]
+def detect_hardware_backend(codec: str, ffmpeg_path: Optional[str] = None) -> Optional[str]
 ```
 
-Returns one of `"cuda"`, `"amf"`, `"qsv"`, `"videotoolbox"` or `None`.
+`codec` is stripped and lowercased; for anything other than `h264`, `hevc` or
+`av1` (e.g. `mp3`) it returns `None` without probing. Callers pass the value of
+`normalize_video_codec` (see §2).
+It returns one of `"cuda"`, `"amf"`, `"qsv"`, `"videotoolbox"` or `None`: the
+backend that will encode **this codec**.
+
+Candidates per codec, in priority order (discrete GPUs first, because a machine
+can have an Intel iGPU and an NVIDIA/AMD dGPU and the discrete encoder is
+normally faster):
+
+| codec | candidates |
+|---|---|
+| `h264` | `cuda` |
+| `hevc` | `cuda`, `amf`, `qsv`, `videotoolbox` |
+| `av1` | `cuda`, `amf`, `qsv` |
+
+H.264 lists only `cuda` because QSV, AMF and VideoToolbox H.264 stay on libx264
+(§2), so probing them would cost time for nothing. Candidates are further
+limited by platform: `cuda`/`amf`/`qsv` on Windows and Linux, `videotoolbox` on
+macOS only.
 
 Steps:
 
-1. Return the in-process cached value for this ffmpeg fingerprint if present.
+1. Return the in-process cached value for this (ffmpeg fingerprint, codec) if
+   present.
 2. Return the on-disk cached value if it is valid (see §3).
-3. Otherwise probe candidates in priority order **cuda → amf → qsv →
-   videotoolbox** and stop at the first success. Discrete GPUs come first
-   because a machine can have both an Intel iGPU and an NVIDIA/AMD dGPU, and the
-   discrete encoder is normally faster.
-   - `cuda`, `amf`, `qsv`: the backend's `hevc_*` encoder must appear in the
-     `-encoders` listing (cheap filter, reuses `_get_encoder_listing`) **and** a
+3. Otherwise probe the codec's candidates in order and stop at the first
+   success:
+   - `cuda`, `amf`, `qsv`: the encoder `<codec>_<nvenc|amf|qsv>` must appear in
+     the `-encoders` listing (cheap filter via `encoder_available`) **and** a
      trial encode must exit 0:
-     `ffmpeg -v quiet -f lavfi -i color=black:size=256x144:duration=0.04 -frames:v 1 -c:v <encoder> -f null -`
+     `ffmpeg -hide_banner -v quiet -f lavfi -i color=black:size=256x144:duration=0.04 -frames:v 1 -c:v <encoder> -f null -`
      with a 10 s timeout.
    - `videotoolbox`: the existing `check_videotoolbox_available` logic (macOS
      only, listing-based, no trial encode — it has no false positives).
 4. Store the result, including `None`, in both caches.
 
+Probing is lazy: an H.264 run probes only NVENC (~50 ms); HEVC and AV1 are
+probed the first time they are requested.
+
 New public function:
 
 ```python
-def invalidate_hardware_backend_cache(ffmpeg_path: Optional[str] = None) -> None
+def invalidate_hardware_backend_cache(codec: str, ffmpeg_path: Optional[str] = None) -> None
 ```
 
-Clears the in-process entry and removes the on-disk key.
+Clears that codec's in-process entry and removes it from the on-disk entry.
 
-`check_cuda_available` and `check_videotoolbox_available` stay as thin wrappers
-(`detect_hardware_backend(path) == "cuda"` / `== "videotoolbox"`) so external
-callers keep working and inherit the corrected detection.
+`check_cuda_available(ffmpeg_path)` stays as a thin wrapper,
+`detect_hardware_backend("h264", ffmpeg_path) == "cuda"`, so external callers
+keep working and inherit the corrected detection. `check_videotoolbox_available`
+keeps its listing logic unchanged; detection calls it.
 
 ### 2. Command building
 
 `build_video_commands` replaces `cuda_available` and `videotoolbox_available`
-with `hardware_backend: Optional[str] = None`.
+with `hardware_backend: Optional[str] = None` — the value `detect_hardware_backend`
+returned for the codec being encoded.
+
+A new public helper `normalize_video_codec(value) -> str` returns `"h264"`,
+`"hevc"` or `"av1"` (unknown values map to `"h264"`, matching today's inline
+normalisation in `build_video_commands`), so the pipeline and the command
+builder agree on which codec was probed.
 
 - `-hwaccel cuda -hwaccel_output_format cuda` is added only for `"cuda"`
   (unchanged condition: not in small mode). QSV and AMF decode on the CPU,
@@ -178,28 +211,36 @@ Stored in the shared `settings.json` (`config.determine_config_path()`):
 
 ```json
 "hardware_backend": {
-  "backend": "qsv",
-  "checked_at": 1791590400,
-  "ffmpeg": {"path": "C:\\...\\ffmpeg.exe", "size": 123456789, "mtime": 1767000000}
+  "ffmpeg": {"path": "C:\\...\\ffmpeg.exe", "size": 123456789, "mtime": 1767000000},
+  "codecs": {
+    "hevc": {"backend": "qsv", "checked_at": 1791590400},
+    "av1": {"backend": "qsv", "checked_at": 1791590400}
+  }
 }
 ```
 
-- `backend` may be `null`; a GPU-less machine is cached too.
-- `checked_at` is a Unix timestamp in seconds.
 - `ffmpeg` is the fingerprint of the resolved binary: absolute path, size and
-  integer mtime.
+  integer mtime. When the binary cannot be stat'ed (e.g. a bare `ffmpeg` name),
+  there is no fingerprint and only the in-process cache is used.
+- `codecs` holds one record per probed codec; `backend` may be `null`, so a
+  GPU-less machine is cached too. `checked_at` is a Unix timestamp in seconds.
 
-The entry is valid only when the fingerprint matches the current binary, the
-age is under **30 days**, and `backend` is `null` or one of the four known
-names. Anything else — missing key, wrong shape, unknown backend — means
-re-detect.
+A codec record is valid only when the entry's fingerprint matches the current
+binary, the record's age is under **30 days**, and `backend` is `null` or one of
+the four known names. Anything else — missing key, wrong shape, unknown backend
+— means re-detect that codec.
+
+The key name lives in `config.py` as `HARDWARE_BACKEND_KEY = "hardware_backend"`
+so both `ffmpeg.py` and `gui/preferences.py` import it without a GUI dependency.
 
 Writing:
 
 1. Read the file with `read_settings_strict`.
 2. On `SettingsReadError`, do not write; keep the in-process value only, so a
    transient lock or partial write never clobbers other keys.
-3. Otherwise set the one key and write with `save_settings`.
+3. If the stored fingerprint differs from the current one, start a fresh entry
+   (dropping other codecs' records, which belonged to the old binary).
+4. Set or remove the one codec record and write with `save_settings`.
 
 `gui/preferences.py` adds `"hardware_backend"` to `_EXTERNALLY_OWNED_KEYS`, so
 `GUIPreferences.save()` re-reads the key from disk instead of overwriting it
@@ -214,17 +255,19 @@ server may run several jobs).
 - `PipelineDependencies` replaces `check_cuda_available` and
   `check_videotoolbox_available` with `detect_hardware_backend` and adds
   `invalidate_hardware_backend_cache`.
-- `speed_up_video` calls `detect_hardware_backend(ffmpeg_path)` once and passes
-  `hardware_backend=` to `build_video_commands`.
+- `speed_up_video` calls `detect_hardware_backend(codec, ffmpeg_path)` once,
+  with `codec = normalize_video_codec(options.video_codec)`, and skips detection
+  entirely for `mp3` output. It passes `hardware_backend=` to
+  `build_video_commands`.
 - Display names come from one mapping:
   `{"cuda": "CUDA", "amf": "AMF", "qsv": "QSV", "videotoolbox": "VideoToolbox"}`,
   feeding the existing `Processing on: GPU (...)`, `Encoder plan` and
   `"<backend> encoding failed"` logs and `ProcessingResult.gpu_backend`.
 - The audio-extraction `hwaccel` list stays `cuda`-only.
 - When the primary GPU command raises `CalledProcessError` and the CPU fallback
-  runs, call `invalidate_hardware_backend_cache(ffmpeg_path)` so the next run
-  re-probes. A stale "GPU present" entry therefore costs at most one failed
-  attempt.
+  runs, call `invalidate_hardware_backend_cache(codec, ffmpeg_path)` so the next
+  run re-probes that codec. A stale "GPU present" record therefore costs at most
+  one failed attempt.
 
 ### 5. Error handling
 
@@ -249,7 +292,10 @@ immediately. This trade-off was accepted in brainstorming.
 
 - Detection order and short-circuit: with stubbed process runs, the first
   successful candidate wins and later ones are not probed.
-- A backend whose `hevc_*` encoder is absent from `-encoders` is not trial-run.
+- Per-codec candidates: H.264 probes only NVENC; AV1 never probes VideoToolbox;
+  a machine whose `av1_qsv` trial fails reports `None` for AV1 and `"qsv"` for
+  HEVC; `mp3` returns `None` without running FFmpeg.
+- A backend whose `<codec>_*` encoder is absent from `-encoders` is not trial-run.
 - A trial encode that times out or exits non-zero is treated as unavailable.
 - Cache: a valid on-disk entry is used without running ffmpeg; a changed
   fingerprint, an entry older than 30 days, an unknown backend name and a
