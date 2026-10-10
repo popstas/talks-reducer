@@ -557,14 +557,19 @@ def _trial_encode(ffmpeg_path: str, encoder: str) -> Optional[bool]:
 def _probe_backend(backend: str, codec: str, ffmpeg_path: str) -> Optional[bool]:
     """Return whether *backend* can encode *codec*: ``True``, ``False`` or ``None``.
 
-    ``None`` means inconclusive, because the encoder listing could not be
-    obtained or the trial encode could not run. A listed encoder that fails its
-    trial is a conclusive ``False``.
+    ``None`` means inconclusive, because the encoder listing or, for VideoToolbox,
+    the ``-hwaccels`` listing could not be obtained, or the trial encode could not
+    run. A listed encoder that fails its trial is a conclusive ``False``.
     """
 
     if not _backend_supported_on_platform(backend):
         return False
     if backend == "videotoolbox":
+        if (
+            _probe_ffmpeg_output([ffmpeg_path, "-hide_banner", "-hwaccels"]) is None
+            or _get_encoder_listing(ffmpeg_path) is None
+        ):
+            return None
         return check_videotoolbox_available(ffmpeg_path)
     if _get_encoder_listing(ffmpeg_path) is None:
         return None

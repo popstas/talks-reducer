@@ -395,6 +395,28 @@ def test_detect_hardware_backend_uses_videotoolbox_on_macos(monkeypatch):
     assert trials == []
 
 
+def test_detect_hardware_backend_failed_videotoolbox_probe_is_not_persisted(
+    monkeypatch, tmp_path
+):
+    """A failed ``-hwaccels`` probe says nothing about VideoToolbox, so it must not persist."""
+
+    binary = _fake_ffmpeg_binary(tmp_path)
+    monkeypatch.setattr(ffmpeg.sys, "platform", "darwin")
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    def fake_run(args, **kwargs):
+        if "-hwaccels" in args:
+            return SimpleNamespace(stdout="", returncode=1)
+        if "-encoders" in args:
+            return SimpleNamespace(stdout=" V..... hevc_videotoolbox", returncode=0)
+        raise AssertionError(f"Unexpected args: {args}")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    assert not ffmpeg._hardware_cache_path().exists()
+
+
 def test_detect_hardware_backend_timeout_is_not_persisted(monkeypatch, tmp_path):
     """A timed-out trial may be a slow driver start, so it must not stick for 30 days."""
 
