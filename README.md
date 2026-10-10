@@ -16,7 +16,9 @@ re-encoding them to much smaller files.
 - **Speeds up the silence** — no montage editing.
 - **Shrinks the file** — typically 8–10× smaller, web-friendly.
 - **Fast** — in-memory audio/video processing, auto GPU encoding (NVENC on
-  NVIDIA, AMF on AMD, Quick Sync on Intel, VideoToolbox for HEVC on macOS).
+  NVIDIA, AMF on AMD and Quick Sync on Intel for HEVC/AV1, VideoToolbox for HEVC on
+  macOS). Detection results are cached in `settings.json`; see
+  [Hardware encoding](docs/cli.md#hardware-encoding) to reset them.
 - **Extract audio** — export an audio-only `.mp3` instead of video.
 - **Simple mode** — one drop zone, minimum settings.
 - **Named presets** — save a settings bundle once, apply it on every surface.

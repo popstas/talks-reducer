@@ -185,11 +185,14 @@ version supports it:
 | | optimized | fast |
 |---|---|---|
 | `hevc_amf` | `-quality balanced -rc cqp -qp_i 26 -qp_p 28` | `-quality speed -rc cqp -qp_i 26 -qp_p 28` |
-| `av1_amf` | `-quality balanced -rc cqp -qp_i 30 -qp_p 32` | `-quality speed -rc cqp -qp_i 30 -qp_p 32` |
+| `av1_amf` | `-quality balanced -rc cqp -qp_i 120 -qp_p 128` | `-quality speed -rc cqp -qp_i 120 -qp_p 128` |
 
-The QP values mirror the NVENC fast-profile scale already used in the project
-(`-qp 28` for HEVC, `-qp 32` for AV1). A code comment next to the table states
-that the AMF values are not calibrated on real hardware.
+The HEVC values follow the NVENC fast-profile QP scale already used in the
+project (0–51). `av1_amf` takes `-qp_i`/`-qp_p` on a 0–255 q-index scale
+(`ffmpeg -h encoder=av1_amf`), so its values are anchored to the CPU AV1
+default instead: libaom `crf 32` is roughly q-index 128, with the same
+8-step gap between I and P frames. A code comment next to the table states
+that all AMF values are provisional and not calibrated on AMD hardware.
 
 #### 2.1 QSV calibration
 
@@ -226,8 +229,8 @@ Stored in the shared `settings.json` (`config.determine_config_path()`):
 - `codecs` holds one record per probed codec; `backend` may be `null`, so a
   GPU-less machine is cached too. `checked_at` is a Unix timestamp in seconds.
   Inconclusive probes (a trial that times out or cannot be spawned, or a
-  failed encoder listing) stay in memory only and are re-checked next run;
-  a codec is written to disk only when every candidate probed conclusively.
+  failed encoder listing) are never written to disk; a codec is written only
+  when every candidate probed conclusively.
 
 A codec record is valid only when the entry's fingerprint matches the current
 binary, the record's age is under **30 days**, and `backend` is `null` or one of
@@ -252,7 +255,11 @@ with its stale in-memory snapshot.
 
 The in-process cache is a module-level dict keyed by the fingerprint, guarded
 by a `threading.Lock` (the GUI runs the pipeline on a worker thread and the
-server may run several jobs).
+server may run several jobs). A conclusive answer stays in it for the life of
+the process. An inconclusive one carries an expiry and is reused for at most
+`HARDWARE_INCONCLUSIVE_RETRY_SECONDS` (10 minutes); after that the next
+`detect_hardware_backend` call probes again, so a slow first driver start
+cannot pin a long-running GUI or tray server to the CPU until restart.
 
 ### 4. Pipeline (`talks_reducer/pipeline.py`)
 
@@ -270,8 +277,12 @@ server may run several jobs).
 - The audio-extraction `hwaccel` list stays `cuda`-only.
 - When the primary GPU command raises `CalledProcessError` and the CPU fallback
   runs, call `invalidate_hardware_backend_cache(codec, ffmpeg_path)` so the next
-  run re-probes that codec. A stale "GPU present" record therefore costs at most
-  one failed attempt.
+  run re-probes that codec. A record that went stale (a removed eGPU, a broken
+  driver) therefore costs one failed attempt. A GPU that passes the one-frame
+  trial but keeps failing real encodes (for example an unsupported resolution or
+  pixel format) is different: every job tries the GPU, falls back, invalidates,
+  re-probes and rewrites `settings.json`. That is no worse than the old CUDA
+  behaviour, but it is not bounded to one failure.
 
 ### 5. Error handling
 
@@ -283,6 +294,8 @@ Detection and caching must never block a conversion:
 | Settings file unreadable | Detect, keep result in memory, skip the write |
 | Settings write fails | Keep result in memory |
 | Trial encode times out (10 s) or exits non-zero | Treat the backend as unavailable, try the next |
+| Settings file is not valid UTF-8 | Same as unreadable: `SettingsReadError`, no write |
+| Probe is inconclusive | Use the answer for up to 10 minutes in memory, never persist it |
 | ffmpeg binary missing during fingerprinting | Treat as cache miss; detection then fails as it does today |
 | GPU encode fails during a real run | Existing CPU fallback, then invalidate the cache |
 
@@ -303,7 +316,8 @@ immediately. This trade-off was accepted in brainstorming.
 - A trial encode that exits non-zero is treated as unavailable. A trial that
   times out or cannot be spawned, or a failed `-encoders` listing, is
   inconclusive: it counts as unavailable for that run, and the answer is
-  kept out of the disk cache.
+  kept out of the disk cache and reused from memory for at most 10 minutes
+  (a conclusive answer is never re-probed in-process).
 - Cache: a valid on-disk entry is used without running ffmpeg; a changed
   fingerprint, an entry older than 30 days, an unknown backend name and a
   malformed entry each trigger re-detection; `None` is cached;
@@ -372,8 +386,8 @@ the stated height, scored against the same source scaled to that height with
 
 Selection rule: the `-global_quality` whose 720p VMAF is closest to 91.0 (ties
 within 0.2 take the higher value). Chosen: **hevc_qsv 29** (91.04) and
-**av1_qsv 31** (90.96); the next-closest values are 0.7 and 1.0 VMAF away, so
-no tie-break applied. Both stay above the VMAF 88 floor at 480p (91.23 and
+**av1_qsv 31** (90.96); the next-closest values (hevc 28, av1 30) are 0.70 and
+0.66 VMAF from the 91.0 target, so no tie-break applied. Both stay above the VMAF 88 floor at 480p (91.23 and
 91.31).
 
 Keyframe check (`-g 1800 -keyint_min 1800 -force_key_frames
@@ -383,6 +397,17 @@ Keyframe check (`-g 1800 -keyint_min 1800 -force_key_frames
 - `hevc_qsv`: a keyframe at 0 s only. `-force_key_frames` is ignored (it is
   honoured once `-forced_idr 1` is added).
 
-Because `hevc_qsv` ignores it, `_table_encoder_args` drops the
-`-force_key_frames` argument for the whole QSV backend and relies on
-`-g`/`-keyint_min`.
+Final-review measurements (Core Ultra 5 125H, gyan 8.0.1):
+
+- With `-g 300` only, `hevc_qsv` emits an IDR every GOP.
+- With a file input through the `select`/`setpts`/`scale` chain, `hevc_qsv`
+  ignores `-force_key_frames`; it honours it with `-forced_idr 1`. With a
+  lavfi `testsrc2` input it honours it even without `-forced_idr`, so the
+  behaviour depends on the input.
+- `av1_qsv` honours `-force_key_frames`.
+- On the CPU path, `libx265` turns forced frames into non-IRAP I slices, so its
+  seek points also come from `-g`.
+
+Decision: `_table_encoder_args` keeps dropping `-force_key_frames` for the whole
+QSV backend and relies on `-g`/`-keyint_min`, which land on the same frames for
+the constant-frame-rate pipeline output.
