@@ -267,10 +267,13 @@ HARDWARE_BACKEND_LABELS = {
     "videotoolbox": "VideoToolbox",
 }
 HARDWARE_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+HARDWARE_INCONCLUSIVE_RETRY_SECONDS = 10 * 60
 
-# (fingerprint-or-path, codec) -> backend. Guarded by the lock because the GUI
-# renders on a worker thread and the server can run several jobs at once.
-_HARDWARE_BACKEND_CACHE: dict[tuple, Optional[str]] = {}
+# (fingerprint-or-path, codec) -> (backend, expires_at). ``expires_at`` is
+# ``None`` for a conclusive answer, which lasts the whole process, and a
+# ``time.time()`` deadline for an inconclusive one. Guarded by the lock because
+# the GUI renders on a worker thread and the server can run several jobs at once.
+_HARDWARE_BACKEND_CACHE: dict[tuple, Tuple[Optional[str], Optional[float]]] = {}
 _HARDWARE_BACKEND_LOCK = threading.Lock()
 
 
@@ -374,6 +377,7 @@ def _probe_ffmpeg_output(args: List[str]) -> Optional[str]:
     try:
         result = subprocess.run(
             args,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=5,
@@ -519,6 +523,8 @@ def _trial_encode(ffmpeg_path: str, encoder: str) -> Optional[bool]:
     Returns ``True`` when FFmpeg exits 0, ``False`` when it exits non-zero, and
     ``None`` when the trial could not run to completion (a timeout or a spawn
     error). ``None`` is inconclusive: a slow first driver start looks the same.
+    Standard input is closed so a killed probe cannot leave a terminal without
+    echo.
 
     The encoder listing is not a capability signal: the gyan.dev builds that
     ``static-ffmpeg`` bundles list every NVENC, AMF and QSV encoder whatever GPU
@@ -545,6 +551,7 @@ def _trial_encode(ffmpeg_path: str, encoder: str) -> Optional[bool]:
                 "null",
                 "-",
             ],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=_TRIAL_ENCODE_TIMEOUT_SECONDS,
             creationflags=creationflags,
@@ -622,8 +629,10 @@ def detect_hardware_backend(
     with a one-frame trial encode. The answer is cached per codec in memory, and
     in ``settings.json`` for :data:`HARDWARE_CACHE_MAX_AGE_SECONDS` keyed by the
     FFmpeg binary's fingerprint, but only when every probe was conclusive. A
-    timed-out trial or a failed encoder listing is inconclusive: it stays in
-    memory and is re-checked by the next run. Detection is per codec because
+    timed-out trial or a failed encoder listing is inconclusive: it is never
+    written to disk and is reused from memory for at most
+    :data:`HARDWARE_INCONCLUSIVE_RETRY_SECONDS`, so a long-lived GUI or server
+    does not stay on the CPU after one slow driver start. Detection is per codec because
     support differs: Intel before Arc, AMD before RDNA3 and NVIDIA before RTX 40
     encode HEVC but not AV1. Non-video codecs such as ``mp3`` return ``None``
     without probing.
@@ -639,18 +648,25 @@ def detect_hardware_backend(
     memory_key = _hardware_memory_key(ffmpeg_path, fingerprint, codec)
 
     with _HARDWARE_BACKEND_LOCK:
-        if memory_key in _HARDWARE_BACKEND_CACHE:
-            return _HARDWARE_BACKEND_CACHE[memory_key]
-
         now = time.time()
+        remembered = _HARDWARE_BACKEND_CACHE.get(memory_key)
+        if remembered is not None:
+            backend, expires_at = remembered
+            if expires_at is None or now < expires_at:
+                return backend
+            del _HARDWARE_BACKEND_CACHE[memory_key]
+
         if fingerprint is not None:
             hit, cached = _read_cached_backend(fingerprint, codec, now)
             if hit:
-                _HARDWARE_BACKEND_CACHE[memory_key] = cached
+                _HARDWARE_BACKEND_CACHE[memory_key] = (cached, None)
                 return cached
 
         backend, conclusive = _first_working_backend(candidates, codec, ffmpeg_path)
-        _HARDWARE_BACKEND_CACHE[memory_key] = backend
+        _HARDWARE_BACKEND_CACHE[memory_key] = (
+            backend,
+            None if conclusive else now + HARDWARE_INCONCLUSIVE_RETRY_SECONDS,
+        )
         if fingerprint is not None and conclusive:
             _write_cached_backend(
                 fingerprint, codec, {"backend": backend, "checked_at": int(now)}
@@ -1102,9 +1118,11 @@ class _HardwareEncoderSpec(NamedTuple):
 # 5 125H (Arc iGPU) over a 1080p60 screen recording scaled to 720p, and checked
 # at 480p; see "Calibration results" in
 # docs/superpowers/specs/2026-10-10-qsv-amf-hardware-encoding-design.md.
-# The AMF values mirror the NVENC fast-profile QP scale set in
-# resolve_encoder_plan below and are NOT calibrated on real AMD hardware. CQP is
-# used because every VCN generation supports it, unlike QVBR.
+# The AMF values are provisional and NOT calibrated on real AMD hardware. The
+# HEVC pair follows the NVENC fast-profile QP scale set in resolve_encoder_plan
+# below (0-51). The AV1 pair uses the encoder's own 0-255 q-index scale, anchored
+# to the CPU AV1 default: libaom crf 32 is roughly q-index 128. CQP is used
+# because every VCN generation supports it, unlike QVBR.
 _HARDWARE_ENCODER_ARGS: dict[Tuple[str, str], _HardwareEncoderSpec] = {
     ("qsv", "hevc"): _HardwareEncoderSpec(
         "hevc_qsv",
@@ -1123,8 +1141,8 @@ _HARDWARE_ENCODER_ARGS: dict[Tuple[str, str], _HardwareEncoderSpec] = {
     ),
     ("amf", "av1"): _HardwareEncoderSpec(
         "av1_amf",
-        optimized=("-quality balanced", "-rc cqp", "-qp_i 30", "-qp_p 32"),
-        fast=("-quality speed", "-rc cqp", "-qp_i 30", "-qp_p 32"),
+        optimized=("-quality balanced", "-rc cqp", "-qp_i 120", "-qp_p 128"),
+        fast=("-quality speed", "-rc cqp", "-qp_i 120", "-qp_p 128"),
     ),
 }
 

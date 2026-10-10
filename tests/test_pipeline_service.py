@@ -917,6 +917,32 @@ def test_speed_up_video_uses_cuda_hwaccel_only_for_cuda(monkeypatch, tmp_path):
     assert hwaccels == [[]]
 
 
+def test_speed_up_video_decodes_extraction_on_gpu_for_cuda(monkeypatch, tmp_path):
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+    options = ProcessingOptions(
+        input_file=input_path,
+        temp_folder=tmp_path / "temp",
+        output_file=tmp_path / "output.mp4",
+        video_codec="hevc",
+    )
+    hwaccels: List[list] = []
+
+    def fake_extract(_input, _wav, _rate, _bitrate, hwaccel, **_kwargs):
+        hwaccels.append(list(hwaccel))
+        return "extract"
+
+    dependencies = replace(
+        _stub_pipeline_externals(monkeypatch, options),
+        detect_hardware_backend=lambda _codec, _path: "cuda",
+        build_extract_audio_command=fake_extract,
+    )
+
+    speed_up_video(options, reporter=DummyReporter(), dependencies=dependencies)
+
+    assert hwaccels == [["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]]
+
+
 def test_speed_up_video_skips_audio_when_speeds_neutral(monkeypatch, tmp_path):
     """When both speeds are 1.0, the audio processing branch is bypassed."""
 

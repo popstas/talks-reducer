@@ -484,6 +484,69 @@ def test_detect_hardware_backend_skips_persisting_after_inconclusive_candidate(
     assert trials == ["hevc_nvenc", "hevc_amf", "hevc_qsv"]
 
 
+def _patch_clock(monkeypatch, start=1_000_000.0):
+    """Replace ``ffmpeg.time`` with a controllable clock; return its mutable cell."""
+
+    clock = [start]
+    monkeypatch.setattr(ffmpeg, "time", SimpleNamespace(time=lambda: clock[0]))
+    return clock
+
+
+def test_inconclusive_result_is_reused_within_retry_window(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    clock = _patch_clock(monkeypatch)
+    trials = _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, timeouts=ALL_HEVC)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    clock[0] += ffmpeg.HARDWARE_INCONCLUSIVE_RETRY_SECONDS - 1
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+
+    assert len(trials) == 3
+
+
+def test_inconclusive_result_is_reprobed_after_retry_window(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    clock = _patch_clock(monkeypatch)
+    trials = _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, timeouts=ALL_HEVC)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    clock[0] += ffmpeg.HARDWARE_INCONCLUSIVE_RETRY_SECONDS
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+
+    assert len(trials) == 6
+    assert not ffmpeg._hardware_cache_path().exists()
+
+
+def test_conclusive_result_is_not_reprobed_after_retry_window(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    clock = _patch_clock(monkeypatch)
+    trials = _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, working=("hevc_qsv",))
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+    clock[0] += 10 * ffmpeg.HARDWARE_INCONCLUSIVE_RETRY_SECONDS
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+
+    assert len(trials) == 3
+
+
+def test_probe_subprocesses_do_not_inherit_stdin(monkeypatch):
+    """A killed probe that shared the terminal's stdin can leave a tty without echo."""
+
+    calls: List[dict] = []
+
+    def fake_run(args, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+
+    ffmpeg._trial_encode("/usr/bin/ffmpeg", "hevc_qsv")
+    ffmpeg._probe_ffmpeg_output(["/usr/bin/ffmpeg", "-encoders"])
+
+    assert len(calls) == 2
+    assert all(call.get("stdin") is ffmpeg.subprocess.DEVNULL for call in calls)
+
+
 def test_detect_hardware_backend_persists_conclusive_success(monkeypatch, tmp_path):
     binary = _fake_ffmpeg_binary(tmp_path)
     _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, working=("hevc_qsv",))
@@ -1756,15 +1819,16 @@ def test_build_video_commands_hevc_amf_optimized(monkeypatch):
 
 
 def test_build_video_commands_av1_amf_fast(monkeypatch):
-    command, _fallback, use_gpu = _build_with_backend(
+    command, fallback, use_gpu = _build_with_backend(
         monkeypatch, "amf", codec="av1", optimize=False
     )
 
     assert "-c:v av1_amf" in command
     assert "-quality speed" in command
-    assert "-qp_i 30" in command
-    assert "-qp_p 32" in command
+    assert "-qp_i 120" in command
+    assert "-qp_p 128" in command
     assert use_gpu
+    assert fallback is not None and "-c:v libaom-av1" in fallback
 
 
 @pytest.mark.parametrize("backend", ["qsv", "amf"])
