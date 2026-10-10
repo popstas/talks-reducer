@@ -139,10 +139,22 @@ Talks Reducer relies on its built-in volume thresholding to detect speech. Adjus
 `--silent_threshold` if you need to fine-tune when segments count as silence. Dropping the
 optional Silero VAD integration keeps the install lightweight and avoids pulling in PyTorch.
 
-When CUDA-capable hardware is available the pipeline leans on GPU encoders to keep export
-times low, but it still runs great on CPUs.
+The pipeline picks a hardware encoder automatically, trying NVIDIA NVENC, then AMD AMF,
+then Intel Quick Sync (QSV), and still runs great on CPUs. Each candidate is checked by
+encoding a single tiny frame, because the bundled FFmpeg lists NVENC, AMF and QSV encoders
+on every machine whether or not the GPU exists. The check runs per codec — older GPUs
+encode HEVC but not AV1 — and its result is cached in `settings.json` under
+`hardware_backend` for 30 days, or until the FFmpeg binary changes. A GPU encode that fails
+falls back to the CPU and clears that codec's cache entry; delete the `hardware_backend`
+key to force a fresh check after installing a new GPU or driver.
 
-On macOS the pipeline uses Apple VideoToolbox for `--codec hevc` only, and falls back to
+AMF and QSV handle `--video-codec hevc` and `--video-codec av1` only. H.264 stays on `libx264` with
+them: on an Intel Core Ultra 5 125H, `h264_qsv` encoded a 1080p60 recording at 390 fps
+with a 55% larger file, while `libx264 -preset veryfast` reached 504 fps. HEVC and AV1 are
+the reverse — QSV was 3.6× faster than `libx265` and 15× faster than `libaom` while
+producing smaller files. The AMF settings are not yet calibrated on AMD hardware.
+
+On macOS the pipeline uses Apple VideoToolbox for `--video-codec hevc` only, and falls back to
 `libx265` if the hardware encoder rejects the job. H.264 stays on `libx264` even though
 `h264_videotoolbox` exists: Apple's media engine tops out near 290 fps at 1080p regardless
 of the requested quality, while `libx264 -preset veryfast` spreads across the CPU cores and
