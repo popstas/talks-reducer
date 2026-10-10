@@ -146,13 +146,20 @@ on every machine whether or not the GPU exists. The check runs per codec — old
 encode HEVC but not AV1 — and its result is cached in `settings.json` under
 `hardware_backend` for 30 days, or until the FFmpeg binary changes. A GPU encode that fails
 falls back to the CPU and clears that codec's cache entry; delete the `hardware_backend`
-key to force a fresh check after installing a new GPU or driver.
+key to force a fresh check after installing a new GPU or driver. An inconclusive check — a
+timed-out trial encode, a failed spawn, or a failed encoder listing — is kept in memory only
+and repeated on the next run, so a transient failure never pins a machine to the CPU.
 
-AMF and QSV handle `--video-codec hevc` and `--video-codec av1` only. H.264 stays on `libx264` with
-them: on an Intel Core Ultra 5 125H, `h264_qsv` encoded a 1080p60 recording at 390 fps
-with a 55% larger file, while `libx264 -preset veryfast` reached 504 fps. HEVC and AV1 are
-the reverse — QSV was 3.6× faster than `libx265` and 15× faster than `libaom` while
-producing smaller files. The AMF settings are not yet calibrated on AMD hardware.
+AMF and QSV handle `--video-codec hevc` and `--video-codec av1` only. H.264 stays on
+`libx264` with them: on an Intel Core Ultra 5 125H, `h264_qsv` encoded a 1080p60 recording
+at 390 fps with a 55% larger file, while `libx264 -preset veryfast` reached 504 fps. HEVC
+and AV1 are the reverse — QSV was 3.6× faster than `libx265` and 15× faster than `libaom`
+while producing smaller files.
+
+QSV uses `-global_quality 29` for HEVC and `31` for AV1, calibrated to a VMAF of about 91
+at 720p, the level the CPU defaults reach. `hevc_qsv` ignores `-force_key_frames`, so the
+QSV backend drops that flag and takes its keyframes from `-g`/`-keyint_min` at the same
+interval. The AMF settings are uncalibrated CQP defaults, not yet tuned on AMD hardware.
 
 On macOS the pipeline uses Apple VideoToolbox for `--video-codec hevc` only, and falls back to
 `libx265` if the hardware encoder rejects the job. H.264 stays on `libx264` even though
