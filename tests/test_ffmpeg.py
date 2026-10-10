@@ -1348,6 +1348,40 @@ def test_build_video_commands_av1_cuda(monkeypatch):
     assert use_cuda
 
 
+def test_build_video_commands_av1_cuda_fast_uses_qindex_scale(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    def fake_encoder_available(name: str, ffmpeg_path: Optional[str] = None) -> bool:
+        return name in {"av1_nvenc", "libaom-av1"}
+
+    monkeypatch.setattr(ffmpeg, "encoder_available", fake_encoder_available)
+
+    command, fallback, use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        hardware_backend="cuda",
+        optimize=False,
+        small=False,
+        frame_rate=30.0,
+        video_codec="av1",
+    )
+
+    assert "-c:v av1_nvenc" in command
+    assert "-preset p1" in command
+    assert "-rc constqp" in command
+    # av1_nvenc -qp is an AV1 q-index (0..255), not the 0..51 H.26x scale.
+    assert "-qp 128" in command
+    assert "-qp 32" not in command
+    assert "-g 900" not in command
+    assert fallback is not None
+    assert "-c:v libaom-av1" in fallback
+    assert "-crf 38" in fallback
+    assert "-cpu-used 6" in fallback
+    assert use_cuda
+
+
 def test_build_video_commands_av1_cpu(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
     monkeypatch.setattr(

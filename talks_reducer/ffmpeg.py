@@ -1299,6 +1299,13 @@ def build_video_commands(
                 extra_keyframe_args=extra_keyframe_args,
                 ffmpeg_path=ffmpeg_path,
             )
+            # av1_nvenc quality scales differ from hevc/h264_nvenc (0-51):
+            # -qp is an AV1 q-index (-1..255) and -cq is 0-63, the same scale
+            # as libaom -crf. The old -qp 32 was therefore near-lossless and
+            # produced huge files on RTX 40+ GPUs. -qp uses the same anchor as
+            # the AMF AV1 pair in _HARDWARE_ENCODER_ARGS (libaom crf 32 is
+            # roughly q-index 128); -cq 36 is already on its 0-63 scale. Both
+            # values are NOT calibrated on real NVIDIA hardware.
             if backend == "cuda" and encoder_available(
                 "av1_nvenc", ffmpeg_path=ffmpeg_path
             ):
@@ -1308,7 +1315,7 @@ def build_video_commands(
                         "-c:v av1_nvenc",
                         "-preset p1",
                         "-rc constqp",
-                        "-qp 32",
+                        "-qp 128",
                     ] + list(extra_keyframe_args)
                 else:
                     primary_args = [
