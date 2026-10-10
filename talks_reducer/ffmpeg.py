@@ -1057,6 +1057,62 @@ def build_audio_only_command(
     return " ".join(command_parts)
 
 
+class _HardwareEncoderSpec(NamedTuple):
+    """FFmpeg arguments for one hardware encoder, per quality profile."""
+
+    encoder: str
+    optimized: Tuple[str, ...]
+    fast: Tuple[str, ...]
+
+
+# QSV quality was calibrated to VMAF ~91 — the level the CPU H.264/H.265
+# defaults reach — on a 1080p60 screen recording scaled to 720p; see
+# "Calibration results" in
+# docs/superpowers/specs/2026-10-10-qsv-amf-hardware-encoding-design.md.
+# The AMF values mirror the NVENC fast-profile QP scale used above and are NOT
+# calibrated on real AMD hardware. CQP is used because every VCN generation
+# supports it, unlike QVBR.
+_HARDWARE_ENCODER_ARGS: dict[Tuple[str, str], _HardwareEncoderSpec] = {
+    ("qsv", "hevc"): _HardwareEncoderSpec(
+        "hevc_qsv",
+        optimized=("-preset medium", "-global_quality 28"),
+        fast=("-preset veryfast", "-global_quality 28"),
+    ),
+    ("qsv", "av1"): _HardwareEncoderSpec(
+        "av1_qsv",
+        optimized=("-preset medium", "-global_quality 32"),
+        fast=("-preset veryfast", "-global_quality 32"),
+    ),
+    ("amf", "hevc"): _HardwareEncoderSpec(
+        "hevc_amf",
+        optimized=("-quality balanced", "-rc cqp", "-qp_i 26", "-qp_p 28"),
+        fast=("-quality speed", "-rc cqp", "-qp_i 26", "-qp_p 28"),
+    ),
+    ("amf", "av1"): _HardwareEncoderSpec(
+        "av1_amf",
+        optimized=("-quality balanced", "-rc cqp", "-qp_i 30", "-qp_p 32"),
+        fast=("-quality speed", "-rc cqp", "-qp_i 30", "-qp_p 32"),
+    ),
+}
+
+
+def _table_encoder_args(
+    backend: Optional[str],
+    codec: str,
+    *,
+    profile: str,
+    extra_keyframe_args: Sequence[str],
+    ffmpeg_path: Optional[str],
+) -> Optional[List[str]]:
+    """Return QSV/AMF encoder flags for *codec*, or ``None`` when not applicable."""
+
+    spec = _HARDWARE_ENCODER_ARGS.get((backend or "", codec))
+    if spec is None or not encoder_available(spec.encoder, ffmpeg_path=ffmpeg_path):
+        return None
+    profile_args = spec.fast if profile == "fast" else spec.optimized
+    return [f"-c:v {spec.encoder}", *profile_args, *extra_keyframe_args]
+
+
 def build_video_commands(
     input_file: str,
     audio_file: Optional[str],
@@ -1064,8 +1120,7 @@ def build_video_commands(
     output_file: str,
     *,
     ffmpeg_path: Optional[str] = None,
-    cuda_available: bool,
-    videotoolbox_available: bool = False,
+    hardware_backend: Optional[str] = None,
     optimize: bool,
     small: bool,
     frame_rate: Optional[float] = None,
@@ -1083,10 +1138,10 @@ def build_video_commands(
             ``keep_input_audio`` is False, the video is encoded without audio.
         filter_script: Optional path to the filter script file. If None, video will be re-encoded without speed modification.
         output_file: Path to the output video file.
-        cuda_available: Whether NVENC encoders may be used for the primary command.
-        videotoolbox_available: Whether Apple VideoToolbox encoders may be used for
-            the primary command. Ignored when ``cuda_available`` is True, since a
-            machine never has both backends.
+        hardware_backend: The backend :func:`detect_hardware_backend` returned
+            for this codec (``"cuda"``, ``"amf"``, ``"qsv"``, ``"videotoolbox"``)
+            or ``None`` for the CPU. Only CUDA also decodes on the GPU; QSV and
+            AMF decode on the CPU because the filter graph runs there anyway.
         frame_rate: Optional source frame rate used to size GOP/keyframe spacing for
             the small preset when generating hardware/software encoder commands.
         keep_input_audio: When True and ``audio_file`` is None, map the audio
@@ -1098,7 +1153,7 @@ def build_video_commands(
     global_parts: List[str] = [f'"{ffmpeg_path}"', "-y"]
     hwaccel_args: List[str] = []
 
-    if cuda_available and not small:
+    if hardware_backend == "cuda" and not small:
         hwaccel_args = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
         global_parts.extend(hwaccel_args)
 
@@ -1118,9 +1173,7 @@ def build_video_commands(
     if filter_script:
         output_parts.append(f'-filter_script:v "{filter_script}"')
 
-    codec_choice = (video_codec or "h264").strip().lower()
-    if codec_choice not in {"h264", "hevc", "av1"}:
-        codec_choice = "h264"
+    codec_choice = normalize_video_codec(video_codec)
 
     video_encoder_args: List[str]
     fallback_encoder_args: List[str] = []
@@ -1147,8 +1200,7 @@ def build_video_commands(
 
     def resolve_encoder_plan(
         *,
-        prefer_cuda: bool,
-        prefer_videotoolbox: bool,
+        backend: Optional[str],
         codec: str,
         extra_keyframe_args: Sequence[str],
         profile: str,
@@ -1178,7 +1230,16 @@ def build_video_commands(
 
             primary_args = cpu_encoder_args
 
-            if prefer_cuda and encoder_available("av1_nvenc", ffmpeg_path=ffmpeg_path):
+            table_args = _table_encoder_args(
+                backend,
+                "av1",
+                profile=profile,
+                extra_keyframe_args=extra_keyframe_args,
+                ffmpeg_path=ffmpeg_path,
+            )
+            if backend == "cuda" and encoder_available(
+                "av1_nvenc", ffmpeg_path=ffmpeg_path
+            ):
                 uses_gpu = True
                 if profile == "fast":
                     primary_args = [
@@ -1198,6 +1259,10 @@ def build_video_commands(
                         "-temporal-aq 1",
                     ] + list(extra_keyframe_args)
                 fallback_args = cpu_encoder_args
+            elif table_args is not None:
+                uses_gpu = True
+                primary_args = table_args
+                fallback_args = cpu_encoder_args
         elif codec == "hevc":
             if profile == "fast":
                 cpu_encoder_args = [
@@ -1213,7 +1278,16 @@ def build_video_commands(
                 ] + list(extra_keyframe_args)
 
             primary_args = cpu_encoder_args
-            if prefer_cuda and encoder_available("hevc_nvenc", ffmpeg_path=ffmpeg_path):
+            table_args = _table_encoder_args(
+                backend,
+                "hevc",
+                profile=profile,
+                extra_keyframe_args=extra_keyframe_args,
+                ffmpeg_path=ffmpeg_path,
+            )
+            if backend == "cuda" and encoder_available(
+                "hevc_nvenc", ffmpeg_path=ffmpeg_path
+            ):
                 uses_gpu = True
                 if profile == "fast":
                     primary_args = [
@@ -1235,7 +1309,7 @@ def build_video_commands(
                         "-multipass fullres",
                     ] + list(extra_keyframe_args)
                 fallback_args = cpu_encoder_args
-            elif prefer_videotoolbox and encoder_available(
+            elif backend == "videotoolbox" and encoder_available(
                 "hevc_videotoolbox", ffmpeg_path=ffmpeg_path
             ):
                 uses_gpu = True
@@ -1246,6 +1320,10 @@ def build_video_commands(
                     extra_keyframe_args=extra_keyframe_args,
                     ffmpeg_path=ffmpeg_path,
                 )
+                fallback_args = cpu_encoder_args
+            elif table_args is not None:
+                uses_gpu = True
+                primary_args = table_args
                 fallback_args = cpu_encoder_args
         else:
             if profile == "fast":
@@ -1264,7 +1342,7 @@ def build_video_commands(
                 ] + list(extra_keyframe_args)
 
             primary_args = cpu_encoder_args
-            if prefer_cuda:
+            if backend == "cuda":
                 uses_gpu = True
                 if profile == "fast":
                     primary_args = [
@@ -1283,17 +1361,16 @@ def build_video_commands(
                         "-forced-idr 1",
                     ] + list(extra_keyframe_args)
                 fallback_args = cpu_encoder_args
-            # H.264 deliberately stays on libx264 even when VideoToolbox is
-            # available: Apple's media engine caps out around 290 fps at 1080p,
-            # while libx264 -preset veryfast reaches ~600 fps across the CPU
-            # cores, so at matched output size the hardware encoder is the
-            # slower option. HEVC is the opposite — see the branch above.
+            # H.264 deliberately stays on libx264 even when VideoToolbox, QSV or
+            # AMF is available: Apple's media engine caps out around 290 fps at
+            # 1080p, and Intel QSV on a Core Ultra 5 125H managed 390 fps with a
+            # 55% larger file, while libx264 -preset veryfast reaches 500-600 fps
+            # across the CPU cores. HEVC and AV1 are the opposite — see above.
 
         return primary_args, fallback_args, uses_gpu
 
     primary_plan, primary_fallback, primary_uses_gpu = resolve_encoder_plan(
-        prefer_cuda=cuda_available,
-        prefer_videotoolbox=videotoolbox_available and not cuda_available,
+        backend=hardware_backend,
         codec=codec_choice,
         extra_keyframe_args=keyframe_args,
         profile=quality_profile,

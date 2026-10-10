@@ -595,8 +595,7 @@ def test_build_video_commands_videotoolbox_adds_spatial_aq_when_supported(monkey
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
-        videotoolbox_available=True,
+        hardware_backend="videotoolbox",
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -620,8 +619,7 @@ def test_build_video_commands_h264_keeps_software_encoder_on_videotoolbox(monkey
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
-        videotoolbox_available=True,
+        hardware_backend="videotoolbox",
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -651,8 +649,7 @@ def test_build_video_commands_hevc_videotoolbox(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
-        videotoolbox_available=True,
+        hardware_backend="videotoolbox",
         optimize=False,
         small=False,
         frame_rate=30.0,
@@ -680,8 +677,7 @@ def test_build_video_commands_videotoolbox_falls_back_to_cpu(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
-        videotoolbox_available=True,
+        hardware_backend="videotoolbox",
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -691,30 +687,6 @@ def test_build_video_commands_videotoolbox_falls_back_to_cpu(monkeypatch):
     assert "-c:v libx265" in command
     assert fallback is None
     assert not use_gpu
-
-
-def test_build_video_commands_cuda_takes_priority_over_videotoolbox(monkeypatch):
-    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(
-        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: True
-    )
-
-    command, _fallback, use_gpu = ffmpeg.build_video_commands(
-        "input.mp4",
-        "audio.wav",
-        "filter.txt",
-        "output.mp4",
-        cuda_available=True,
-        videotoolbox_available=True,
-        optimize=True,
-        small=False,
-        frame_rate=30.0,
-        video_codec="hevc",
-    )
-
-    assert "-c:v hevc_nvenc" in command
-    assert "videotoolbox" not in command
-    assert use_gpu
 
 
 def test_build_video_commands_av1_ignores_videotoolbox(monkeypatch):
@@ -730,8 +702,7 @@ def test_build_video_commands_av1_ignores_videotoolbox(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
-        videotoolbox_available=True,
+        hardware_backend="videotoolbox",
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -932,7 +903,7 @@ def test_build_video_commands_with_trim(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -953,7 +924,7 @@ def test_build_video_commands_no_trim_unchanged(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -972,7 +943,7 @@ def test_build_video_commands_keep_input_audio(monkeypatch):
         None,
         None,
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -997,7 +968,7 @@ def test_build_video_commands_small_cuda(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=True,
+        hardware_backend="cuda",
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -1023,7 +994,7 @@ def test_build_video_commands_small_cpu(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -1046,7 +1017,7 @@ def test_build_video_commands_custom_keyframe_interval(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -1071,7 +1042,7 @@ def test_build_video_commands_large_cuda(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=True,
+        hardware_backend="cuda",
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -1098,7 +1069,7 @@ def test_build_video_commands_large_cpu(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -1124,7 +1095,7 @@ def test_build_video_commands_large_cuda_fast(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=True,
+        hardware_backend="cuda",
         optimize=False,
         small=False,
         frame_rate=30.0,
@@ -1155,7 +1126,7 @@ def test_build_video_commands_hevc_cpu_no_optimize(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=False,
         small=False,
         frame_rate=30.0,
@@ -1183,7 +1154,7 @@ def test_build_video_commands_av1_cuda(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=True,
+        hardware_backend="cuda",
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -1215,7 +1186,7 @@ def test_build_video_commands_av1_cpu(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -1243,7 +1214,7 @@ def test_build_video_commands_av1_cuda_svt_fallback(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=True,
+        hardware_backend="cuda",
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -1270,7 +1241,7 @@ def test_build_video_commands_hevc_cuda(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=True,
+        hardware_backend="cuda",
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -1304,7 +1275,7 @@ def test_build_video_commands_hevc_cpu(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -1619,3 +1590,100 @@ def test_write_cached_backend_resets_entry_for_new_ffmpeg(tmp_path):
         "ffmpeg": new,
         "codecs": {"av1": {"backend": None, "checked_at": 1000}},
     }
+
+
+def _build_with_backend(monkeypatch, backend, *, codec, optimize=True, listed=True):
+    """Build commands with every encoder reported as present (or absent)."""
+
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: listed
+    )
+    return ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        hardware_backend=backend,
+        optimize=optimize,
+        small=False,
+        frame_rate=30.0,
+        video_codec=codec,
+    )
+
+
+def test_build_video_commands_hevc_qsv_optimized(monkeypatch):
+    command, fallback, use_gpu = _build_with_backend(monkeypatch, "qsv", codec="hevc")
+
+    assert "-c:v hevc_qsv" in command
+    assert "-preset medium" in command
+    assert "-global_quality 28" in command
+    assert "-g 900" in command
+    assert "-hwaccel" not in command
+    assert use_gpu
+    assert fallback is not None and "-c:v libx265" in fallback
+
+
+def test_build_video_commands_av1_qsv_fast(monkeypatch):
+    command, fallback, use_gpu = _build_with_backend(
+        monkeypatch, "qsv", codec="av1", optimize=False
+    )
+
+    assert "-c:v av1_qsv" in command
+    assert "-preset veryfast" in command
+    assert "-global_quality 32" in command
+    assert use_gpu
+    assert fallback is not None and "-c:v libaom-av1" in fallback
+
+
+def test_build_video_commands_hevc_amf_optimized(monkeypatch):
+    command, fallback, use_gpu = _build_with_backend(monkeypatch, "amf", codec="hevc")
+
+    assert "-c:v hevc_amf" in command
+    assert "-quality balanced" in command
+    assert "-rc cqp" in command
+    assert "-qp_i 26" in command
+    assert "-qp_p 28" in command
+    assert use_gpu
+    assert fallback is not None and "-c:v libx265" in fallback
+
+
+def test_build_video_commands_av1_amf_fast(monkeypatch):
+    command, _fallback, use_gpu = _build_with_backend(
+        monkeypatch, "amf", codec="av1", optimize=False
+    )
+
+    assert "-c:v av1_amf" in command
+    assert "-quality speed" in command
+    assert "-qp_i 30" in command
+    assert "-qp_p 32" in command
+    assert use_gpu
+
+
+@pytest.mark.parametrize("backend", ["qsv", "amf"])
+def test_build_video_commands_h264_stays_on_libx264(monkeypatch, backend):
+    """H.264 on QSV was slower and larger than libx264 veryfast in benchmarks."""
+
+    command, fallback, use_gpu = _build_with_backend(monkeypatch, backend, codec="h264")
+
+    assert "-c:v libx264" in command
+    assert backend not in command
+    assert fallback is None
+    assert not use_gpu
+
+
+def test_build_video_commands_qsv_without_listed_encoder_uses_cpu(monkeypatch):
+    command, fallback, use_gpu = _build_with_backend(
+        monkeypatch, "qsv", codec="hevc", listed=False
+    )
+
+    assert "-c:v libx265" in command
+    assert fallback is None
+    assert not use_gpu
+
+
+def test_build_video_commands_cuda_decodes_on_gpu(monkeypatch):
+    command, fallback, _use_gpu = _build_with_backend(monkeypatch, "cuda", codec="hevc")
+
+    assert "-hwaccel cuda" in command
+    assert fallback is not None and "-hwaccel" not in fallback

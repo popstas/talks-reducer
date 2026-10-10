@@ -602,7 +602,7 @@ def _run_no_audio_pipeline(tmp_path, monkeypatch, options_kwargs):
 
     dependencies = pipeline.PipelineDependencies(
         get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
-        check_cuda_available=lambda ffmpeg_path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_video_commands=fake_build_video_commands,
         run_timed_ffmpeg_command=fake_run_timed,
     )
@@ -697,7 +697,7 @@ def test_speed_up_video_mp3_uses_audio_only_command(tmp_path, monkeypatch) -> No
 
     dependencies = pipeline.PipelineDependencies(
         get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
-        check_cuda_available=lambda ffmpeg_path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_video_commands=fail_build_video_commands,
         build_audio_only_command=fake_build_audio_only,
         run_timed_ffmpeg_command=fake_run_timed,
@@ -794,7 +794,7 @@ def test_speed_up_video_mp3_uses_processed_wav(tmp_path, monkeypatch) -> None:
 
     dependencies = pipeline.PipelineDependencies(
         get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
-        check_cuda_available=lambda ffmpeg_path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_extract_audio_command=lambda *args, **kwargs: "extract-command",
         build_video_commands=fail_build_video_commands,
         build_audio_only_command=fake_build_audio_only,
@@ -843,7 +843,7 @@ def test_speed_up_video_mp3_without_audio_raises(tmp_path, monkeypatch) -> None:
 
     dependencies = pipeline.PipelineDependencies(
         get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
-        check_cuda_available=lambda ffmpeg_path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
     )
 
     options = ProcessingOptions(
@@ -892,7 +892,7 @@ def test_speed_up_video_mp3_accepts_audio_only_input(tmp_path, monkeypatch) -> N
 
     dependencies = pipeline.PipelineDependencies(
         get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
-        check_cuda_available=lambda ffmpeg_path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_video_commands=fail_build_video_commands,
         build_audio_only_command=fake_build_audio_only,
         run_timed_ffmpeg_command=lambda command, **kwargs: commands_run.append(command),
@@ -937,7 +937,7 @@ def test_speed_up_video_rejects_audio_only_for_video_codec(
 
     dependencies = pipeline.PipelineDependencies(
         get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
-        check_cuda_available=lambda ffmpeg_path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
     )
 
     options = ProcessingOptions(

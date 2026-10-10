@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from contextlib import AbstractContextManager
+from dataclasses import replace
 from pathlib import Path
 from typing import List, Optional
 
@@ -141,8 +142,7 @@ def test_speed_up_video_returns_result(monkeypatch, tmp_path):
 
     dependencies = PipelineDependencies(
         get_ffmpeg_path=positional_get_ffmpeg_path,
-        check_cuda_available=lambda _path: False,
-        check_videotoolbox_available=lambda _path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
         run_timed_ffmpeg_command=fake_run,
@@ -228,8 +228,7 @@ def test_speed_up_video_reports_audio_processing_progress(monkeypatch, tmp_path)
 
     dependencies = PipelineDependencies(
         get_ffmpeg_path=lambda prefer=False: "ffmpeg",
-        check_cuda_available=lambda _path: False,
-        check_videotoolbox_available=lambda _path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
         run_timed_ffmpeg_command=fake_run,
@@ -330,10 +329,14 @@ def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
         ffmpeg_calls.append(flag)
         return "ffmpeg"
 
+    invalidated: List[tuple] = []
+
     dependencies = PipelineDependencies(
         get_ffmpeg_path=positional_get_ffmpeg_path,
-        check_cuda_available=lambda _path: True,
-        check_videotoolbox_available=lambda _path: False,
+        detect_hardware_backend=lambda _codec, _path: "cuda",
+        invalidate_hardware_backend_cache=lambda codec, path: invalidated.append(
+            (codec, path)
+        ),
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", "render-cpu", True),
         run_timed_ffmpeg_command=fake_run,
@@ -345,6 +348,9 @@ def test_speed_up_video_falls_back_to_cpu(monkeypatch, tmp_path):
     assert result.output_file.read_bytes() == b"fallback"
     assert any("CUDA encoding failed" in msg for msg in reporter.messages)
     assert ffmpeg_calls == [options.prefer_global_ffmpeg]
+    # A real GPU failure means the cached answer is stale: re-probe next run.
+    assert invalidated == [("h264", "ffmpeg")]
+    assert result.gpu_backend is None
 
 
 def test_speed_up_video_falls_back_without_cuda(monkeypatch, tmp_path):
@@ -414,8 +420,7 @@ def test_speed_up_video_falls_back_without_cuda(monkeypatch, tmp_path):
 
     dependencies = PipelineDependencies(
         get_ffmpeg_path=lambda flag: "ffmpeg",
-        check_cuda_available=lambda _path: False,
-        check_videotoolbox_available=lambda _path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: (
             "render-fast",
@@ -469,8 +474,7 @@ def test_speed_up_video_cleans_temp_on_abort(monkeypatch, tmp_path):
 
     dependencies = PipelineDependencies(
         get_ffmpeg_path=positional_get_ffmpeg_path,
-        check_cuda_available=lambda _path: False,
-        check_videotoolbox_available=lambda _path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
         run_timed_ffmpeg_command=lambda *args, **kwargs: None,
@@ -556,8 +560,7 @@ def test_speed_up_video_computes_ratios(monkeypatch, tmp_path):
 
     dependencies = PipelineDependencies(
         get_ffmpeg_path=lambda prefer=False: "ffmpeg",
-        check_cuda_available=lambda _path: False,
-        check_videotoolbox_available=lambda _path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
         run_timed_ffmpeg_command=fake_run,
@@ -646,8 +649,7 @@ def test_small_mode_preserves_lower_resolution(monkeypatch, tmp_path):
 
     dependencies = PipelineDependencies(
         get_ffmpeg_path=lambda prefer=False: "ffmpeg",
-        check_cuda_available=lambda _path: False,
-        check_videotoolbox_available=lambda _path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda input_file, audio_file, filter_script, output_file, **kwargs: (
             f"ffmpeg -i {input_file} -i {audio_file} -filter_script:v {filter_script} {output_file}",
@@ -748,8 +750,7 @@ def test_small_mode_scales_down_when_larger(monkeypatch, tmp_path):
 
     dependencies = PipelineDependencies(
         get_ffmpeg_path=lambda prefer=False: "ffmpeg",
-        check_cuda_available=lambda _path: False,
-        check_videotoolbox_available=lambda _path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda input_file, audio_file, filter_script, output_file, **kwargs: (
             f"ffmpeg -i {input_file} -i {audio_file} -filter_script:v {filter_script} {output_file}",
@@ -826,12 +827,94 @@ def _stub_pipeline_externals(monkeypatch, options):
 
     return PipelineDependencies(
         get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
-        check_cuda_available=lambda _path: False,
-        check_videotoolbox_available=lambda _path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_extract_audio_command=lambda *args, **kwargs: "extract",
         build_video_commands=lambda *args, **kwargs: ("render", None, False),
         run_timed_ffmpeg_command=fake_run,
     )
+
+
+def test_speed_up_video_detects_backend_for_requested_codec(monkeypatch, tmp_path):
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+    options = ProcessingOptions(
+        input_file=input_path,
+        temp_folder=tmp_path / "temp",
+        output_file=tmp_path / "output.mp4",
+        video_codec="HEVC",
+    )
+    detected: List[tuple] = []
+    build_kwargs: dict = {}
+
+    def fake_detect(codec, path):
+        detected.append((codec, path))
+        return "qsv"
+
+    def fake_build(*args, **kwargs):
+        build_kwargs.update(kwargs)
+        return ("render", "render-cpu", True)
+
+    dependencies = replace(
+        _stub_pipeline_externals(monkeypatch, options),
+        detect_hardware_backend=fake_detect,
+        build_video_commands=fake_build,
+    )
+    reporter = DummyReporter()
+
+    result = speed_up_video(options, reporter=reporter, dependencies=dependencies)
+
+    assert detected == [("hevc", "ffmpeg")]
+    assert build_kwargs["hardware_backend"] == "qsv"
+    assert "Processing on: GPU (QSV)" in reporter.messages
+    assert result.gpu_backend == "QSV"
+
+
+def test_speed_up_video_skips_detection_for_mp3(monkeypatch, tmp_path):
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+    options = ProcessingOptions(
+        input_file=input_path,
+        temp_folder=tmp_path / "temp",
+        output_file=tmp_path / "output.mp3",
+        video_codec="mp3",
+    )
+
+    def fail_detect(codec, path):
+        raise AssertionError("mp3 output must not probe GPU encoders")
+
+    dependencies = replace(
+        _stub_pipeline_externals(monkeypatch, options),
+        detect_hardware_backend=fail_detect,
+        build_audio_only_command=lambda *args, **kwargs: "render",
+    )
+
+    speed_up_video(options, reporter=DummyReporter(), dependencies=dependencies)
+
+
+def test_speed_up_video_uses_cuda_hwaccel_only_for_cuda(monkeypatch, tmp_path):
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+    options = ProcessingOptions(
+        input_file=input_path,
+        temp_folder=tmp_path / "temp",
+        output_file=tmp_path / "output.mp4",
+        video_codec="hevc",
+    )
+    hwaccels: List[list] = []
+
+    def fake_extract(_input, _wav, _rate, _bitrate, hwaccel, **_kwargs):
+        hwaccels.append(list(hwaccel))
+        return "extract"
+
+    dependencies = replace(
+        _stub_pipeline_externals(monkeypatch, options),
+        detect_hardware_backend=lambda _codec, _path: "qsv",
+        build_extract_audio_command=fake_extract,
+    )
+
+    speed_up_video(options, reporter=DummyReporter(), dependencies=dependencies)
+
+    assert hwaccels == [[]]
 
 
 def test_speed_up_video_skips_audio_when_speeds_neutral(monkeypatch, tmp_path):
@@ -913,8 +996,7 @@ def test_speed_up_video_skips_audio_when_speeds_neutral(monkeypatch, tmp_path):
 
     dependencies = PipelineDependencies(
         get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
-        check_cuda_available=lambda _path: False,
-        check_videotoolbox_available=lambda _path: False,
+        detect_hardware_backend=lambda _codec, _path: None,
         build_extract_audio_command=fake_build_extract,
         build_video_commands=fake_build_video_commands,
         run_timed_ffmpeg_command=fake_run,
