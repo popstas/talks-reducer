@@ -14,6 +14,11 @@ import sys
 from pathlib import Path
 from typing import Mapping, Optional
 
+# Settings key under which ``ffmpeg.detect_hardware_backend`` caches its
+# per-codec trial-encode results. Lives here so the GUI can protect it from
+# wholesale rewrites without importing the FFmpeg module.
+HARDWARE_BACKEND_KEY = "hardware_backend"
+
 
 def determine_config_path(
     platform: Optional[str] = None,

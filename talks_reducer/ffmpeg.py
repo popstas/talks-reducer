@@ -6,9 +6,13 @@ import os
 import re
 import subprocess
 import sys
+import threading
+import time
+from pathlib import Path
 from shutil import which as _shutil_which
-from typing import List, Optional, Sequence, Tuple
+from typing import List, NamedTuple, Optional, Sequence, Tuple
 
+from . import config
 from .progress import ProgressReporter, TqdmProgressReporter
 
 
@@ -254,6 +258,109 @@ def is_global_ffmpeg_available() -> bool:
 
 _ENCODER_LISTING: dict[str, str] = {}
 _ENCODER_OPTIONS: dict[tuple[str, str], str] = {}
+
+HARDWARE_BACKENDS = ("cuda", "amf", "qsv", "videotoolbox")
+HARDWARE_BACKEND_LABELS = {
+    "cuda": "CUDA",
+    "amf": "AMF",
+    "qsv": "QSV",
+    "videotoolbox": "VideoToolbox",
+}
+HARDWARE_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+
+# (fingerprint-or-path, codec) -> backend. Guarded by the lock because the GUI
+# renders on a worker thread and the server can run several jobs at once.
+_HARDWARE_BACKEND_CACHE: dict[tuple, Optional[str]] = {}
+_HARDWARE_BACKEND_LOCK = threading.Lock()
+
+
+def _hardware_cache_path() -> Path:
+    """Return the settings file that stores the hardware detection cache."""
+
+    return config.determine_config_path()
+
+
+def _ffmpeg_fingerprint(ffmpeg_path: str) -> Optional[dict[str, object]]:
+    """Identify the FFmpeg binary so a cached probe is dropped when it changes.
+
+    Returns ``None`` when the binary cannot be stat'ed (for example a bare
+    ``ffmpeg`` name); such runs keep their probe results in memory only.
+    """
+
+    try:
+        resolved = os.path.abspath(ffmpeg_path)
+        stat = os.stat(resolved)
+    except OSError:
+        return None
+    return {"path": resolved, "size": stat.st_size, "mtime": int(stat.st_mtime)}
+
+
+def _read_cached_backend(
+    fingerprint: dict[str, object], codec: str, now: float
+) -> Tuple[bool, Optional[str]]:
+    """Return ``(hit, backend)`` for *codec* from the on-disk cache.
+
+    A record only counts when it belongs to the same FFmpeg binary, names a
+    known backend (or ``None`` for "no GPU"), and is younger than
+    :data:`HARDWARE_CACHE_MAX_AGE_SECONDS`. Anything else is a miss.
+    """
+
+    settings = config.load_settings(_hardware_cache_path())
+    entry = settings.get(config.HARDWARE_BACKEND_KEY)
+    if not isinstance(entry, dict) or entry.get("ffmpeg") != fingerprint:
+        return False, None
+    codecs = entry.get("codecs")
+    record = codecs.get(codec) if isinstance(codecs, dict) else None
+    if not isinstance(record, dict) or "backend" not in record:
+        return False, None
+
+    backend = record["backend"]
+    checked_at = record.get("checked_at")
+    if backend is not None and backend not in HARDWARE_BACKENDS:
+        return False, None
+    if isinstance(checked_at, bool) or not isinstance(checked_at, (int, float)):
+        return False, None
+    if not 0 <= now - checked_at < HARDWARE_CACHE_MAX_AGE_SECONDS:
+        return False, None
+    return True, backend
+
+
+def _write_cached_backend(
+    fingerprint: dict[str, object], codec: str, record: Optional[dict[str, object]]
+) -> bool:
+    """Store *record* for *codec* on disk, or remove it when *record* is ``None``.
+
+    The settings file is shared with the GUI and presets, so it is re-read
+    strictly first and left untouched when that read fails — rewriting it from
+    an empty dict would delete every other setting. An entry written for a
+    different FFmpeg binary is replaced wholesale, since its other codec
+    records describe that old binary.
+    """
+
+    path = _hardware_cache_path()
+    try:
+        settings = config.read_settings_strict(path)
+    except config.SettingsReadError:
+        return False
+
+    entry = settings.get(config.HARDWARE_BACKEND_KEY)
+    codecs: dict[str, object] = {}
+    if (
+        isinstance(entry, dict)
+        and entry.get("ffmpeg") == fingerprint
+        and isinstance(entry.get("codecs"), dict)
+    ):
+        codecs = dict(entry["codecs"])
+
+    if record is None:
+        if codec not in codecs:
+            return True
+        codecs.pop(codec)
+    else:
+        codecs[codec] = record
+
+    settings[config.HARDWARE_BACKEND_KEY] = {"ffmpeg": fingerprint, "codecs": codecs}
+    return config.save_settings(path, settings)
 
 
 def _probe_ffmpeg_output(args: List[str]) -> Optional[str]:

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import io
+import json
+import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Optional
 
@@ -1338,3 +1341,155 @@ def test_run_timed_ffmpeg_command_stall_timeout(monkeypatch):
         )
 
     assert any("no output" in log for log in reporter.logs)
+
+
+def _fake_ffmpeg_binary(tmp_path) -> str:
+    """Create a file that stands in for the FFmpeg binary so it can be stat'ed."""
+
+    binary = tmp_path / "ffmpeg.exe"
+    binary.write_bytes(b"binary")
+    return str(binary)
+
+
+def test_ffmpeg_fingerprint_describes_binary(tmp_path):
+    path = _fake_ffmpeg_binary(tmp_path)
+
+    fingerprint = ffmpeg._ffmpeg_fingerprint(path)
+
+    assert fingerprint == {
+        "path": os.path.abspath(path),
+        "size": 6,
+        "mtime": int(Path(path).stat().st_mtime),
+    }
+
+
+def test_ffmpeg_fingerprint_is_none_for_missing_binary(tmp_path):
+    assert ffmpeg._ffmpeg_fingerprint(str(tmp_path / "missing.exe")) is None
+
+
+def test_cached_backend_round_trip(tmp_path):
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+
+    assert ffmpeg._write_cached_backend(
+        fingerprint, "hevc", {"backend": "qsv", "checked_at": 1000}
+    )
+
+    assert ffmpeg._read_cached_backend(fingerprint, "hevc", now=1060) == (True, "qsv")
+    assert ffmpeg._read_cached_backend(fingerprint, "av1", now=1060) == (False, None)
+
+
+def test_cached_backend_stores_absent_gpu(tmp_path):
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+    ffmpeg._write_cached_backend(
+        fingerprint, "hevc", {"backend": None, "checked_at": 1000}
+    )
+
+    assert ffmpeg._read_cached_backend(fingerprint, "hevc", now=1060) == (True, None)
+
+
+def test_cached_backend_expires_after_thirty_days(tmp_path):
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+    ffmpeg._write_cached_backend(
+        fingerprint, "hevc", {"backend": "qsv", "checked_at": 1000}
+    )
+    max_age = ffmpeg.HARDWARE_CACHE_MAX_AGE_SECONDS
+
+    assert ffmpeg._read_cached_backend(fingerprint, "hevc", now=1000 + max_age - 1)[0]
+    assert not ffmpeg._read_cached_backend(fingerprint, "hevc", now=1000 + max_age)[0]
+
+
+def test_cached_backend_rejects_changed_ffmpeg(tmp_path):
+    path = _fake_ffmpeg_binary(tmp_path)
+    old = ffmpeg._ffmpeg_fingerprint(path)
+    ffmpeg._write_cached_backend(old, "hevc", {"backend": "qsv", "checked_at": 1000})
+
+    Path(path).write_bytes(b"a newer and longer binary")
+    new = ffmpeg._ffmpeg_fingerprint(path)
+
+    assert ffmpeg._read_cached_backend(new, "hevc", now=1060) == (False, None)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"backend": "vulkan", "checked_at": 1000},
+        {"backend": "qsv", "checked_at": "yesterday"},
+        {"backend": "qsv", "checked_at": True},
+        {"backend": "qsv"},
+        "qsv",
+    ],
+)
+def test_cached_backend_rejects_malformed_record(tmp_path, record):
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+    ffmpeg._hardware_cache_path().write_text(
+        json.dumps(
+            {"hardware_backend": {"ffmpeg": fingerprint, "codecs": {"hevc": record}}}
+        ),
+        encoding="utf-8",
+    )
+
+    assert ffmpeg._read_cached_backend(fingerprint, "hevc", now=1060) == (False, None)
+
+
+def test_cached_backend_rejects_malformed_entry(tmp_path):
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+    ffmpeg._hardware_cache_path().write_text(
+        json.dumps({"hardware_backend": "qsv"}), encoding="utf-8"
+    )
+
+    assert ffmpeg._read_cached_backend(fingerprint, "hevc", now=1060) == (False, None)
+
+
+def test_write_cached_backend_keeps_other_settings(tmp_path):
+    settings_path = ffmpeg._hardware_cache_path()
+    settings_path.write_text(
+        json.dumps({"presets": [], "theme": "dark"}), encoding="utf-8"
+    )
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+
+    assert ffmpeg._write_cached_backend(
+        fingerprint, "hevc", {"backend": "qsv", "checked_at": 1000}
+    )
+
+    stored = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert stored["presets"] == []
+    assert stored["theme"] == "dark"
+
+
+def test_write_cached_backend_skips_unreadable_settings(tmp_path):
+    settings_path = ffmpeg._hardware_cache_path()
+    settings_path.write_text("{not json", encoding="utf-8")
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+
+    assert not ffmpeg._write_cached_backend(
+        fingerprint, "hevc", {"backend": "qsv", "checked_at": 1000}
+    )
+    assert settings_path.read_text(encoding="utf-8") == "{not json"
+
+
+def test_write_cached_backend_removes_one_codec(tmp_path):
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+    record = {"backend": "qsv", "checked_at": 1000}
+    ffmpeg._write_cached_backend(fingerprint, "hevc", record)
+    ffmpeg._write_cached_backend(fingerprint, "av1", record)
+
+    assert ffmpeg._write_cached_backend(fingerprint, "hevc", None)
+
+    assert ffmpeg._read_cached_backend(fingerprint, "hevc", now=1060) == (False, None)
+    assert ffmpeg._read_cached_backend(fingerprint, "av1", now=1060) == (True, "qsv")
+
+
+def test_write_cached_backend_resets_entry_for_new_ffmpeg(tmp_path):
+    path = _fake_ffmpeg_binary(tmp_path)
+    old = ffmpeg._ffmpeg_fingerprint(path)
+    ffmpeg._write_cached_backend(old, "hevc", {"backend": "qsv", "checked_at": 1000})
+    Path(path).write_bytes(b"a newer and longer binary")
+    new = ffmpeg._ffmpeg_fingerprint(path)
+
+    ffmpeg._write_cached_backend(new, "av1", {"backend": None, "checked_at": 1000})
+
+    stored = json.loads(ffmpeg._hardware_cache_path().read_text(encoding="utf-8"))
+    assert stored["hardware_backend"] == {
+        "ffmpeg": new,
+        "codecs": {"av1": {"backend": None, "checked_at": 1000}},
+    }

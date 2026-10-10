@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, MutableMapping, Optional
 
 from ..config import (
+    HARDWARE_BACKEND_KEY,
     SettingsReadError,
     determine_config_path,
     load_settings,
@@ -28,12 +29,12 @@ from .theme import (
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from .app import TalksReducerGUI
 
-# Keys written independently by :mod:`talks_reducer.presets` through its own
-# read-modify-write cycle. ``GUIPreferences`` snapshots ``settings.json`` once at
-# construction and rewrites the whole file on every ``save()``, so it must not
-# clobber these keys with its stale snapshot when a preset was authored after the
-# snapshot was taken.
-_EXTERNALLY_OWNED_KEYS = (PRESETS_KEY, SELECTED_PRESET_KEY)
+# Keys written independently of ``GUIPreferences`` through their own
+# read-modify-write cycles: presets by :mod:`talks_reducer.presets`, the GPU
+# detection cache by :mod:`talks_reducer.ffmpeg`. ``GUIPreferences`` snapshots
+# ``settings.json`` once at construction and rewrites the whole file on every
+# ``save()``, so it must not clobber these keys with its stale snapshot.
+_EXTERNALLY_OWNED_KEYS = (PRESETS_KEY, SELECTED_PRESET_KEY, HARDWARE_BACKEND_KEY)
 
 __all__ = [
     "determine_config_path",
