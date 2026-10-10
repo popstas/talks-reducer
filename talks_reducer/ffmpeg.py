@@ -1097,23 +1097,24 @@ class _HardwareEncoderSpec(NamedTuple):
     fast: Tuple[str, ...]
 
 
-# QSV quality was calibrated to VMAF ~91 — the level the CPU H.264/H.265
-# defaults reach — on a 1080p60 screen recording scaled to 720p; see
-# "Calibration results" in
+# The QSV -global_quality values (hevc 29, av1 31) were calibrated to VMAF ~91
+# — the level the CPU H.264/H.265 defaults reach — with a sweep on a Core Ultra
+# 5 125H (Arc iGPU) over a 1080p60 screen recording scaled to 720p, and checked
+# at 480p; see "Calibration results" in
 # docs/superpowers/specs/2026-10-10-qsv-amf-hardware-encoding-design.md.
-# The AMF values mirror the NVENC fast-profile QP scale used above and are NOT
-# calibrated on real AMD hardware. CQP is used because every VCN generation
-# supports it, unlike QVBR.
+# The AMF values mirror the NVENC fast-profile QP scale set in
+# resolve_encoder_plan below and are NOT calibrated on real AMD hardware. CQP is
+# used because every VCN generation supports it, unlike QVBR.
 _HARDWARE_ENCODER_ARGS: dict[Tuple[str, str], _HardwareEncoderSpec] = {
     ("qsv", "hevc"): _HardwareEncoderSpec(
         "hevc_qsv",
-        optimized=("-preset medium", "-global_quality 28"),
-        fast=("-preset veryfast", "-global_quality 28"),
+        optimized=("-preset medium", "-global_quality 29"),
+        fast=("-preset veryfast", "-global_quality 29"),
     ),
     ("qsv", "av1"): _HardwareEncoderSpec(
         "av1_qsv",
-        optimized=("-preset medium", "-global_quality 32"),
-        fast=("-preset veryfast", "-global_quality 32"),
+        optimized=("-preset medium", "-global_quality 31"),
+        fast=("-preset veryfast", "-global_quality 31"),
     ),
     ("amf", "hevc"): _HardwareEncoderSpec(
         "hevc_amf",
@@ -1136,13 +1137,24 @@ def _table_encoder_args(
     extra_keyframe_args: Sequence[str],
     ffmpeg_path: Optional[str],
 ) -> Optional[List[str]]:
-    """Return QSV/AMF encoder flags for *codec*, or ``None`` when not applicable."""
+    """Return QSV/AMF encoder flags for *codec*, or ``None`` when not applicable.
+
+    ``hevc_qsv`` ignores ``-force_key_frames`` (it emits a keyframe only at
+    frame zero unless ``-forced_idr 1`` is also set; ``av1_qsv`` honours it), so
+    the QSV backend keeps ``-g``/``-keyint_min`` and drops the forced-keyframe
+    expression for both codecs.
+    """
 
     spec = _HARDWARE_ENCODER_ARGS.get((backend or "", codec))
     if spec is None or not encoder_available(spec.encoder, ffmpeg_path=ffmpeg_path):
         return None
     profile_args = spec.fast if profile == "fast" else spec.optimized
-    return [f"-c:v {spec.encoder}", *profile_args, *extra_keyframe_args]
+    keyframe_args = list(extra_keyframe_args)
+    if backend == "qsv":
+        keyframe_args = [
+            arg for arg in keyframe_args if not arg.startswith("-force_key_frames")
+        ]
+    return [f"-c:v {spec.encoder}", *profile_args, *keyframe_args]
 
 
 def build_video_commands(

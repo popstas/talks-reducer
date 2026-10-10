@@ -350,4 +350,39 @@ Manual verification on the Intel laptop:
 
 ## Calibration results
 
-To be filled in during implementation (§2.1).
+Machine: Intel Core Ultra 5 125H (Arc iGPU), ffmpeg 8.0 (gyan) with libvmaf.
+Source: a 2:38, 1080p60 screen recording of a talk. Each row is a
+`<codec>_qsv -preset medium -global_quality <gq>` encode, video only, scaled to
+the stated height, scored against the same source scaled to that height with
+`libvmaf` (`n_subsample=5`, mean VMAF).
+
+| Codec | Height | `-global_quality` | Size (MB) | VMAF |
+| ----- | ------ | ----------------- | --------- | ---- |
+| hevc  | 720    | 27                | 4.40      | 92.39 |
+| hevc  | 720    | 28                | 3.91      | 91.70 |
+| hevc  | 720    | **29**            | 3.53      | 91.04 |
+| hevc  | 720    | 30                | 3.16      | 90.25 |
+| av1   | 720    | 28                | 5.91      | 92.64 |
+| av1   | 720    | 29                | 5.17      | 92.16 |
+| av1   | 720    | 30                | 4.63      | 91.66 |
+| av1   | 720    | **31**            | 4.18      | 90.96 |
+| av1   | 720    | 32                | 3.67      | 90.04 |
+| hevc  | 480    | 29 (confirm)      | 2.39      | 91.23 |
+| av1   | 480    | 31 (confirm)      | 2.65      | 91.31 |
+
+Selection rule: the `-global_quality` whose 720p VMAF is closest to 91.0 (ties
+within 0.2 take the higher value). Chosen: **hevc_qsv 29** (91.04) and
+**av1_qsv 31** (90.96); the next-closest values are 0.7 and 1.0 VMAF away, so
+no tie-break applied. Both stay above the VMAF 88 floor at 480p (91.23 and
+91.31).
+
+Keyframe check (`-g 1800 -keyint_min 1800 -force_key_frames
+"expr:gte(t,n_forced*5)"`, first 20 s, packets flagged `K`):
+
+- `av1_qsv`: keyframes at 0, 5, 10, 15 s. `-force_key_frames` is honoured.
+- `hevc_qsv`: a keyframe at 0 s only. `-force_key_frames` is ignored (it is
+  honoured once `-forced_idr 1` is added).
+
+Because `hevc_qsv` ignores it, `_table_encoder_args` drops the
+`-force_key_frames` argument for the whole QSV backend and relies on
+`-g`/`-keyint_min`.

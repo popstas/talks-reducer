@@ -1714,11 +1714,21 @@ def test_build_video_commands_hevc_qsv_optimized(monkeypatch):
 
     assert "-c:v hevc_qsv" in command
     assert "-preset medium" in command
-    assert "-global_quality 28" in command
+    assert "-global_quality 29" in command
     assert "-g 900" in command
+    assert "-force_key_frames" not in command
     assert "-hwaccel" not in command
     assert use_gpu
     assert fallback is not None and "-c:v libx265" in fallback
+
+
+def test_build_video_commands_av1_qsv_optimized_drops_forced_keyframes(monkeypatch):
+    command, _, _ = _build_with_backend(monkeypatch, "qsv", codec="av1")
+
+    assert "-c:v av1_qsv" in command
+    assert "-g 900" in command
+    assert "-keyint_min 900" in command
+    assert "-force_key_frames" not in command
 
 
 def test_build_video_commands_av1_qsv_fast(monkeypatch):
@@ -1728,7 +1738,7 @@ def test_build_video_commands_av1_qsv_fast(monkeypatch):
 
     assert "-c:v av1_qsv" in command
     assert "-preset veryfast" in command
-    assert "-global_quality 32" in command
+    assert "-global_quality 31" in command
     assert use_gpu
     assert fallback is not None and "-c:v libaom-av1" in fallback
 
