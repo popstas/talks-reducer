@@ -5,9 +5,12 @@ from pathlib import Path
 
 import pytest
 
+from talks_reducer import config
 from talks_reducer.config import (
+    SettingsReadError,
     determine_config_path,
     load_settings,
+    read_settings_strict,
     save_settings,
 )
 
@@ -86,3 +89,94 @@ def test_save_settings_reports_failure(tmp_path):
     config_path = blocker / "settings.json"
 
     assert save_settings(config_path, {"a": 1}) is False
+
+
+def test_read_settings_strict_rejects_non_utf8_bytes(tmp_path):
+    """A stray Latin-1 byte is a read failure, not a crash for every caller."""
+
+    config_path = tmp_path / "settings.json"
+    config_path.write_bytes(b'{"a": "\xe9"}')
+
+    with pytest.raises(SettingsReadError):
+        read_settings_strict(config_path)
+    assert load_settings(config_path) == {}
+
+
+def _write_original(config_path: Path) -> str:
+    """Seed *config_path* with a known settings payload and return its text."""
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    original = json.dumps({"keep": "me"})
+    config_path.write_text(original, encoding="utf-8")
+    return original
+
+
+def test_save_settings_leaves_no_temp_files(tmp_path):
+    config_path = tmp_path / "settings.json"
+    _write_original(config_path)
+
+    assert save_settings(config_path, {"a": 1}) is True
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["settings.json"]
+    assert load_settings(config_path) == {"a": 1}
+
+
+def test_save_settings_replaces_from_temp_in_same_directory(tmp_path, monkeypatch):
+    config_path = tmp_path / "settings.json"
+    real_replace = config.os.replace
+    calls = []
+
+    def recording_replace(src, dst):
+        calls.append((Path(src), Path(dst)))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(config.os, "replace", recording_replace)
+
+    assert save_settings(config_path, {"a": 1}) is True
+
+    assert len(calls) == 1
+    src, dst = calls[0]
+    assert src.parent == config_path.parent
+    assert src != config_path
+    assert dst == config_path
+
+
+def test_save_settings_replace_permission_error_keeps_original(tmp_path, monkeypatch):
+    config_path = tmp_path / "settings.json"
+    original = _write_original(config_path)
+
+    def locked_replace(src, dst):
+        raise PermissionError(13, "file is held open by another process")
+
+    monkeypatch.setattr(config.os, "replace", locked_replace)
+
+    assert save_settings(config_path, {"a": 1}) is False
+
+    assert config_path.read_text(encoding="utf-8") == original
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["settings.json"]
+
+
+def test_save_settings_write_failure_keeps_original(tmp_path, monkeypatch):
+    config_path = tmp_path / "settings.json"
+    original = _write_original(config_path)
+
+    def failing_fsync(fd):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(config.os, "fsync", failing_fsync)
+
+    assert save_settings(config_path, {"a": 1}) is False
+
+    assert config_path.read_text(encoding="utf-8") == original
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["settings.json"]
+
+
+def test_save_settings_unserializable_data_raises_without_touching_disk(tmp_path):
+    config_path = tmp_path / "settings.json"
+    original = _write_original(config_path)
+
+    with pytest.raises(TypeError):
+        save_settings(config_path, {"bad": object()})
+
+    assert config_path.read_text(encoding="utf-8") == original
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["settings.json"]

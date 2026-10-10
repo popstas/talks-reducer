@@ -442,3 +442,23 @@ def test_on_watch_change_stops_when_disabled(tmp_path):
 
     assert load_settings(config_path)["watch_enabled"] is False
     assert events == ["stop", "refresh"]
+
+
+def test_save_preserves_hardware_backend_cache(tmp_path):
+    """GPU detection writes its cache out-of-band; a preference save keeps it."""
+
+    from talks_reducer.config import HARDWARE_BACKEND_KEY, save_settings
+
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    prefs.update("small_video", False)
+
+    on_disk = load_settings(config_path)
+    on_disk[HARDWARE_BACKEND_KEY] = {"ffmpeg": None, "codecs": {}}
+    assert save_settings(config_path, on_disk)
+
+    prefs.update("small_video", True)
+
+    reloaded = load_settings(config_path)
+    assert reloaded["small_video"] is True
+    assert reloaded[HARDWARE_BACKEND_KEY] == {"ffmpeg": None, "codecs": {}}

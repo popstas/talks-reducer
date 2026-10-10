@@ -19,12 +19,14 @@ from . import audio as audio_utils
 from . import chunks as chunk_utils
 from . import wav_io as wavfile
 from .ffmpeg import (
+    HARDWARE_BACKEND_LABELS,
     build_audio_only_command,
     build_extract_audio_command,
     build_video_commands,
-    check_cuda_available,
-    check_videotoolbox_available,
+    detect_hardware_backend,
     get_ffmpeg_path,
+    invalidate_hardware_backend_cache,
+    normalize_video_codec,
     run_timed_ffmpeg_command,
 )
 from .models import ProcessingOptions, ProcessingResult
@@ -40,8 +42,10 @@ class PipelineDependencies:
     """Bundle of external dependencies used by :func:`speed_up_video`."""
 
     get_ffmpeg_path: Callable[[bool], str] = get_ffmpeg_path
-    check_cuda_available: Callable[[str], bool] = check_cuda_available
-    check_videotoolbox_available: Callable[[str], bool] = check_videotoolbox_available
+    detect_hardware_backend: Callable[[str, str], str | None] = detect_hardware_backend
+    invalidate_hardware_backend_cache: Callable[[str, str], None] = (
+        invalidate_hardware_backend_cache
+    )
     build_extract_audio_command: Callable[..., str] = build_extract_audio_command
     build_video_commands: Callable[..., tuple[str, str | None, bool]] = (
         build_video_commands
@@ -296,11 +300,6 @@ def speed_up_video(
 
     output_path = resolve_output_path(options)
 
-    cuda_available = dependencies.check_cuda_available(ffmpeg_path)
-    videotoolbox_available = (
-        not cuda_available and dependencies.check_videotoolbox_available(ffmpeg_path)
-    )
-
     base_temp_path = Path(options.temp_folder)
     dependencies.create_path(base_temp_path)
     job_temp_path = Path(tempfile.mkdtemp(prefix="job_", dir=os.fspath(base_temp_path)))
@@ -349,12 +348,6 @@ def speed_up_video(
         reporter,
     )
 
-    if cuda_available:
-        gpu_backend: str | None = "CUDA"
-    elif videotoolbox_available:
-        gpu_backend = "VideoToolbox"
-    else:
-        gpu_backend = None
     if options.optimize:
         reporter.log("Optimized encoding enabled")
     else:
@@ -385,12 +378,26 @@ def speed_up_video(
             "No audio stream found. Video will be re-encoded without speed modification."
         )
 
+    # Detected per codec (not every GPU encodes AV1) and only once the job is
+    # known to need a video encode, so mp3 exports never spawn a probe.
+    encode_codec = normalize_video_codec(options.video_codec)
+    hardware_backend = (
+        None
+        if is_mp3_output
+        else dependencies.detect_hardware_backend(encode_codec, ffmpeg_path)
+    )
+    gpu_backend: str | None = (
+        HARDWARE_BACKEND_LABELS.get(hardware_backend) if hardware_backend else None
+    )
+
     neutral_speeds = math.isclose(
         options.silent_speed, 1.0, rel_tol=1e-9, abs_tol=1e-9
     ) and math.isclose(options.sounded_speed, 1.0, rel_tol=1e-9, abs_tol=1e-9)
 
     hwaccel = (
-        ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if cuda_available else []
+        ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+        if hardware_backend == "cuda"
+        else []
     )
     process_callback = getattr(reporter, "process_callback", None)
     stop_cb: Callable[[], bool] | None = None
@@ -556,8 +563,7 @@ def speed_up_video(
                 os.fspath(filter_graph_path) if filter_graph_path else None,
                 os.fspath(output_path),
                 ffmpeg_path=ffmpeg_path,
-                cuda_available=cuda_available,
-                videotoolbox_available=videotoolbox_available,
+                hardware_backend=hardware_backend,
                 optimize=options.optimize,
                 small=options.small,
                 frame_rate=frame_rate,
@@ -650,6 +656,10 @@ def speed_up_video(
             if use_gpu_encoder:
                 reporter.log(
                     f"{gpu_backend} encoding failed, retrying with CPU encoder..."
+                )
+                # The cached detection said this GPU works; it just did not.
+                dependencies.invalidate_hardware_backend_cache(
+                    encode_codec, ffmpeg_path
                 )
             else:
                 reporter.log(

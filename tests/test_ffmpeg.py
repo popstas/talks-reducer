@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import io
+import json
+import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Optional
 
@@ -279,77 +282,376 @@ def test_is_global_ffmpeg_available_true_when_both_present(monkeypatch):
     assert ffmpeg.is_global_ffmpeg_available() is True
 
 
-def test_check_cuda_available_detects_nvenc(monkeypatch):
+def _stub_hardware_probe(
+    monkeypatch,
+    *,
+    platform="win32",
+    listed=(),
+    working=(),
+    trial_error=None,
+    timeouts=(),
+):
+    """Fake the encoder listing and trial encodes; return the encoders trialled."""
+
+    monkeypatch.setattr(ffmpeg.sys, "platform", platform)
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    trials: List[str] = []
+
+    def fake_run(args, **kwargs):
+        if "-encoders" in args:
+            listing = "\n".join(f" V..... {name}" for name in listed)
+            return SimpleNamespace(stdout=listing, returncode=0)
+        if "-hwaccels" in args:
+            return SimpleNamespace(stdout="videotoolbox\n", returncode=0)
+        if "-c:v" in args:
+            encoder = args[args.index("-c:v") + 1]
+            trials.append(encoder)
+            if encoder in timeouts:
+                raise ffmpeg.subprocess.TimeoutExpired(cmd="ffmpeg", timeout=10)
+            if trial_error is not None:
+                raise trial_error
+            return SimpleNamespace(
+                stdout="", stderr="", returncode=0 if encoder in working else 1
+            )
+        raise AssertionError(f"Unexpected args: {args}")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+    return trials
+
+
+ALL_HEVC = ("hevc_nvenc", "hevc_amf", "hevc_qsv")
+
+
+def test_detect_hardware_backend_prefers_first_working_candidate(monkeypatch):
+    trials = _stub_hardware_probe(
+        monkeypatch, listed=ALL_HEVC, working=("hevc_amf", "hevc_qsv")
+    )
+
+    assert ffmpeg.detect_hardware_backend("hevc") == "amf"
+    assert trials == ["hevc_nvenc", "hevc_amf"]
+
+
+def test_detect_hardware_backend_skips_unlisted_encoders(monkeypatch):
+    trials = _stub_hardware_probe(
+        monkeypatch, listed=("hevc_qsv",), working=("hevc_qsv",)
+    )
+
+    assert ffmpeg.detect_hardware_backend("hevc") == "qsv"
+    assert trials == ["hevc_qsv"]
+
+
+def test_detect_hardware_backend_h264_only_probes_nvenc(monkeypatch):
+    """QSV/AMF H.264 stays on libx264, so probing them would be wasted time."""
+
+    trials = _stub_hardware_probe(
+        monkeypatch,
+        listed=("h264_nvenc", "h264_amf", "h264_qsv"),
+        working=("h264_qsv",),
+    )
+
+    assert ffmpeg.detect_hardware_backend("h264") is None
+    assert trials == ["h264_nvenc"]
+
+
+def test_detect_hardware_backend_probes_each_codec_separately(monkeypatch):
+    """Pre-Arc Intel encodes HEVC but not AV1."""
+
+    _stub_hardware_probe(
+        monkeypatch, listed=("hevc_qsv", "av1_qsv"), working=("hevc_qsv",)
+    )
+
+    assert ffmpeg.detect_hardware_backend("hevc") == "qsv"
+    assert ffmpeg.detect_hardware_backend("av1") is None
+
+
+def test_detect_hardware_backend_ignores_non_video_codecs(monkeypatch):
+    def unexpected_run(*args, **kwargs):
+        raise AssertionError("mp3 must not probe GPU encoders")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", unexpected_run)
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    assert ffmpeg.detect_hardware_backend("mp3") is None
+
+
+def test_detect_hardware_backend_normalises_codec_name(monkeypatch):
+    trials = _stub_hardware_probe(
+        monkeypatch, listed=("hevc_qsv",), working=("hevc_qsv",)
+    )
+
+    assert ffmpeg.detect_hardware_backend(" HEVC ") == "qsv"
+    assert trials == ["hevc_qsv"]
+
+
+def test_detect_hardware_backend_uses_videotoolbox_on_macos(monkeypatch):
+    trials = _stub_hardware_probe(
+        monkeypatch,
+        platform="darwin",
+        listed=("hevc_videotoolbox", "hevc_nvenc", "av1_qsv"),
+    )
+
+    assert ffmpeg.detect_hardware_backend("hevc") == "videotoolbox"
+    assert ffmpeg.detect_hardware_backend("av1") is None
+    assert trials == []
+
+
+def test_detect_hardware_backend_failed_videotoolbox_probe_is_not_persisted(
+    monkeypatch, tmp_path
+):
+    """A failed ``-hwaccels`` probe says nothing about VideoToolbox, so it must not persist."""
+
+    binary = _fake_ffmpeg_binary(tmp_path)
+    monkeypatch.setattr(ffmpeg.sys, "platform", "darwin")
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
 
     def fake_run(args, **kwargs):
         if "-hwaccels" in args:
-            return SimpleNamespace(stdout="cuda\n", returncode=0)
+            return SimpleNamespace(stdout="", returncode=1)
         if "-encoders" in args:
-            return SimpleNamespace(stdout="encoder h264_nvenc", returncode=0)
+            return SimpleNamespace(stdout=" V..... hevc_videotoolbox", returncode=0)
         raise AssertionError(f"Unexpected args: {args}")
 
     monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    assert not ffmpeg._hardware_cache_path().exists()
+
+
+def test_detect_hardware_backend_timeout_is_not_persisted(monkeypatch, tmp_path):
+    """A timed-out trial may be a slow driver start, so it must not stick for 30 days."""
+
+    binary = _fake_ffmpeg_binary(tmp_path)
+    trials = _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, timeouts=ALL_HEVC)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    assert not ffmpeg._hardware_cache_path().exists()
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    assert trials == ["hevc_nvenc", "hevc_amf", "hevc_qsv"]
+
+    ffmpeg._HARDWARE_BACKEND_CACHE.clear()
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    assert len(trials) == 6
+
+
+def test_detect_hardware_backend_spawn_error_is_not_persisted(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    _stub_hardware_probe(
+        monkeypatch, listed=("hevc_qsv",), trial_error=OSError("spawn failed")
+    )
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    assert not ffmpeg._hardware_cache_path().exists()
+
+
+def test_detect_hardware_backend_listing_failure_is_not_persisted(
+    monkeypatch, tmp_path
+):
+    """A failed ``-encoders`` probe says nothing about the GPU, unlike an empty list."""
+
+    binary = _fake_ffmpeg_binary(tmp_path)
+    monkeypatch.setattr(ffmpeg.sys, "platform", "win32")
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    def fake_run(args, **kwargs):
+        if "-encoders" in args:
+            return SimpleNamespace(stdout="", returncode=1)
+        raise AssertionError(f"Unexpected args: {args}")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    assert not ffmpeg._hardware_cache_path().exists()
+
+
+def test_detect_hardware_backend_skips_persisting_after_inconclusive_candidate(
+    monkeypatch, tmp_path
+):
+    """A timed-out NVENC trial must not lock in QSV for 30 days."""
+
+    binary = _fake_ffmpeg_binary(tmp_path)
+    trials = _stub_hardware_probe(
+        monkeypatch,
+        listed=ALL_HEVC,
+        working=("hevc_qsv",),
+        timeouts=("hevc_nvenc",),
+    )
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+    assert not ffmpeg._hardware_cache_path().exists()
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+    assert trials == ["hevc_nvenc", "hevc_amf", "hevc_qsv"]
+
+
+def _patch_clock(monkeypatch, start=1_000_000.0):
+    """Replace ``ffmpeg.time`` with a controllable clock; return its mutable cell."""
+
+    clock = [start]
+    monkeypatch.setattr(ffmpeg, "time", SimpleNamespace(time=lambda: clock[0]))
+    return clock
+
+
+def test_inconclusive_result_is_reused_within_retry_window(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    clock = _patch_clock(monkeypatch)
+    trials = _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, timeouts=ALL_HEVC)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    clock[0] += ffmpeg.HARDWARE_INCONCLUSIVE_RETRY_SECONDS - 1
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+
+    assert len(trials) == 3
+
+
+def test_inconclusive_result_is_reprobed_after_retry_window(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    clock = _patch_clock(monkeypatch)
+    trials = _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, timeouts=ALL_HEVC)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+    clock[0] += ffmpeg.HARDWARE_INCONCLUSIVE_RETRY_SECONDS
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+
+    assert len(trials) == 6
+    assert not ffmpeg._hardware_cache_path().exists()
+
+
+def test_conclusive_result_is_not_reprobed_after_retry_window(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    clock = _patch_clock(monkeypatch)
+    trials = _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, working=("hevc_qsv",))
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+    clock[0] += 10 * ffmpeg.HARDWARE_INCONCLUSIVE_RETRY_SECONDS
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+
+    assert len(trials) == 3
+
+
+def test_probe_subprocesses_do_not_inherit_stdin(monkeypatch):
+    """A killed probe that shared the terminal's stdin can leave a tty without echo."""
+
+    calls: List[dict] = []
+
+    def fake_run(args, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+
+    ffmpeg._trial_encode("/usr/bin/ffmpeg", "hevc_qsv")
+    ffmpeg._probe_ffmpeg_output(["/usr/bin/ffmpeg", "-encoders"])
+
+    assert len(calls) == 2
+    assert all(call.get("stdin") is ffmpeg.subprocess.DEVNULL for call in calls)
+
+
+def test_detect_hardware_backend_survives_non_utf8_settings(monkeypatch, tmp_path):
+    """An undecodable settings.json must neither crash detection nor be rewritten."""
+
+    binary = _fake_ffmpeg_binary(tmp_path)
+    settings_path = ffmpeg._hardware_cache_path()
+    raw = b'{"theme": "\xe9"}'
+    settings_path.write_bytes(raw)
+    _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, working=("hevc_qsv",))
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+    assert settings_path.read_bytes() == raw
+
+
+def test_detect_hardware_backend_persists_conclusive_success(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, working=("hevc_qsv",))
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+
+    stored = json.loads(ffmpeg._hardware_cache_path().read_text(encoding="utf-8"))
+    assert stored["hardware_backend"]["codecs"]["hevc"]["backend"] == "qsv"
+
+
+def test_detect_hardware_backend_memoizes_in_process(monkeypatch):
+    trials = _stub_hardware_probe(monkeypatch, listed=ALL_HEVC, working=("hevc_qsv",))
+
+    assert ffmpeg.detect_hardware_backend("hevc") == "qsv"
+    assert ffmpeg.detect_hardware_backend("hevc") == "qsv"
+    assert trials == ["hevc_nvenc", "hevc_amf", "hevc_qsv"]
+
+
+def test_detect_hardware_backend_reads_disk_cache_without_probing(
+    monkeypatch, tmp_path
+):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    ffmpeg._write_cached_backend(
+        ffmpeg._ffmpeg_fingerprint(binary),
+        "hevc",
+        {"backend": "qsv", "checked_at": int(ffmpeg.time.time())},
+    )
+
+    def unexpected_run(*args, **kwargs):
+        raise AssertionError("a fresh cache entry must not re-probe")
+
+    monkeypatch.setattr(ffmpeg.subprocess, "run", unexpected_run)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+
+
+def test_detect_hardware_backend_writes_disk_cache(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    _stub_hardware_probe(monkeypatch, listed=ALL_HEVC)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) is None
+
+    stored = json.loads(ffmpeg._hardware_cache_path().read_text(encoding="utf-8"))
+    record = stored["hardware_backend"]["codecs"]["hevc"]
+    assert record["backend"] is None
+    assert isinstance(record["checked_at"], int)
+
+
+def test_invalidate_hardware_backend_cache_forces_reprobe(monkeypatch, tmp_path):
+    binary = _fake_ffmpeg_binary(tmp_path)
+    trials = _stub_hardware_probe(
+        monkeypatch, listed=("hevc_qsv",), working=("hevc_qsv",)
+    )
+    ffmpeg.detect_hardware_backend("hevc", binary)
+
+    ffmpeg.invalidate_hardware_backend_cache("hevc", binary)
+
+    assert ffmpeg.detect_hardware_backend("hevc", binary) == "qsv"
+    assert trials == ["hevc_qsv", "hevc_qsv"]
+
+
+def test_check_cuda_available_requires_working_nvenc(monkeypatch):
+    """Listing NVENC is not enough: gyan.dev builds list it on every machine."""
+
+    _stub_hardware_probe(monkeypatch, listed=("h264_nvenc",))
+
+    assert not ffmpeg.check_cuda_available()
+
+
+def test_check_cuda_available_detects_working_nvenc(monkeypatch):
+    _stub_hardware_probe(monkeypatch, listed=("h264_nvenc",), working=("h264_nvenc",))
 
     assert ffmpeg.check_cuda_available()
 
 
-def test_check_cuda_available_handles_missing_nvenc(monkeypatch):
+def test_check_cuda_available_handles_listing_failure(monkeypatch):
+    monkeypatch.setattr(ffmpeg.sys, "platform", "linux")
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-
-    def fake_run(args, **kwargs):
-        if "-hwaccels" in args:
-            return SimpleNamespace(stdout="cuda\n", returncode=0)
-        if "-encoders" in args:
-            return SimpleNamespace(stdout="encoder libx264", returncode=0)
-        raise AssertionError(f"Unexpected args: {args}")
-
-    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        ffmpeg.subprocess,
+        "run",
+        lambda args, **kwargs: SimpleNamespace(stdout="", returncode=1),
+    )
 
     assert not ffmpeg.check_cuda_available()
 
 
-def test_check_cuda_available_requires_cuda_hwaccel(monkeypatch):
-    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-
-    def fake_run(args, **kwargs):
-        if "-hwaccels" in args:
-            return SimpleNamespace(stdout="qsv\nonevapi", returncode=0)
-        if "-encoders" in args:
-            return SimpleNamespace(stdout="encoder h264_nvenc", returncode=0)
-        raise AssertionError(f"Unexpected args: {args}")
-
-    monkeypatch.setattr(ffmpeg.subprocess, "run", fake_run)
-
-    assert not ffmpeg.check_cuda_available()
-
-
-def test_check_cuda_available_handles_errors(monkeypatch):
-    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-
-    def failing_run(args, **kwargs):
-        return SimpleNamespace(stdout="", returncode=1)
-
-    monkeypatch.setattr(ffmpeg.subprocess, "run", failing_run)
-    assert not ffmpeg.check_cuda_available()
-
-    def raise_timeout(*args, **kwargs):
-        raise ffmpeg.subprocess.TimeoutExpired(cmd=args, timeout=5)
-
-    monkeypatch.setattr(ffmpeg.subprocess, "run", raise_timeout)
-    assert not ffmpeg.check_cuda_available()
-
-    def raise_called_process_error(args, **kwargs):
-        raise ffmpeg.subprocess.CalledProcessError(returncode=1, cmd=args)
-
-    monkeypatch.setattr(ffmpeg.subprocess, "run", raise_called_process_error)
-    assert not ffmpeg.check_cuda_available()
-
-    def raise_file_not_found(args, **kwargs):
-        raise FileNotFoundError
-
-    monkeypatch.setattr(ffmpeg.subprocess, "run", raise_file_not_found)
-    assert not ffmpeg.check_cuda_available()
+def test_normalize_video_codec():
+    assert ffmpeg.normalize_video_codec(" HEVC ") == "hevc"
+    assert ffmpeg.normalize_video_codec("av1") == "av1"
+    assert ffmpeg.normalize_video_codec(None) == "h264"
+    assert ffmpeg.normalize_video_codec("vp9") == "h264"
 
 
 def _stub_videotoolbox_probe(monkeypatch, *, hwaccels: str, encoders: str) -> None:
@@ -466,8 +768,7 @@ def test_build_video_commands_videotoolbox_adds_spatial_aq_when_supported(monkey
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
-        videotoolbox_available=True,
+        hardware_backend="videotoolbox",
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -491,8 +792,7 @@ def test_build_video_commands_h264_keeps_software_encoder_on_videotoolbox(monkey
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
-        videotoolbox_available=True,
+        hardware_backend="videotoolbox",
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -522,8 +822,7 @@ def test_build_video_commands_hevc_videotoolbox(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
-        videotoolbox_available=True,
+        hardware_backend="videotoolbox",
         optimize=False,
         small=False,
         frame_rate=30.0,
@@ -551,8 +850,7 @@ def test_build_video_commands_videotoolbox_falls_back_to_cpu(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
-        videotoolbox_available=True,
+        hardware_backend="videotoolbox",
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -562,30 +860,6 @@ def test_build_video_commands_videotoolbox_falls_back_to_cpu(monkeypatch):
     assert "-c:v libx265" in command
     assert fallback is None
     assert not use_gpu
-
-
-def test_build_video_commands_cuda_takes_priority_over_videotoolbox(monkeypatch):
-    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(
-        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: True
-    )
-
-    command, _fallback, use_gpu = ffmpeg.build_video_commands(
-        "input.mp4",
-        "audio.wav",
-        "filter.txt",
-        "output.mp4",
-        cuda_available=True,
-        videotoolbox_available=True,
-        optimize=True,
-        small=False,
-        frame_rate=30.0,
-        video_codec="hevc",
-    )
-
-    assert "-c:v hevc_nvenc" in command
-    assert "videotoolbox" not in command
-    assert use_gpu
 
 
 def test_build_video_commands_av1_ignores_videotoolbox(monkeypatch):
@@ -601,8 +875,7 @@ def test_build_video_commands_av1_ignores_videotoolbox(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
-        videotoolbox_available=True,
+        hardware_backend="videotoolbox",
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -803,7 +1076,7 @@ def test_build_video_commands_with_trim(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -824,7 +1097,7 @@ def test_build_video_commands_no_trim_unchanged(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -843,7 +1116,7 @@ def test_build_video_commands_keep_input_audio(monkeypatch):
         None,
         None,
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -868,7 +1141,7 @@ def test_build_video_commands_small_cuda(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=True,
+        hardware_backend="cuda",
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -894,7 +1167,7 @@ def test_build_video_commands_small_cpu(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -917,7 +1190,7 @@ def test_build_video_commands_custom_keyframe_interval(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -942,7 +1215,7 @@ def test_build_video_commands_large_cuda(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=True,
+        hardware_backend="cuda",
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -969,7 +1242,7 @@ def test_build_video_commands_large_cpu(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -995,7 +1268,7 @@ def test_build_video_commands_large_cuda_fast(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=True,
+        hardware_backend="cuda",
         optimize=False,
         small=False,
         frame_rate=30.0,
@@ -1026,7 +1299,7 @@ def test_build_video_commands_hevc_cpu_no_optimize(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=False,
         small=False,
         frame_rate=30.0,
@@ -1054,7 +1327,7 @@ def test_build_video_commands_av1_cuda(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=True,
+        hardware_backend="cuda",
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -1075,6 +1348,40 @@ def test_build_video_commands_av1_cuda(monkeypatch):
     assert use_cuda
 
 
+def test_build_video_commands_av1_cuda_fast_uses_qindex_scale(monkeypatch):
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+
+    def fake_encoder_available(name: str, ffmpeg_path: Optional[str] = None) -> bool:
+        return name in {"av1_nvenc", "libaom-av1"}
+
+    monkeypatch.setattr(ffmpeg, "encoder_available", fake_encoder_available)
+
+    command, fallback, use_cuda = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        hardware_backend="cuda",
+        optimize=False,
+        small=False,
+        frame_rate=30.0,
+        video_codec="av1",
+    )
+
+    assert "-c:v av1_nvenc" in command
+    assert "-preset p1" in command
+    assert "-rc constqp" in command
+    # av1_nvenc -qp is an AV1 q-index (0..255), not the 0..51 H.26x scale.
+    assert "-qp 128" in command
+    assert "-qp 32" not in command
+    assert "-g 900" not in command
+    assert fallback is not None
+    assert "-c:v libaom-av1" in fallback
+    assert "-crf 38" in fallback
+    assert "-cpu-used 6" in fallback
+    assert use_cuda
+
+
 def test_build_video_commands_av1_cpu(monkeypatch):
     monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
     monkeypatch.setattr(
@@ -1086,7 +1393,7 @@ def test_build_video_commands_av1_cpu(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -1114,7 +1421,7 @@ def test_build_video_commands_av1_cuda_svt_fallback(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=True,
+        hardware_backend="cuda",
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -1141,7 +1448,7 @@ def test_build_video_commands_hevc_cuda(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=True,
+        hardware_backend="cuda",
         optimize=True,
         small=True,
         frame_rate=30.0,
@@ -1175,7 +1482,7 @@ def test_build_video_commands_hevc_cpu(monkeypatch):
         "audio.wav",
         "filter.txt",
         "output.mp4",
-        cuda_available=False,
+        hardware_backend=None,
         optimize=True,
         small=False,
         frame_rate=30.0,
@@ -1338,3 +1645,263 @@ def test_run_timed_ffmpeg_command_stall_timeout(monkeypatch):
         )
 
     assert any("no output" in log for log in reporter.logs)
+
+
+def _fake_ffmpeg_binary(tmp_path) -> str:
+    """Create a file that stands in for the FFmpeg binary so it can be stat'ed."""
+
+    binary = tmp_path / "ffmpeg.exe"
+    binary.write_bytes(b"binary")
+    return str(binary)
+
+
+def test_ffmpeg_fingerprint_describes_binary(tmp_path):
+    path = _fake_ffmpeg_binary(tmp_path)
+
+    fingerprint = ffmpeg._ffmpeg_fingerprint(path)
+
+    assert fingerprint == {
+        "path": os.path.abspath(path),
+        "size": 6,
+        "mtime": int(Path(path).stat().st_mtime),
+    }
+
+
+def test_ffmpeg_fingerprint_is_none_for_missing_binary(tmp_path):
+    assert ffmpeg._ffmpeg_fingerprint(str(tmp_path / "missing.exe")) is None
+
+
+def test_cached_backend_round_trip(tmp_path):
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+
+    assert ffmpeg._write_cached_backend(
+        fingerprint, "hevc", {"backend": "qsv", "checked_at": 1000}
+    )
+
+    assert ffmpeg._read_cached_backend(fingerprint, "hevc", now=1060) == (True, "qsv")
+    assert ffmpeg._read_cached_backend(fingerprint, "av1", now=1060) == (False, None)
+
+
+def test_cached_backend_stores_absent_gpu(tmp_path):
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+    ffmpeg._write_cached_backend(
+        fingerprint, "hevc", {"backend": None, "checked_at": 1000}
+    )
+
+    assert ffmpeg._read_cached_backend(fingerprint, "hevc", now=1060) == (True, None)
+
+
+def test_cached_backend_expires_after_thirty_days(tmp_path):
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+    ffmpeg._write_cached_backend(
+        fingerprint, "hevc", {"backend": "qsv", "checked_at": 1000}
+    )
+    max_age = ffmpeg.HARDWARE_CACHE_MAX_AGE_SECONDS
+
+    assert ffmpeg._read_cached_backend(fingerprint, "hevc", now=1000 + max_age - 1)[0]
+    assert not ffmpeg._read_cached_backend(fingerprint, "hevc", now=1000 + max_age)[0]
+
+
+def test_cached_backend_rejects_changed_ffmpeg(tmp_path):
+    path = _fake_ffmpeg_binary(tmp_path)
+    old = ffmpeg._ffmpeg_fingerprint(path)
+    ffmpeg._write_cached_backend(old, "hevc", {"backend": "qsv", "checked_at": 1000})
+
+    Path(path).write_bytes(b"a newer and longer binary")
+    new = ffmpeg._ffmpeg_fingerprint(path)
+
+    assert ffmpeg._read_cached_backend(new, "hevc", now=1060) == (False, None)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"backend": "vulkan", "checked_at": 1000},
+        {"backend": "qsv", "checked_at": "yesterday"},
+        {"backend": "qsv", "checked_at": True},
+        {"backend": "qsv"},
+        "qsv",
+    ],
+)
+def test_cached_backend_rejects_malformed_record(tmp_path, record):
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+    ffmpeg._hardware_cache_path().write_text(
+        json.dumps(
+            {"hardware_backend": {"ffmpeg": fingerprint, "codecs": {"hevc": record}}}
+        ),
+        encoding="utf-8",
+    )
+
+    assert ffmpeg._read_cached_backend(fingerprint, "hevc", now=1060) == (False, None)
+
+
+def test_cached_backend_rejects_malformed_entry(tmp_path):
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+    ffmpeg._hardware_cache_path().write_text(
+        json.dumps({"hardware_backend": "qsv"}), encoding="utf-8"
+    )
+
+    assert ffmpeg._read_cached_backend(fingerprint, "hevc", now=1060) == (False, None)
+
+
+def test_write_cached_backend_keeps_other_settings(tmp_path):
+    settings_path = ffmpeg._hardware_cache_path()
+    settings_path.write_text(
+        json.dumps({"presets": [], "theme": "dark"}), encoding="utf-8"
+    )
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+
+    assert ffmpeg._write_cached_backend(
+        fingerprint, "hevc", {"backend": "qsv", "checked_at": 1000}
+    )
+
+    stored = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert stored["presets"] == []
+    assert stored["theme"] == "dark"
+
+
+def test_write_cached_backend_skips_unreadable_settings(tmp_path):
+    settings_path = ffmpeg._hardware_cache_path()
+    settings_path.write_text("{not json", encoding="utf-8")
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+
+    assert not ffmpeg._write_cached_backend(
+        fingerprint, "hevc", {"backend": "qsv", "checked_at": 1000}
+    )
+    assert settings_path.read_text(encoding="utf-8") == "{not json"
+
+
+def test_write_cached_backend_removes_one_codec(tmp_path):
+    fingerprint = ffmpeg._ffmpeg_fingerprint(_fake_ffmpeg_binary(tmp_path))
+    record = {"backend": "qsv", "checked_at": 1000}
+    ffmpeg._write_cached_backend(fingerprint, "hevc", record)
+    ffmpeg._write_cached_backend(fingerprint, "av1", record)
+
+    assert ffmpeg._write_cached_backend(fingerprint, "hevc", None)
+
+    assert ffmpeg._read_cached_backend(fingerprint, "hevc", now=1060) == (False, None)
+    assert ffmpeg._read_cached_backend(fingerprint, "av1", now=1060) == (True, "qsv")
+
+
+def test_write_cached_backend_resets_entry_for_new_ffmpeg(tmp_path):
+    path = _fake_ffmpeg_binary(tmp_path)
+    old = ffmpeg._ffmpeg_fingerprint(path)
+    ffmpeg._write_cached_backend(old, "hevc", {"backend": "qsv", "checked_at": 1000})
+    Path(path).write_bytes(b"a newer and longer binary")
+    new = ffmpeg._ffmpeg_fingerprint(path)
+
+    ffmpeg._write_cached_backend(new, "av1", {"backend": None, "checked_at": 1000})
+
+    stored = json.loads(ffmpeg._hardware_cache_path().read_text(encoding="utf-8"))
+    assert stored["hardware_backend"] == {
+        "ffmpeg": new,
+        "codecs": {"av1": {"backend": None, "checked_at": 1000}},
+    }
+
+
+def _build_with_backend(monkeypatch, backend, *, codec, optimize=True, listed=True):
+    """Build commands with every encoder reported as present (or absent)."""
+
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: listed
+    )
+    return ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        hardware_backend=backend,
+        optimize=optimize,
+        small=False,
+        frame_rate=30.0,
+        video_codec=codec,
+    )
+
+
+def test_build_video_commands_hevc_qsv_optimized(monkeypatch):
+    command, fallback, use_gpu = _build_with_backend(monkeypatch, "qsv", codec="hevc")
+
+    assert "-c:v hevc_qsv" in command
+    assert "-preset medium" in command
+    assert "-global_quality 29" in command
+    assert "-g 900" in command
+    assert "-force_key_frames" not in command
+    assert "-hwaccel" not in command
+    assert use_gpu
+    assert fallback is not None and "-c:v libx265" in fallback
+
+
+def test_build_video_commands_av1_qsv_optimized_drops_forced_keyframes(monkeypatch):
+    command, _, _ = _build_with_backend(monkeypatch, "qsv", codec="av1")
+
+    assert "-c:v av1_qsv" in command
+    assert "-g 900" in command
+    assert "-keyint_min 900" in command
+    assert "-force_key_frames" not in command
+
+
+def test_build_video_commands_av1_qsv_fast(monkeypatch):
+    command, fallback, use_gpu = _build_with_backend(
+        monkeypatch, "qsv", codec="av1", optimize=False
+    )
+
+    assert "-c:v av1_qsv" in command
+    assert "-preset veryfast" in command
+    assert "-global_quality 31" in command
+    assert use_gpu
+    assert fallback is not None and "-c:v libaom-av1" in fallback
+
+
+def test_build_video_commands_hevc_amf_optimized(monkeypatch):
+    command, fallback, use_gpu = _build_with_backend(monkeypatch, "amf", codec="hevc")
+
+    assert "-c:v hevc_amf" in command
+    assert "-quality balanced" in command
+    assert "-rc cqp" in command
+    assert "-qp_i 26" in command
+    assert "-qp_p 28" in command
+    assert use_gpu
+    assert fallback is not None and "-c:v libx265" in fallback
+
+
+def test_build_video_commands_av1_amf_fast(monkeypatch):
+    command, fallback, use_gpu = _build_with_backend(
+        monkeypatch, "amf", codec="av1", optimize=False
+    )
+
+    assert "-c:v av1_amf" in command
+    assert "-quality speed" in command
+    assert "-qp_i 120" in command
+    assert "-qp_p 128" in command
+    assert use_gpu
+    assert fallback is not None and "-c:v libaom-av1" in fallback
+
+
+@pytest.mark.parametrize("backend", ["qsv", "amf"])
+def test_build_video_commands_h264_stays_on_libx264(monkeypatch, backend):
+    """H.264 on QSV was slower and larger than libx264 veryfast in benchmarks."""
+
+    command, fallback, use_gpu = _build_with_backend(monkeypatch, backend, codec="h264")
+
+    assert "-c:v libx264" in command
+    assert backend not in command
+    assert fallback is None
+    assert not use_gpu
+
+
+def test_build_video_commands_qsv_without_listed_encoder_uses_cpu(monkeypatch):
+    command, fallback, use_gpu = _build_with_backend(
+        monkeypatch, "qsv", codec="hevc", listed=False
+    )
+
+    assert "-c:v libx265" in command
+    assert fallback is None
+    assert not use_gpu
+
+
+def test_build_video_commands_cuda_decodes_on_gpu(monkeypatch):
+    command, fallback, _use_gpu = _build_with_backend(monkeypatch, "cuda", codec="hevc")
+
+    assert "-hwaccel cuda" in command
+    assert fallback is not None and "-hwaccel" not in fallback

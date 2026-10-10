@@ -6,9 +6,13 @@ import os
 import re
 import subprocess
 import sys
+import threading
+import time
+from pathlib import Path
 from shutil import which as _shutil_which
-from typing import List, Optional, Sequence, Tuple
+from typing import List, NamedTuple, Optional, Sequence, Tuple
 
+from . import config
 from .progress import ProgressReporter, TqdmProgressReporter
 
 
@@ -255,6 +259,112 @@ def is_global_ffmpeg_available() -> bool:
 _ENCODER_LISTING: dict[str, str] = {}
 _ENCODER_OPTIONS: dict[tuple[str, str], str] = {}
 
+HARDWARE_BACKENDS = ("cuda", "amf", "qsv", "videotoolbox")
+HARDWARE_BACKEND_LABELS = {
+    "cuda": "CUDA",
+    "amf": "AMF",
+    "qsv": "QSV",
+    "videotoolbox": "VideoToolbox",
+}
+HARDWARE_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+HARDWARE_INCONCLUSIVE_RETRY_SECONDS = 10 * 60
+
+# (fingerprint-or-path, codec) -> (backend, expires_at). ``expires_at`` is
+# ``None`` for a conclusive answer, which lasts the whole process, and a
+# ``time.time()`` deadline for an inconclusive one. Guarded by the lock because
+# the GUI renders on a worker thread and the server can run several jobs at once.
+_HARDWARE_BACKEND_CACHE: dict[tuple, Tuple[Optional[str], Optional[float]]] = {}
+_HARDWARE_BACKEND_LOCK = threading.Lock()
+
+
+def _hardware_cache_path() -> Path:
+    """Return the settings file that stores the hardware detection cache."""
+
+    return config.determine_config_path()
+
+
+def _ffmpeg_fingerprint(ffmpeg_path: str) -> Optional[dict[str, object]]:
+    """Identify the FFmpeg binary so a cached probe is dropped when it changes.
+
+    Returns ``None`` when the binary cannot be stat'ed (for example a bare
+    ``ffmpeg`` name); such runs keep their probe results in memory only.
+    """
+
+    try:
+        resolved = os.path.abspath(ffmpeg_path)
+        stat = os.stat(resolved)
+    except OSError:
+        return None
+    return {"path": resolved, "size": stat.st_size, "mtime": int(stat.st_mtime)}
+
+
+def _read_cached_backend(
+    fingerprint: dict[str, object], codec: str, now: float
+) -> Tuple[bool, Optional[str]]:
+    """Return ``(hit, backend)`` for *codec* from the on-disk cache.
+
+    A record only counts when it belongs to the same FFmpeg binary, names a
+    known backend (or ``None`` for "no GPU"), and is younger than
+    :data:`HARDWARE_CACHE_MAX_AGE_SECONDS`. Anything else is a miss.
+    """
+
+    settings = config.load_settings(_hardware_cache_path())
+    entry = settings.get(config.HARDWARE_BACKEND_KEY)
+    if not isinstance(entry, dict) or entry.get("ffmpeg") != fingerprint:
+        return False, None
+    codecs = entry.get("codecs")
+    record = codecs.get(codec) if isinstance(codecs, dict) else None
+    if not isinstance(record, dict) or "backend" not in record:
+        return False, None
+
+    backend = record["backend"]
+    checked_at = record.get("checked_at")
+    if backend is not None and backend not in HARDWARE_BACKENDS:
+        return False, None
+    if isinstance(checked_at, bool) or not isinstance(checked_at, (int, float)):
+        return False, None
+    if not 0 <= now - checked_at < HARDWARE_CACHE_MAX_AGE_SECONDS:
+        return False, None
+    return True, backend
+
+
+def _write_cached_backend(
+    fingerprint: dict[str, object], codec: str, record: Optional[dict[str, object]]
+) -> bool:
+    """Store *record* for *codec* on disk, or remove it when *record* is ``None``.
+
+    The settings file is shared with the GUI and presets, so it is re-read
+    strictly first and left untouched when that read fails — rewriting it from
+    an empty dict would delete every other setting. An entry written for a
+    different FFmpeg binary is replaced wholesale, since its other codec
+    records describe that old binary.
+    """
+
+    path = _hardware_cache_path()
+    try:
+        settings = config.read_settings_strict(path)
+    except config.SettingsReadError:
+        return False
+
+    entry = settings.get(config.HARDWARE_BACKEND_KEY)
+    codecs: dict[str, object] = {}
+    if (
+        isinstance(entry, dict)
+        and entry.get("ffmpeg") == fingerprint
+        and isinstance(entry.get("codecs"), dict)
+    ):
+        codecs = dict(entry["codecs"])
+
+    if record is None:
+        if codec not in codecs:
+            return True
+        codecs.pop(codec)
+    else:
+        codecs[codec] = record
+
+    settings[config.HARDWARE_BACKEND_KEY] = {"ffmpeg": fingerprint, "codecs": codecs}
+    return config.save_settings(path, settings)
+
 
 def _probe_ffmpeg_output(args: List[str]) -> Optional[str]:
     """Return stdout from an FFmpeg invocation, handling common failures."""
@@ -267,6 +377,7 @@ def _probe_ffmpeg_output(args: List[str]) -> Optional[str]:
     try:
         result = subprocess.run(
             args,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=5,
@@ -275,7 +386,7 @@ def _probe_ffmpeg_output(args: List[str]) -> Optional[str]:
     except (
         subprocess.TimeoutExpired,
         subprocess.CalledProcessError,
-        FileNotFoundError,
+        OSError,
     ):
         return None
 
@@ -344,22 +455,14 @@ def encoder_supports_option(
 
 
 def check_cuda_available(ffmpeg_path: Optional[str] = None) -> bool:
-    """Return whether CUDA hardware encoders are usable in the FFmpeg build."""
+    """Return whether NVENC can actually encode on this machine.
 
-    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+    Kept for callers outside the pipeline; it now delegates to the trial-encode
+    detection, because the encoder listing alone reports NVENC on machines
+    without an NVIDIA GPU.
+    """
 
-    hwaccels_output = _probe_ffmpeg_output([ffmpeg_path, "-hide_banner", "-hwaccels"])
-    if not hwaccels_output or "cuda" not in hwaccels_output.lower():
-        return False
-
-    encoder_output = _get_encoder_listing(ffmpeg_path)
-    if not encoder_output:
-        return False
-
-    return any(
-        encoder in encoder_output
-        for encoder in ["h264_nvenc", "hevc_nvenc", "av1_nvenc", "nvenc"]
-    )
+    return detect_hardware_backend("h264", ffmpeg_path) == "cuda"
 
 
 def check_videotoolbox_available(ffmpeg_path: Optional[str] = None) -> bool:
@@ -382,6 +485,213 @@ def check_videotoolbox_available(ffmpeg_path: Optional[str] = None) -> bool:
         encoder_available(encoder, ffmpeg_path=ffmpeg_path)
         for encoder in ("hevc_videotoolbox", "h264_videotoolbox")
     )
+
+
+_HARDWARE_CANDIDATES = {
+    # H.264 lists only NVENC: QSV, AMF and VideoToolbox H.264 stay on libx264
+    # (see ``resolve_encoder_plan``), so probing them would cost time for nothing.
+    "h264": ("cuda",),
+    "hevc": ("cuda", "amf", "qsv", "videotoolbox"),
+    # No Apple AV1 encoder exists.
+    "av1": ("cuda", "amf", "qsv"),
+}
+_TRIAL_ENCODER_SUFFIXES = {"cuda": "nvenc", "amf": "amf", "qsv": "qsv"}
+_TRIAL_ENCODE_TIMEOUT_SECONDS = 10
+
+
+def normalize_video_codec(value: Optional[str]) -> str:
+    """Return ``h264``, ``hevc`` or ``av1`` for a user-supplied codec name.
+
+    Unknown values map to ``h264``, matching the encoder plan's default.
+    """
+
+    codec = (value or "h264").strip().lower()
+    return codec if codec in _HARDWARE_CANDIDATES else "h264"
+
+
+def _backend_supported_on_platform(backend: str) -> bool:
+    """Return whether *backend* can exist on the current operating system."""
+
+    if backend == "videotoolbox":
+        return sys.platform == "darwin"
+    return sys.platform == "win32" or sys.platform.startswith("linux")
+
+
+def _trial_encode(ffmpeg_path: str, encoder: str) -> Optional[bool]:
+    """Encode one tiny frame with *encoder* and report whether FFmpeg succeeded.
+
+    Returns ``True`` when FFmpeg exits 0, ``False`` when it exits non-zero, and
+    ``None`` when the trial could not run to completion (a timeout or a spawn
+    error). ``None`` is inconclusive: a slow first driver start looks the same.
+    Standard input is closed so a killed probe cannot leave a terminal without
+    echo.
+
+    The encoder listing is not a capability signal: the gyan.dev builds that
+    ``static-ffmpeg`` bundles list every NVENC, AMF and QSV encoder whatever GPU
+    is installed, and only fail once the encoder is opened.
+    """
+
+    creationflags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg_path,
+                "-hide_banner",
+                "-v",
+                "quiet",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=black:size=256x144:duration=0.04",
+                "-frames:v",
+                "1",
+                "-c:v",
+                encoder,
+                "-f",
+                "null",
+                "-",
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=_TRIAL_ENCODE_TIMEOUT_SECONDS,
+            creationflags=creationflags,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    return result.returncode == 0
+
+
+def _probe_backend(backend: str, codec: str, ffmpeg_path: str) -> Optional[bool]:
+    """Return whether *backend* can encode *codec*: ``True``, ``False`` or ``None``.
+
+    ``None`` means inconclusive, because the encoder listing or, for VideoToolbox,
+    the ``-hwaccels`` listing could not be obtained, or the trial encode could not
+    run. A listed encoder that fails its trial is a conclusive ``False``.
+    """
+
+    if not _backend_supported_on_platform(backend):
+        return False
+    if backend == "videotoolbox":
+        if (
+            _probe_ffmpeg_output([ffmpeg_path, "-hide_banner", "-hwaccels"]) is None
+            or _get_encoder_listing(ffmpeg_path) is None
+        ):
+            return None
+        return check_videotoolbox_available(ffmpeg_path)
+    if _get_encoder_listing(ffmpeg_path) is None:
+        return None
+    encoder = f"{codec}_{_TRIAL_ENCODER_SUFFIXES[backend]}"
+    if not encoder_available(encoder, ffmpeg_path=ffmpeg_path):
+        return False
+    return _trial_encode(ffmpeg_path, encoder)
+
+
+def _first_working_backend(
+    candidates: Tuple[str, ...], codec: str, ffmpeg_path: str
+) -> Tuple[Optional[str], bool]:
+    """Return ``(backend, conclusive)`` for the first candidate that works.
+
+    Candidates are tried in priority order and the search stops at the first
+    success. The result is conclusive only when every candidate tried was
+    conclusive, so an inconclusive higher-priority probe keeps a lower-priority
+    success out of the disk cache.
+    """
+
+    conclusive = True
+    for candidate in candidates:
+        result = _probe_backend(candidate, codec, ffmpeg_path)
+        if result is None:
+            conclusive = False
+        elif result:
+            return candidate, conclusive
+    return None, conclusive
+
+
+def _hardware_memory_key(
+    ffmpeg_path: str, fingerprint: Optional[dict[str, object]], codec: str
+) -> tuple:
+    """Key the in-process cache by binary identity, falling back to its path."""
+
+    identity = (
+        tuple(sorted(fingerprint.items()))
+        if fingerprint is not None
+        else os.path.abspath(ffmpeg_path)
+    )
+    return (identity, codec)
+
+
+def detect_hardware_backend(
+    codec: str, ffmpeg_path: Optional[str] = None
+) -> Optional[str]:
+    """Return the hardware backend that will encode *codec*, or ``None``.
+
+    Candidates are tried in priority order (discrete GPUs before Intel's iGPU)
+    with a one-frame trial encode. The answer is cached per codec in memory, and
+    in ``settings.json`` for :data:`HARDWARE_CACHE_MAX_AGE_SECONDS` keyed by the
+    FFmpeg binary's fingerprint, but only when every probe was conclusive. A
+    timed-out trial or a failed encoder listing is inconclusive: it is never
+    written to disk and is reused from memory for at most
+    :data:`HARDWARE_INCONCLUSIVE_RETRY_SECONDS`, so a long-lived GUI or server
+    does not stay on the CPU after one slow driver start. Detection is per codec because
+    support differs: Intel before Arc, AMD before RDNA3 and NVIDIA before RTX 40
+    encode HEVC but not AV1. Non-video codecs such as ``mp3`` return ``None``
+    without probing.
+    """
+
+    codec = (codec or "").strip().lower()
+    candidates = _HARDWARE_CANDIDATES.get(codec)
+    if candidates is None:
+        return None
+
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+    fingerprint = _ffmpeg_fingerprint(ffmpeg_path)
+    memory_key = _hardware_memory_key(ffmpeg_path, fingerprint, codec)
+
+    with _HARDWARE_BACKEND_LOCK:
+        now = time.time()
+        remembered = _HARDWARE_BACKEND_CACHE.get(memory_key)
+        if remembered is not None:
+            backend, expires_at = remembered
+            if expires_at is None or now < expires_at:
+                return backend
+            del _HARDWARE_BACKEND_CACHE[memory_key]
+
+        if fingerprint is not None:
+            hit, cached = _read_cached_backend(fingerprint, codec, now)
+            if hit:
+                _HARDWARE_BACKEND_CACHE[memory_key] = (cached, None)
+                return cached
+
+        backend, conclusive = _first_working_backend(candidates, codec, ffmpeg_path)
+        _HARDWARE_BACKEND_CACHE[memory_key] = (
+            backend,
+            None if conclusive else now + HARDWARE_INCONCLUSIVE_RETRY_SECONDS,
+        )
+        if fingerprint is not None and conclusive:
+            _write_cached_backend(
+                fingerprint, codec, {"backend": backend, "checked_at": int(now)}
+            )
+        return backend
+
+
+def invalidate_hardware_backend_cache(
+    codec: str, ffmpeg_path: Optional[str] = None
+) -> None:
+    """Forget the cached backend for *codec* so the next run probes again.
+
+    Called when a GPU encode fails for real, which means the cached answer no
+    longer matches the machine (a removed eGPU, a broken driver).
+    """
+
+    codec = (codec or "").strip().lower()
+    ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
+    fingerprint = _ffmpeg_fingerprint(ffmpeg_path)
+    with _HARDWARE_BACKEND_LOCK:
+        _HARDWARE_BACKEND_CACHE.pop(
+            _hardware_memory_key(ffmpeg_path, fingerprint, codec), None
+        )
+        if fingerprint is not None:
+            _write_cached_backend(fingerprint, codec, None)
 
 
 # Quality on the VideoToolbox 1-100 scale that matches the size the software
@@ -795,6 +1105,76 @@ def build_audio_only_command(
     return " ".join(command_parts)
 
 
+class _HardwareEncoderSpec(NamedTuple):
+    """FFmpeg arguments for one hardware encoder, per quality profile."""
+
+    encoder: str
+    optimized: Tuple[str, ...]
+    fast: Tuple[str, ...]
+
+
+# The QSV -global_quality values (hevc 29, av1 31) were calibrated to VMAF ~91
+# — the level the CPU H.264/H.265 defaults reach — with a sweep on a Core Ultra
+# 5 125H (Arc iGPU) over a 1080p60 screen recording scaled to 720p, and checked
+# at 480p; see "Calibration results" in
+# docs/superpowers/specs/2026-10-10-qsv-amf-hardware-encoding-design.md.
+# The AMF values are provisional and NOT calibrated on real AMD hardware. The
+# HEVC pair follows the NVENC fast-profile QP scale set in resolve_encoder_plan
+# below (0-51). The AV1 pair uses the encoder's own 0-255 q-index scale, anchored
+# to the CPU AV1 default: libaom crf 32 is roughly q-index 128. CQP is used
+# because every VCN generation supports it, unlike QVBR.
+_HARDWARE_ENCODER_ARGS: dict[Tuple[str, str], _HardwareEncoderSpec] = {
+    ("qsv", "hevc"): _HardwareEncoderSpec(
+        "hevc_qsv",
+        optimized=("-preset medium", "-global_quality 29"),
+        fast=("-preset veryfast", "-global_quality 29"),
+    ),
+    ("qsv", "av1"): _HardwareEncoderSpec(
+        "av1_qsv",
+        optimized=("-preset medium", "-global_quality 31"),
+        fast=("-preset veryfast", "-global_quality 31"),
+    ),
+    ("amf", "hevc"): _HardwareEncoderSpec(
+        "hevc_amf",
+        optimized=("-quality balanced", "-rc cqp", "-qp_i 26", "-qp_p 28"),
+        fast=("-quality speed", "-rc cqp", "-qp_i 26", "-qp_p 28"),
+    ),
+    ("amf", "av1"): _HardwareEncoderSpec(
+        "av1_amf",
+        optimized=("-quality balanced", "-rc cqp", "-qp_i 120", "-qp_p 128"),
+        fast=("-quality speed", "-rc cqp", "-qp_i 120", "-qp_p 128"),
+    ),
+}
+
+
+def _table_encoder_args(
+    backend: Optional[str],
+    codec: str,
+    *,
+    profile: str,
+    extra_keyframe_args: Sequence[str],
+    ffmpeg_path: Optional[str],
+) -> Optional[List[str]]:
+    """Return QSV/AMF encoder flags for *codec*, or ``None`` when not applicable.
+
+    ``hevc_qsv`` ignores ``-force_key_frames`` (it emits a keyframe only at
+    frame zero unless ``-forced_idr 1`` is also set; ``av1_qsv`` honours it), so
+    the QSV backend keeps ``-g``/``-keyint_min`` and drops the forced-keyframe
+    expression for both codecs.
+    """
+
+    spec = _HARDWARE_ENCODER_ARGS.get((backend or "", codec))
+    if spec is None or not encoder_available(spec.encoder, ffmpeg_path=ffmpeg_path):
+        return None
+    profile_args = spec.fast if profile == "fast" else spec.optimized
+    keyframe_args = list(extra_keyframe_args)
+    if backend == "qsv":
+        keyframe_args = [
+            arg for arg in keyframe_args if not arg.startswith("-force_key_frames")
+        ]
+    return [f"-c:v {spec.encoder}", *profile_args, *keyframe_args]
+
+
 def build_video_commands(
     input_file: str,
     audio_file: Optional[str],
@@ -802,8 +1182,7 @@ def build_video_commands(
     output_file: str,
     *,
     ffmpeg_path: Optional[str] = None,
-    cuda_available: bool,
-    videotoolbox_available: bool = False,
+    hardware_backend: Optional[str] = None,
     optimize: bool,
     small: bool,
     frame_rate: Optional[float] = None,
@@ -821,10 +1200,10 @@ def build_video_commands(
             ``keep_input_audio`` is False, the video is encoded without audio.
         filter_script: Optional path to the filter script file. If None, video will be re-encoded without speed modification.
         output_file: Path to the output video file.
-        cuda_available: Whether NVENC encoders may be used for the primary command.
-        videotoolbox_available: Whether Apple VideoToolbox encoders may be used for
-            the primary command. Ignored when ``cuda_available`` is True, since a
-            machine never has both backends.
+        hardware_backend: The backend :func:`detect_hardware_backend` returned
+            for this codec (``"cuda"``, ``"amf"``, ``"qsv"``, ``"videotoolbox"``)
+            or ``None`` for the CPU. Only CUDA also decodes on the GPU; QSV and
+            AMF decode on the CPU because the filter graph runs there anyway.
         frame_rate: Optional source frame rate used to size GOP/keyframe spacing for
             the small preset when generating hardware/software encoder commands.
         keep_input_audio: When True and ``audio_file`` is None, map the audio
@@ -836,7 +1215,7 @@ def build_video_commands(
     global_parts: List[str] = [f'"{ffmpeg_path}"', "-y"]
     hwaccel_args: List[str] = []
 
-    if cuda_available and not small:
+    if hardware_backend == "cuda" and not small:
         hwaccel_args = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
         global_parts.extend(hwaccel_args)
 
@@ -856,9 +1235,7 @@ def build_video_commands(
     if filter_script:
         output_parts.append(f'-filter_script:v "{filter_script}"')
 
-    codec_choice = (video_codec or "h264").strip().lower()
-    if codec_choice not in {"h264", "hevc", "av1"}:
-        codec_choice = "h264"
+    codec_choice = normalize_video_codec(video_codec)
 
     video_encoder_args: List[str]
     fallback_encoder_args: List[str] = []
@@ -885,8 +1262,7 @@ def build_video_commands(
 
     def resolve_encoder_plan(
         *,
-        prefer_cuda: bool,
-        prefer_videotoolbox: bool,
+        backend: Optional[str],
         codec: str,
         extra_keyframe_args: Sequence[str],
         profile: str,
@@ -916,14 +1292,30 @@ def build_video_commands(
 
             primary_args = cpu_encoder_args
 
-            if prefer_cuda and encoder_available("av1_nvenc", ffmpeg_path=ffmpeg_path):
+            table_args = _table_encoder_args(
+                backend,
+                "av1",
+                profile=profile,
+                extra_keyframe_args=extra_keyframe_args,
+                ffmpeg_path=ffmpeg_path,
+            )
+            # av1_nvenc quality scales differ from hevc/h264_nvenc (0-51):
+            # -qp is an AV1 q-index (-1..255) and -cq is 0-63, the same scale
+            # as libaom -crf. The old -qp 32 was therefore near-lossless and
+            # produced huge files on RTX 40+ GPUs. -qp uses the same anchor as
+            # the AMF AV1 pair in _HARDWARE_ENCODER_ARGS (libaom crf 32 is
+            # roughly q-index 128); -cq 36 is already on its 0-63 scale. Both
+            # values are NOT calibrated on real NVIDIA hardware.
+            if backend == "cuda" and encoder_available(
+                "av1_nvenc", ffmpeg_path=ffmpeg_path
+            ):
                 uses_gpu = True
                 if profile == "fast":
                     primary_args = [
                         "-c:v av1_nvenc",
                         "-preset p1",
                         "-rc constqp",
-                        "-qp 32",
+                        "-qp 128",
                     ] + list(extra_keyframe_args)
                 else:
                     primary_args = [
@@ -935,6 +1327,10 @@ def build_video_commands(
                         "-spatial-aq 1",
                         "-temporal-aq 1",
                     ] + list(extra_keyframe_args)
+                fallback_args = cpu_encoder_args
+            elif table_args is not None:
+                uses_gpu = True
+                primary_args = table_args
                 fallback_args = cpu_encoder_args
         elif codec == "hevc":
             if profile == "fast":
@@ -951,7 +1347,16 @@ def build_video_commands(
                 ] + list(extra_keyframe_args)
 
             primary_args = cpu_encoder_args
-            if prefer_cuda and encoder_available("hevc_nvenc", ffmpeg_path=ffmpeg_path):
+            table_args = _table_encoder_args(
+                backend,
+                "hevc",
+                profile=profile,
+                extra_keyframe_args=extra_keyframe_args,
+                ffmpeg_path=ffmpeg_path,
+            )
+            if backend == "cuda" and encoder_available(
+                "hevc_nvenc", ffmpeg_path=ffmpeg_path
+            ):
                 uses_gpu = True
                 if profile == "fast":
                     primary_args = [
@@ -973,7 +1378,7 @@ def build_video_commands(
                         "-multipass fullres",
                     ] + list(extra_keyframe_args)
                 fallback_args = cpu_encoder_args
-            elif prefer_videotoolbox and encoder_available(
+            elif backend == "videotoolbox" and encoder_available(
                 "hevc_videotoolbox", ffmpeg_path=ffmpeg_path
             ):
                 uses_gpu = True
@@ -984,6 +1389,10 @@ def build_video_commands(
                     extra_keyframe_args=extra_keyframe_args,
                     ffmpeg_path=ffmpeg_path,
                 )
+                fallback_args = cpu_encoder_args
+            elif table_args is not None:
+                uses_gpu = True
+                primary_args = table_args
                 fallback_args = cpu_encoder_args
         else:
             if profile == "fast":
@@ -1002,7 +1411,7 @@ def build_video_commands(
                 ] + list(extra_keyframe_args)
 
             primary_args = cpu_encoder_args
-            if prefer_cuda:
+            if backend == "cuda":
                 uses_gpu = True
                 if profile == "fast":
                     primary_args = [
@@ -1021,17 +1430,16 @@ def build_video_commands(
                         "-forced-idr 1",
                     ] + list(extra_keyframe_args)
                 fallback_args = cpu_encoder_args
-            # H.264 deliberately stays on libx264 even when VideoToolbox is
-            # available: Apple's media engine caps out around 290 fps at 1080p,
-            # while libx264 -preset veryfast reaches ~600 fps across the CPU
-            # cores, so at matched output size the hardware encoder is the
-            # slower option. HEVC is the opposite — see the branch above.
+            # H.264 deliberately stays on libx264 even when VideoToolbox, QSV or
+            # AMF is available: Apple's media engine caps out around 290 fps at
+            # 1080p, and Intel QSV on a Core Ultra 5 125H managed 390 fps with a
+            # 55% larger file, while libx264 -preset veryfast reaches 500-600 fps
+            # across the CPU cores. HEVC and AV1 are the opposite — see above.
 
         return primary_args, fallback_args, uses_gpu
 
     primary_plan, primary_fallback, primary_uses_gpu = resolve_encoder_plan(
-        prefer_cuda=cuda_available,
-        prefer_videotoolbox=videotoolbox_available and not cuda_available,
+        backend=hardware_backend,
         codec=codec_choice,
         extra_keyframe_args=keyframe_args,
         profile=quality_profile,
@@ -1090,6 +1498,10 @@ __all__ = [
     "get_ffprobe_path",
     "check_cuda_available",
     "check_videotoolbox_available",
+    "detect_hardware_backend",
+    "invalidate_hardware_backend_cache",
+    "normalize_video_codec",
+    "HARDWARE_BACKEND_LABELS",
     "run_timed_ffmpeg_command",
     "build_trim_input_args",
     "build_extract_audio_command",

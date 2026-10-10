@@ -11,8 +11,15 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Mapping, Optional
+
+# Settings key under which ``ffmpeg.detect_hardware_backend`` caches its
+# per-codec trial-encode results. Lives here so the GUI can protect it from
+# wholesale rewrites without importing the FFmpeg module.
+HARDWARE_BACKEND_KEY = "hardware_backend"
 
 
 def determine_config_path(
@@ -56,7 +63,8 @@ def read_settings_strict(config_path: Path) -> dict[str, object]:
     Returns an empty dict when the file does not exist. Raises
     :class:`SettingsReadError` when the file exists but cannot be read or parsed
     (``OSError`` from a concurrent lock, ``json.JSONDecodeError`` from a
-    partially written file), so a caller must not mistake a transient failure
+    partially written file, ``UnicodeDecodeError`` from a file that is not
+    UTF-8), so a caller must not mistake a transient failure
     for real absence.
     """
 
@@ -65,7 +73,7 @@ def read_settings_strict(config_path: Path) -> dict[str, object]:
             data = json.load(handle)
     except FileNotFoundError:
         return {}
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise SettingsReadError(str(config_path)) from exc
 
     if isinstance(data, dict):
@@ -83,17 +91,43 @@ def load_settings(config_path: Path) -> dict[str, object]:
 
 
 def save_settings(config_path: Path, data: Mapping[str, object]) -> bool:
-    """Write *data* to *config_path*, creating parent directories.
+    """Atomically write *data* to *config_path*, creating parent directories.
+
+    The JSON is written to a temporary file in the target directory, flushed and
+    fsynced, then moved onto *config_path* with :func:`os.replace`, so a reader
+    or a crash mid-write sees either the previous file or the complete new one,
+    never a truncated file that :func:`read_settings_strict` would reject.
 
     Returns ``True`` when the file is written and ``False`` when an ``OSError``
-    prevents persistence, so callers that must not act on a stale
-    ``settings.json`` can detect the failure.
+    prevents persistence (including the ``PermissionError`` Windows raises when
+    another process holds the target open during the replace), so callers that
+    must not act on a stale ``settings.json`` can detect the failure. The
+    temporary file is removed whenever the replace does not happen. Data that
+    cannot be serialized raises before anything touches the disk.
     """
 
+    payload = json.dumps(dict(data), indent=2, sort_keys=True)
+    temp_name: Optional[str] = None
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        with config_path.open("w", encoding="utf-8") as handle:
-            json.dump(dict(data), handle, indent=2, sort_keys=True)
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=config_path.parent,
+            prefix=f".{config_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_name = handle.name
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, config_path)
+        temp_name = None
     except OSError:
         return False
+    finally:
+        if temp_name is not None:
+            with suppress(OSError):
+                os.unlink(temp_name)
     return True
