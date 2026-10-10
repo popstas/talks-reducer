@@ -2608,3 +2608,63 @@ def test_audio_phase_estimate_matches_measured_stage_cost():
     interval_ms = app.TalksReducerGUI._compute_audio_progress_interval(gui)
 
     assert interval_ms == pytest.approx(108, abs=12)
+
+
+def _file_manager_gui(logs):
+    return SimpleNamespace(_append_log=logs.append)
+
+
+def _capture_popen(monkeypatch):
+    commands = []
+    monkeypatch.setattr(app.subprocess, "Popen", commands.append)
+    return commands
+
+
+def test_open_in_file_manager_quotes_only_the_path_on_windows(monkeypatch, tmp_path):
+    output = tmp_path / "2026-10-10 15-17-50_speedup_small.mp4"
+    output.write_bytes(b"")
+    commands = _capture_popen(monkeypatch)
+    monkeypatch.setattr(app.sys, "platform", "win32")
+
+    app.TalksReducerGUI._open_in_file_manager(_file_manager_gui([]), output)
+
+    assert commands == [f'explorer /select,"{output.resolve()}"']
+
+
+def test_open_in_file_manager_opens_folder_of_missing_file_on_windows(
+    monkeypatch, tmp_path
+):
+    commands = _capture_popen(monkeypatch)
+    monkeypatch.setattr(app.sys, "platform", "win32")
+
+    app.TalksReducerGUI._open_in_file_manager(
+        _file_manager_gui([]), tmp_path / "gone file.mp4"
+    )
+
+    assert commands == [f'explorer "{tmp_path.resolve()}"']
+
+
+def test_open_in_file_manager_opens_folder_of_missing_file_on_macos(
+    monkeypatch, tmp_path
+):
+    commands = _capture_popen(monkeypatch)
+    monkeypatch.setattr(app.sys, "platform", "darwin")
+
+    app.TalksReducerGUI._open_in_file_manager(
+        _file_manager_gui([]), tmp_path / "gone.mp4"
+    )
+
+    assert commands == [["open", str(tmp_path.resolve())]]
+
+
+def test_open_in_file_manager_logs_when_folder_is_missing(monkeypatch, tmp_path):
+    commands = _capture_popen(monkeypatch)
+    monkeypatch.setattr(app.sys, "platform", "win32")
+    logs = []
+
+    app.TalksReducerGUI._open_in_file_manager(
+        _file_manager_gui(logs), tmp_path / "missing" / "gone.mp4"
+    )
+
+    assert commands == []
+    assert len(logs) == 1 and logs[0].startswith("Could not open file manager for")

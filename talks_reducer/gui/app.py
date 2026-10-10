@@ -1749,16 +1749,38 @@ class TalksReducerGUI:
             self.drop_hint_button.grid()
 
     def _open_in_file_manager(self, path: Path) -> None:
-        target = Path(path)
-        if sys.platform.startswith("win"):
-            command = ["explorer", f"/select,{target}"]
-        elif sys.platform == "darwin":
-            command = ["open", "-R", os.fspath(target)]
+        """Reveal ``path`` in the system file manager, selecting it when possible.
+
+        A missing file falls back to opening its folder; when the folder is gone
+        too, nothing is launched and the failure is logged.
+
+        On Windows the command is passed as a string rather than a list: for a
+        list, ``subprocess`` quotes the whole ``/select,<path>`` argument once
+        the path contains a space, and Explorer ignores a quoted ``/select`` and
+        opens Documents instead. Only the path itself may be quoted.
+        """
+
+        target = Path(path).resolve()
+        if target.exists():
+            folder = None
+        elif target.parent.is_dir():
+            folder = target.parent
         else:
-            command = [
-                "xdg-open",
-                os.fspath(target.parent if target.exists() else target),
-            ]
+            self._append_log(f"Could not open file manager for {target}")
+            return
+
+        if sys.platform.startswith("win"):
+            command = (
+                f'explorer "{folder}"' if folder else f'explorer /select,"{target}"'
+            )
+        elif sys.platform == "darwin":
+            command = (
+                ["open", os.fspath(folder)]
+                if folder
+                else ["open", "-R", os.fspath(target)]
+            )
+        else:
+            command = ["xdg-open", os.fspath(folder or target.parent)]
         try:
             subprocess.Popen(command)
         except OSError:
