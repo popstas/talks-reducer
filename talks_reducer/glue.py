@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence, Tuple
 
+from . import spherical
 from .ffmpeg import get_ffmpeg_path, run_timed_ffmpeg_command
 from .pipeline import ProcessingAborted, _stop_requested
 from .progress import ProgressReporter
@@ -121,22 +122,27 @@ def build_concat_copy_command(
     destination: Path | str,
     *,
     ffmpeg_path: Optional[str] = None,
+    preserve_spherical: bool = False,
 ) -> str:
-    """Build the stream-copy concatenation command for a demuxer *list_file*."""
+    """Build the stream-copy concatenation command for a demuxer *list_file*.
+
+    ``preserve_spherical`` adds ``-strict unofficial`` so the MOV muxer writes
+    the 360° ``sv3d``/``st3d`` boxes the copied video stream carries.
+    """
 
     ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
-    return " ".join(
-        [
-            f'"{ffmpeg_path}"',
-            "-y",
-            "-f concat",
-            "-safe 0",
-            f'-i "{list_file}"',
-            "-c copy",
-            f'"{destination}"',
-            _FFMPEG_LOG_ARGS,
-        ]
-    )
+    parts = [
+        f'"{ffmpeg_path}"',
+        "-y",
+        "-f concat",
+        "-safe 0",
+        f'-i "{list_file}"',
+        "-c copy",
+    ]
+    if preserve_spherical:
+        parts.append(spherical.PRESERVE_SPHERICAL_ARGS)
+    parts.extend([f'"{destination}"', _FFMPEG_LOG_ARGS])
+    return " ".join(parts)
 
 
 def build_concat_filter_command(
@@ -236,6 +242,7 @@ def concatenate_media(
     list_file = destination.parent / f"{destination.stem}_concat.txt"
     list_file.parent.mkdir(parents=True, exist_ok=True)
     list_file.write_text(build_concat_list(inputs), encoding="utf-8")
+    spherical_info = spherical.probe_spherical(inputs[0])
 
     def _run(command: str, desc: str) -> None:
         if reporter is not None:
@@ -252,6 +259,11 @@ def concatenate_media(
         )
 
     def _reencode() -> None:
+        if spherical_info is not None and reporter is not None:
+            reporter.log(
+                "360° metadata will not be preserved: "
+                "the parts use different stream parameters."
+            )
         first = _probe_streams(inputs[0]) or {}
         video = first.get("video")
         _run(
@@ -278,7 +290,10 @@ def concatenate_media(
             try:
                 _run(
                     build_concat_copy_command(
-                        list_file, destination, ffmpeg_path=ffmpeg_path
+                        list_file,
+                        destination,
+                        ffmpeg_path=ffmpeg_path,
+                        preserve_spherical=spherical_info is not None,
                     ),
                     "Gluing:",
                 )

@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from talks_reducer import glue
+from talks_reducer import glue, spherical
 from talks_reducer.pipeline import ProcessingAborted
 
 
@@ -266,3 +266,72 @@ def test_inputs_can_be_copied_allows_unprobeable_files(
     monkeypatch.setattr(glue, "_probe_streams", lambda path: None)
 
     assert glue.inputs_can_be_copied(_make_inputs(tmp_path)) is True
+
+
+def _spherical_first_part(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every probed part look like an equirectangular 360° video."""
+
+    monkeypatch.setattr(
+        spherical,
+        "probe_spherical",
+        lambda path: spherical.SphericalInfo(projection="equirectangular"),
+    )
+
+
+def test_concatenate_media_copy_keeps_360_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _spherical_first_part(monkeypatch)
+    monkeypatch.setattr(glue, "_probe_streams", lambda path: _signature(320, 240))
+    runner = _RecordingRunner()
+
+    glue.concatenate_media(
+        _make_inputs(tmp_path),
+        tmp_path / "glued.mp4",
+        ffmpeg_path="/usr/bin/ffmpeg",
+        runner=runner,
+    )
+
+    command = runner.commands[0]
+    assert "-c copy" in command
+    assert "-strict unofficial" in command
+    assert command.index("-strict unofficial") < command.index("glued.mp4")
+
+
+def test_concatenate_media_copy_of_flat_video_has_no_strict_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(glue, "_probe_streams", lambda path: _signature(320, 240))
+    runner = _RecordingRunner()
+
+    glue.concatenate_media(
+        _make_inputs(tmp_path),
+        tmp_path / "glued.mp4",
+        ffmpeg_path="/usr/bin/ffmpeg",
+        runner=runner,
+    )
+
+    assert "-strict" not in runner.commands[0]
+
+
+def test_concatenate_media_warns_when_reencode_drops_360_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _spherical_first_part(monkeypatch)
+    inputs = _make_inputs(tmp_path)
+    sizes = {inputs[0]: _signature(320, 240), inputs[1]: _signature(640, 480)}
+    monkeypatch.setattr(glue, "_probe_streams", lambda path: sizes[Path(path)])
+    reporter = _StubReporter()
+
+    glue.concatenate_media(
+        inputs,
+        tmp_path / "glued.mp4",
+        ffmpeg_path="/usr/bin/ffmpeg",
+        reporter=reporter,
+        runner=_RecordingRunner(),
+    )
+
+    assert any(
+        "360° metadata will not be preserved" in message
+        for message in reporter.messages
+    )
