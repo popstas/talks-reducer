@@ -155,17 +155,19 @@ def _scale_filter_part(
 
     reporter.log(f"Scaling down from {int(original_height)}p to {target_height}p")
     if spherical_info is not None:
-        if (
-            spherical_info.projection == spherical_utils.EQUIRECTANGULAR
-            and original_width > 0
-        ):
+        if spherical_info.projection != spherical_utils.EQUIRECTANGULAR:
+            reporter.log(
+                "360° metadata will not be preserved: scaling a "
+                f"{spherical_info.projection} projection is not supported."
+            )
+        elif original_width <= 0:
+            reporter.log(
+                "360° metadata will not be preserved: the source width is unknown."
+            )
+        else:
             return spherical_utils.spherical_scale_filter(
                 int(original_width), int(original_height), target_height
             )
-        reporter.log(
-            "360° metadata will not be preserved: scaling a "
-            f"{spherical_info.projection} projection is not supported."
-        )
     return f"scale=-2:{target_height}"
 
 
@@ -412,7 +414,7 @@ def speed_up_video(
         else None
     )
     if spherical_info is not None:
-        reporter.log(f"Preserving 360° metadata ({spherical_info.projection})")
+        reporter.log(f"360° video detected ({spherical_info.projection})")
 
     # Audio-only inputs can only produce the audio-only mp3 output; every other
     # codec needs a video stream to render.

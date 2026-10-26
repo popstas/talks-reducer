@@ -964,7 +964,7 @@ def test_create_path_builds_nested_directories(tmp_path) -> None:
     assert target.is_dir()
 
 
-def _run_spherical_pipeline(tmp_path, monkeypatch, *, info, small=True):
+def _run_spherical_pipeline(tmp_path, monkeypatch, *, info, small=True, width=7680.0):
     """Drive the no-audio branch with a stubbed spherical probe.
 
     Returns ``(video_kwargs, filter_text, log_lines)``.
@@ -976,7 +976,7 @@ def _run_spherical_pipeline(tmp_path, monkeypatch, *, info, small=True):
         "frame_rate": 30.0,
         "duration": 10.0,
         "frame_count": 300,
-        "width": 7680.0,
+        "width": width,
         "height": 3840.0,
     }
     monkeypatch.setattr(
@@ -1034,15 +1034,19 @@ def test_speed_up_video_scales_equirectangular_with_v360(tmp_path, monkeypatch):
     assert "gblur=sigma=2,v360=e:e:w=1440:h=720" in filter_text
     assert "scale=" not in filter_text
     assert kwargs["preserve_spherical"] is True
-    assert any("Preserving 360° metadata (equirectangular)" in l for l in lines)
+    assert "360° video detected (equirectangular)" in lines
+    assert not any("will not be preserved" in line for line in lines)
 
 
 def test_speed_up_video_flat_video_keeps_scale_filter(tmp_path, monkeypatch):
-    kwargs, filter_text, _ = _run_spherical_pipeline(tmp_path, monkeypatch, info=None)
+    kwargs, filter_text, lines = _run_spherical_pipeline(
+        tmp_path, monkeypatch, info=None
+    )
 
     assert "scale=-2:720" in filter_text
-    assert "v360" not in filter_text
+    assert "v360" not in filter_text and "gblur" not in filter_text
     assert kwargs["preserve_spherical"] is False
+    assert not any("360°" in line for line in lines)
 
 
 def test_speed_up_video_warns_for_unsupported_projection(tmp_path, monkeypatch):
@@ -1054,7 +1058,26 @@ def test_speed_up_video_warns_for_unsupported_projection(tmp_path, monkeypatch):
 
     assert "scale=-2:720" in filter_text
     assert kwargs["preserve_spherical"] is True
-    assert any("360° metadata will not be preserved" in l for l in lines)
+    assert "360° video detected (cubemap)" in lines
+    assert (
+        "360° metadata will not be preserved: "
+        "scaling a cubemap projection is not supported." in lines
+    )
+    assert not any("Preserving 360°" in line for line in lines)
+
+
+def test_speed_up_video_warns_when_equirectangular_width_is_unknown(
+    tmp_path, monkeypatch
+):
+    info = spherical.SphericalInfo(projection="equirectangular")
+
+    _, filter_text, lines = _run_spherical_pipeline(
+        tmp_path, monkeypatch, info=info, width=0.0
+    )
+
+    assert "scale=-2:720" in filter_text
+    assert "360° metadata will not be preserved: the source width is unknown." in lines
+    assert not any("projection is not supported" in line for line in lines)
 
 
 def test_speed_up_video_spherical_without_scaling_keeps_flag(tmp_path, monkeypatch):
