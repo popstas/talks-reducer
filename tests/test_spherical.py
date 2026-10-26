@@ -91,14 +91,18 @@ def test_probe_spherical_swallows_errors(monkeypatch: pytest.MonkeyPatch) -> Non
 @pytest.mark.parametrize(
     ("width", "height", "target", "expected"),
     [
-        (7680, 3840, 720, "v360=e:e:w=1440:h=720"),
-        (7680, 3840, 480, "v360=e:e:w=960:h=480"),
-        (5760, 2880, 720, "v360=e:e:w=1440:h=720"),
-        # Non-2:1 source: width follows the source ratio, rounded to even.
+        # The blur sigma is 0.375x the downscale ratio (5.33x -> 2, 8x -> 3).
+        (7680, 3840, 720, "gblur=sigma=2,v360=e:e:w=1440:h=720"),
+        (7680, 3840, 480, "gblur=sigma=3,v360=e:e:w=960:h=480"),
+        (5760, 2880, 720, "gblur=sigma=1.5,v360=e:e:w=1440:h=720"),
+        (1440, 720, 480, "gblur=sigma=0.56,v360=e:e:w=960:h=480"),
+        # Below a 1.5x downscale nothing aliases, so there is no blur; the
+        # width still follows the source ratio, rounded to even.
         (1000, 562, 480, "v360=e:e:w=854:h=480"),
+        (1438, 719, 480, "v360=e:e:w=960:h=480"),
     ],
 )
-def test_spherical_scale_filter_keeps_aspect_and_even_width(
+def test_spherical_scale_filter_blurs_and_keeps_aspect(
     width: int, height: int, target: int, expected: str
 ) -> None:
     assert spherical.spherical_scale_filter(width, height, target) == expected

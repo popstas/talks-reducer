@@ -136,9 +136,10 @@ def _scale_filter_part(
 ) -> str | None:
     """Return the downscale filter for ``--small``, or ``None`` when not scaling.
 
-    Flat videos get ``scale=-2:H``. Equirectangular 360° sources get ``v360``
-    instead, because ``scale`` drops their Spherical Mapping metadata; other
-    360° projections still use ``scale`` and the loss is logged.
+    Flat videos get ``scale=-2:H``. Equirectangular 360° sources get a
+    ``gblur`` + ``v360`` chain instead, because ``scale`` drops their Spherical
+    Mapping metadata; other 360° projections still use ``scale`` and the loss
+    is logged.
     """
 
     if not options.small:

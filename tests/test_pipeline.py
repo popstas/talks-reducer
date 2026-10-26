@@ -1031,7 +1031,7 @@ def test_speed_up_video_scales_equirectangular_with_v360(tmp_path, monkeypatch):
         tmp_path, monkeypatch, info=info
     )
 
-    assert "v360=e:e:w=1440:h=720" in filter_text
+    assert "gblur=sigma=2,v360=e:e:w=1440:h=720" in filter_text
     assert "scale=" not in filter_text
     assert kwargs["preserve_spherical"] is True
     assert any("Preserving 360° metadata (equirectangular)" in l for l in lines)
