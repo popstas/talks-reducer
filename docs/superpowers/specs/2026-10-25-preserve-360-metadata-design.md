@@ -16,8 +16,8 @@ Measured with the bundled FFmpeg (`static_ffmpeg`, 8.0.1) on a 3 s clip:
 | `-strict unofficial`, no scaling (`setpts` only) | kept | kept |
 | `-strict unofficial`, `scale=1280:-2` | kept | **lost** |
 | `-strict unofficial`, `v360=e:e:w=1280:h=640` | kept | kept |
-| `-strict unofficial`, `gblur=sigma=2,v360=e:e:w=1440:h=720` | kept | kept |
-| `-strict unofficial`, `scale=3840:1920,v360=e:e:w=1440:h=720` | kept | **lost** |
+| `-strict unofficial`, `gblur=sigma=2,v360=e:e:w=1440:h=720` (2 s clip, see below) | kept | kept |
+| `-strict unofficial`, `scale=3840:1920,v360=e:e:w=1440:h=720` (2 s clip, see below) | kept | **lost** |
 | concat demuxer `-c copy -map 0 -strict unofficial` | kept | kept |
 
 Two causes: the MOV muxer only writes `sv3d`/`st3d` under
