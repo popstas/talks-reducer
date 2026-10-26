@@ -22,3 +22,20 @@ def isolate_hardware_backend_cache(monkeypatch, tmp_path):
         ffmpeg, "_hardware_cache_path", lambda: tmp_path / "settings.json"
     )
     monkeypatch.setattr(ffmpeg, "_HARDWARE_BACKEND_CACHE", {})
+
+
+@pytest.fixture(autouse=True)
+def stub_spherical_probe(request, monkeypatch):
+    """Report every input as a flat video unless a test opts in.
+
+    Pipeline and glue tests run on fake files; without this the real probe
+    would spawn ffprobe for each of them. ``test_spherical`` exercises the
+    real function, so it is left alone there.
+    """
+
+    if request.module.__name__.endswith("test_spherical"):
+        return
+
+    from talks_reducer import spherical
+
+    monkeypatch.setattr(spherical, "probe_spherical", lambda path: None)
