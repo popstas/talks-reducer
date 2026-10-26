@@ -49,11 +49,28 @@ def test_parse_returns_none_for_garbage() -> None:
     assert spherical.parse_spherical_side_data(json.dumps({"streams": []})) is None
 
 
+@pytest.mark.parametrize(
+    "document",
+    [
+        [1],
+        {"streams": {"0": {}}},
+        {"streams": "abc"},
+        {"streams": [1]},
+        {"streams": [{"side_data_list": [1]}]},
+        {"streams": [{"side_data_list": {"side_data_type": "Spherical Mapping"}}]},
+    ],
+)
+def test_parse_returns_none_for_malformed_shapes(document) -> None:
+    assert spherical.parse_spherical_side_data(json.dumps(document)) is None
+
+
 def test_probe_spherical_runs_ffprobe(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
+    options = []
 
     def fake_run(command, **kwargs):
         calls.append(command)
+        options.append(kwargs)
         return SimpleNamespace(stdout=_payload(_SPHERICAL))
 
     monkeypatch.setattr(spherical, "_ffprobe_path", lambda: "ffprobe")
@@ -65,6 +82,7 @@ def test_probe_spherical_runs_ffprobe(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls[0][0] == "ffprobe"
     assert "stream_side_data" in " ".join(calls[0])
     assert calls[0][-1] == "clip.mp4"
+    assert options[0]["timeout"] == 10
 
 
 def test_probe_spherical_returns_none_when_ffprobe_missing(
@@ -86,6 +104,32 @@ def test_probe_spherical_swallows_errors(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(spherical.subprocess, "run", failing_run)
 
     assert spherical.probe_spherical("missing.mp4") is None
+
+
+def test_probe_spherical_returns_none_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def hanging_run(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs.get("timeout"))
+
+    monkeypatch.setattr(spherical, "_ffprobe_path", lambda: "ffprobe")
+    monkeypatch.setattr(spherical.subprocess, "run", hanging_run)
+
+    assert spherical.probe_spherical("clip.mp4") is None
+
+
+def test_probe_spherical_returns_none_for_malformed_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = json.dumps({"streams": [{"side_data_list": [1]}]})
+    monkeypatch.setattr(spherical, "_ffprobe_path", lambda: "ffprobe")
+    monkeypatch.setattr(
+        spherical.subprocess,
+        "run",
+        lambda command, **kwargs: SimpleNamespace(stdout=payload),
+    )
+
+    assert spherical.probe_spherical("clip.mp4") is None
 
 
 @pytest.mark.parametrize(

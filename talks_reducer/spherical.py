@@ -21,6 +21,7 @@ EQUIRECTANGULAR = "equirectangular"
 PRESERVE_SPHERICAL_ARGS = "-strict unofficial"
 BLUR_MIN_RATIO = 1.5
 BLUR_SIGMA_PER_RATIO = 0.375
+PROBE_TIMEOUT_SECONDS = 10
 
 
 @dataclass(frozen=True)
@@ -44,19 +45,31 @@ def parse_spherical_side_data(payload: str) -> Optional[SphericalInfo]:
 
     *payload* is the output of ``ffprobe -show_entries stream_side_data -of
     json`` for one video stream. ``None`` means the stream is a flat video or
-    the payload could not be read.
+    the payload could not be read, including JSON whose shape is not the
+    objects-and-lists layout ffprobe writes, so callers never see an exception.
     """
 
     try:
-        streams = json.loads(payload).get("streams") or []
-    except (ValueError, AttributeError):
+        document = json.loads(payload)
+    except ValueError:
         return None
-    if not streams:
+    if not isinstance(document, dict):
+        return None
+    streams = document.get("streams")
+    if not isinstance(streams, list) or not streams:
+        return None
+    stream = streams[0]
+    if not isinstance(stream, dict):
+        return None
+    side_data = stream.get("side_data_list") or []
+    if not isinstance(side_data, list):
         return None
 
     projection: Optional[str] = None
     stereo: Optional[str] = None
-    for entry in streams[0].get("side_data_list") or []:
+    for entry in side_data:
+        if not isinstance(entry, dict):
+            return None
         kind = entry.get("side_data_type")
         if kind == "Spherical Mapping":
             projection = entry.get("projection") or "unknown"
@@ -71,7 +84,8 @@ def parse_spherical_side_data(payload: str) -> Optional[SphericalInfo]:
 def probe_spherical(path: Path | str) -> Optional[SphericalInfo]:
     """Probe *path* for 360° metadata; never raises.
 
-    Any probe failure (missing ffprobe, unreadable file) returns ``None`` so a
+    Any probe failure (missing ffprobe, unreadable file, an ffprobe that hangs
+    past ``PROBE_TIMEOUT_SECONDS``, unexpected output) returns ``None`` so a
     flat-video run is never broken by this check.
     """
 
@@ -95,10 +109,11 @@ def probe_spherical(path: Path | str) -> Optional[SphericalInfo]:
             text=True,
             check=True,
             creationflags=creationflags,
+            timeout=PROBE_TIMEOUT_SECONDS,
         )
+        return parse_spherical_side_data(completed.stdout or "")
     except Exception:
         return None
-    return parse_spherical_side_data(completed.stdout or "")
 
 
 def spherical_scale_filter(
@@ -133,6 +148,7 @@ __all__ = [
     "BLUR_SIGMA_PER_RATIO",
     "EQUIRECTANGULAR",
     "PRESERVE_SPHERICAL_ARGS",
+    "PROBE_TIMEOUT_SECONDS",
     "SphericalInfo",
     "parse_spherical_side_data",
     "probe_spherical",
