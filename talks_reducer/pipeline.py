@@ -17,6 +17,7 @@ from talks_reducer.version_utils import resolve_version
 
 from . import audio as audio_utils
 from . import chunks as chunk_utils
+from . import spherical as spherical_utils
 from . import wav_io as wavfile
 from .ffmpeg import (
     HARDWARE_BACKEND_LABELS,
@@ -31,6 +32,7 @@ from .ffmpeg import (
 )
 from .models import ProcessingOptions, ProcessingResult
 from .progress import NullProgressReporter, ProgressReporter
+from .spherical import SphericalInfo
 
 
 class ProcessingAborted(RuntimeError):
@@ -54,12 +56,16 @@ class PipelineDependencies:
     run_timed_ffmpeg_command: Callable[..., None] = run_timed_ffmpeg_command
     create_path: Callable[[Path], None] | None = None
     delete_path: Callable[[Path], None] | None = None
+    probe_spherical: Callable[[Path], SphericalInfo | None] | None = None
 
     def __post_init__(self) -> None:
         if self.create_path is None:
             self.create_path = _create_path
         if self.delete_path is None:
             self.delete_path = _delete_path
+        if self.probe_spherical is None:
+            # Looked up now, not at class definition, so tests can stub it.
+            self.probe_spherical = spherical_utils.probe_spherical
 
 
 def _invoke_get_ffmpeg_path(
@@ -120,6 +126,48 @@ def _raise_if_stopped(
     raise ProcessingAborted("Processing aborted by user request.")
 
 
+def _scale_filter_part(
+    options: ProcessingOptions,
+    *,
+    original_width: float,
+    original_height: float,
+    spherical_info: SphericalInfo | None,
+    reporter: ProgressReporter,
+) -> str | None:
+    """Return the downscale filter for ``--small``, or ``None`` when not scaling.
+
+    Flat videos get ``scale=-2:H``. Equirectangular 360° sources get ``v360``
+    instead, because ``scale`` drops their Spherical Mapping metadata; other
+    360° projections still use ``scale`` and the loss is logged.
+    """
+
+    if not options.small:
+        return None
+    target_height = options.small_target_height or 720
+    if target_height <= 0:
+        target_height = 720
+    if not (original_height > 0 and original_height >= target_height):
+        reporter.log(
+            f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
+        )
+        return None
+
+    reporter.log(f"Scaling down from {int(original_height)}p to {target_height}p")
+    if spherical_info is not None:
+        if (
+            spherical_info.projection == spherical_utils.EQUIRECTANGULAR
+            and original_width > 0
+        ):
+            return spherical_utils.spherical_scale_filter(
+                int(original_width), int(original_height), target_height
+            )
+        reporter.log(
+            "360° metadata will not be preserved: scaling a "
+            f"{spherical_info.projection} projection is not supported."
+        )
+    return f"scale=-2:{target_height}"
+
+
 def _build_scale_only_filter_graph(
     *,
     job_temp_path: Path,
@@ -127,6 +175,8 @@ def _build_scale_only_filter_graph(
     original_height: int,
     frame_rate: float,
     reporter: ProgressReporter,
+    original_width: float = 0.0,
+    spherical_info: SphericalInfo | None = None,
 ) -> Path | None:
     """Write a filter graph that only rescales (when ``--small`` is requested).
 
@@ -139,19 +189,15 @@ def _build_scale_only_filter_graph(
     """
 
     filter_parts: list[str] = []
-    if options.small:
-        target_height = options.small_target_height or 720
-        if target_height <= 0:
-            target_height = 720
-        if original_height > 0 and original_height >= target_height:
-            filter_parts.append(f"scale=-2:{target_height}")
-            reporter.log(
-                f"Scaling down from {int(original_height)}p to {target_height}p"
-            )
-        else:
-            reporter.log(
-                f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
-            )
+    scale_part = _scale_filter_part(
+        options,
+        original_width=original_width,
+        original_height=original_height,
+        spherical_info=spherical_info,
+        reporter=reporter,
+    )
+    if scale_part:
+        filter_parts.append(scale_part)
 
     if frame_rate and frame_rate > 0:
         filter_parts.append(f"fps={frame_rate}")
@@ -359,6 +405,13 @@ def speed_up_video(
         reporter.log("Small mode scaling to %dp" % target_height)
 
     is_mp3_output = str(options.video_codec).strip().lower() == "mp3"
+    spherical_info = (
+        dependencies.probe_spherical(input_path)
+        if has_video_stream and not is_mp3_output
+        else None
+    )
+    if spherical_info is not None:
+        reporter.log(f"Preserving 360° metadata ({spherical_info.projection})")
 
     # Audio-only inputs can only produce the audio-only mp3 output; every other
     # codec needs a video stream to render.
@@ -510,20 +563,15 @@ def speed_up_video(
         filter_graph_path = job_temp_path / "filterGraph.txt"
         with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
             filter_parts = []
-            if options.small:
-                target_height = options.small_target_height or 720
-                if target_height <= 0:
-                    target_height = 720
-                # Only scale down if the original height is greater than or equal to target
-                if original_height > 0 and original_height >= target_height:
-                    filter_parts.append(f"scale=-2:{target_height}")
-                    reporter.log(
-                        f"Scaling down from {int(original_height)}p to {target_height}p"
-                    )
-                else:
-                    reporter.log(
-                        f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
-                    )
+            scale_part = _scale_filter_part(
+                options,
+                original_width=original_width,
+                original_height=original_height,
+                spherical_info=spherical_info,
+                reporter=reporter,
+            )
+            if scale_part:
+                filter_parts.append(scale_part)
             filter_parts.append(f"fps={frame_rate}")
             escaped_expression = expression.replace(",", "\\,")
             filter_parts.append(f"setpts={escaped_expression}")
@@ -539,6 +587,8 @@ def speed_up_video(
             original_height=original_height,
             frame_rate=frame_rate,
             reporter=reporter,
+            original_width=original_width,
+            spherical_info=spherical_info,
         )
 
     keep_input_audio = has_audio and neutral_speeds
@@ -572,6 +622,7 @@ def speed_up_video(
                 keep_input_audio=keep_input_audio,
                 cut_start_seconds=cut_start_seconds,
                 cut_end_seconds=cut_end_seconds,
+                preserve_spherical=spherical_info is not None,
             )
         )
     # Logged only once the plan is known: a backend can be available yet unused,
