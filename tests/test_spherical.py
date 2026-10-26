@@ -67,6 +67,17 @@ def test_probe_spherical_runs_ffprobe(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls[0][-1] == "clip.mp4"
 
 
+def test_probe_spherical_returns_none_when_ffprobe_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing_ffprobe():
+        raise FileNotFoundError("ffprobe not found")
+
+    monkeypatch.setattr(spherical, "_ffprobe_path", missing_ffprobe)
+
+    assert spherical.probe_spherical("clip.mp4") is None
+
+
 def test_probe_spherical_swallows_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     def failing_run(command, **kwargs):
         raise subprocess.CalledProcessError(1, command)

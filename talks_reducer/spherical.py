@@ -72,20 +72,20 @@ def probe_spherical(path: Path | str) -> Optional[SphericalInfo]:
     flat-video run is never broken by this check.
     """
 
-    command = [
-        _ffprobe_path(),
-        "-v",
-        "error",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream_side_data=side_data_type,projection,type",
-        "-of",
-        "json",
-        str(path),
-    ]
     creationflags = 0x08000000 if sys.platform == "win32" else 0
     try:
+        command = [
+            _ffprobe_path(),
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream_side_data=side_data_type,projection,type",
+            "-of",
+            "json",
+            str(path),
+        ]
         completed = subprocess.run(
             command,
             capture_output=True,
