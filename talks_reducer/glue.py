@@ -262,7 +262,7 @@ def concatenate_media(
         if spherical_info is not None and reporter is not None:
             reporter.log(
                 "360° metadata will not be preserved: "
-                "the parts use different stream parameters."
+                "re-encoding the parts drops it."
             )
         first = _probe_streams(inputs[0]) or {}
         video = first.get("video")
