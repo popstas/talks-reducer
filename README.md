@@ -113,6 +113,17 @@ and each surface opens on the preset you used last. See
 → Full flag reference — codecs, keyframes, silence thresholds, trimming, remote options:
 [docs/cli.md](docs/cli.md).
 
+### 360° videos
+
+Equirectangular 360° recordings keep their 360° metadata (Spherical Mapping
+and Stereo 3D) through gluing and processing, so players still show them as
+a sphere. With a smaller resolution preset the frame is rescaled with FFmpeg's
+`v360` filter instead of `scale`, which would drop the metadata.
+
+Limitations: other projections (cubemap, EAC) keep the metadata only at
+`orig` resolution; gluing 360° parts with different resolutions or codecs
+re-encodes them and drops it. Both cases are reported in the log.
+
 ## Remote server
 
 Run Talks Reducer on the machine with the fast GPU and send jobs to it from anywhere on
