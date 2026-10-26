@@ -118,11 +118,14 @@ and each surface opens on the preset you used last. See
 Equirectangular 360° recordings keep their 360° metadata (Spherical Mapping
 and Stereo 3D) through gluing and processing, so players still show them as
 a sphere. With a smaller resolution preset the frame is rescaled with FFmpeg's
-`v360` filter instead of `scale`, which would drop the metadata.
+`v360` filter instead of `scale`, which would drop the metadata. A light blur,
+scaled to the downscale ratio, runs first so the smaller frame does not
+shimmer: `v360` has no anti-aliasing of its own.
 
 Limitations: other projections (cubemap, EAC) keep the metadata only at
-`orig` resolution; gluing 360° parts with different resolutions or codecs
-re-encodes them and drops it. Both cases are reported in the log.
+original resolution (`orig` in the GUI, no `--small` on the CLI); gluing 360°
+parts with different resolutions or codecs re-encodes them and drops it. Both
+cases are reported in the log.
 
 ## Remote server
 
