@@ -1905,3 +1905,52 @@ def test_build_video_commands_cuda_decodes_on_gpu(monkeypatch):
 
     assert "-hwaccel cuda" in command
     assert fallback is not None and "-hwaccel" not in fallback
+
+
+def test_build_video_commands_preserves_spherical_metadata(monkeypatch):
+    """360° sources need ``-strict unofficial`` for the muxer to write sv3d/st3d."""
+
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: True
+    )
+
+    command, fallback, _ = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        hardware_backend="cuda",
+        optimize=True,
+        small=True,
+        frame_rate=30.0,
+        preserve_spherical=True,
+    )
+
+    assert fallback is not None
+    for built in (command, fallback):
+        assert "-strict unofficial" in built
+        assert built.index("-strict unofficial") < built.index('"output.mp4"')
+
+
+def test_build_video_commands_flat_video_has_no_strict_flag(monkeypatch):
+    """Flat videos keep exactly the commands they had before."""
+
+    monkeypatch.setattr(ffmpeg, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        ffmpeg, "encoder_available", lambda name, ffmpeg_path=None: True
+    )
+
+    command, fallback, _ = ffmpeg.build_video_commands(
+        "input.mp4",
+        "audio.wav",
+        "filter.txt",
+        "output.mp4",
+        hardware_backend="cuda",
+        optimize=True,
+        small=True,
+        frame_rate=30.0,
+    )
+
+    assert "-strict" not in command
+    assert fallback is not None and "-strict" not in fallback

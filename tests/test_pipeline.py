@@ -11,7 +11,7 @@ import pytest
 
 from talks_reducer import audio as audio_module
 from talks_reducer import ffmpeg as ffmpeg_module
-from talks_reducer import pipeline
+from talks_reducer import pipeline, spherical
 from talks_reducer.models import ProcessingOptions
 from talks_reducer.progress import NullProgressReporter
 
@@ -962,3 +962,130 @@ def test_create_path_builds_nested_directories(tmp_path) -> None:
 
     assert target.exists()
     assert target.is_dir()
+
+
+def _run_spherical_pipeline(tmp_path, monkeypatch, *, info, small=True, width=7680.0):
+    """Drive the no-audio branch with a stubbed spherical probe.
+
+    Returns ``(video_kwargs, filter_text, log_lines)``.
+    """
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"fake")
+    metadata = {
+        "frame_rate": 30.0,
+        "duration": 10.0,
+        "frame_count": 300,
+        "width": width,
+        "height": 3840.0,
+    }
+    monkeypatch.setattr(
+        pipeline, "_extract_video_metadata", lambda path, frame_rate: dict(metadata)
+    )
+    monkeypatch.setattr(audio_module, "has_audio_stream", lambda path: False)
+
+    captured = {}
+
+    def fake_build_video_commands(*args, **kwargs):
+        captured.update(kwargs)
+        filter_script = args[2]
+        captured["filter_text"] = (
+            Path(filter_script).read_text(encoding="utf-8") if filter_script else ""
+        )
+        return "video-command", None, False
+
+    dependencies = pipeline.PipelineDependencies(
+        get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
+        detect_hardware_backend=lambda _codec, _path: None,
+        build_video_commands=fake_build_video_commands,
+        run_timed_ffmpeg_command=lambda command, **kwargs: None,
+        probe_spherical=lambda path: info,
+    )
+
+    class _Reporter(NullProgressReporter):
+        def __init__(self):
+            super().__init__()
+            self.lines = []
+
+        def log(self, message):
+            self.lines.append(message)
+
+    reporter = _Reporter()
+    options = ProcessingOptions(
+        input_file=input_file,
+        output_file=tmp_path / "output.mp4",
+        temp_folder=tmp_path / "temp",
+        small=small,
+        small_target_height=720,
+    )
+
+    pipeline.speed_up_video(options, reporter=reporter, dependencies=dependencies)
+
+    return captured, captured["filter_text"], reporter.lines
+
+
+def test_speed_up_video_scales_equirectangular_with_v360(tmp_path, monkeypatch):
+    info = spherical.SphericalInfo(projection="equirectangular", stereo="2D")
+
+    kwargs, filter_text, lines = _run_spherical_pipeline(
+        tmp_path, monkeypatch, info=info
+    )
+
+    assert "gblur=sigma=2,v360=e:e:w=1440:h=720" in filter_text
+    assert "scale=" not in filter_text
+    assert kwargs["preserve_spherical"] is True
+    assert "360° video detected (equirectangular)" in lines
+    assert not any("will not be preserved" in line for line in lines)
+
+
+def test_speed_up_video_flat_video_keeps_scale_filter(tmp_path, monkeypatch):
+    kwargs, filter_text, lines = _run_spherical_pipeline(
+        tmp_path, monkeypatch, info=None
+    )
+
+    assert "scale=-2:720" in filter_text
+    assert "v360" not in filter_text and "gblur" not in filter_text
+    assert kwargs["preserve_spherical"] is False
+    assert not any("360°" in line for line in lines)
+
+
+def test_speed_up_video_warns_for_unsupported_projection(tmp_path, monkeypatch):
+    info = spherical.SphericalInfo(projection="cubemap")
+
+    kwargs, filter_text, lines = _run_spherical_pipeline(
+        tmp_path, monkeypatch, info=info
+    )
+
+    assert "scale=-2:720" in filter_text
+    assert kwargs["preserve_spherical"] is True
+    assert "360° video detected (cubemap)" in lines
+    assert (
+        "360° metadata will not be preserved: "
+        "scaling a cubemap projection is not supported." in lines
+    )
+    assert not any("Preserving 360°" in line for line in lines)
+
+
+def test_speed_up_video_warns_when_equirectangular_width_is_unknown(
+    tmp_path, monkeypatch
+):
+    info = spherical.SphericalInfo(projection="equirectangular")
+
+    _, filter_text, lines = _run_spherical_pipeline(
+        tmp_path, monkeypatch, info=info, width=0.0
+    )
+
+    assert "scale=-2:720" in filter_text
+    assert "360° metadata will not be preserved: the source width is unknown." in lines
+    assert not any("projection is not supported" in line for line in lines)
+
+
+def test_speed_up_video_spherical_without_scaling_keeps_flag(tmp_path, monkeypatch):
+    info = spherical.SphericalInfo(projection="equirectangular")
+
+    kwargs, filter_text, _ = _run_spherical_pipeline(
+        tmp_path, monkeypatch, info=info, small=False
+    )
+
+    assert "v360" not in filter_text and "scale=" not in filter_text
+    assert kwargs["preserve_spherical"] is True

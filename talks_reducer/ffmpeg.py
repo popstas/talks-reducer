@@ -1191,6 +1191,7 @@ def build_video_commands(
     keep_input_audio: bool = False,
     cut_start_seconds: float = 0.0,
     cut_end_seconds: float = 0.0,
+    preserve_spherical: bool = False,
 ) -> Tuple[str, Optional[str], bool]:
     """Create the FFmpeg command strings used to render the final video output.
 
@@ -1209,6 +1210,9 @@ def build_video_commands(
         keep_input_audio: When True and ``audio_file`` is None, map the audio
             track from the input file directly into the output using stream
             copy (``-c:a copy``) instead of disabling audio.
+        preserve_spherical: When True the source carries 360° metadata and
+            ``-strict unofficial`` is added so the MOV muxer writes its
+            ``sv3d``/``st3d`` boxes into the output.
     """
 
     ffmpeg_path = ffmpeg_path or get_ffmpeg_path()
@@ -1456,6 +1460,11 @@ def build_video_commands(
         audio_parts.append("-c:a copy")
     else:
         audio_parts.append("-an")  # No audio
+
+    if preserve_spherical:
+        from .spherical import PRESERVE_SPHERICAL_ARGS
+
+        audio_parts.append(PRESERVE_SPHERICAL_ARGS)
 
     audio_parts.extend(
         [
