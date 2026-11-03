@@ -360,6 +360,50 @@ def test_extract_video_metadata_uses_ffprobe(monkeypatch) -> None:
     assert metadata["height"] == pytest.approx(1080.0)
 
 
+@pytest.mark.parametrize(
+    ("numerator", "denominator", "expected"),
+    [
+        # FFmpeg 5.0's concat demuxer reports this for glued 30 fps parts;
+        # hevc_qsv refuses the matching fps filter value.
+        (130631680, 4354391, 30.0),
+        (30000, 1001, 30000 / 1001),
+        (24000, 1001, 24000 / 1001),
+        (25, 1, 25.0),
+        (120, 1, 120.0),
+    ],
+)
+def test_normalize_frame_rate_snaps_noise_but_keeps_ntsc_rates(
+    numerator: int, denominator: int, expected: float
+) -> None:
+    assert pipeline.normalize_frame_rate(
+        numerator, denominator, fallback=0.0
+    ) == pytest.approx(expected, abs=1e-12)
+
+
+def test_normalize_frame_rate_falls_back_on_zero_terms() -> None:
+    assert pipeline.normalize_frame_rate(0, 0, fallback=30.0) == 30.0
+    assert pipeline.normalize_frame_rate(30, 0, fallback=24.0) == 24.0
+
+
+def test_extract_video_metadata_snaps_noisy_concat_frame_rate(monkeypatch) -> None:
+    """A glued file's noisy avg_frame_rate must reach the fps filter as 30."""
+
+    monkeypatch.setattr(ffmpeg_module, "get_ffprobe_path", lambda: "ffprobe")
+
+    class DummyProcess:
+        def communicate(self) -> tuple[str, str]:
+            return ("avg_frame_rate=130631680/4354391\nduration=1700.9\n", "")
+
+    monkeypatch.setattr(
+        pipeline.subprocess, "Popen", lambda *args, **kwargs: DummyProcess()
+    )
+
+    metadata = pipeline._extract_video_metadata(Path("glued.mp4"), frame_rate=25.0)
+
+    assert metadata["frame_rate"] == 30.0
+    assert f"fps={metadata['frame_rate']}" == "fps=30.0"
+
+
 def test_stop_requested_handles_callable_and_bool() -> None:
     """The stop helper should respect both callable and boolean flags."""
 
