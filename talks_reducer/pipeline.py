@@ -8,6 +8,7 @@ import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Callable, Dict
 
@@ -879,6 +880,29 @@ def _delete_path(path: Path) -> None:
         print(exc)
 
 
+FRAME_RATE_MAX_DENOMINATOR = 1001
+
+
+def normalize_frame_rate(numerator: int, denominator: int, *, fallback: float) -> float:
+    """Return ``numerator/denominator`` snapped to a rate encoders accept.
+
+    A stream-copied concat (FFmpeg 5.0's demuxer in particular) can report an
+    ``avg_frame_rate`` such as ``130631680/4354391`` for 30 fps footage. Fed
+    into the ``fps`` filter, that becomes a rational with huge terms which
+    ``hevc_qsv`` rejects ("Current frame rate is unsupported"), forcing the CPU
+    fallback. Limiting the denominator to 1001 snaps that noise to ``30`` while
+    keeping the NTSC rates (``30000/1001`` …) exact. A zero term returns
+    *fallback*.
+    """
+
+    if numerator <= 0 or denominator <= 0:
+        return fallback
+    snapped = Fraction(numerator, denominator).limit_denominator(
+        FRAME_RATE_MAX_DENOMINATOR
+    )
+    return float(snapped)
+
+
 def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, float]:
     from .ffmpeg import get_ffprobe_path
 
@@ -904,9 +928,13 @@ def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, fl
     )
     stdout, _ = process.communicate()
 
-    match_frame_rate = re.search(r"frame_rate=(\d*)/(\d*)", str(stdout))
+    match_frame_rate = re.search(r"frame_rate=(\d+)/(\d+)", str(stdout))
     if match_frame_rate is not None:
-        frame_rate = float(match_frame_rate.group(1)) / float(match_frame_rate.group(2))
+        frame_rate = normalize_frame_rate(
+            int(match_frame_rate.group(1)),
+            int(match_frame_rate.group(2)),
+            fallback=frame_rate,
+        )
 
     match_duration = re.search(r"duration=([\d.]*)", str(stdout))
     original_duration = float(match_duration.group(1)) if match_duration else 0.0

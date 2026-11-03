@@ -33,6 +33,15 @@ Start Menu and desktop shortcuts, and registers an **Open with Talks Reducer** s
 files and folders so that you can launch the GUI with a dropped path. Use the Additional Tasks
 page at install time to skip the optional shortcuts or shell integration.
 
+FFmpeg is **not** part of the bundle. The bundled `static_ffmpeg` downloads it into
+`{app}\_internal\static_ffmpeg\bin` on the first conversion and writes an `installed.crumb`
+there, after which it never downloads again and never compares versions. The installer's
+`[InstallDelete]` therefore wipes `{app}\_internal` before copying the new files, so every
+update also picks up the FFmpeg the new `static_ffmpeg` points to (and drops libraries an
+older build left behind). Without it, an install kept FFmpeg 5.0 long after `static_ffmpeg`
+had moved to 8.0. The trade-off is one FFmpeg download (~70 MB) after each update.
+`[UninstallDelete]` removes that download on uninstall, since the uninstaller does not track it.
+
 ## Faster PyInstaller builds
 
 PyInstaller spends most of its time walking imports. To keep GUI builds snappy:

@@ -2510,6 +2510,7 @@ def test_maybe_glue_inputs_glues_when_confirmed(monkeypatch, tmp_path):
 
     gui = SimpleNamespace(
         _ask_glue_confirmation=lambda count: True,
+        _ask_glue_order=lambda files: list(files),
         _append_log=lambda message: None,
         _glue_temp_dir=None,
     )
@@ -2526,6 +2527,102 @@ def test_maybe_glue_inputs_glues_when_confirmed(monkeypatch, tmp_path):
     assert gui._glue_temp_dir == glued.parent
     assert calls[0]["inputs"] == ["/videos/part1.mp4", "/videos/part2.mp4"]
     assert calls[0]["temp_folder"] == tmp_path
+
+
+def test_maybe_glue_inputs_uses_the_order_from_the_dialog(monkeypatch, tmp_path):
+    """The order dialog decides the concat order and which part names the output."""
+
+    calls: list[list[str]] = []
+
+    def fake_prepare(inputs, **kwargs):
+        calls.append(list(inputs))
+        glued = tmp_path / "glue_dir" / Path(inputs[0]).name
+        return glued, glued.parent
+
+    monkeypatch.setattr(app, "prepare_glued_input", fake_prepare)
+    asked: list[list[str]] = []
+
+    def fake_order(files):
+        asked.append(list(files))
+        return ["/videos/b.mp4", "/videos/a.mp4"]
+
+    gui = SimpleNamespace(
+        _ask_glue_confirmation=lambda count: True,
+        _ask_glue_order=fake_order,
+        _append_log=lambda message: None,
+        _glue_temp_dir=None,
+    )
+
+    files, glue_source = app.TalksReducerGUI._maybe_glue_inputs(
+        gui,
+        ["/videos/a.mp4", "/videos/b.mp4"],
+        {"temp_folder": str(tmp_path)},
+        reporter=object(),
+    )
+
+    assert asked == [["/videos/a.mp4", "/videos/b.mp4"]]
+    assert calls == [["/videos/b.mp4", "/videos/a.mp4"]]
+    assert glue_source == Path("/videos/b.mp4")
+    assert files == [str(tmp_path / "glue_dir" / "b.mp4")]
+
+
+def test_maybe_glue_inputs_aborts_when_order_dialog_is_cancelled(monkeypatch):
+    """Cancelling the order dialog stops the run instead of gluing or splitting."""
+
+    monkeypatch.setattr(
+        app,
+        "prepare_glued_input",
+        lambda *args, **kwargs: pytest.fail("gluing should not run"),
+    )
+    gui = SimpleNamespace(
+        _ask_glue_confirmation=lambda count: True,
+        _ask_glue_order=lambda files: None,
+        _append_log=lambda message: None,
+        _glue_temp_dir=None,
+    )
+
+    with pytest.raises(app.ProcessingAborted):
+        app.TalksReducerGUI._maybe_glue_inputs(
+            gui, ["/videos/a.mp4", "/videos/b.mp4"], {}, reporter=object()
+        )
+
+
+def test_ask_glue_order_opens_the_dialog_on_the_ui_thread(monkeypatch):
+    """The worker waits for the dialog's answer, which is opened via the UI queue."""
+
+    scheduled: list = []
+    opened: list = []
+
+    def fake_open(gui, files, on_done):
+        opened.append(list(files))
+        on_done(["/videos/b.mp4", "/videos/a.mp4"])
+
+    monkeypatch.setattr(app.glue_dialog, "open_glue_order_dialog", fake_open)
+
+    def schedule(callback):
+        scheduled.append(callback)
+        callback()
+
+    gui = SimpleNamespace(_schedule_on_ui_thread=schedule)
+
+    result = app.TalksReducerGUI._ask_glue_order(
+        gui, ["/videos/a.mp4", "/videos/b.mp4"]
+    )
+
+    assert len(scheduled) == 1
+    assert opened == [["/videos/a.mp4", "/videos/b.mp4"]]
+    assert result == ["/videos/b.mp4", "/videos/a.mp4"]
+
+
+def test_ask_glue_order_returns_none_when_cancelled(monkeypatch):
+    monkeypatch.setattr(
+        app.glue_dialog,
+        "open_glue_order_dialog",
+        lambda gui, files, on_done: on_done(None),
+    )
+    gui = SimpleNamespace(_schedule_on_ui_thread=lambda callback: callback())
+
+    assert app.TalksReducerGUI._ask_glue_order(gui, ["/a.mp4", "/b.mp4"]) is None
 
 
 def test_maybe_glue_inputs_keeps_files_when_declined(monkeypatch, tmp_path):

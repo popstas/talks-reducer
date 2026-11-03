@@ -30,7 +30,15 @@ are ignored.
 drop, a picker selection, or a folder that expands), the worker asks
 `_ask_glue_confirmation` — a `messagebox.askyesno` marshalled onto the UI thread
 with the worker blocking on a `threading.Event`, since the dialog cannot be
-raised from the processing thread. **Yes** routes the queue through
+raised from the processing thread. **Yes** then opens the **Glue order** dialog
+(`_ask_glue_order` → `gui/glue_dialog.py:open_glue_order_dialog`, same
+UI-thread/`Event` pattern): the parts start sorted by file name
+(`sort_glue_inputs`, natural digit order) because drop order and `os.listdir`
+order say nothing about recording order, and the user reorders them with ↑/↓,
+Alt+↑/↓ or dragging. The reordered list decides the concat order *and*
+`glue_source`, so the first row names the output. Cancelling that dialog raises
+`ProcessingAborted` (status "Aborted") instead of silently processing the parts
+separately. The confirmed order then routes the queue through
 `glue.prepare_glued_input` (`_maybe_glue_inputs`), which concatenates the parts
 into a `glue_*` directory under the temp folder **before** the local/remote
 branch, so remote mode uploads one file too; `_cleanup_glue_workspace` removes
@@ -292,6 +300,7 @@ launches.
   - `pipeline.py` orchestrates FFmpeg, audio processing, and temporary assets.
   - `audio.py` handles audio validation, volume analysis, and phase vocoder processing. `render_chunk` is the per-chunk unit shared with the worker processes; it copies the samples instead of running the vocoder when the chunk plays at speed 1.0 (the vocoder is an identity transform there, so the STFT round-trip was pure cost in the default configuration).
   - `audio_workers.py` renders phase-vocoder chunks in a `ProcessPoolExecutor`. Threads make the stage *slower* — the vocoder is Python plus small NumPy ops and holds the GIL — so this uses processes, publishes the source audio once through `multiprocessing.shared_memory` rather than pickling every slice, and spawns rather than forks (the GUI and tray own Tk and pystray on the main thread). `audio.PARALLEL_MIN_OUTPUT_SAMPLES` gates it on *estimated output* samples, not input, since a chunk sped up ten times is a tenth of the work. Every pool failure — at startup or mid-run, via a dying worker — logs at debug level and falls back to in-process rendering, so a frozen build that cannot spawn still converts. `launcher.py` calls `multiprocessing.freeze_support()` before anything else because a frozen build re-executes it for every worker.
+  - `pipeline.normalize_frame_rate` snaps the probed `avg_frame_rate` with `Fraction.limit_denominator(1001)`. FFmpeg 5.0's concat demuxer (the one the installed Windows build bundles) reports glued 30 fps parts as `130631680/4354391`; written into the `fps=` filter that becomes a rational `hevc_qsv` refuses ("Current frame rate is unsupported"), so every glued QSV run fell back to the CPU. The bound keeps `30000/1001`-style NTSC rates exact.
   - `chunks.py` builds timing metadata and FFmpeg expressions for frame selection.
   - The `Audio processing:` task counts **chunks**, not samples (`total=len(chunks)`, one unit per chunk). The two chunk kinds stopped costing the same once unit-speed chunks were copied instead of resampled: a copy takes microseconds and the phase vocoder takes everything, so a sample-weighted bar sprinted through ~70% of the samples and then crawled.
   - `glue.py` concatenates several inputs into one file before the pipeline runs (`--glue`, GUI confirmation). It stream-copies only when `inputs_can_be_copied` reports matching probes — FFmpeg will happily copy parts of different resolutions into a file whose frames change size mid-playback — and otherwise re-encodes through the concat filter, scaling every part to the first one's frame size.

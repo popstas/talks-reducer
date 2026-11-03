@@ -44,6 +44,7 @@ try:
     from ..timecode import format_timecode, parse_timecode
     from ..version_utils import resolve_version
     from . import discovery as discovery_helpers
+    from . import glue_dialog
     from . import layout as layout_helpers
     from . import preset_dialog, relaunch
     from . import shortcut as shortcut_helpers
@@ -90,6 +91,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from talks_reducer.glue import prepare_glued_input
     from talks_reducer.gui import discovery as discovery_helpers
+    from talks_reducer.gui import glue_dialog
     from talks_reducer.gui import layout as layout_helpers
     from talks_reducer.gui import preset_dialog, relaunch
     from talks_reducer.gui import shortcut as shortcut_helpers
@@ -1669,6 +1671,31 @@ class TalksReducerGUI:
         answered.wait()
         return answer.get("value", False)
 
+    def _ask_glue_order(self, files: List[str]) -> Optional[List[str]]:
+        """Let the user order the parts to glue; ``None`` means cancelled.
+
+        Like :meth:`_ask_glue_confirmation`, the dialog is opened on the Tk main
+        thread while the calling worker thread waits for the answer.
+        """
+
+        answer: dict[str, Optional[List[str]]] = {}
+        answered = threading.Event()
+
+        def done(result: Optional[List[str]]) -> None:
+            answer["value"] = result
+            answered.set()
+
+        def ask() -> None:
+            try:
+                glue_dialog.open_glue_order_dialog(self, files, done)
+            except Exception:
+                done(None)
+                raise
+
+        self._schedule_on_ui_thread(ask)
+        answered.wait()
+        return answer.get("value")
+
     def _maybe_glue_inputs(
         self,
         files: List[str],
@@ -1679,13 +1706,19 @@ class TalksReducerGUI:
         """Offer to concatenate *files* and return the queue to process.
 
         Returns the (possibly single-entry) file list plus the original first
-        file, which names the output when the parts were glued. A single queued
-        file is returned untouched without showing the dialog.
+        file, which names the output when the parts were glued. After the user
+        agrees, the order dialog decides the concat order (and so which part
+        names the output); cancelling it aborts the run. A single queued file is
+        returned untouched without showing either dialog.
         """
 
         if len(files) < 2 or not self._ask_glue_confirmation(len(files)):
             return files, None
 
+        ordered = self._ask_glue_order(files)
+        if ordered is None:
+            raise ProcessingAborted("Gluing cancelled in the order dialog.")
+        files = ordered
         glue_source = Path(files[0])
         temp_folder = Path(args.get("temp_folder") or default_temp_folder())
         glued_file, temp_dir = prepare_glued_input(

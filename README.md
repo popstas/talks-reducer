@@ -100,7 +100,9 @@ talks-reducer --list-presets                               # print the saved pre
 
 Every input can also be a directory, and you can pass as many as you like in one run. Each
 one is processed separately unless you add `--glue`, which concatenates them into a single
-video first and names the result after the first part.
+video first and names the result after the first part. In the desktop GUI, dropping several
+files asks whether to glue them; answering **Yes** opens a **Glue order** list sorted by file
+name, where you can move parts up or down (buttons, Alt+↑/↓, or drag) before gluing starts.
 
 **Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec)
 you author once in the desktop GUI's Advanced mode and reuse everywhere — Simple mode, the
