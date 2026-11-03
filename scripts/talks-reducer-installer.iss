@@ -82,6 +82,22 @@ Name: "addcontext"; Description: "Register ""Open with Talks Reducer"" in Explor
 Name: "dockserver_startmenu"; Description: "Add ""OBS Dock Server"" to the Start menu"; GroupDescription: "OBS Processing Dock:"; Flags: unchecked
 Name: "dockserver_startup"; Description: "Start the OBS Dock Server automatically at logon"; GroupDescription: "OBS Processing Dock:"; Flags: unchecked
 
+[InstallDelete]
+; Start every update from a clean bundle. [Files] only adds and overwrites, so
+; without this, files a newer build dropped pile up in _internal (several
+; click-*.dist-info copies were found side by side). It also removes the FFmpeg
+; that static_ffmpeg downloads into _internal\static_ffmpeg\bin on first use:
+; its installed.crumb blocks any later download and is never checked against
+; the version the new build asks for, so an install kept FFmpeg 5.0 long after
+; the bundled static_ffmpeg had moved to 8.0. The current FFmpeg is downloaded
+; again on the first conversion after the update.
+Type: filesandordirs; Name: "{app}\_internal"
+
+[UninstallDelete]
+; The runtime FFmpeg download is not one of the installed files, so the
+; uninstaller would otherwise leave it (and the _internal folder) behind.
+Type: filesandordirs; Name: "{app}\_internal\static_ffmpeg"
+
 [Files]
 Source: "{#SOURCE_DIR}*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
