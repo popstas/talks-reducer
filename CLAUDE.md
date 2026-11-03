@@ -30,7 +30,15 @@ are ignored.
 drop, a picker selection, or a folder that expands), the worker asks
 `_ask_glue_confirmation` — a `messagebox.askyesno` marshalled onto the UI thread
 with the worker blocking on a `threading.Event`, since the dialog cannot be
-raised from the processing thread. **Yes** routes the queue through
+raised from the processing thread. **Yes** then opens the **Glue order** dialog
+(`_ask_glue_order` → `gui/glue_dialog.py:open_glue_order_dialog`, same
+UI-thread/`Event` pattern): the parts start sorted by file name
+(`sort_glue_inputs`, natural digit order) because drop order and `os.listdir`
+order say nothing about recording order, and the user reorders them with ↑/↓,
+Alt+↑/↓ or dragging. The reordered list decides the concat order *and*
+`glue_source`, so the first row names the output. Cancelling that dialog raises
+`ProcessingAborted` (status "Aborted") instead of silently processing the parts
+separately. The confirmed order then routes the queue through
 `glue.prepare_glued_input` (`_maybe_glue_inputs`), which concatenates the parts
 into a `glue_*` directory under the temp folder **before** the local/remote
 branch, so remote mode uploads one file too; `_cleanup_glue_workspace` removes
