@@ -45,6 +45,9 @@ class ProcessingOptions:
     ``cut_end_seconds`` is the timestamp to stop keeping. An end value of
     ``0.0`` means "keep until the end of the video" (EOF); when both are
     ``0.0`` no trim is applied and processing is byte-for-byte unchanged.
+
+    ``max_frame_rate`` caps the output frame rate (``None`` keeps the source
+    rate); it only ever lowers it.
     """
 
     input_file: Path
@@ -60,6 +63,7 @@ class ProcessingOptions:
     optimize: bool = True
     small: bool = False
     small_target_height: Optional[int] = None
+    max_frame_rate: Optional[float] = None
     video_codec: str = "h264"
     keyframe_interval_seconds: float = 30.0
     prefer_global_ffmpeg: bool = False
