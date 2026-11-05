@@ -20,9 +20,21 @@ from .ffmpeg import FFmpegNotFoundError
 from .glue import prepare_glued_input
 from .models import ProcessingOptions, default_temp_folder
 from .pipeline import resolve_output_path, speed_up_video
+from .presets import parse_fps_token, resolution_to_small
 from .progress import TqdmProgressReporter
 from .timecode import parse_timecode
 from .version_utils import resolve_version
+
+
+def _parse_fps_arg(text: str) -> float:
+    """argparse ``type`` for ``--fps``: ``0.0`` for ``orig``, else a positive number."""
+
+    try:
+        return parse_fps_token(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"invalid fps {text!r}: use 30, 60, orig or another positive number"
+        ) from exc
 
 
 class _ListPresetsAction(argparse.Action):
@@ -178,7 +190,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--small",
         action="store_true",
-        help="Apply small file optimizations: resize video to 720p (or 480p with --480), audio to 128k bitrate, best compression (uses CUDA if available).",
+        help="Apply small file optimizations: resize video to 720p (or 480p/1080p with --480/--1080), audio to 128k bitrate, best compression (uses CUDA if available).",
     )
     parser.add_argument(
         "--no-small",
@@ -189,16 +201,32 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--480",
-        dest="small_480",
-        action="store_true",
+        dest="small_height",
+        action="store_const",
+        const=480,
         help="Use with --small to scale video to 480p instead of 720p.",
     )
     parser.add_argument(
         "--720",
-        dest="small_480",
-        action="store_false",
-        default=False,
-        help="Force the 720p small preset, overriding a stored 480p preference (unchecks the GUI 480p box on a seeded launch).",
+        dest="small_height",
+        action="store_const",
+        const=720,
+        help="Use with --small to scale video to 720p (the default), overriding a stored 480p/1080p preference on a seeded launch.",
+    )
+    parser.add_argument(
+        "--1080",
+        dest="small_height",
+        action="store_const",
+        const=1080,
+        help="Use with --small to scale video down to 1080p; sources at or below 1080p are kept as is.",
+    )
+    parser.add_argument(
+        "--fps",
+        dest="max_frame_rate",
+        type=_parse_fps_arg,
+        default=None,
+        metavar="{30,60,orig}",
+        help="Cap the output frame rate (30, 60 or any positive number); 'orig' keeps the source rate. The frame rate is never raised.",
     )
     parser.add_argument(
         "--no-optimize",
@@ -284,30 +312,31 @@ def _apply_preset_to_args(
 
     Presets are sparse: a field the preset leaves unset (``None``) is skipped so
     it inherits the parser default or a stored preference instead of being forced.
-    When present, resolution is expanded to the ``small``/``small_480`` tri-state
-    so a preset can force ``--no-small``; each field is only written when the user
-    did not pass the corresponding flag, preserving explicit-flag precedence.
+    When present, resolution is expanded to ``small``/``small_height`` so a preset
+    can force ``--no-small``, and ``fps`` maps to ``max_frame_rate``; each field is
+    only written when the user did not pass the corresponding flag, preserving
+    explicit-flag precedence.
     """
 
     resolution = getattr(preset, "resolution", None)
     if resolution is not None:
-        if resolution == "1080p":
-            small, small_480 = False, False
-        elif resolution == "480p":
-            small, small_480 = True, True
-        else:  # "720p" and any unexpected value.
-            small, small_480 = True, False
-
+        small, height = resolution_to_small(resolution)
         if "small" not in explicit:
             parsed_args.small = small
-        if "small_480" not in explicit:
-            # ``small_480`` is only meaningful alongside ``small``; when the
-            # effective small flag is off (e.g. an explicit ``--no-small``
-            # overriding a 480p preset) never leave 480p scaling on, or the output
-            # name gains a stray ``480`` marker with no rescale behind it.
-            parsed_args.small_480 = small_480 and bool(
-                getattr(parsed_args, "small", small)
+        if "small_height" not in explicit:
+            # A height only means something alongside ``small``; with small off
+            # (e.g. an explicit ``--no-small`` over a 1080p preset) leave none, or
+            # the output name would gain a size marker with no rescale behind it.
+            parsed_args.small_height = (
+                height if getattr(parsed_args, "small", small) else None
             )
+
+    fps = getattr(preset, "fps", None)
+    if fps is not None and "max_frame_rate" not in explicit:
+        try:
+            parsed_args.max_frame_rate = parse_fps_token(fps)
+        except ValueError:
+            pass
 
     if (
         getattr(preset, "silent_speed", None) is not None
@@ -480,11 +509,11 @@ class CliApplication:
         if len(files) > 1 and "output_file" in args:
             del args["output_file"]
 
-        if getattr(parsed_args, "small_480", False) and not getattr(
+        if getattr(parsed_args, "small_height", None) and not getattr(
             parsed_args, "small", False
         ):
             print(
-                "Warning: --480 has no effect unless --small is also provided.",
+                "Warning: --480/--720/--1080 has no effect unless --small is also provided.",
                 file=sys.stderr,
             )
 
@@ -540,8 +569,12 @@ class CliApplication:
                 option_kwargs["optimize"] = bool(local_options["optimize"])
             if "small" in local_options:
                 option_kwargs["small"] = bool(local_options["small"])
-            if local_options.get("small_480"):
-                option_kwargs["small_target_height"] = 480
+            small_height = local_options.get("small_height")
+            if small_height and local_options.get("small"):
+                option_kwargs["small_target_height"] = int(small_height)
+            max_frame_rate = local_options.get("max_frame_rate")
+            if max_frame_rate and float(max_frame_rate) > 0:
+                option_kwargs["max_frame_rate"] = float(max_frame_rate)
             if "prefer_global_ffmpeg" in local_options:
                 option_kwargs["prefer_global_ffmpeg"] = bool(
                     local_options["prefer_global_ffmpeg"]
@@ -671,11 +704,14 @@ class CliApplication:
                 file=sys.stderr,
             )
 
-        small_480_mode = bool(getattr(parsed_args, "small_480", False)) and bool(
-            getattr(parsed_args, "small", False)
-        )
-        if small_480_mode:
-            remote_option_values["small_480"] = True
+        small_on = bool(getattr(parsed_args, "small", False))
+        small_height = getattr(parsed_args, "small_height", None) if small_on else None
+        small_480_mode = small_height == 480
+        if small_height:
+            remote_option_values["small_height"] = int(small_height)
+        max_frame_rate = getattr(parsed_args, "max_frame_rate", None)
+        if max_frame_rate and max_frame_rate > 0:
+            remote_option_values["max_frame_rate"] = float(max_frame_rate)
 
         for index, file in enumerate(files, start=1):
             basename = os.path.basename(file)

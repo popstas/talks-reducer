@@ -64,26 +64,26 @@ def test_main_applies_preset_as_base_config(monkeypatch: pytest.MonkeyPatch) -> 
     cli.main(["--preset", "480p 10x speedup H.265", "input.mp4"])
 
     assert captured["small"] is True
-    assert captured["small_480"] is True
+    assert captured["small_height"] == 480
     assert captured["silent_speed"] == pytest.approx(10.0)
     assert captured["sounded_speed"] == pytest.approx(1.0)
     assert captured["silent_threshold"] == pytest.approx(0.02)
     assert captured["video_codec"] == "hevc"
 
 
-def test_main_preset_1080p_forces_no_small(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A 1080p preset should force ``small=False`` even without an explicit flag."""
+def test_main_preset_orig_forces_no_small(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An ``orig`` preset should force ``small=False`` even without an explicit flag."""
 
-    preset = _make_preset(name="1080p", resolution="1080p", video_codec="h264")
+    preset = _make_preset(name="orig", resolution="orig", video_codec="h264")
     monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [preset])
 
     captured: dict = {}
     _capture_cli_application(monkeypatch, captured)
 
-    cli.main(["--preset", "1080p", "input.mp4"])
+    cli.main(["--preset", "orig", "input.mp4"])
 
     assert captured["small"] is False
-    assert captured["small_480"] is False
+    assert captured["small_height"] is None
 
 
 def test_main_explicit_flags_override_preset(
@@ -119,8 +119,8 @@ def test_main_explicit_flags_override_preset(
     assert captured["silent_speed"] == pytest.approx(3.0)
     assert captured["small"] is False
     # ``--no-small`` must fully override the 480p preset: 480p scaling is only
-    # meaningful alongside ``small``, so ``small_480`` must not leak through.
-    assert captured["small_480"] is False
+    # meaningful alongside ``small``, so ``small_height`` must not leak through.
+    assert captured["small_height"] is None
     # ``sounded_speed`` was not passed, so the preset value still applies.
     assert captured["sounded_speed"] == pytest.approx(1.0)
 
@@ -1400,3 +1400,113 @@ def test_cli_application_reports_a_failed_glue(tmp_path: Path) -> None:
 
     assert exit_code == 1
     assert any("ffmpeg exploded" in message for message in error_messages)
+
+
+def test_main_1080_flag_sets_small_height(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict = {}
+    _capture_cli_application(monkeypatch, captured)
+
+    cli.main(["--small", "--1080", "input.mp4"])
+
+    assert captured["small"] is True
+    assert captured["small_height"] == 1080
+
+
+@pytest.mark.parametrize("value, expected", [("30", 30.0), ("orig", 0.0), ("25", 25.0)])
+def test_main_fps_flag(monkeypatch: pytest.MonkeyPatch, value, expected) -> None:
+    captured: dict = {}
+    _capture_cli_application(monkeypatch, captured)
+
+    cli.main(["--fps", value, "input.mp4"])
+
+    assert captured["max_frame_rate"] == pytest.approx(expected)
+
+
+def test_main_fps_rejects_garbage(monkeypatch: pytest.MonkeyPatch) -> None:
+    _capture_cli_application(monkeypatch, {})
+
+    with pytest.raises(SystemExit):
+        cli.main(["--fps", "fast", "input.mp4"])
+
+
+def test_main_preset_applies_1080_and_fps(monkeypatch: pytest.MonkeyPatch) -> None:
+    preset = _make_preset(name="HD", resolution="1080p", fps="30")
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [preset])
+    captured: dict = {}
+    _capture_cli_application(monkeypatch, captured)
+
+    cli.main(["--preset", "HD", "input.mp4"])
+
+    assert captured["small"] is True
+    assert captured["small_height"] == 1080
+    assert captured["max_frame_rate"] == pytest.approx(30.0)
+
+
+def test_main_explicit_fps_beats_preset(monkeypatch: pytest.MonkeyPatch) -> None:
+    preset = _make_preset(name="HD", resolution="1080p", fps="30")
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [preset])
+    captured: dict = {}
+    _capture_cli_application(monkeypatch, captured)
+
+    cli.main(["--preset", "HD", "--fps", "orig", "input.mp4"])
+
+    assert captured["max_frame_rate"] == 0.0
+
+
+def test_cli_application_passes_height_and_fps_to_options() -> None:
+    parsed_args = cli._build_parser().parse_args(
+        ["--small", "--1080", "--fps", "30", "input.mp4"]
+    )
+    speed_calls: list[cli.ProcessingOptions] = []
+
+    def fake_speed_up(options: cli.ProcessingOptions, reporter: object):
+        speed_calls.append(options)
+        return SimpleNamespace(output_file=Path("/videos/output.mp4"))
+
+    class DummyReporter:
+        def log(self, message: str) -> None:
+            pass
+
+    app = cli.CliApplication(
+        gather_files=lambda paths, **_kwargs: ["/videos/input.mp4"],
+        send_video=None,
+        speed_up=fake_speed_up,
+        reporter_factory=DummyReporter,
+    )
+
+    exit_code, _ = app.run(parsed_args)
+
+    assert exit_code == 0
+    assert speed_calls[0].small_target_height == 1080
+    assert speed_calls[0].max_frame_rate == pytest.approx(30.0)
+
+
+def test_cli_application_remote_480_and_fps() -> None:
+    """``--url --small --480`` used to pass ``small_480`` twice and fall back."""
+
+    parsed_args = cli._build_parser().parse_args(
+        ["--url", "http://localhost:9005/", "--small", "--480", "--fps", "30", "in.mp4"]
+    )
+    send_calls: list[dict[str, object]] = []
+
+    def fake_send_video(**kwargs: object):
+        send_calls.append(dict(kwargs))
+        return Path("/tmp/result.mp4"), "Summary", "Log"
+
+    def fail_speed_up(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("Local pipeline should not run when remote succeeds")
+
+    app = cli.CliApplication(
+        gather_files=lambda paths, **_kwargs: ["/tmp/input.mp4"],
+        send_video=fake_send_video,
+        speed_up=fail_speed_up,
+        reporter_factory=mock.Mock(),
+    )
+
+    exit_code, error_messages = app.run(parsed_args)
+
+    assert exit_code == 0, error_messages
+    call = send_calls[0]
+    assert call["small_480"] is True
+    assert call["small_height"] == 480
+    assert call["max_frame_rate"] == pytest.approx(30.0)
