@@ -97,7 +97,7 @@ def test_save_and_load_round_trip(tmp_path):
     custom = [
         Preset(
             name="My preset",
-            resolution="1080p",
+            resolution="orig",
             silent_speed=7.5,
             sounded_speed=1.25,
             silent_threshold=0.02,
@@ -147,7 +147,8 @@ def test_load_presets_non_list_value_returns_empty(tmp_path):
 @pytest.mark.parametrize(
     "resolution, expected_prefix",
     [
-        ("1080p", ["--no-small"]),
+        ("orig", ["--no-small"]),
+        ("1080p", ["--small", "--1080"]),
         ("720p", ["--small", "--720"]),
         ("480p", ["--small", "--480"]),
     ],
@@ -201,6 +202,7 @@ def test_match_preset_exact_match_within_tolerance():
         "sounded_speed": 1.0,
         "silent_threshold": 0.01,
         "video_codec": "hevc",
+        "fps": "30",
     }
 
     assert match_preset(values, DEFAULT_PRESETS) == "Smallest"
@@ -243,7 +245,7 @@ def test_match_preset_invalid_number_returns_none():
 
 
 def test_find_preset():
-    assert find_preset("Compress", DEFAULT_PRESETS).resolution == "720p"
+    assert find_preset("Compress", DEFAULT_PRESETS).resolution == "1080p"
     assert find_preset("missing", DEFAULT_PRESETS) is None
 
 
@@ -395,7 +397,7 @@ def test_preset_to_cli_args_sparse_emits_only_present_flags():
 
 
 def test_preset_to_cli_args_sparse_resolution_only():
-    preset = Preset(name="res only", resolution="1080p")
+    preset = Preset(name="res only", resolution="orig")
 
     assert preset_to_cli_args(preset) == ["--no-small"]
 
@@ -491,3 +493,130 @@ def test_describe_preset_omits_absent_fields():
 
 def test_describe_preset_without_values_is_not_blank():
     assert presets.describe_preset(Preset(name="empty")) == "Applies no settings"
+
+
+def _write(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+
+
+def test_load_presets_migrates_v1_1080p_to_orig(tmp_path):
+    """Before version 2, ``"1080p"`` meant "no scaling"; it becomes ``"orig"``."""
+
+    path = _config_path(tmp_path)
+    _write(
+        path,
+        {
+            "theme": "dark",
+            "presets": [
+                {"name": "Full", "resolution": "1080p"},
+                {"name": "Small", "resolution": "720p"},
+            ],
+        },
+    )
+
+    result = load_presets(config_path=path)
+
+    assert [p.resolution for p in result] == ["orig", "720p"]
+    stored = _read(path)
+    assert stored["presets_version"] == 2
+    assert stored["presets"][0]["resolution"] == "orig"
+    assert stored["theme"] == "dark"
+
+
+def test_load_presets_keeps_real_1080p_once_migrated(tmp_path):
+    path = _config_path(tmp_path)
+    _write(
+        path,
+        {"presets_version": 2, "presets": [{"name": "HD", "resolution": "1080p"}]},
+    )
+
+    assert load_presets(config_path=path)[0].resolution == "1080p"
+
+
+def test_load_presets_seed_writes_version_marker(tmp_path):
+    path = _config_path(tmp_path)
+
+    load_presets(config_path=path)
+
+    assert _read(path)["presets_version"] == 2
+
+
+def test_save_presets_writes_version_marker(tmp_path):
+    path = _config_path(tmp_path)
+
+    save_presets([Preset(name="x", resolution="1080p")], config_path=path)
+
+    assert _read(path)["presets_version"] == 2
+
+
+def test_preset_fps_round_trips_sparse():
+    preset = Preset(name="p", fps="30")
+
+    assert preset.to_dict() == {"name": "p", "fps": "30"}
+    assert Preset.from_dict({"name": "p", "fps": 30}).fps == "30"
+    assert Preset.from_dict({"name": "p"}).fps is None
+    assert preset.present_fields() == {"fps"}
+
+
+def test_describe_preset_lists_fps():
+    assert presets.describe_preset(Preset(name="p", fps="60")) == "FPS: 60"
+
+
+def test_match_preset_compares_fps():
+    stored = [Preset(name="Capped", fps="30")]
+
+    assert match_preset({"fps": "30"}, stored) == "Capped"
+    assert match_preset({"fps": "orig"}, stored) is None
+
+
+@pytest.mark.parametrize(
+    "fps, expected",
+    [("30", ["--fps", "30"]), ("orig", ["--fps", "orig"])],
+)
+def test_preset_to_cli_args_emits_fps(fps, expected):
+    assert preset_to_cli_args(Preset(name="p", fps=fps)) == expected
+
+
+def test_default_presets_compress_and_smallest_cap_fps():
+    compress = find_preset("Compress", DEFAULT_PRESETS)
+    smallest = find_preset("Smallest", DEFAULT_PRESETS)
+
+    assert (compress.resolution, compress.fps) == ("1080p", "30")
+    assert smallest.fps == "30"
+    assert find_preset("Compatible", DEFAULT_PRESETS).fps is None
+
+
+@pytest.mark.parametrize(
+    "resolution, expected",
+    [
+        ("orig", (False, None)),
+        ("1080p", (True, 1080)),
+        ("720p", (True, 720)),
+        ("480p", (True, 480)),
+        ("bogus", (True, 720)),
+    ],
+)
+def test_resolution_to_small(resolution, expected):
+    assert presets.resolution_to_small(resolution) == expected
+
+
+@pytest.mark.parametrize(
+    "token, expected", [("orig", 0.0), ("ORIG", 0.0), ("30", 30.0), ("29.97", 29.97)]
+)
+def test_parse_fps_token(token, expected):
+    assert presets.parse_fps_token(token) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("token", ["0", "-5", "abc", "", "nan", "inf"])
+def test_parse_fps_token_rejects_invalid(token):
+    with pytest.raises(ValueError):
+        presets.parse_fps_token(token)
+
+
+@pytest.mark.parametrize(
+    "value, expected", [(None, "orig"), (0.0, "orig"), (30.0, "30"), (29.97, "29.97")]
+)
+def test_format_fps_token(value, expected):
+    assert presets.format_fps_token(value) == expected
