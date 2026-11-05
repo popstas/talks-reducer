@@ -29,10 +29,12 @@ from talks_reducer.pipeline import (
     speed_up_video,
 )
 from talks_reducer.presets import (
+    FPS_VALUES,
     Preset,
     find_preset,
     get_selected_preset,
     load_presets,
+    parse_fps_token,
     set_selected_preset,
 )
 from talks_reducer.progress import (
@@ -1109,14 +1111,12 @@ def _stream_pipeline(
     yield ("done", (final_result, "\n".join(collected_logs)))
 
 
-def _resolution_to_flags(resolution: str) -> tuple[bool, bool]:
-    """Map the Resolution radio to ``(small, small_480)``."""
+def _resolution_to_target(resolution: str) -> tuple[bool, int]:
+    """Map the Resolution radio to ``(small, target_height)``; 0 = no scaling."""
 
-    if resolution == "480p":
-        return True, True
-    if resolution == "720p":
-        return True, False
-    return False, False
+    heights = {"1080p": 1080, "720p": 720, "480p": 480}
+    height = heights.get(resolution, 0)
+    return height > 0, height
 
 
 _SPEEDUP_SILENT_SPEEDS: dict[str, float] = {"1×": 1.0, "5×": 5.0, "10×": 10.0}
@@ -1129,18 +1129,15 @@ def _speedup_to_silent_speed(label: str) -> float:
 
 
 def _preset_resolution_to_radio(resolution: str) -> str:
-    """Map a preset's resolution tri-state onto the Resolution radio label.
+    """Map a preset's resolution onto the Resolution radio label.
 
-    A ``1080p`` preset (and any unexpected value) selects ``"No change"`` — the
-    radio label whose ``(small, small_480)`` flags are ``(False, False)`` — so
-    the preset forces full resolution rather than inheriting a persisted
-    ``--small`` default.
+    An ``orig`` preset (and any unexpected value) selects ``"No change"`` so the
+    preset forces full resolution rather than inheriting a persisted ``--small``
+    default.
     """
 
-    if resolution == "480p":
-        return "480p"
-    if resolution == "720p":
-        return "720p"
+    if resolution in ("1080p", "720p", "480p"):
+        return resolution
     return "No change"
 
 
@@ -1163,8 +1160,8 @@ def preset_to_web_controls(preset: Preset) -> dict[str, object]:
 
     Presets are sparse, so only the params the preset defines appear in the
     returned mapping; a caller leaves every other control untouched. When present,
-    keys are the ``resolution`` radio label (``"No change"`` for a ``1080p``
-    preset), the matching ``speedup`` radio label (``None`` when the silent speed
+    keys are the ``resolution`` radio label (``"No change"`` for an ``orig``
+    preset), the ``fps`` radio value, the matching ``speedup`` radio label (``None`` when the silent speed
     is not one of the radio's presets), the ``video_codec`` dropdown value, and
     the numeric ``silent_speed`` / ``silent_threshold`` / ``sounded_speed`` slider
     values.
@@ -1173,6 +1170,8 @@ def preset_to_web_controls(preset: Preset) -> dict[str, object]:
     controls: dict[str, object] = {}
     if preset.resolution is not None:
         controls["resolution"] = _preset_resolution_to_radio(preset.resolution)
+    if preset.fps is not None and str(preset.fps) in FPS_VALUES:
+        controls["fps"] = str(preset.fps)
     if preset.silent_speed is not None:
         controls["speedup"] = _silent_speed_to_speedup_label(preset.silent_speed)
         controls["silent_speed"] = float(preset.silent_speed)
@@ -1213,6 +1212,7 @@ def process_video_ui(
     cut_enabled: bool,
     cut_start_seconds: Optional[float],
     cut_end_seconds: Optional[float],
+    fps: str = "orig",
     progress: Optional[gr.Progress] = gr.Progress(track_tqdm=False),
     *,
     dependencies: Optional[ProcessVideoDependencies] = None,
@@ -1224,12 +1224,16 @@ def process_video_ui(
     that slider), so a custom slider value is honored.
     """
 
-    small_video, small_480 = _resolution_to_flags(resolution)
+    small_video, target_height = _resolution_to_target(resolution)
+    try:
+        max_frame_rate = parse_fps_token(fps or "orig")
+    except ValueError:
+        max_frame_rate = 0.0
 
     for kind, payload in _stream_pipeline(
         file_path,
         small_video,
-        small_480,
+        target_height == 480,
         optimize,
         video_codec,
         add_codec_suffix,
@@ -1241,6 +1245,8 @@ def process_video_ui(
         cut_start_seconds,
         cut_end_seconds,
         dependencies,
+        target_height=target_height,
+        max_frame_rate=max_frame_rate,
     ):
         if kind == "log":
             yield (
@@ -1421,8 +1427,8 @@ def build_interface(
         gr.Markdown(f"## Talks Reducer Web UI{version_suffix}")
         with gr.Accordion("About", open=False):
             gr.Markdown(f"""
-                Drop a video or audio file below. Pick a **Resolution** and
-                **Speedup**, choose the **Video codec**, and processing starts on
+                Drop a video or audio file below. Pick a **Resolution**,
+                **FPS** and **Speedup**, choose the **Video codec**, and processing starts on
                 upload. Open **Advanced** for encoder toggles and fine-grained
                 speed/threshold controls.
 
@@ -1453,9 +1459,14 @@ def build_interface(
         )
 
         resolution_radio = gr.Radio(
-            choices=["No change", "720p", "480p"],
+            choices=["No change", "1080p", "720p", "480p"],
             value=_initial("resolution", "720p"),
             label="Resolution",
+        )
+        fps_radio = gr.Radio(
+            choices=["orig", "60", "30"],
+            value=_initial("fps", "orig"),
+            label="FPS",
         )
         speedup_radio = gr.Radio(
             choices=["1×", "5×", "10×"],
@@ -1537,12 +1548,13 @@ def build_interface(
 
         def _apply_preset(
             name: Optional[str],
-        ) -> tuple[object, object, object, object, object, object]:
+        ) -> tuple[object, object, object, object, object, object, object]:
             """Fan the selected preset onto the resolution/speed/codec controls."""
 
             preset = find_preset(name, preset_list) if name else None
             if preset is None:
                 return (
+                    gr.update(),
                     gr.update(),
                     gr.update(),
                     gr.update(),
@@ -1570,6 +1582,7 @@ def build_interface(
                 _upd("video_codec"),
                 _upd("silent_threshold"),
                 _upd("sounded_speed"),
+                _upd("fps"),
             )
 
         preset_dropdown.change(
@@ -1582,6 +1595,7 @@ def build_interface(
                 codec_dropdown,
                 silent_threshold_input,
                 sounded_speed_input,
+                fps_radio,
             ],
         )
         cut_enabled_checkbox.change(
@@ -1605,6 +1619,7 @@ def build_interface(
                 cut_enabled_checkbox,
                 cut_start_input,
                 cut_end_input,
+                fps_radio,
             ],
             outputs=[
                 video_output,

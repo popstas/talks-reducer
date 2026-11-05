@@ -1795,11 +1795,16 @@ def test_process_video_still_yields_four_tuples(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "resolution, expected",
-    [("No change", (False, False)), ("720p", (True, False)), ("480p", (True, True))],
+    "label, expected",
+    [
+        ("No change", (False, 0)),
+        ("1080p", (True, 1080)),
+        ("720p", (True, 720)),
+        ("480p", (True, 480)),
+    ],
 )
-def test_resolution_to_flags(resolution, expected) -> None:
-    assert server._resolution_to_flags(resolution) == expected
+def test_resolution_to_target(label, expected) -> None:
+    assert server._resolution_to_target(label) == expected
 
 
 @pytest.mark.parametrize(
@@ -1884,7 +1889,7 @@ def test_preset_to_web_controls_maps_resolution_tristate() -> None:
     """Each resolution tri-state maps onto the correct Resolution radio label."""
 
     assert (
-        server.preset_to_web_controls(_preset(resolution="1080p"))["resolution"]
+        server.preset_to_web_controls(_preset(resolution="orig"))["resolution"]
         == "No change"
     )
     assert (
@@ -1895,6 +1900,71 @@ def test_preset_to_web_controls_maps_resolution_tristate() -> None:
         server.preset_to_web_controls(_preset(resolution="480p"))["resolution"]
         == "480p"
     )
+
+
+def test_preset_to_web_controls_maps_1080_and_fps() -> None:
+    controls = server.preset_to_web_controls(_preset(resolution="1080p", fps="30"))
+
+    assert controls["resolution"] == "1080p"
+    assert controls["fps"] == "30"
+
+
+def test_preset_to_web_controls_omits_absent_fps() -> None:
+    assert "fps" not in server.preset_to_web_controls(_preset(resolution="720p"))
+
+
+def test_process_video_ui_maps_1080_and_fps(tmp_path: Path) -> None:
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+    captured: dict = {}
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        captured["options"] = options
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or input_file,
+            frame_rate=30.0,
+            original_duration=10.0,
+            output_duration=5.0,
+            chunk_count=1,
+            used_gpu=False,
+            max_audio_volume=0.5,
+            time_ratio=0.5,
+            size_ratio=0.5,
+        )
+
+    dependencies = server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+    try:
+        list(
+            server.process_video_ui(
+                str(input_file),
+                "1080p",
+                10.0,
+                "hevc",
+                True,
+                False,
+                False,
+                1.0,
+                0.01,
+                False,
+                0.0,
+                0.0,
+                "30",
+                progress=None,
+                dependencies=dependencies,
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+
+    assert captured["options"].small_target_height == 1080
+    assert captured["options"].max_frame_rate == 30.0
 
 
 def test_preset_to_web_controls_maps_speed_codec_threshold() -> None:
@@ -2002,7 +2072,7 @@ def test_build_interface_preset_dropdown_hidden_when_empty() -> None:
 def test_build_interface_preset_change_handler_registered() -> None:
     """Selecting a preset updates the resolution/speed/codec/threshold controls."""
 
-    presets = [_preset(name="Alpha", resolution="1080p", silent_speed=5.0)]
+    presets = [_preset(name="Alpha", resolution="orig", silent_speed=5.0)]
     demo = server.build_interface(presets=presets)
 
     preset_fns = [
@@ -2020,6 +2090,7 @@ def test_build_interface_preset_change_handler_registered() -> None:
         "Video codec",
         "Silent threshold",
         "Sounded speed",
+        "FPS",
     ]
 
 
