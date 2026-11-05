@@ -1164,7 +1164,7 @@ def test_speed_filter_graph_caps_after_setpts() -> None:
         "scale=-2:1080", 60.0, 30.0, "if(lt(N,5),N,PTS)"
     )
 
-    assert text == "scale=-2:1080,fps=60.0,setpts=if(lt(N\,5)\,N\,PTS),fps=30.0"
+    assert text == "scale=-2:1080,fps=60.0,setpts=if(lt(N\\,5)\\,N\\,PTS),fps=30.0"
 
 
 def test_speed_filter_graph_without_cap_is_unchanged() -> None:
