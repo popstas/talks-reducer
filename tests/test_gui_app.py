@@ -339,7 +339,8 @@ def test_collect_arguments_includes_video_codec():
         sample_rate_var=SimpleNamespace(get=lambda: "48000"),
         keyframe_interval_var=SimpleNamespace(get=lambda: 30.0),
         small_var=SimpleNamespace(get=lambda: False),
-        small_480_var=SimpleNamespace(get=lambda: False),
+        small_height_var=SimpleNamespace(get=lambda: 720),
+        fps_var=SimpleNamespace(get=lambda: "orig"),
         video_codec_var=DummyVar("AV1"),
         add_codec_suffix_var=SimpleNamespace(get=lambda: False),
         use_global_ffmpeg_var=SimpleNamespace(get=lambda: True),
@@ -380,7 +381,8 @@ def test_collect_arguments_accepts_mp3_codec():
         sample_rate_var=SimpleNamespace(get=lambda: "48000"),
         keyframe_interval_var=SimpleNamespace(get=lambda: 30.0),
         small_var=SimpleNamespace(get=lambda: False),
-        small_480_var=SimpleNamespace(get=lambda: False),
+        small_height_var=SimpleNamespace(get=lambda: 720),
+        fps_var=SimpleNamespace(get=lambda: "orig"),
         video_codec_var=DummyVar("mp3"),
         add_codec_suffix_var=SimpleNamespace(get=lambda: False),
         use_global_ffmpeg_var=SimpleNamespace(get=lambda: True),
@@ -409,7 +411,8 @@ def test_collect_arguments_includes_add_codec_suffix():
         sample_rate_var=SimpleNamespace(get=lambda: "48000"),
         keyframe_interval_var=SimpleNamespace(get=lambda: 30.0),
         small_var=SimpleNamespace(get=lambda: False),
-        small_480_var=SimpleNamespace(get=lambda: False),
+        small_height_var=SimpleNamespace(get=lambda: 720),
+        fps_var=SimpleNamespace(get=lambda: "orig"),
         video_codec_var=SimpleNamespace(get=lambda: "hevc", set=lambda value: None),
         add_codec_suffix_var=SimpleNamespace(get=lambda: True),
         use_global_ffmpeg_var=SimpleNamespace(get=lambda: False),
@@ -438,7 +441,8 @@ def _make_collect_gui(**overrides) -> SimpleNamespace:
         sample_rate_var=SimpleNamespace(get=lambda: "48000"),
         keyframe_interval_var=SimpleNamespace(get=lambda: 30.0),
         small_var=SimpleNamespace(get=lambda: False),
-        small_480_var=SimpleNamespace(get=lambda: False),
+        small_height_var=SimpleNamespace(get=lambda: 720),
+        fps_var=SimpleNamespace(get=lambda: "orig"),
         video_codec_var=SimpleNamespace(get=lambda: "h264", set=lambda value: None),
         add_codec_suffix_var=SimpleNamespace(get=lambda: False),
         use_global_ffmpeg_var=SimpleNamespace(get=lambda: False),
@@ -752,7 +756,8 @@ def _make_settings_gui() -> SimpleNamespace:
 
     gui = SimpleNamespace(
         small_var=_RecordingVar(False),
-        small_480_var=_RecordingVar(False),
+        small_height_var=_RecordingVar(720),
+        fps_var=_RecordingVar("orig"),
         silent_speed_var=silent_speed_var,
         sounded_speed_var=sounded_speed_var,
         silent_threshold_var=silent_threshold_var,
@@ -2773,3 +2778,81 @@ def test_open_in_file_manager_logs_when_folder_is_missing(monkeypatch, tmp_path)
 
     assert commands == []
     assert len(logs) == 1 and logs[0].startswith("Could not open file manager for")
+
+
+class _Var:
+    def __init__(self, value):
+        self.value = value
+
+    def get(self):
+        return self.value
+
+    def set(self, value):
+        self.value = value
+
+
+def _collect_args_gui(*, small: bool, height: int, fps: str) -> SimpleNamespace:
+    gui = SimpleNamespace(
+        output_var=_Var(""),
+        temp_var=_Var(""),
+        silent_threshold_var=_Var(0.01),
+        sounded_speed_var=_Var(1.0),
+        silent_speed_var=_Var(4.0),
+        frame_margin_var=_Var("2"),
+        sample_rate_var=_Var("48000"),
+        keyframe_interval_var=_Var(30.0),
+        small_var=_Var(small),
+        small_height_var=_Var(height),
+        fps_var=_Var(fps),
+        video_codec_var=_Var("h264"),
+        add_codec_suffix_var=_Var(False),
+        use_global_ffmpeg_var=_Var(False),
+        optimize_var=_Var(True),
+        cut_enabled_var=_Var(False),
+        cut_start_var=_Var(0.0),
+        cut_end_var=_Var(0.0),
+        preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
+    )
+    gui._parse_float = lambda value, _label: float(value)
+    return gui
+
+
+def test_collect_arguments_emits_height_and_fps_cap():
+    args = app.TalksReducerGUI._collect_arguments(
+        _collect_args_gui(small=True, height=1080, fps="30")
+    )
+
+    assert args["small"] is True
+    assert args["small_target_height"] == 1080
+    assert args["max_frame_rate"] == 30.0
+
+
+def test_collect_arguments_orig_fps_and_no_small():
+    args = app.TalksReducerGUI._collect_arguments(
+        _collect_args_gui(small=False, height=1080, fps="orig")
+    )
+
+    assert "small_target_height" not in args
+    assert "max_frame_rate" not in args
+
+
+def test_apply_cli_settings_seeds_height_and_fps():
+    gui = SimpleNamespace(small_height_var=_Var(720), fps_var=_Var("orig"))
+
+    app.TalksReducerGUI._apply_cli_settings(
+        gui, {"small_height": 1080, "max_frame_rate": 30.0}
+    )
+
+    assert gui.small_height_var.get() == 1080
+    assert gui.fps_var.get() == "30"
+
+
+def test_apply_cli_settings_orig_fps_keeps_height():
+    gui = SimpleNamespace(small_height_var=_Var(480), fps_var=_Var("30"))
+
+    app.TalksReducerGUI._apply_cli_settings(
+        gui, {"small_height": None, "max_frame_rate": 0.0}
+    )
+
+    assert gui.small_height_var.get() == 480
+    assert gui.fps_var.get() == "orig"

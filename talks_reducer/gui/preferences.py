@@ -29,6 +29,26 @@ from .theme import (
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from .app import TalksReducerGUI
 
+SMALL_HEIGHTS = (480, 720, 1080)
+
+
+def resolve_stored_small_height(stored_height: object, legacy_480: object) -> int:
+    """Return the persisted small-video height, migrating the old 480p flag.
+
+    ``small_height`` replaced the boolean ``small_video_480``; a config written
+    before it falls back to 480 when that flag was set, else 720. Unknown values
+    also fall back, so a hand-edited file cannot select an unsupported height.
+    """
+
+    try:
+        height = int(stored_height)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        height = 0
+    if height in SMALL_HEIGHTS:
+        return height
+    return 480 if bool(legacy_480) else 720
+
+
 # Keys written independently of ``GUIPreferences`` through their own
 # read-modify-write cycles: presets by :mod:`talks_reducer.presets`, the GPU
 # detection cache by :mod:`talks_reducer.ffmpeg`. ``GUIPreferences`` snapshots
@@ -153,10 +173,13 @@ class PreferenceController:
     def on_small_video_change(self, *_: object) -> None:
         self.gui.preferences.update("small_video", bool(self.gui.small_var.get()))
 
-    def on_small_480_change(self, *_: object) -> None:
+    def on_small_height_change(self, *_: object) -> None:
         self.gui.preferences.update(
-            "small_video_480", bool(self.gui.small_480_var.get())
+            "small_height", int(self.gui.small_height_var.get())
         )
+
+    def on_fps_change(self, *_: object) -> None:
+        self.gui.preferences.update("fps", str(self.gui.fps_var.get()))
 
     def on_open_after_convert_change(self, *_: object) -> None:
         self.gui.preferences.update(

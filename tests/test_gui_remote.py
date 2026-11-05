@@ -991,3 +991,39 @@ def test_process_files_via_server_appends_transfer_speed(
     # 5 MB over 1 s -> 5.0 MB/s at 50%, then another 5 MB over 1 s at 100%.
     assert "Uploading: 50%, 5.0 MB/s" in speed_statuses
     assert "Uploading: 100%, 5.0 MB/s" in speed_statuses
+
+
+def test_process_files_via_server_sends_height_and_fps(tmp_path: Path) -> None:
+    gui = StubGUI()
+    send_calls: list[dict[str, object]] = []
+    destination_calls: list[dict[str, object]] = []
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            send_calls.append(kwargs)
+            return (str(tmp_path / "output.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    def destination(path, small, small_480, **kwargs):  # noqa: ANN001,ANN003
+        destination_calls.append(kwargs)
+        return tmp_path / "fallback.mp4"
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={"small": True, "small_target_height": 1080, "max_frame_rate": 30.0},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=destination,
+        parse_summary=lambda text: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    assert send_calls[0]["small"] is True
+    assert send_calls[0]["small_480"] is False
+    assert send_calls[0]["small_height"] == 1080
+    assert send_calls[0]["max_frame_rate"] == 30.0
+    assert destination_calls[0]["small_target_height"] == 1080

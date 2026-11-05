@@ -147,7 +147,8 @@ def _gui_settings_from_namespace(parsed: argparse.Namespace) -> Dict[str, object
     settings: Dict[str, object] = {}
     for key in (
         "small",
-        "small_480",
+        "small_height",
+        "max_frame_rate",
         "silent_speed",
         "sounded_speed",
         "silent_threshold",

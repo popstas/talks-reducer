@@ -427,6 +427,8 @@ def process_files_via_server(
     except (TypeError, ValueError):
         small_target_height_value = None
     small_480_mode = small_mode and small_target_height_value == 480
+    small_height_value = small_target_height_value if small_mode else None
+    max_frame_rate = args.get("max_frame_rate")
     add_codec_suffix = bool(args.get("add_codec_suffix", False))
     codec_value = str(args.get("video_codec", "h264")).strip().lower()
     if codec_value not in {"h264", "hevc", "av1", "mp3"}:
@@ -456,6 +458,7 @@ def process_files_via_server(
                         input_path,
                         small=small_mode,
                         small_480=small_480_mode,
+                        small_target_height=small_height_value,
                         add_codec_suffix=add_codec_suffix,
                         video_codec=codec_value,
                         silent_speed=args.get("silent_speed"),
@@ -467,6 +470,7 @@ def process_files_via_server(
                 input_path,
                 small=small_mode,
                 small_480=small_480_mode,
+                small_target_height=small_height_value,
                 add_codec_suffix=add_codec_suffix,
                 video_codec=codec_value,
                 silent_speed=args.get("silent_speed"),
@@ -480,6 +484,8 @@ def process_files_via_server(
                 server_url=server_url,
                 small=small_mode,
                 small_480=small_480_mode,
+                small_height=small_height_value,
+                max_frame_rate=max_frame_rate,
                 optimize=bool(args.get("optimize", True)),
                 video_codec=codec_value,
                 add_codec_suffix=add_codec_suffix,

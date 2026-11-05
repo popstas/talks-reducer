@@ -11,6 +11,7 @@ from talks_reducer.gui.preferences import (
     PreferenceController,
     determine_config_path,
     load_settings,
+    resolve_stored_small_height,
 )
 
 
@@ -462,3 +463,19 @@ def test_save_preserves_hardware_backend_cache(tmp_path):
     reloaded = load_settings(config_path)
     assert reloaded["small_video"] is True
     assert reloaded[HARDWARE_BACKEND_KEY] == {"ffmpeg": None, "codecs": {}}
+
+
+@pytest.mark.parametrize(
+    "stored, legacy, expected",
+    [
+        (1080, False, 1080),
+        (480, False, 480),
+        ("720", True, 720),
+        (None, True, 480),
+        (None, False, 720),
+        (999, False, 720),
+        ("junk", True, 480),
+    ],
+)
+def test_resolve_stored_small_height(stored, legacy, expected):
+    assert resolve_stored_small_height(stored, legacy) == expected
