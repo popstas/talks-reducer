@@ -1205,8 +1205,9 @@ def build_video_commands(
             for this codec (``"cuda"``, ``"amf"``, ``"qsv"``, ``"videotoolbox"``)
             or ``None`` for the CPU. Only CUDA also decodes on the GPU; QSV and
             AMF decode on the CPU because the filter graph runs there anyway.
-        frame_rate: Optional source frame rate used to size GOP/keyframe spacing for
-            the small preset when generating hardware/software encoder commands.
+        frame_rate: Optional output (capped) frame rate used to size GOP/keyframe
+            spacing for the small preset when generating hardware/software
+            encoder commands.
         keep_input_audio: When True and ``audio_file`` is None, map the audio
             track from the input file directly into the output using stream
             copy (``-c:a copy``) instead of disabling audio.

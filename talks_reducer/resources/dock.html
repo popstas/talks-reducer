@@ -455,8 +455,10 @@
     if (codecInput) codecInput.checked = true;
   }
   const savedFps = localStorage.getItem('obsDock.fps') || 'orig';
-  const fpsInput = document.querySelector(`input[name="fps"][value="${savedFps}"]`);
-  if (fpsInput) fpsInput.checked = true;
+  if (['orig', '30', '60'].includes(savedFps)) {
+    const fpsInput = document.querySelector(`input[name="fps"][value="${savedFps}"]`);
+    if (fpsInput) fpsInput.checked = true;
+  }
   autoClose.checked = localStorage.getItem('obsDock.autoClose') === '1';
 
   function log(message) {
