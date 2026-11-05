@@ -89,7 +89,8 @@ Full setup, options, and troubleshooting: [docs/obs-dock.md](docs/obs-dock.md).
 ```sh
 talks-reducer input.mp4                                    # tuned encode at the source resolution
 talks-reducer --small input.mp4                            # same, scaled down to 720p
-talks-reducer --480 input.mp4                              # scale down to 480p instead
+talks-reducer --small --480 input.mp4                      # scale down to 480p instead (or --1080)
+talks-reducer --small --1080 --fps 30 input.mp4            # 1080p at most, capped to 30 fps
 talks-reducer --video-codec mp3 talk.mp4                   # export audio only, as .mp3
 talks-reducer --cut-start 00:00:10 --cut-end 00:01:00 demo.mp4  # keep only 10s–60s
 talks-reducer --url http://localhost:9005 demo.mp4         # process on a remote server
@@ -104,13 +105,19 @@ video first and names the result after the first part. In the desktop GUI, dropp
 files asks whether to glue them; answering **Yes** opens a **Glue order** list sorted by file
 name, where you can move parts up or down (buttons, Alt+↑/↓, or drag) before gluing starts.
 
-**Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec)
+`--small` scales to 480p, 720p (default) or 1080p (`--480`, `--720`, `--1080`); `--1080` only
+downscales sources taller than 1080 px. `--fps 30|60|orig` (or any positive number) caps the
+output frame rate and never raises it. The 1080p and FPS options need an up-to-date server in
+remote mode.
+
+**Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec, fps)
 you author once in the desktop GUI's Advanced mode and reuse everywhere — Simple mode, the
 Web UI, the OBS dock, and the CLI (`--preset`). When saving you pick which settings the preset
 controls, so a preset can be partial (e.g. codec-only) and applying it leaves your other
 settings alone. They live in the shared `settings.json`, so one list appears on every surface,
 and each surface opens on the preset you used last. See
-[docs/cli.md](docs/cli.md#named-presets).
+[docs/cli.md](docs/cli.md#named-presets). A preset's resolution is `orig`, `1080p`, `720p` or
+`480p`; fresh installs seed **Compress** as 1080p 30 fps and **Smallest** at 30 fps.
 
 → Full flag reference — codecs, keyframes, silence thresholds, trimming, remote options:
 [docs/cli.md](docs/cli.md).

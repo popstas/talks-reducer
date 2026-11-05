@@ -50,8 +50,9 @@ it. The remote path gets the same treatment by wrapping
 `default_remote_destination` so it names the download after the glue source
 rather than the temp input. Nothing is persisted: the question is asked on every
 multi-file run, and a single file never triggers it.
-- **Presets** — user-named bundles of processing settings (`resolution`,
-`silent_speed`, `sounded_speed`, `silent_threshold`, `video_codec`) stored in the
+- **Presets** — user-named bundles of processing settings (`resolution` — `orig`/`1080p`/
+`720p`/`480p` — `silent_speed`, `sounded_speed`, `silent_threshold`, `video_codec`, and a
+sparse `fps` cap stored as `"30"`/`"60"`/`"orig"`) stored in the
 shared `settings.json` (`presets` key) via `talks_reducer/presets.py` and applied
 read-only on every surface (Simple mode, Web UI, OBS dock, CLI `--preset`). Presets
 are **sparse**: every value field on `Preset` is `Optional`, `to_dict()` stores only
@@ -61,9 +62,14 @@ all skip absent fields (`apply_preset_to_gui`, `_apply_preset_to_args`,
 present fields — a zero-field preset never matches). `load_presets()` seeds five
 `DEFAULT_PRESETS` on first run when the key is absent — **Compatible** (720p ×10 h.264, the
 first-run default on every surface), **Optimal** (720p ×10 h.265), **Smallest** (480p ×10
-h.265), **Compress** (720p h.264, silence ×1) and the deliberately sparse **mp3** (no
+h.265, 30 fps), **Compress** (1080p 30 fps h.264, silence ×1) and the deliberately sparse **mp3** (no
 resolution, so it leaves the video settings alone). They are named for the outcome rather
-than the settings, since the values are one hover away (`describe_preset`). An emptied
+than the settings, since the values are one hover away (`describe_preset`). `"1080p"` used to
+mean *no scaling* in stored presets; once it became a real downscale, existing lists would have
+silently started scaling, so `settings.json` carries a `presets_version` marker (`2`) and
+`load_presets()` rewrites stored `"1080p"` to `"orig"` exactly once — without the marker an old
+`"1080p"` could not be told from a new one on a later load. Fresh installs seed the v2 defaults
+and write the marker; existing lists never pick up the new default values. An emptied
 list persists as `[]`. Each surface opens on the remembered `selected_preset`, else
 the first preset (`layout.seed_initial_preset`, `server.resolve_initial_web_preset`,
 dock `populatePresetDropdown`). **Simple mode** replaces the old
@@ -95,13 +101,15 @@ reorder the selected preset via `presets.move_preset`/`layout.move_advanced_pres
 `presets.save_presets` (pure `add_preset`/`update_preset`/`delete_preset`/`move_preset`)
 and refreshes every dropdown. The CLI applies `--preset NAME` before explicit flags
 (`cli._apply_preset_to_args`, precedence explicit > preset > default), resolution
-expanded to `--no-small`/`--small --720`/`--small --480`; `--list-presets` prints
-names. The Web UI `Preset` dropdown (`server.build_interface`) inits its controls
+expanded to `--no-small`/`--small --1080`/`--small --720`/`--small --480` and `fps` to
+`--fps`; `--list-presets` prints names. The Web UI `Preset` dropdown (`server.build_interface`) inits its controls
 from the default preset and persists selection on change. The OBS dock serves
 `GET /presets` and, when presets exist, shows the dropdown as the primary control,
 **moving** the resolution/speed selects into the ⚙️ settings panel and back on
 **Custom** (`dock.html`, `obsDock.preset` `localStorage`), sending a `preset` field
-that `dock_server.build_args` maps to `--preset NAME`. The dock's controls use
+that `dock_server.build_args` maps to `--preset NAME`. The dock's FPS radios stay in the ⚙️
+panel permanently, like Codec (the preset/Custom logic never relocates them); with a preset
+selected the preset's own `fps` applies and the FPS control is ignored. The dock's controls use
 squared 4px corners to match OBS and cap the preset select width for a single-line row.
 - **Basic options** — the panel (`layout.py`, inside `options_frame`) is a plain `ttk.Frame`
 sitting flush under the Preset strip: it used to be a `ttk.Labelframe`, but an empty
@@ -121,7 +129,9 @@ styled `Segment.TButton`/`SelectedSegment.TButton` (added in `theme.py`)
 **Resolution**: the two together describe the output file, so they read as a pair before the
 timing knobs. It offers h.264/h.265/av1/mp3, each with its own tooltip ("Faster", "25%
 smaller", "No advantages", "Audio only" — text that used to sit in parentheses in the label);
-**Add codec suffix** sits to its right. **Silent**
+**Add codec suffix** sits to its right. **FPS** (30/60/orig, default orig) is a plain
+`SegmentedChoice` on `fps_var`, like Codec, at grid row 3 directly under it, so **Silent**
+through **Theme** each moved down one row. **Silent**
 speed offers 10/5/2/1 (custom 1–10, default 10 — every row leads with its
 strongest option and opens on it); **Sounded** speed offers 1/1.3/1.5/2 (custom
 0.75–10, default 1 — 1.3 and 1.5 are newly reachable now that the old slider's 0.25 quantization
@@ -161,13 +171,15 @@ also a `SegmentedChoice` (`gui.basic_preset_control`, `variable=None`, highlight
 itself when the sliders already matched the defaults, but a button rendered as "selected" must
 not simultaneously be disabled, so `update_basic_reset_state` no longer disables it — clicking
 it always re-applies the defaults.
-- **Resolution** — a `SegmentedChoice` (**720p** / **480p** / **orig**) in the basic options
+- **Resolution** — a `SegmentedChoice` (**1080p** / **720p** / **480p** / **orig**) in the basic options
 panel, replacing the old **Small video** + **480p** checkboxes. `orig` leaves the source
 resolution untouched and corresponds to the CLI's `--no-small`. The control is a *projection*:
-`small_var`/`small_480_var` remain the source of truth that presets, the seeded-launch CLI
-flags and `_collect_arguments` read, so clicking a button fans onto them
-(`layout.apply_resolution_choice`) and a trace on both booleans writes `resolution_var` back
-(`layout.resolution_from_small`) — that is what makes an applied preset move the buttons.
+`small_var` and `small_height_var` (an `IntVar` of 480/720/1080, persisted as `small_height`
+and migrated from the legacy `small_video_480` by `preferences.resolve_stored_small_height`)
+remain the source of truth that presets, the seeded-launch CLI flags and `_collect_arguments`
+read, so clicking a button fans onto them (`layout.apply_resolution_choice`, which writes the
+height *before* `small_var` so the trace never sees a stale height) and a trace on both writes
+`resolution_var` back (`layout.resolution_from_small`) — that is what makes an applied preset move the buttons.
 Because the control lives inside `basic_options_frame`, which Simple mode hides, a Simple-mode
 session with **zero** presets now has no resolution control at all (the checkboxes used to
 cover that case).
@@ -297,7 +309,7 @@ launches.
 
 - `talks_reducer/` — Python package that exposes the CLI and reusable pipeline:
   - `cli.py` parses arguments and dispatches to the pipeline.
-  - `pipeline.py` orchestrates FFmpeg, audio processing, and temporary assets.
+  - `pipeline.py` orchestrates FFmpeg, audio processing, and temporary assets. The `--fps` cap filter is applied **after** `setpts` (`_speed_filter_graph`) because the `setpts` expression counts *source* frames; GOP sizing and final-encode frame counts use the output rate, while chunking and `samples_per_frame` stay on the source rate. `--1080` rescales only sources taller than 1080 (equal height logs "Keeping original resolution").
   - `audio.py` handles audio validation, volume analysis, and phase vocoder processing. `render_chunk` is the per-chunk unit shared with the worker processes; it copies the samples instead of running the vocoder when the chunk plays at speed 1.0 (the vocoder is an identity transform there, so the STFT round-trip was pure cost in the default configuration).
   - `audio_workers.py` renders phase-vocoder chunks in a `ProcessPoolExecutor`. Threads make the stage *slower* — the vocoder is Python plus small NumPy ops and holds the GIL — so this uses processes, publishes the source audio once through `multiprocessing.shared_memory` rather than pickling every slice, and spawns rather than forks (the GUI and tray own Tk and pystray on the main thread). `audio.PARALLEL_MIN_OUTPUT_SAMPLES` gates it on *estimated output* samples, not input, since a chunk sped up ten times is a tenth of the work. Every pool failure — at startup or mid-run, via a dying worker — logs at debug level and falls back to in-process rendering, so a frozen build that cannot spawn still converts. `launcher.py` calls `multiprocessing.freeze_support()` before anything else because a frozen build re-executes it for every worker.
   - `pipeline.normalize_frame_rate` snaps the probed `avg_frame_rate` with `Fraction.limit_denominator(1001)`. FFmpeg 5.0's concat demuxer (the one the installed Windows build bundles) reports glued 30 fps parts as `130631680/4354391`; written into the `fps=` filter that becomes a rational `hevc_qsv` refuses ("Current frame rate is unsupported"), so every glued QSV run fell back to the CPU. The bound keeps `30000/1001`-style NTSC rates exact.
