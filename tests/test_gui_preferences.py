@@ -119,6 +119,37 @@ def test_save_preserves_externally_written_presets(tmp_path):
     assert "selected_preset" not in reloaded
 
 
+def test_save_preserves_presets_version_marker(tmp_path):
+    """The ``presets_version`` marker belongs to ``presets`` and survives saves."""
+
+    from talks_reducer import presets
+
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    prefs.update("small_video", False)
+
+    assert presets.save_presets([presets.Preset(name="x")], config_path=config_path)
+    prefs.update("small_video", True)
+
+    assert load_settings(config_path)[presets.PRESETS_VERSION_KEY] == 2
+
+
+def test_seeded_real_1080p_preset_survives_preference_save(tmp_path):
+    """A GUI preference save after seeding must not re-run the v1 migration."""
+
+    from talks_reducer import presets
+
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    presets.load_presets(config_path)
+    assert prefs.save()
+
+    reloaded = presets.load_presets(config_path)
+
+    compress = presets.find_preset("Compress", reloaded)
+    assert compress is not None and compress.resolution == "1080p"
+
+
 def test_on_cut_change_persists_values(tmp_path):
     config_path = tmp_path / "settings.json"
     prefs = GUIPreferences(config_path)

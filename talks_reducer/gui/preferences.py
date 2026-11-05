@@ -16,7 +16,7 @@ from ..config import (
     read_settings_strict,
     save_settings,
 )
-from ..presets import PRESETS_KEY, SELECTED_PRESET_KEY
+from ..presets import PRESETS_KEY, PRESETS_VERSION_KEY, SELECTED_PRESET_KEY
 from . import layout as layout_helpers
 from .theme import (
     DARK_THEME,
@@ -54,7 +54,12 @@ def resolve_stored_small_height(stored_height: object, legacy_480: object) -> in
 # detection cache by :mod:`talks_reducer.ffmpeg`. ``GUIPreferences`` snapshots
 # ``settings.json`` once at construction and rewrites the whole file on every
 # ``save()``, so it must not clobber these keys with its stale snapshot.
-_EXTERNALLY_OWNED_KEYS = (PRESETS_KEY, SELECTED_PRESET_KEY, HARDWARE_BACKEND_KEY)
+_EXTERNALLY_OWNED_KEYS = (
+    PRESETS_KEY,
+    PRESETS_VERSION_KEY,
+    SELECTED_PRESET_KEY,
+    HARDWARE_BACKEND_KEY,
+)
 
 __all__ = [
     "determine_config_path",
