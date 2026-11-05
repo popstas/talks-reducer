@@ -11,6 +11,7 @@ from talks_reducer.gui.preferences import (
     PreferenceController,
     determine_config_path,
     load_settings,
+    resolve_stored_small_height,
 )
 
 
@@ -116,6 +117,37 @@ def test_save_preserves_externally_written_presets(tmp_path):
     reloaded = load_settings(config_path)
     assert reloaded["presets"] == []
     assert "selected_preset" not in reloaded
+
+
+def test_save_preserves_presets_version_marker(tmp_path):
+    """The ``presets_version`` marker belongs to ``presets`` and survives saves."""
+
+    from talks_reducer import presets
+
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    prefs.update("small_video", False)
+
+    assert presets.save_presets([presets.Preset(name="x")], config_path=config_path)
+    prefs.update("small_video", True)
+
+    assert load_settings(config_path)[presets.PRESETS_VERSION_KEY] == 2
+
+
+def test_seeded_real_1080p_preset_survives_preference_save(tmp_path):
+    """A GUI preference save after seeding must not re-run the v1 migration."""
+
+    from talks_reducer import presets
+
+    config_path = tmp_path / "settings.json"
+    prefs = GUIPreferences(config_path)
+    presets.load_presets(config_path)
+    assert prefs.save()
+
+    reloaded = presets.load_presets(config_path)
+
+    compress = presets.find_preset("Compress", reloaded)
+    assert compress is not None and compress.resolution == "1080p"
 
 
 def test_on_cut_change_persists_values(tmp_path):
@@ -462,3 +494,19 @@ def test_save_preserves_hardware_backend_cache(tmp_path):
     reloaded = load_settings(config_path)
     assert reloaded["small_video"] is True
     assert reloaded[HARDWARE_BACKEND_KEY] == {"ffmpeg": None, "codecs": {}}
+
+
+@pytest.mark.parametrize(
+    "stored, legacy, expected",
+    [
+        (1080, False, 1080),
+        (480, False, 480),
+        ("720", True, 720),
+        (None, True, 480),
+        (None, False, 720),
+        (999, False, 720),
+        ("junk", True, 480),
+    ],
+)
+def test_resolve_stored_small_height(stored, legacy, expected):
+    assert resolve_stored_small_height(stored, legacy) == expected

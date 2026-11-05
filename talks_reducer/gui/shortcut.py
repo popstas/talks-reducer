@@ -45,13 +45,14 @@ def build_shortcut_args(
 ) -> List[str]:
     """Map the checked dialog options to CLI flags using live GUI values.
 
-    ``selections`` keys: ``small``, ``small_720``, ``small_480``,
-    ``silent_speed``, ``sounded_speed``, ``silent_threshold``, ``codec`` and
+    ``selections`` keys: ``small``, ``small_1080``, ``small_720``,
+    ``small_480``, ``silent_speed``, ``sounded_speed``, ``silent_threshold``, ``codec`` and
     ``auto_close``. ``gui_values`` supplies the live values: ``silent_speed``,
     ``sounded_speed``, ``silent_threshold`` (numbers) and ``video_codec`` (str).
 
-    Checking ``small_720`` or ``small_480`` implies ``--small``; the two are
-    mutually exclusive with ``small_480`` taking precedence when both are set.
+    Checking ``small_1080``, ``small_720`` or ``small_480`` implies ``--small``;
+    the three sizes are mutually exclusive, with precedence 480 > 720 > 1080
+    when several are set.
     Checking ``auto_close`` emits ``--auto-close`` and ``--open-location`` so the
     seeded GUI closes itself and reveals the exported file after each convert.
     Numeric values are trimmed of trailing zeros.
@@ -61,7 +62,8 @@ def build_shortcut_args(
 
     want_480 = bool(selections.get("small_480"))
     want_720 = bool(selections.get("small_720"))
-    want_small = bool(selections.get("small")) or want_480 or want_720
+    want_1080 = bool(selections.get("small_1080"))
+    want_small = bool(selections.get("small")) or want_480 or want_720 or want_1080
 
     if want_small:
         args.append("--small")
@@ -69,6 +71,8 @@ def build_shortcut_args(
             args.append("--480")
         elif want_720:
             args.append("--720")
+        elif want_1080:
+            args.append("--1080")
 
     if selections.get("silent_speed"):
         args.extend(
@@ -218,11 +222,12 @@ def _dialog_initial_selections(gui: "TalksReducerGUI") -> dict[str, bool]:
     """Compute the pre-checked dialog options from the current GUI state."""
 
     small_on = bool(gui.small_var.get())
-    is_480 = bool(gui.small_480_var.get())
+    height = int(gui.small_height_var.get())
     return {
         "small": small_on,
-        "small_720": small_on and not is_480,
-        "small_480": small_on and is_480,
+        "small_1080": small_on and height == 1080,
+        "small_720": small_on and height == 720,
+        "small_480": small_on and height == 480,
         "silent_speed": abs(float(gui.silent_speed_var.get()) - DEFAULT_SILENT_SPEED)
         > 1e-9,
         "sounded_speed": abs(float(gui.sounded_speed_var.get()) - DEFAULT_SOUNDED_SPEED)
@@ -321,6 +326,7 @@ def open_create_lnk_dialog(gui: "TalksReducerGUI") -> None:
         key: gui.tk.BooleanVar(value=selections[key])
         for key in (
             "small",
+            "small_1080",
             "small_720",
             "small_480",
             "silent_speed",
@@ -345,19 +351,22 @@ def open_create_lnk_dialog(gui: "TalksReducerGUI") -> None:
 
     _updating = {"busy": False}
 
+    size_keys = ("small_1080", "small_720", "small_480")
+
     def on_small_variant(changed: str) -> None:
         if _updating["busy"]:
             return
         _updating["busy"] = True
         try:
-            if changed in ("small_720", "small_480") and vars_by_key[changed].get():
-                # 720/480 imply Small and are mutually exclusive.
+            if changed in size_keys and vars_by_key[changed].get():
+                # A size implies Small, and the sizes are mutually exclusive.
                 vars_by_key["small"].set(True)
-                other = "small_480" if changed == "small_720" else "small_720"
-                vars_by_key[other].set(False)
+                for other in size_keys:
+                    if other != changed:
+                        vars_by_key[other].set(False)
             if changed == "small" and not vars_by_key["small"].get():
-                vars_by_key["small_720"].set(False)
-                vars_by_key["small_480"].set(False)
+                for key in size_keys:
+                    vars_by_key[key].set(False)
         finally:
             _updating["busy"] = False
         refresh_preview()
@@ -370,6 +379,7 @@ def open_create_lnk_dialog(gui: "TalksReducerGUI") -> None:
 
     checkbox_specs = [
         ("small", "Small video"),
+        ("small_1080", "1080p"),
         ("small_720", "720p"),
         ("small_480", "480p"),
         ("silent_speed", "Silent speed"),

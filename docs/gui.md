@@ -27,9 +27,12 @@ rows grouped under four quiet headings — **Basic options**, **Speed & silence*
 
 - **Silence speedup** offers the three shortcuts **Silence ×10**, **Silence ×5** and
   **No speedup**, each setting the speed and threshold knobs below in one click.
-- **Resolution** offers **720p**, **480p** and **orig**. `orig` keeps the source resolution
-  untouched (the CLI's `--no-small`); the other two match `--small --480` and `--small --720`.
+- **Resolution** offers **1080p**, **720p**, **480p** and **orig**. `orig` keeps the source
+  resolution untouched (the CLI's `--no-small`); the others match `--small --1080`,
+  `--small --720` and `--small --480`. **1080p** only downscales sources taller than 1080 px.
   This replaces the former **Small video** and **480p** checkboxes.
+- **FPS** sits under **Codec** and offers **30**, **60** and **orig**. It caps the output
+  frame rate (the CLI's `--fps`) and never raises it; `orig` keeps the source rate.
 
 - **Silent** and **Sounded** speed each offer four preset buttons (silent: 10, 5, 2, 1; sounded:
   1, 1.3, 1.5, 2). Silent speed defaults to **10**: every row is ordered strongest-first and
@@ -71,15 +74,15 @@ competes with the buttons for width.
 
 ## Presets
 
-A **preset** is a named bundle of processing settings — any of resolution (1080p/720p/480p),
-silent and sounded speed, silent threshold, and video codec — that you author once and apply
+A **preset** is a named bundle of processing settings — any of resolution (orig/1080p/720p/480p),
+silent and sounded speed, silent threshold, video codec, and frame-rate cap (FPS) — that you author once and apply
 read-only everywhere: Simple mode, the Web UI, the OBS dock, and the CLI's `--preset` flag.
 Presets are **sparse**: a preset stores only the settings you choose, so applying it changes
 just those and leaves everything else as it is. Presets are stored in the shared
 `settings.json`, so a preset created on the desktop GUI also appears in the Web UI and dock
 served from that machine. On first launch five defaults are seeded — **Compatible** (720p,
-silence ×10, h.264), **Optimal** (the same in h.265), **Smallest** (480p h.265), **Compress**
-(720p h.264, no speedup) and **mp3** (audio only, no resolution). Hover a preset button to see
+silence ×10, h.264, source fps), **Optimal** (the same in h.265), **Smallest** (480p h.265, 30 fps), **Compress**
+(1080p 30 fps h.264, no speedup) and **mp3** (audio only, no resolution). Hover a preset button to see
 exactly which settings it applies. Each surface opens on the preset you used last (or the first
 preset when none is remembered).
 
@@ -215,7 +218,7 @@ dropped recording, shows the result in Explorer, and closes itself.
 
 On Windows, the full (non-Simple) layout shows a **Create lnk** button next to the
 **Advanced** button (hidden on other platforms). It opens a small dialog where you tick the
-presets you want — **Small**, **720** or **480** (these imply Small), **Silent speed**,
+presets you want — **Small**, **1080**, **720** or **480** (these imply Small and are mutually exclusive), **Silent speed**,
 **Sounded speed**, **Silent threshold**, **Codec**, and **Auto close and open file location**
 (adds `--auto-close --open-location` so the shortcut closes the GUI and reveals the exported
 file when each convert finishes) — each pre-checked to match your current GUI state. A live

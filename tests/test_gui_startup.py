@@ -123,7 +123,7 @@ def test_parse_seeded_launch_omits_post_convert_flags_when_unspecified(
 
 
 def test_parse_seeded_launch_720_unchecks_480(tmp_path) -> None:
-    """``--720`` seeds ``small_480=False`` so the GUI 480p box is unchecked."""
+    """``--720`` seeds ``small_height=720``."""
 
     video = tmp_path / "talk.mp4"
     video.write_bytes(b"data")
@@ -133,7 +133,7 @@ def test_parse_seeded_launch_720_unchecks_480(tmp_path) -> None:
     assert seeded is not None
     _, settings = seeded
     assert settings["small"] is True
-    assert settings["small_480"] is False
+    assert settings["small_height"] == 720
 
 
 def test_parse_seeded_launch_no_small_unchecks_small(tmp_path) -> None:
@@ -150,7 +150,7 @@ def test_parse_seeded_launch_no_small_unchecks_small(tmp_path) -> None:
 
 
 def test_parse_seeded_launch_480_checks_480(tmp_path) -> None:
-    """``--480`` still seeds ``small_480=True`` so the GUI 480p box is checked."""
+    """``--480`` seeds ``small_height=480``."""
 
     video = tmp_path / "talk.mp4"
     video.write_bytes(b"data")
@@ -159,7 +159,7 @@ def test_parse_seeded_launch_480_checks_480(tmp_path) -> None:
 
     assert seeded is not None
     _, settings = seeded
-    assert settings["small_480"] is True
+    assert settings["small_height"] == 480
 
 
 def test_parse_seeded_launch_omits_480_when_unspecified(tmp_path) -> None:
@@ -172,7 +172,7 @@ def test_parse_seeded_launch_omits_480_when_unspecified(tmp_path) -> None:
 
     assert seeded is not None
     _, settings = seeded
-    assert "small_480" not in settings
+    assert "small_height" not in settings
 
 
 def test_parse_seeded_launch_expands_preset(tmp_path, monkeypatch) -> None:
@@ -200,9 +200,9 @@ def test_parse_seeded_launch_expands_preset(tmp_path, monkeypatch) -> None:
     assert seeded is not None
     input_files, settings = seeded
     assert input_files == [str(video)]
-    # 480p preset expands to the small/small_480 tri-state and the codec/speeds.
+    # 480p preset expands to the small/small_height pair and the codec/speeds.
     assert settings["small"] is True
-    assert settings["small_480"] is True
+    assert settings["small_height"] == 480
     assert settings["video_codec"] == "hevc"
     assert settings["silent_speed"] == 10.0
     assert settings["open_location"] is True
@@ -218,7 +218,7 @@ def test_parse_seeded_launch_preset_yields_to_explicit_flag(
 
     from talks_reducer import presets as presets_module
 
-    preset = presets_module.Preset(name="Smallest", resolution="480p")
+    preset = presets_module.Preset(name="Smallest", resolution="orig")
     monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [preset])
 
     video = tmp_path / "talk.mp4"
@@ -231,7 +231,7 @@ def test_parse_seeded_launch_preset_yields_to_explicit_flag(
     assert seeded is not None
     _, settings = seeded
     assert settings["small"] is False
-    assert settings["small_480"] is False
+    assert settings["small_height"] is None
 
 
 def test_parse_seeded_launch_unknown_preset_is_ignored(tmp_path, monkeypatch) -> None:
@@ -752,3 +752,17 @@ def test_main_server_url_without_managed_flag_passes_to_cli(
 
     assert result is False
     assert cli_calls == [["--server-url", "http://example:9005/", "video.mp4"]]
+
+
+def test_parse_seeded_launch_1080_and_fps(tmp_path) -> None:
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch(
+        ["--small", "--1080", "--fps", "30", str(video)]
+    )
+
+    assert seeded is not None
+    _, settings = seeded
+    assert settings["small_height"] == 1080
+    assert settings["max_frame_rate"] == 30.0

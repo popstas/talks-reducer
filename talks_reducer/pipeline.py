@@ -10,7 +10,7 @@ import tempfile
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 import numpy as np
 
@@ -140,7 +140,8 @@ def _scale_filter_part(
     Flat videos get ``scale=-2:H``. Equirectangular 360° sources get a
     ``gblur`` + ``v360`` chain instead, because ``scale`` drops their Spherical
     Mapping metadata; other 360° projections still use ``scale`` and the loss
-    is logged.
+    is logged. A source already at the target height is not rescaled, which also
+    keeps CUDA decoding on for it.
     """
 
     if not options.small:
@@ -148,9 +149,9 @@ def _scale_filter_part(
     target_height = options.small_target_height or 720
     if target_height <= 0:
         target_height = 720
-    if not (original_height > 0 and original_height >= target_height):
+    if not (original_height > 0 and original_height > target_height):
         reporter.log(
-            f"Keeping original resolution {int(original_height)}p (smaller than target {target_height}p)"
+            f"Keeping original resolution {int(original_height)}p (not larger than target {target_height}p)"
         )
         return None
 
@@ -213,6 +214,50 @@ def _build_scale_only_filter_graph(
     with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
         filter_graph_file.write(",".join(filter_parts))
     return filter_graph_path
+
+
+def resolve_output_frame_rate(
+    source_fps: float, max_frame_rate: Optional[float]
+) -> float:
+    """Return the frame rate the output is encoded at.
+
+    The cap only lowers the rate: a source at or below *max_frame_rate* (within
+    a small tolerance, so 59.94 fps under a 60 cap is kept) is left alone, and an
+    unset or non-positive cap means "orig".
+    """
+
+    if max_frame_rate and max_frame_rate > 0 and source_fps > max_frame_rate + 1e-3:
+        return float(max_frame_rate)
+    return source_fps
+
+
+def _speed_filter_graph(
+    scale_part: Optional[str], source_fps: float, output_fps: float, expression: str
+) -> str:
+    """Build the speed-path filter graph text.
+
+    The ``setpts`` expression indexes **source** frames (``N``) and divides by
+    the link's frame rate, so the source-rate ``fps`` must precede it and the
+    cap must follow it; lowering the rate first would shift every chunk edge.
+    """
+
+    escaped = expression.replace(",", "\\,")
+    parts: list[str] = []
+    if scale_part:
+        parts.append(scale_part)
+    parts.append(f"fps={source_fps}")
+    parts.append(f"setpts={escaped}")
+    if output_fps != source_fps:
+        parts.append(f"fps={output_fps}")
+    return ",".join(parts)
+
+
+def _scale_output_frames(frames: int, source_fps: float, output_fps: float) -> int:
+    """Convert a source-rate frame count into output frames under an fps cap."""
+
+    if frames <= 0 or source_fps <= 0 or output_fps >= source_fps:
+        return frames
+    return int(math.ceil(frames * output_fps / source_fps))
 
 
 def _resolve_trim(
@@ -409,6 +454,11 @@ def speed_up_video(
         reporter.log("Small mode scaling to %dp" % target_height)
 
     is_mp3_output = str(options.video_codec).strip().lower() == "mp3"
+    output_frame_rate = resolve_output_frame_rate(frame_rate, options.max_frame_rate)
+    if output_frame_rate != frame_rate and has_video_stream and not is_mp3_output:
+        reporter.log(
+            f"Capping frame rate from {frame_rate:.3f} to {output_frame_rate:g} fps"
+        )
     spherical_info = (
         dependencies.probe_spherical(input_path)
         if has_video_stream and not is_mp3_output
@@ -566,7 +616,6 @@ def speed_up_video(
         expression = chunk_utils.get_tree_expression(updated_chunks)
         filter_graph_path = job_temp_path / "filterGraph.txt"
         with open(filter_graph_path, "w", encoding="utf-8") as filter_graph_file:
-            filter_parts = []
             scale_part = _scale_filter_part(
                 options,
                 original_width=original_width,
@@ -574,12 +623,11 @@ def speed_up_video(
                 spherical_info=spherical_info,
                 reporter=reporter,
             )
-            if scale_part:
-                filter_parts.append(scale_part)
-            filter_parts.append(f"fps={frame_rate}")
-            escaped_expression = expression.replace(",", "\\,")
-            filter_parts.append(f"setpts={escaped_expression}")
-            filter_graph_file.write(",".join(filter_parts))
+            filter_graph_file.write(
+                _speed_filter_graph(
+                    scale_part, frame_rate, output_frame_rate, expression
+                )
+            )
     else:
         if has_audio and neutral_speeds:
             reporter.log(
@@ -589,7 +637,7 @@ def speed_up_video(
             job_temp_path=job_temp_path,
             options=options,
             original_height=original_height,
-            frame_rate=frame_rate,
+            frame_rate=output_frame_rate,
             reporter=reporter,
             original_width=original_width,
             spherical_info=spherical_info,
@@ -620,7 +668,7 @@ def speed_up_video(
                 hardware_backend=hardware_backend,
                 optimize=options.optimize,
                 small=options.small,
-                frame_rate=frame_rate,
+                frame_rate=output_frame_rate,
                 keyframe_interval_seconds=options.keyframe_interval_seconds,
                 video_codec=options.video_codec,
                 keep_input_audio=keep_input_audio,
@@ -675,14 +723,18 @@ def speed_up_video(
             if final_total_frames <= 0 and effective_duration > 0 and frame_rate > 0:
                 final_total_frames = int(math.ceil(effective_duration * frame_rate))
 
+        final_total_frames = _scale_output_frames(
+            final_total_frames, frame_rate, output_frame_rate
+        )
+
         if final_total_frames > 0:
             reporter.log(f"Final encode target frames: {final_total_frames}")
-            if frame_rate > 0:
-                final_duration_seconds = final_total_frames / frame_rate
+            if output_frame_rate > 0:
+                final_duration_seconds = final_total_frames / output_frame_rate
                 reporter.log(
                     (
                         "Final encode target duration: {duration:.2f}s at {fps:.3f} fps"
-                    ).format(duration=final_duration_seconds, fps=frame_rate)
+                    ).format(duration=final_duration_seconds, fps=output_frame_rate)
                 )
             else:
                 reporter.log(
@@ -726,13 +778,13 @@ def speed_up_video(
                 )
             else:
                 reporter.log("Final encode target frames (fallback): unknown")
-            if final_total_frames > 0 and frame_rate > 0:
+            if final_total_frames > 0 and output_frame_rate > 0:
                 reporter.log(
                     (
                         "Final encode target duration (fallback): {duration:.2f}s at {fps:.3f} fps"
                     ).format(
-                        duration=final_total_frames / frame_rate,
-                        fps=frame_rate,
+                        duration=final_total_frames / output_frame_rate,
+                        fps=output_frame_rate,
                     )
                 )
             reporter.log("Executing FFmpeg fallback command:")
@@ -755,7 +807,7 @@ def speed_up_video(
     finally:
         dependencies.delete_path(job_temp_path)
 
-    output_metadata = _extract_video_metadata(output_path, frame_rate)
+    output_metadata = _extract_video_metadata(output_path, output_frame_rate)
     output_duration = output_metadata.get("duration", 0.0)
     time_ratio = output_duration / original_duration if original_duration > 0 else None
 
@@ -766,7 +818,7 @@ def speed_up_video(
     return ProcessingResult(
         input_file=input_path,
         output_file=output_path,
-        frame_rate=frame_rate,
+        frame_rate=output_frame_rate,
         original_duration=original_duration,
         output_duration=output_duration,
         chunk_count=len(updated_chunks) if updated_chunks else 0,
@@ -829,8 +881,8 @@ def _input_to_output_filename(
     if small:
         suffix_tokens.append("small")
 
-    if small and small_target_height == 480:
-        suffix_tokens.append("480")
+    if small and small_target_height in (480, 1080):
+        suffix_tokens.append(str(small_target_height))
 
     if not optimize and not small:
         suffix_tokens.append("fast")

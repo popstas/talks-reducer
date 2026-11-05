@@ -5,13 +5,14 @@ and applied read-only everywhere else. Presets live in the shared
 ``settings.json`` (see :mod:`talks_reducer.config`) under the ``presets`` key so
 one canonical list appears on every surface the config file reaches.
 
-The helpers here are UI-agnostic and unit-tested. The three seeded defaults are
+The helpers here are UI-agnostic and unit-tested. The seeded defaults are
 persisted the first time the ``presets`` key is absent; afterward they are
 ordinary, fully editable presets rather than immutable built-ins.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Mapping, Optional, Sequence
@@ -22,8 +23,17 @@ from . import config
 PRESETS_KEY = "presets"
 SELECTED_PRESET_KEY = "selected_preset"
 
-# Valid resolution tri-state values.
-RESOLUTIONS = ("1080p", "720p", "480p")
+# Valid resolution values. ``"orig"`` leaves the source resolution alone; the
+# others downscale (never upscale) to that height.
+RESOLUTIONS = ("orig", "1080p", "720p", "480p")
+
+# Valid frame-rate values. ``"orig"`` keeps the source frame rate; a number caps it.
+FPS_VALUES = ("30", "60", "orig")
+
+# Schema marker. Version 1 files used ``"1080p"`` for "no scaling"; version 2
+# gives ``"1080p"`` its literal meaning and spells "no scaling" as ``"orig"``.
+PRESETS_VERSION_KEY = "presets_version"
+PRESETS_VERSION = 2
 
 # Label shown in an authoring dropdown when the live knobs match no stored
 # preset. Mirrors :func:`match_preset` returning ``None``.
@@ -38,6 +48,7 @@ MATCH_TOLERANCE = 1e-9
 # is the identity, not an applied value.
 PRESET_VALUE_FIELDS = (
     "resolution",
+    "fps",
     "silent_speed",
     "sounded_speed",
     "silent_threshold",
@@ -48,6 +59,7 @@ PRESET_VALUE_FIELDS = (
 # checkboxes and the preset summaries shown as tooltips.
 PRESET_FIELD_LABELS = {
     "resolution": "Resolution",
+    "fps": "FPS",
     "silent_speed": "Silent speed",
     "sounded_speed": "Sounded speed",
     "silent_threshold": "Silent threshold",
@@ -70,14 +82,15 @@ class Preset:
 
     Presets are **sparse**: every value field is optional and a field left as
     ``None`` is not stored, not applied, and ignored when reverse-matching, so a
-    preset controls only the params it was saved with. ``resolution`` is an
-    explicit tri-state (``"1080p"``, ``"720p"``, or ``"480p"``) so a 1080p preset
-    can force ``--no-small`` rather than inheriting a persisted ``--small``
-    default.
+    preset controls only the params it was saved with. ``resolution`` is one
+    of :data:`RESOLUTIONS` (``"orig"`` forces ``--no-small`` rather than
+    inheriting a persisted ``--small`` default) and ``fps`` is one of
+    :data:`FPS_VALUES`.
     """
 
     name: str
     resolution: Optional[str] = None
+    fps: Optional[str] = None
     silent_speed: Optional[float] = None
     sounded_speed: Optional[float] = None
     silent_threshold: Optional[float] = None
@@ -117,6 +130,7 @@ class Preset:
         return cls(
             name=str(data.get("name", "")),
             resolution=_opt_str("resolution"),
+            fps=_opt_str("fps"),
             silent_speed=_opt_float("silent_speed"),
             sounded_speed=_opt_float("sounded_speed"),
             silent_threshold=_opt_float("silent_threshold"),
@@ -137,11 +151,15 @@ class Preset:
 # so the name is free to say what the preset is *for*. "Compatible" leads
 # because it is the first-run default on every surface and h.264 plays
 # everywhere. "mp3" is deliberately sparse: it carries no resolution, so
-# extracting audio leaves the video settings alone.
+# extracting audio leaves the video settings alone. "Compress" keeps 1080p (a
+# real downscale for 4K sources) at 30 fps; "Smallest" also caps at 30 fps.
+# "Compatible" and "Optimal" say ``fps="orig"`` explicitly: a sparse preset with
+# no fps would keep whatever cap the previously selected preset left behind.
 DEFAULT_PRESETS: List[Preset] = [
     Preset(
         name="Compatible",
         resolution="720p",
+        fps="orig",
         silent_speed=10.0,
         sounded_speed=1.0,
         silent_threshold=0.01,
@@ -150,6 +168,7 @@ DEFAULT_PRESETS: List[Preset] = [
     Preset(
         name="Optimal",
         resolution="720p",
+        fps="orig",
         silent_speed=10.0,
         sounded_speed=1.0,
         silent_threshold=0.01,
@@ -158,6 +177,7 @@ DEFAULT_PRESETS: List[Preset] = [
     Preset(
         name="Smallest",
         resolution="480p",
+        fps="30",
         silent_speed=10.0,
         sounded_speed=1.0,
         silent_threshold=0.01,
@@ -165,7 +185,8 @@ DEFAULT_PRESETS: List[Preset] = [
     ),
     Preset(
         name="Compress",
-        resolution="720p",
+        resolution="1080p",
+        fps="30",
         silent_speed=1.0,
         sounded_speed=1.0,
         silent_threshold=0.01,
@@ -199,12 +220,84 @@ def _format_number(value: float) -> str:
     return text or "0"
 
 
+def resolution_to_small(resolution: str) -> tuple[bool, Optional[int]]:
+    """Map a resolution value to ``(small, target_height)``.
+
+    ``"orig"`` disables scaling and returns no height; ``"1080p"``/``"480p"``
+    return their height; ``"720p"`` and any unexpected value fall back to the
+    720p small preset, matching how unknown values were always treated.
+    """
+
+    if resolution == "orig":
+        return False, None
+    if resolution == "1080p":
+        return True, 1080
+    if resolution == "480p":
+        return True, 480
+    return True, 720
+
+
+def parse_fps_token(token: object) -> float:
+    """Return the frame-rate cap for *token*: ``0.0`` for ``"orig"``.
+
+    Any other value must be a positive finite number; anything else raises
+    :class:`ValueError` so callers can reject it (CLI) or skip it (presets).
+    """
+
+    text = str(token).strip().lower()
+    if text == "orig":
+        return 0.0
+    value = float(text)
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"fps must be positive or 'orig', got {token!r}")
+    return value
+
+
+def format_fps_token(max_frame_rate: Optional[float]) -> str:
+    """Render a frame-rate cap as a token: ``"orig"`` when unset or non-positive."""
+
+    if not max_frame_rate or max_frame_rate <= 0:
+        return "orig"
+    return _format_number(max_frame_rate)
+
+
+def _stored_presets_version(settings: Mapping[str, object]) -> int:
+    """Return the ``presets_version`` marker, treating absent/garbage as 1."""
+
+    try:
+        return int(settings.get(PRESETS_VERSION_KEY, 1))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 1
+
+
+def _migrate_v1_entry(entry: object) -> object:
+    """Rewrite a version-1 preset dict into the version-2 schema.
+
+    ``"1080p"`` meant "orig" in version 1, and a preset with a resolution but
+    no ``fps`` implicitly kept the source frame rate, so it gains
+    ``fps: "orig"`` to stop inheriting the cap of a previously selected preset.
+    Presets without a resolution (e.g. audio-only) are left alone.
+    """
+
+    if not isinstance(entry, Mapping) or entry.get("resolution") is None:
+        return entry
+    migrated = dict(entry)
+    if migrated["resolution"] == "1080p":
+        migrated["resolution"] = "orig"
+    if migrated.get("fps") is None:
+        migrated["fps"] = "orig"
+    return migrated
+
+
 def load_presets(config_path: Optional[Path] = None) -> List[Preset]:
     """Return the stored presets, seeding :data:`DEFAULT_PRESETS` on first run.
 
     When the ``presets`` key is absent the defaults are persisted to
     ``settings.json`` and returned. An explicitly empty list (the user deleted
-    every preset) is preserved and returned as ``[]``.
+    every preset) is preserved and returned as ``[]``. A version-1 file (no
+    ``presets_version`` marker) has its ``"1080p"`` presets rewritten to
+    ``"orig"`` once, gains ``fps: "orig"`` where it has a resolution but no fps,
+    and is re-saved with the marker.
     """
 
     path = _resolve_config_path(config_path)
@@ -224,6 +317,14 @@ def load_presets(config_path: Optional[Path] = None) -> List[Preset]:
     raw = settings.get(PRESETS_KEY)
     if not isinstance(raw, list):
         return []
+
+    if _stored_presets_version(settings) < PRESETS_VERSION:
+        raw = [_migrate_v1_entry(entry) for entry in raw]
+        settings[PRESETS_KEY] = raw
+        settings[PRESETS_VERSION_KEY] = PRESETS_VERSION
+        # Best-effort: a failed write migrates again on the next load, which
+        # is safe because only a version-1 file is ever rewritten.
+        config.save_settings(path, settings)
 
     presets: List[Preset] = []
     for entry in raw:
@@ -251,6 +352,7 @@ def save_presets(presets: Sequence[Preset], config_path: Optional[Path] = None) 
         # ``GUIPreferences.save()`` hardening for the shared ``settings.json``.
         return False
     settings[PRESETS_KEY] = [preset.to_dict() for preset in presets]
+    settings[PRESETS_VERSION_KEY] = PRESETS_VERSION
     return config.save_settings(path, settings)
 
 
@@ -326,21 +428,22 @@ def preset_to_cli_args(preset: Preset) -> List[str]:
 
     Only the fields the (sparse) preset defines are emitted, so a preset that
     stores just a codec leaves resolution and speeds untouched. When present,
-    resolution is emitted explicitly (``--no-small`` / ``--small --720`` /
-    ``--small --480``) so the preset wins over a persisted ``--small`` default.
-    Speeds, threshold, and codec follow using the same flag spellings as
+    resolution is emitted explicitly (``--no-small`` / ``--small --1080`` /
+    ``--small --720`` / ``--small --480``) so the preset wins over a persisted
+    ``--small`` default, followed by ``--fps``. Speeds, threshold, and codec follow using the same flag spellings as
     :func:`talks_reducer.gui.shortcut.build_shortcut_args`.
     """
 
     args: List[str] = []
 
     if preset.resolution is not None:
-        if preset.resolution == "1080p":
+        small, height = resolution_to_small(preset.resolution)
+        if not small:
             args.append("--no-small")
-        elif preset.resolution == "480p":
-            args.extend(["--small", "--480"])
-        else:  # "720p" (and any unexpected value) map to the 720p small preset.
-            args.extend(["--small", "--720"])
+        else:
+            args.extend(["--small", f"--{height}"])
+    if preset.fps is not None:
+        args.extend(["--fps", str(preset.fps)])
 
     if preset.silent_speed is not None:
         args.extend(["--silent-speed", _format_number(preset.silent_speed)])
@@ -399,7 +502,7 @@ def match_preset(
 ) -> Optional[str]:
     """Reverse-match live *values* to a preset name, or ``None`` for "Custom".
 
-    ``values`` supplies ``resolution`` and ``video_codec`` (compared exactly)
+    ``values`` supplies ``resolution``, ``fps`` and ``video_codec`` (compared exactly)
     plus ``silent_speed``, ``sounded_speed``, and ``silent_threshold`` (compared
     within :data:`MATCH_TOLERANCE`). A sparse preset matches when **every field
     it defines** equals the live value; the params it omits are ignored. A preset
@@ -417,6 +520,8 @@ def match_preset(
         if "video_codec" in present and preset.video_codec != str(
             values.get("video_codec", "")
         ):
+            continue
+        if "fps" in present and preset.fps != str(values.get("fps", "")):
             continue
 
         matched = True

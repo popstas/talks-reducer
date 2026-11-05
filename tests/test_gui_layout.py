@@ -88,6 +88,14 @@ class StringVarStub(VarStub):
         super().set(str(value))
 
 
+class IntVarStub(VarStub):
+    def __init__(self, value: int = 0):
+        super().__init__(value=int(value))
+
+    def set(self, value):
+        super().set(int(value))
+
+
 class DoubleVarStub(VarStub):
     def __init__(self, value: float = 0.0):
         super().__init__(value=float(value))
@@ -272,7 +280,8 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         _move_selected_preset_up=Mock(),
         _move_selected_preset_down=Mock(),
         small_var=BooleanVarStub(value=True),
-        small_480_var=BooleanVarStub(value=False),
+        small_height_var=IntVarStub(value=720),
+        fps_var=StringVarStub(value="orig"),
         optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
         cut_enabled_var=BooleanVarStub(value=False),
@@ -553,7 +562,8 @@ def test_build_layout_initializes_widgets(monkeypatch):
         _move_selected_preset_up=Mock(),
         _move_selected_preset_down=Mock(),
         small_var=BooleanVarStub(value=True),
-        small_480_var=BooleanVarStub(value=False),
+        small_height_var=IntVarStub(value=720),
+        fps_var=StringVarStub(value="orig"),
         optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
         cut_enabled_var=BooleanVarStub(value=False),
@@ -824,7 +834,8 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         _move_selected_preset_up=Mock(),
         _move_selected_preset_down=Mock(),
         small_var=BooleanVarStub(value=True),
-        small_480_var=BooleanVarStub(value=False),
+        small_height_var=IntVarStub(value=720),
+        fps_var=StringVarStub(value="orig"),
         optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
         cut_enabled_var=BooleanVarStub(value=False),
@@ -1628,7 +1639,8 @@ def _make_preset_target_gui() -> SimpleNamespace:
     threshold = DummyVar(0.01)
     return SimpleNamespace(
         small_var=BooleanVarStub(value=True),
-        small_480_var=BooleanVarStub(value=False),
+        small_height_var=IntVarStub(value=720),
+        fps_var=StringVarStub(value="orig"),
         video_codec_var=StringVarStub(value="h264"),
         silent_speed_var=silent,
         sounded_speed_var=sounded,
@@ -1656,17 +1668,17 @@ def test_apply_preset_to_gui_sets_vars_for_480p():
     layout.apply_preset_to_gui(gui, preset)
 
     assert gui.small_var.get() is True
-    assert gui.small_480_var.get() is True
+    assert gui.small_height_var.get() == 480
     assert gui.silent_speed_var.get() == pytest.approx(10.0)
     assert gui.silent_threshold_var.get() == pytest.approx(0.02)
     assert gui.video_codec_var.get() == "hevc"
 
 
-def test_apply_preset_to_gui_1080p_clears_small():
+def test_apply_preset_to_gui_orig_clears_small():
     gui = _make_preset_target_gui()
     preset = Preset(
-        name="1080p no speedup H.264",
-        resolution="1080p",
+        name="orig no speedup H.264",
+        resolution="orig",
         silent_speed=1.0,
         sounded_speed=1.0,
         silent_threshold=0.01,
@@ -1676,7 +1688,7 @@ def test_apply_preset_to_gui_1080p_clears_small():
     layout.apply_preset_to_gui(gui, preset)
 
     assert gui.small_var.get() is False
-    assert gui.small_480_var.get() is False
+    assert gui.small_height_var.get() != 480
 
 
 def test_apply_preset_to_gui_prefers_slider_updaters():
@@ -1699,7 +1711,7 @@ def test_apply_preset_to_gui_prefers_slider_updaters():
     # The slider updater is used when present so the label/preferences sync.
     assert ("silent_speed", "7.0") in calls
     assert gui.small_var.get() is True
-    assert gui.small_480_var.get() is False
+    assert gui.small_height_var.get() != 480
 
 
 def test_apply_preset_to_gui_persists_through_real_segmented_updater(monkeypatch):
@@ -1806,7 +1818,7 @@ def test_apply_simple_preset_applies_and_persists(monkeypatch):
 
     layout._apply_simple_preset(gui)
 
-    assert gui.small_480_var.get() is True
+    assert gui.small_height_var.get() == 480
     assert gui.video_codec_var.get() == "hevc"
     assert persisted == ["480p 10x speedup H.265"]
 
@@ -1826,7 +1838,7 @@ def test_apply_simple_preset_unknown_name_noops(monkeypatch):
     layout._apply_simple_preset(gui)
 
     # Unknown selection leaves the vars untouched and persists nothing.
-    assert gui.small_480_var.get() is False
+    assert gui.small_height_var.get() != 480
     assert gui.video_codec_var.get() == "h264"
     assert persisted == []
 
@@ -1839,7 +1851,8 @@ def _make_advanced_preset_gui() -> SimpleNamespace:
     threshold = DummyVar(0.01)
     return SimpleNamespace(
         small_var=BooleanVarStub(value=True),
-        small_480_var=BooleanVarStub(value=False),
+        small_height_var=IntVarStub(value=720),
+        fps_var=StringVarStub(value="orig"),
         video_codec_var=StringVarStub(value="h264"),
         silent_speed_var=silent,
         sounded_speed_var=sounded,
@@ -1862,13 +1875,17 @@ def test_advanced_preset_values_maps_resolution_tri_state():
     gui = _make_advanced_preset_gui()
 
     gui.small_var.set(False)
+    assert layout.advanced_preset_values(gui)["resolution"] == "orig"
+
+    gui.small_var.set(True)
+    gui.small_height_var.set(1080)
     assert layout.advanced_preset_values(gui)["resolution"] == "1080p"
 
     gui.small_var.set(True)
-    gui.small_480_var.set(False)
+    gui.small_height_var.set(720)
     assert layout.advanced_preset_values(gui)["resolution"] == "720p"
 
-    gui.small_480_var.set(True)
+    gui.small_height_var.set(480)
     assert layout.advanced_preset_values(gui)["resolution"] == "480p"
 
 
@@ -2097,7 +2114,8 @@ def test_refresh_advanced_preset_selection_skips_before_knobs_exist():
     gui = SimpleNamespace(
         advanced_preset_var=StringVarStub(value=""),
         small_var=BooleanVarStub(value=True),
-        small_480_var=BooleanVarStub(value=False),
+        small_height_var=IntVarStub(value=720),
+        fps_var=StringVarStub(value="orig"),
         video_codec_var=StringVarStub(value="h264"),
         silent_speed_var=DummyVar(10.0),
         _simple_presets=list(_TEST_PRESETS),
@@ -2122,7 +2140,7 @@ def test_apply_advanced_preset_applies_and_persists(monkeypatch):
 
     layout.apply_advanced_preset(gui)
 
-    assert gui.small_480_var.get() is True
+    assert gui.small_height_var.get() == 480
     assert gui.video_codec_var.get() == "hevc"
     assert persisted == ["480p 10x speedup H.265"]
 
@@ -2157,7 +2175,7 @@ def test_save_advanced_preset_persists_and_refreshes(monkeypatch):
     )
 
     gui = _make_advanced_preset_gui()
-    gui.small_var.set(False)  # 1080p
+    gui.small_var.set(False)  # orig
     gui.video_codec_var.set("av1")
 
     layout.save_advanced_preset(gui, "My new preset")
@@ -2165,7 +2183,7 @@ def test_save_advanced_preset_persists_and_refreshes(monkeypatch):
     assert saved, "save_presets should be called"
     new = layout.presets.find_preset("My new preset", saved[-1])
     assert new is not None
-    assert new.resolution == "1080p"
+    assert new.resolution == "orig"
     assert new.video_codec == "av1"
     assert gui.advanced_preset_var.get() == "My new preset"
 
@@ -2445,6 +2463,8 @@ def test_basic_options_frame_grid_positions_do_not_collide():
         raise AssertionError(f"no {text!r} label found on basic_options_frame")
 
     assert _label_row("Threshold") != _label_row("Codec")
+    assert _label_row("FPS") == _label_row("Codec") + 1
+    assert _label_row("Silent") == _label_row("FPS") + 1
 
 
 def test_threshold_help_link_lives_in_the_label_not_the_value_row():
@@ -2578,6 +2598,7 @@ def test_resolution_buttons_replace_the_small_checkboxes():
     assert not hasattr(gui, "small_check")
     assert not hasattr(gui, "small_480_check")
     assert [button.kwargs["text"] for button in gui.resolution_control.buttons] == [
+        "1080p",
         "720p",
         "480p",
         "orig",
@@ -2585,11 +2606,11 @@ def test_resolution_buttons_replace_the_small_checkboxes():
 
 
 @pytest.mark.parametrize(
-    "index, expected_small, expected_480",
-    [(0, True, False), (1, True, True), (2, False, False)],
+    "index, expected_small, expected_height",
+    [(0, True, 1080), (1, True, 720), (2, True, 480), (3, False, None)],
 )
 def test_clicking_a_resolution_button_drives_the_small_vars(
-    index, expected_small, expected_480
+    index, expected_small, expected_height
 ):
     """The booleans stay the source of truth that presets and the CLI read."""
 
@@ -2599,7 +2620,8 @@ def test_clicking_a_resolution_button_drives_the_small_vars(
     gui.resolution_control.buttons[index].kwargs["command"]()
 
     assert gui.small_var.get() is expected_small
-    assert gui.small_480_var.get() is expected_480
+    if expected_height is not None:
+        assert gui.small_height_var.get() == expected_height
 
 
 def test_applying_a_preset_moves_the_resolution_buttons():
@@ -2611,8 +2633,8 @@ def test_applying_a_preset_moves_the_resolution_buttons():
     layout.apply_preset_to_gui(gui, Preset(name="tiny", resolution="480p"))
     assert gui.resolution_var.get() == "480p"
 
-    layout.apply_preset_to_gui(gui, Preset(name="full", resolution="1080p"))
-    assert gui.resolution_var.get() == "1080p"
+    layout.apply_preset_to_gui(gui, Preset(name="full", resolution="orig"))
+    assert gui.resolution_var.get() == "orig"
 
 
 def test_panel_has_no_group_headings():
@@ -2649,7 +2671,12 @@ def test_option_rows_lead_with_the_strongest_reduction():
         "Silence ×5",
         "No speedup",
     ]
-    assert [o.label for o in layout.RESOLUTION_OPTIONS] == ["720p", "480p", "orig"]
+    assert [o.label for o in layout.RESOLUTION_OPTIONS] == [
+        "1080p",
+        "720p",
+        "480p",
+        "orig",
+    ]
 
 
 def test_silence_speedup_row_lives_in_the_basic_options_frame():
@@ -2678,3 +2705,79 @@ def test_every_row_opens_on_its_first_button():
     # The macro that matches those defaults is the first one, Silence x10.
     layout.update_basic_preset_highlight(gui)
     assert gui._active_basic_preset == "silence_x10"
+
+
+def test_apply_preset_to_gui_1080p_sets_height():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    layout.apply_preset_to_gui(gui, Preset(name="HD", resolution="1080p"))
+
+    assert gui.small_var.get() is True
+    assert gui.small_height_var.get() == 1080
+    assert gui.resolution_var.get() == "1080p"
+
+
+def test_apply_preset_to_gui_sets_fps():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    layout.apply_preset_to_gui(gui, Preset(name="Capped", fps="30"))
+
+    assert gui.fps_var.get() == "30"
+
+
+def test_resolution_buttons_include_1080p_and_orig():
+    values = [option.value for option in layout.RESOLUTION_OPTIONS]
+
+    assert values == ["1080p", "720p", "480p", "orig"]
+
+
+def test_apply_resolution_choice_1080p():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    layout.apply_resolution_choice(gui, "1080p")
+
+    assert gui.small_var.get() is True
+    assert gui.small_height_var.get() == 1080
+
+
+def test_advanced_preset_values_include_fps():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.fps_var.set("60")
+
+    assert layout.advanced_preset_values(gui)["fps"] == "60"
+
+
+def test_editing_fps_flips_advanced_preset_to_custom(monkeypatch):
+    monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
+    monkeypatch.setattr(
+        layout.presets,
+        "load_presets",
+        lambda *a, **k: [Preset(name="Capped", fps="30")],
+    )
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    gui.fps_var.set("30")
+    assert gui.advanced_preset_var.get() == "Capped"
+
+    gui.fps_var.set("orig")
+
+    assert gui.advanced_preset_var.get() == CUSTOM_LABEL
+
+
+def test_fps_row_sits_under_codec():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    rows = {
+        widget.kwargs.get("text"): widget.grid_calls[0][1]["row"]
+        for widget in gui.ttk.Label.created
+        if widget.args
+        and widget.args[0] is gui.basic_options_frame
+        and widget.grid_calls
+    }
+
+    assert rows["FPS"] == rows["Codec"] + 1

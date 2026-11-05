@@ -531,6 +531,8 @@ def send_video(
     cut_enabled: bool = False,
     cut_start_seconds: Optional[float] = None,
     cut_end_seconds: Optional[float] = None,
+    small_height: Optional[int] = None,
+    max_frame_rate: Optional[float] = None,
     log_callback: Optional[Callable[[str], None]] = None,
     stream_updates: bool = False,
     should_cancel: Optional[Callable[[], bool]] = None,
@@ -548,7 +550,9 @@ def send_video(
     :class:`ProcessingAborted` exception is raised. Set *optimize* to ``False``
     to switch to the fastest CUDA-oriented preset when available, and set
     *prefer_global_ffmpeg* when the PATH-provided FFmpeg offers hardware
-    encoders that the bundled static build omits.
+    encoders that the bundled static build omits. *small_height* selects the
+    downscale target (1080 needs an updated server) and *max_frame_rate* caps the
+    output frame rate (also needs an updated server).
     """
 
     if not input_path.exists():
@@ -571,6 +575,14 @@ def send_video(
         cut_start_seconds,
         cut_end_seconds,
     )
+    target_height = int(small_height) if small and small_height else 0
+    frame_rate_cap = (
+        float(max_frame_rate) if max_frame_rate and max_frame_rate > 0 else 0.0
+    )
+    if target_height not in (0, 480, 720) or frame_rate_cap > 0:
+        # Appended only when needed so a client stays compatible with servers
+        # that predate these two parameters for every option that existed then.
+        submit_args = submit_args + (target_height, frame_rate_cap)
     submit_kwargs: dict[str, Any] = {"api_name": "/process_video"}
 
     upload_total: Optional[int] = None

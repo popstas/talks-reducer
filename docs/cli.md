@@ -6,7 +6,7 @@ Full flag reference for the `talks-reducer` command. See the
 ## Named presets
 
 A **preset** is a saved bundle of processing settings — resolution, silent/sounded speed,
-silent threshold, and video codec — authored once in the desktop GUI (Advanced mode) and
+silent threshold, video codec, and an optional frame-rate cap (`fps`) — authored once in the desktop GUI (Advanced mode) and
 applied read-only on every other surface, including the CLI. Presets live in the shared
 `settings.json` (the same file the GUI, Web UI, and OBS dock read), so one canonical list
 appears everywhere.
@@ -32,28 +32,42 @@ appears everywhere.
   talks-reducer --preset "Smallest" --silent-speed 8 talk.mp4  # override just the speed
   ```
 
-The preset's resolution is expanded to the explicit tri-state (`1080p` → `--no-small`,
-`720p` → `--small --720`, `480p` → `--small --480`) so a 1080p preset overrides a stored
-`--small` preference rather than inheriting it. An unknown `--preset NAME` errors and lists
-the valid names.
+The preset's resolution is `orig`, `1080p`, `720p` or `480p`, expanded to explicit flags
+(`orig` → `--no-small`, `1080p` → `--small --1080`, `720p` → `--small --720`, `480p` →
+`--small --480`) so an `orig` preset overrides a stored `--small` preference rather than
+inheriting it. The optional `fps` field (`"30"`, `"60"` or `"orig"`) maps to `--fps`. An
+unknown `--preset NAME` errors and lists the valid names.
+
+On a fresh install **Compress** is 1080p, 30 fps, h.264, silence ×1, **Smallest** is
+480p ×10 h.265 at 30 fps, and **Compatible** and **Optimal** say `fps` **orig** explicitly (a
+preset with no fps would keep the cap left by the previously selected one); existing preset lists are never rewritten by the new defaults.
+Before 1080p became a real downscale, `"1080p"` in `settings.json` meant "no scaling". A
+one-time migration, tracked by a `presets_version: 2` marker in `settings.json`, rewrites
+every stored `"1080p"` resolution to `"orig"` and adds `fps: "orig"` to every preset that has a
+resolution but no fps; afterwards `"1080p"` means a real downscale.
 
 ## Encoding presets
 
 By default the CLI applies the same tuned encoder settings everywhere: adaptive keyframes,
 128 kbps AAC audio, and NVENC fallbacks that previously lived behind `--small`.
 
-- `--small` layers on a 720p scale for a smaller output.
+- `--small` layers on a 720p scale for a smaller output (480p, 720p or 1080p with the flags below).
 - `--480` scales down to 480p instead.
-- `--720` forces the 720p scale explicitly — handy on a seeded GUI launch, where it unchecks
-  the **Target 480p** box even if your stored preference enabled it.
+- `--1080` scales down to 1080p. Only sources taller than 1080 px are rescaled; a 1080p source
+  logs "Keeping original resolution" and passes through. The output name gets `_small_1080`.
+- `--720` forces the 720p scale explicitly — handy on a seeded GUI launch (the OBS dock sends
+  it for 720p), where it overrides a stored 480p or 1080p height.
 - `--no-small` force-disables the preset, overriding a stored `--small` preference and
   unchecking the **Small video** box on a seeded launch.
+- `--fps {30,60,orig}` caps the output frame rate (any positive number is accepted too). It
+  is a cap: a 24 fps source stays at 24 fps, and `orig` keeps the source rate.
 - `--no-optimize` switches to a speed-focused CUDA preset that prioritizes turnaround time
   over compression efficiency, adding a `_fast` suffix when applicable.
 
 ```sh
 talks-reducer input.mp4  # optimized encoding at the source resolution
 talks-reducer --small input.mp4  # optimized encoding plus 720p scaling
+talks-reducer --small --1080 --fps 30 input.mp4  # at most 1080p, at most 30 fps
 talks-reducer --no-small input.mp4  # force the small preset off, overriding a stored preference
 talks-reducer --no-optimize input.mp4  # fastest CUDA preset with a _fast suffix when applicable
 ```

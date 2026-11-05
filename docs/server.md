@@ -32,8 +32,9 @@ talks-reducer server --host 0.0.0.0 --port 7860
 
 ## The browser UI
 
-The page features a drag-and-drop upload zone with **Small video**, **Target 480p**, and
-**Optimized encoding** checkboxes that mirror the CLI presets; a **Video codec** dropdown that
+The page features a drag-and-drop upload zone with a **Resolution** radio (**No change**,
+**1080p**, **720p**, **480p**), an **FPS** radio (**orig**, **60**, **30**) that caps the output
+frame rate, and an **Optimized encoding** checkbox that mirror the CLI presets; a **Video codec** dropdown that
 switches between h.264 (10% faster), h.265 (25% smaller), av1 (no advantages), and mp3 (audio
 only); a **Use global FFmpeg** toggle (disabled automatically when no system binary is
 detected) to prioritise the system binary when you need encoders the bundled build lacks; and
@@ -42,7 +43,7 @@ seconds) — the keep range is applied only when the checkbox is ticked, and you
 the embedded player to find the timestamps.
 
 A **Preset** dropdown near the top lists the saved presets from the shared `settings.json`
-(the same list the desktop GUI authors). Selecting a preset sets the resolution, speedup,
+(the same list the desktop GUI authors). Selecting a preset sets the resolution, FPS, speedup,
 silent/sounded speed sliders, silent threshold, and codec controls to its values (when a
 preset's silent speed is not one of the speedup radio's presets, only the slider is set);
 the dropdown is hidden when no presets are defined. See [gui.md](gui.md#presets) for how
@@ -61,10 +62,10 @@ resulting compression ratio and download the rendered video directly from the pa
 1. Open the printed `http://localhost:<port>` address (the default port is `9005`).
 2. Drag a video onto the **Video file** drop zone or click to browse and select one from
    disk.
-3. **Optimized encoding** stays enabled to apply the tuned codec arguments, and **Small
-   video** starts enabled to apply the 720p/128 kbps preset. Pair it with **Target 480p** to
-   downscale further or clear the checkboxes before the upload finishes to keep the original
-   resolution and bitrate. Use the **Video codec** dropdown to decide between the default
+3. **Optimized encoding** stays enabled to apply the tuned codec arguments, and **Resolution**
+   starts on the 720p/128 kbps preset. Pick **480p** to downscale further, **1080p** to only
+   downscale 1440p/4K sources, or **No change** to keep the original resolution and bitrate;
+   **FPS** caps the frame rate (never raises it). Use the **Video codec** dropdown to decide between the default
    h.264 (10% faster), h.265 (25% smaller), and av1 (no advantages) compression profiles, or
    pick **mp3 (audio only)** to export an audio-only `.mp3` instead of a video, and enable
    **Use global FFmpeg** (when available) if your system FFmpeg exposes GPU encoders that the
@@ -176,12 +177,17 @@ python -m talks_reducer.service_client --server http://127.0.0.1:9005/ --input d
 
 The helper wraps the Gradio API exposed by `server.py`, waits for processing to complete, then
 copies the rendered file to the path you provide. Pass `--small` (and optionally `--480`) to
-mirror the **Small video**/**Target 480p** checkboxes, toggle `--no-optimize` to disable the
+select the 720p or 480p **Resolution**, toggle `--no-optimize` to disable the
 optimized encoding preset, `--video-codec hevc`, `--video-codec h264`, `--video-codec av1`, or
 `--video-codec mp3` (audio-only `.mp3` output) to match the codec radio buttons,
 `--add-codec-suffix` to append the selected codec to the default output filename,
 `--prefer-global-ffmpeg` to reuse the system FFmpeg before the bundled copy, or `--print-log`
 to stream the server log after the download finishes.
+
+The Gradio `/process_video` endpoint accepts two optional trailing arguments, `target_height`
+and `max_frame_rate`. Clients send them only when the job asks for 1080p or an FPS cap, so a
+client talking to an older server keeps working for everything else, but 1080p and FPS caps
+need a server updated to this version.
 
 The plain CLI can also submit jobs to a server with `--url`/`--host`; see
 [cli.md](cli.md#remote-processing).

@@ -74,42 +74,49 @@ PRESET_ROW_PADY = (36, 24)
 # and the default is the first button so a fresh install starts there.
 DEFAULT_SILENT_SPEED = 10.0
 
-DEFAULT_RESOLUTION = "1080p"
+DEFAULT_RESOLUTION = "orig"
 
-# "orig" rather than "1080p": the pipeline leaves the source resolution alone in
-# this state, and a 1440p or 4K source is not downscaled to 1080p.
+# "orig" leaves the source resolution alone; "1080p" downscales larger sources
+# (a 1440p or 4K recording) and keeps anything at or below 1080p as is.
 RESOLUTION_OPTIONS = (
+    Option("1080p", "1080p"),
     Option("720p", "720p"),
     Option("480p", "480p"),
     Option(DEFAULT_RESOLUTION, "orig"),
 )
 
+# The fps cap never raises the frame rate, so "60" on a 30 fps source keeps 30.
+FPS_OPTIONS = (
+    Option("30", "30", tooltip="At most 30 fps"),
+    Option("60", "60", tooltip="At most 60 fps"),
+    Option("orig", "orig", tooltip="Keep the source frame rate"),
+)
+
+_HEIGHT_TO_RESOLUTION = {1080: "1080p", 720: "720p", 480: "480p"}
+
 
 def resolution_from_small(gui: "TalksReducerGUI") -> str:
-    """Collapse ``small_var``/``small_480_var`` into the resolution tri-state."""
+    """Collapse ``small_var``/``small_height_var`` into a resolution value."""
 
-    if gui.small_var.get():
-        return "480p" if gui.small_480_var.get() else "720p"
-    return DEFAULT_RESOLUTION
+    if not gui.small_var.get():
+        return DEFAULT_RESOLUTION
+    return _HEIGHT_TO_RESOLUTION.get(int(gui.small_height_var.get()), "720p")
 
 
 def apply_resolution_choice(gui: "TalksReducerGUI", value: str) -> None:
-    """Fan a resolution choice back onto the two boolean vars behind it.
+    """Fan a resolution choice back onto ``small_var``/``small_height_var``.
 
-    Those booleans remain the source of truth — presets, the CLI seed and
+    Those vars remain the source of truth — presets, the CLI seed and
     ``_collect_arguments`` all read them — so the buttons are a projection of
-    them rather than a third independent piece of state.
+    them rather than a third independent piece of state. The height is written
+    before ``small_var`` so the projection never shows a stale size in between;
+    ``orig`` leaves the height alone so switching back restores it.
     """
 
-    if value == DEFAULT_RESOLUTION:
-        gui.small_var.set(False)
-        gui.small_480_var.set(False)
-    elif value == "480p":
-        gui.small_var.set(True)
-        gui.small_480_var.set(True)
-    else:
-        gui.small_var.set(True)
-        gui.small_480_var.set(False)
+    small, height = presets.resolution_to_small(value)
+    if height is not None:
+        gui.small_height_var.set(height)
+    gui.small_var.set(small)
 
 
 BASIC_PRESETS: dict[str, dict[str, float]] = {
@@ -170,24 +177,18 @@ def apply_preset_to_gui(gui: "TalksReducerGUI", preset: "presets.Preset") -> Non
 
     Presets are sparse: only the fields the preset defines are applied, so a
     preset that stores just a codec leaves the resolution and speeds untouched.
-    When present, the resolution tri-state maps onto
-    ``small_var``/``small_480_var`` explicitly (``1080p`` → both off, ``720p`` →
-    small only, ``480p`` → small + 480p) so a preset always wins over a persisted
-    ``--small`` default. Speeds and the threshold route through the basic-slider
+    When present, the resolution maps through :func:`apply_resolution_choice`
+    (``orig`` → small off, ``1080p``/``720p``/``480p`` → small on with that
+    height) so a preset always wins over a persisted ``--small`` default, and
+    the fps cap writes ``fps_var``. Speeds and the threshold route through the basic-slider
     updaters when they exist so the slider labels and persisted preferences stay
     in sync; the codec updates the shared ``video_codec_var``.
     """
 
     if preset.resolution is not None:
-        if preset.resolution == "1080p":
-            gui.small_var.set(False)
-            gui.small_480_var.set(False)
-        elif preset.resolution == "480p":
-            gui.small_var.set(True)
-            gui.small_480_var.set(True)
-        else:  # "720p" and any unexpected value map to the 720p small preset.
-            gui.small_var.set(True)
-            gui.small_480_var.set(False)
+        apply_resolution_choice(gui, preset.resolution)
+    if preset.fps is not None:
+        gui.fps_var.set(str(preset.fps))
 
     updaters = getattr(gui, "_slider_updaters", {})
     variables = getattr(gui, "_basic_variables", {})
@@ -228,15 +229,16 @@ def _apply_simple_preset(gui: "TalksReducerGUI") -> None:
 def advanced_preset_values(gui: "TalksReducerGUI") -> dict:
     """Snapshot the live Advanced knobs as a preset-comparable mapping.
 
-    ``small_var``/``small_480_var`` collapse back into the resolution tri-state
-    (``1080p``/``720p``/``480p``) and the speeds, threshold, and codec read from
-    their shared GUI vars so the result can be fed straight to
+    ``small_var``/``small_height_var`` collapse back into the resolution value
+    (``orig``/``1080p``/``720p``/``480p``) and the fps cap, speeds, threshold,
+    and codec read from their shared GUI vars so the result can be fed straight to
     :func:`~talks_reducer.presets.match_preset` or
     :func:`~talks_reducer.presets.Preset`.
     """
 
     return {
         "resolution": resolution_from_small(gui),
+        "fps": gui.fps_var.get(),
         "silent_speed": gui.silent_speed_var.get(),
         "sounded_speed": gui.sounded_speed_var.get(),
         "silent_threshold": gui.silent_threshold_var.get(),
@@ -292,7 +294,8 @@ def refresh_advanced_preset_selection(gui: "TalksReducerGUI") -> None:
         return
     required_vars = (
         "small_var",
-        "small_480_var",
+        "small_height_var",
+        "fps_var",
         "silent_speed_var",
         "sounded_speed_var",
         "silent_threshold_var",
@@ -847,8 +850,13 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.advanced_preset_frame = advanced_preset_frame
 
     # Editing any knob flips the Advanced dropdown to "Custom"; slider vars route
-    # through ``update_basic_reset_state`` while the small/codec vars trace here.
-    for _preset_var in (gui.small_var, gui.small_480_var, gui.video_codec_var):
+    # through ``update_basic_reset_state`` while the small/fps/codec vars trace here.
+    for _preset_var in (
+        gui.small_var,
+        gui.small_height_var,
+        gui.fps_var,
+        gui.video_codec_var,
+    ):
         _preset_var.trace_add(
             "write", lambda *_: refresh_advanced_preset_selection(gui)
         )
@@ -915,10 +923,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         on_change=lambda value: apply_resolution_choice(gui, value),
     )
     gui.resolution_control.frame.pack(side=gui.tk.LEFT)
-    # ``small_var``/``small_480_var`` stay the source of truth — presets, the
+    # ``small_var``/``small_height_var`` stay the source of truth — presets, the
     # CLI seed and ``_collect_arguments`` all read them — so the buttons follow
     # whatever writes those, and writing them back here would loop.
-    for _small_var in (gui.small_var, gui.small_480_var):
+    for _small_var in (gui.small_var, gui.small_height_var):
         _small_var.trace_add(
             "write", lambda *_: gui.resolution_var.set(resolution_from_small(gui))
         )
@@ -949,6 +957,21 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(12, 0))
 
+    gui.ttk.Label(gui.basic_options_frame, text="FPS").grid(
+        row=3, column=0, sticky="w", pady=SETTING_ROW_PADY
+    )
+    fps_choice = gui.ttk.Frame(gui.basic_options_frame)
+    fps_choice.grid(row=3, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY)
+    gui.fps_control = SegmentedChoice(
+        fps_choice,
+        list(FPS_OPTIONS),
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=gui.fps_var,
+        default_value="orig",
+    )
+    gui.fps_control.frame.pack(side=gui.tk.LEFT)
+
     gui.silent_speed_var = gui.tk.DoubleVar(
         value=min(
             max(gui.preferences.get_float("silent_speed", DEFAULT_SILENT_SPEED), 1.0),
@@ -960,7 +983,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Silent",
         gui.silent_speed_var,
-        row=3,
+        row=4,
         setting_key="silent_speed",
         options=[
             Option(10.0, "10"),
@@ -986,7 +1009,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Sounded",
         gui.sounded_speed_var,
-        row=4,
+        row=5,
         setting_key="sounded_speed",
         options=[
             Option(1.0, "1"),
@@ -1009,7 +1032,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Threshold",
         gui.silent_threshold_var,
-        row=5,
+        row=6,
         setting_key="silent_threshold",
         options=[
             Option(0.01, "0.01"),
@@ -1027,10 +1050,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.threshold_help_button = threshold_control.help_button
 
     gui.ttk.Label(gui.basic_options_frame, text="Mode").grid(
-        row=6, column=0, sticky="w", pady=SETTING_ROW_PADY
+        row=7, column=0, sticky="w", pady=SETTING_ROW_PADY
     )
     mode_choice = gui.ttk.Frame(gui.basic_options_frame)
-    mode_choice.grid(row=6, column=1, sticky="w", pady=SETTING_ROW_PADY)
+    mode_choice.grid(row=7, column=1, sticky="w", pady=SETTING_ROW_PADY)
     gui.processing_mode_control = SegmentedChoice(
         mode_choice,
         [Option("local", "Local"), Option("remote", "Remote")],
@@ -1078,16 +1101,16 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text=format_local_server_url(local_server_url) if server_managed else "",
     )
     gui.local_server_url_label.grid(
-        row=6, column=2, sticky="w", padx=(8, 0), pady=SETTING_ROW_PADY
+        row=7, column=2, sticky="w", padx=(8, 0), pady=SETTING_ROW_PADY
     )
     if not (server_managed and local_server_url):
         gui.local_server_url_label.grid_remove()
 
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
-        row=7, column=0, sticky="w", pady=SETTING_ROW_PADY
+        row=8, column=0, sticky="w", pady=SETTING_ROW_PADY
     )
     theme_choice = gui.ttk.Frame(gui.basic_options_frame)
-    theme_choice.grid(row=7, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY)
+    theme_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY)
     gui.theme_control = SegmentedChoice(
         theme_choice,
         [Option("os", "OS"), Option("light", "Light"), Option("dark", "Dark")],

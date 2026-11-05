@@ -327,6 +327,7 @@
               <label class="radio-pill"><input type="radio" name="resolution" value="1080p" /> 1080p</label>
               <label class="radio-pill"><input type="radio" name="resolution" value="720p" checked /> 720p</label>
               <label class="radio-pill"><input type="radio" name="resolution" value="480p" /> 480p</label>
+              <label class="radio-pill"><input type="radio" name="resolution" value="orig" /> orig</label>
             </div>
 
             <div class="buttons">
@@ -350,6 +351,14 @@
               <label class="radio-pill"><input type="radio" name="codec" value="hevc" /> hevc</label>
               <label class="radio-pill"><input type="radio" name="codec" value="av1" /> av1</label>
               <label class="radio-pill"><input type="radio" name="codec" value="mp3" /> mp3</label>
+            </div>
+          </div>
+          <div class="row">
+            <label class="small">FPS</label>
+            <div class="radio-group">
+              <label class="radio-pill"><input type="radio" name="fps" value="orig" checked /> orig</label>
+              <label class="radio-pill"><input type="radio" name="fps" value="60" /> 60</label>
+              <label class="radio-pill"><input type="radio" name="fps" value="30" /> 30</label>
             </div>
           </div>
           <div class="row">
@@ -444,6 +453,11 @@
   if (ALLOWED_CODECS.has(savedCodec)) {
     const codecInput = document.querySelector(`input[name="codec"][value="${savedCodec}"]`);
     if (codecInput) codecInput.checked = true;
+  }
+  const savedFps = localStorage.getItem('obsDock.fps') || 'orig';
+  if (['orig', '30', '60'].includes(savedFps)) {
+    const fpsInput = document.querySelector(`input[name="fps"][value="${savedFps}"]`);
+    if (fpsInput) fpsInput.checked = true;
   }
   autoClose.checked = localStorage.getItem('obsDock.autoClose') === '1';
 
@@ -640,6 +654,10 @@
     return document.querySelector('input[name="codec"]:checked').value;
   }
 
+  function getFps() {
+    return document.querySelector('input[name="fps"]:checked').value;
+  }
+
   function toBase64(buffer) {
     let binary = '';
     const bytes = new Uint8Array(buffer);
@@ -828,16 +846,18 @@
       payload.speed = Number(speed);
       payload.resolution = getResolution();
       payload.codec = getCodec();
+      payload.fps = getFps();
     }
 
     localStorage.setItem('obsDock.talksReducerExe', payload.exe);
     if (payload.codec) localStorage.setItem('obsDock.videoCodec', payload.codec);
+    if (payload.fps) localStorage.setItem('obsDock.fps', payload.fps);
     localStorage.setItem('obsDock.autoClose', payload.autoClose ? '1' : '0');
 
     if (preset) {
       log(`Processing: preset=${preset}`);
     } else {
-      log(`Processing: speed=${payload.speed}x, resolution=${payload.resolution}, codec=${payload.codec}`);
+      log(`Processing: speed=${payload.speed}x, resolution=${payload.resolution}, fps=${payload.fps}, codec=${payload.codec}`);
     }
 
     try {
@@ -871,6 +891,11 @@
   document.querySelectorAll('input[name="codec"]').forEach((input) => {
     input.addEventListener('change', () => {
       localStorage.setItem('obsDock.videoCodec', getCodec());
+    });
+  });
+  document.querySelectorAll('input[name="fps"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      localStorage.setItem('obsDock.fps', getFps());
     });
   });
   autoClose.addEventListener('change', () => {

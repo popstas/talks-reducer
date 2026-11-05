@@ -51,7 +51,12 @@ try:
     from . import taskbar as taskbar_helpers
     from . import update_checker
     from .inputs import InputController
-    from .preferences import GUIPreferences, PreferenceController, determine_config_path
+    from .preferences import (
+        GUIPreferences,
+        PreferenceController,
+        determine_config_path,
+        resolve_stored_small_height,
+    )
     from .progress import _TkProgressReporter
     from .remote_io import RemoteController
     from .summaries import (
@@ -102,6 +107,7 @@ except ImportError:  # pragma: no cover - handled at runtime
         GUIPreferences,
         PreferenceController,
         determine_config_path,
+        resolve_stored_small_height,
     )
     from talks_reducer.gui.progress import _TkProgressReporter
     from talks_reducer.gui.remote_io import RemoteController
@@ -337,9 +343,18 @@ class TalksReducerGUI:
         )
         self.run_after_drop_var = tk.BooleanVar(value=True)
         self.small_var = tk.BooleanVar(value=self.preferences.get("small_video", True))
-        self.small_480_var = tk.BooleanVar(
-            value=self.preferences.get("small_video_480", False)
+        self.small_height_var = tk.IntVar(
+            value=resolve_stored_small_height(
+                self.preferences.get("small_height", None),
+                self.preferences.get("small_video_480", False),
+            )
         )
+        stored_fps = str(self.preferences.get("fps", "orig"))
+        try:
+            presets.parse_fps_token(stored_fps)
+        except ValueError:
+            stored_fps = "orig"
+        self.fps_var = tk.StringVar(value=stored_fps)
         self.open_after_convert_var = tk.BooleanVar(
             value=self.preferences.get("open_after_convert", True)
         )
@@ -392,7 +407,8 @@ class TalksReducerGUI:
         self.theme_var = tk.StringVar(value=self.preferences.get("theme", "os"))
         self.theme_var.trace_add("write", self._on_theme_change)
         self.small_var.trace_add("write", self._on_small_video_change)
-        self.small_480_var.trace_add("write", self._on_small_480_change)
+        self.small_height_var.trace_add("write", self._on_small_height_change)
+        self.fps_var.trace_add("write", self._on_fps_change)
         self.open_after_convert_var.trace_add(
             "write", self._on_open_after_convert_change
         )
@@ -1285,8 +1301,11 @@ class TalksReducerGUI:
     def _on_small_video_change(self, *_: object) -> None:
         self.preference_controller.on_small_video_change(*_)
 
-    def _on_small_480_change(self, *_: object) -> None:
-        self.preference_controller.on_small_480_change(*_)
+    def _on_small_height_change(self, *_: object) -> None:
+        self.preference_controller.on_small_height_change(*_)
+
+    def _on_fps_change(self, *_: object) -> None:
+        self.preference_controller.on_fps_change(*_)
 
     def _on_open_after_convert_change(self, *_: object) -> None:
         self.preference_controller.on_open_after_convert_change(*_)
@@ -1418,8 +1437,12 @@ class TalksReducerGUI:
 
         if "small" in settings:
             self.small_var.set(bool(settings["small"]))
-        if "small_480" in settings:
-            self.small_480_var.set(bool(settings["small_480"]))
+        if settings.get("small_height"):
+            self.small_height_var.set(int(settings["small_height"]))
+        if settings.get("max_frame_rate") is not None:
+            self.fps_var.set(
+                presets.format_fps_token(float(settings["max_frame_rate"]))
+            )
         if "silent_speed" in settings:
             self.silent_speed_var.set(float(settings["silent_speed"]))
             self._refresh_slider_label("silent_speed")
@@ -1597,8 +1620,14 @@ class TalksReducerGUI:
         args["optimize"] = bool(self.optimize_var.get())
         if self.small_var.get():
             args["small"] = True
-            if self.small_480_var.get():
-                args["small_target_height"] = 480
+            args["small_target_height"] = int(self.small_height_var.get())
+        fps_token = str(self.fps_var.get())
+        try:
+            max_frame_rate = presets.parse_fps_token(fps_token)
+        except ValueError:
+            max_frame_rate = None
+        if max_frame_rate:
+            args["max_frame_rate"] = max_frame_rate
         # Cut video is an Advanced-only feature; Simple mode never trims even if
         # the flag persisted from a previous Advanced session.
         if self.cut_enabled_var.get() and not self.simple_mode_var.get():

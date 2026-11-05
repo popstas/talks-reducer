@@ -1507,3 +1507,47 @@ def test_build_client_survives_unencodable_status_print(monkeypatch):
 def cwd_tmp_path(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     return tmp_path
+
+
+def _captured_submit_args(monkeypatch, tmp_path, **send_kwargs):
+    """Run ``send_video`` against a dummy client; return the positional args."""
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"input")
+    server_file = tmp_path / "server_output.mp4"
+    server_file.write_bytes(b"processed")
+
+    client_instance = DummyClient("http://localhost:9005/")
+    client_instance.job_outputs = [
+        (str(server_file), "log", "summary", str(server_file))
+    ]
+    monkeypatch.setattr(service_client, "Client", lambda url: client_instance)
+    monkeypatch.setattr(
+        service_client, "gradio_file", lambda path: SimpleNamespace(path=path)
+    )
+
+    service_client.send_video(
+        input_path=input_file,
+        output_path=tmp_path / "out.mp4",
+        server_url="http://localhost:9005/",
+        **send_kwargs,
+    )
+
+    submission_args, _ = client_instance.submissions[0]
+    return tuple(submission_args)
+
+
+def test_send_video_keeps_13_args_for_legacy_options(monkeypatch, tmp_path):
+    args = _captured_submit_args(monkeypatch, tmp_path, small=True, small_480=True)
+    assert len(args) == 13
+    args = _captured_submit_args(monkeypatch, tmp_path, small=True, small_height=720)
+    assert len(args) == 13
+
+
+def test_send_video_appends_height_and_fps_when_needed(monkeypatch, tmp_path):
+    args = _captured_submit_args(monkeypatch, tmp_path, small=True, small_height=1080)
+    assert len(args) == 15
+    assert args[-2:] == (1080, 0.0)
+
+    args = _captured_submit_args(monkeypatch, tmp_path, max_frame_rate=30.0)
+    assert args[-2:] == (0, 30.0)

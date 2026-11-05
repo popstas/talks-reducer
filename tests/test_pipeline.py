@@ -609,7 +609,9 @@ def test_resolve_trim_unknown_duration_ignores_empty_range() -> None:
     assert result == (0.0, 0.0, 0.0, 0)
 
 
-def _run_no_audio_pipeline(tmp_path, monkeypatch, options_kwargs):
+def _run_no_audio_pipeline(
+    tmp_path, monkeypatch, options_kwargs, metadata_overrides=None
+):
     """Drive ``speed_up_video`` through the no-audio branch with mocks.
 
     Returns ``(video_kwargs, encode_totals)`` captured from the stubbed
@@ -626,6 +628,7 @@ def _run_no_audio_pipeline(tmp_path, monkeypatch, options_kwargs):
         "width": 1920.0,
         "height": 1080.0,
     }
+    metadata.update(metadata_overrides or {})
 
     def fake_metadata(path, frame_rate):
         return dict(metadata)
@@ -637,6 +640,10 @@ def _run_no_audio_pipeline(tmp_path, monkeypatch, options_kwargs):
 
     def fake_build_video_commands(*args, **kwargs):
         video_kwargs.update(kwargs)
+        filter_script = args[2]
+        video_kwargs["filter_text"] = (
+            Path(filter_script).read_text(encoding="utf-8") if filter_script else ""
+        )
         return "video-command", None, False
 
     encode_totals = []
@@ -1133,3 +1140,92 @@ def test_speed_up_video_spherical_without_scaling_keeps_flag(tmp_path, monkeypat
 
     assert "v360" not in filter_text and "scale=" not in filter_text
     assert kwargs["preserve_spherical"] is True
+
+
+@pytest.mark.parametrize(
+    "source, cap, expected",
+    [
+        (60.0, None, 60.0),
+        (60.0, 30.0, 30.0),
+        (30.0, 60.0, 30.0),
+        (59.94, 60.0, 59.94),
+        (60.0, 60.0, 60.0),
+        (25.0, 0.0, 25.0),
+    ],
+)
+def test_resolve_output_frame_rate_only_lowers(source, cap, expected) -> None:
+    assert pipeline.resolve_output_frame_rate(source, cap) == pytest.approx(expected)
+
+
+def test_speed_filter_graph_caps_after_setpts() -> None:
+    """The cap must follow ``setpts``: its expression counts source frames."""
+
+    text = pipeline._speed_filter_graph(
+        "scale=-2:1080", 60.0, 30.0, "if(lt(N,5),N,PTS)"
+    )
+
+    assert text == "scale=-2:1080,fps=60.0,setpts=if(lt(N\\,5)\\,N\\,PTS),fps=30.0"
+
+
+def test_speed_filter_graph_without_cap_is_unchanged() -> None:
+    text = pipeline._speed_filter_graph(None, 30.0, 30.0, "N")
+
+    assert text == "fps=30.0,setpts=N"
+
+
+def test_scale_output_frames() -> None:
+    assert pipeline._scale_output_frames(600, 60.0, 30.0) == 300
+    assert pipeline._scale_output_frames(601, 60.0, 30.0) == 301
+    assert pipeline._scale_output_frames(300, 30.0, 30.0) == 300
+    assert pipeline._scale_output_frames(0, 60.0, 30.0) == 0
+
+
+def test_speed_up_video_caps_fps_in_scale_only_graph(tmp_path, monkeypatch) -> None:
+    video_kwargs, encode_totals = _run_no_audio_pipeline(
+        tmp_path,
+        monkeypatch,
+        {"max_frame_rate": 30.0},
+        metadata_overrides={"frame_rate": 60.0, "frame_count": 600},
+    )
+
+    assert video_kwargs["filter_text"] == "fps=30.0"
+    assert video_kwargs["frame_rate"] == pytest.approx(30.0)
+    assert encode_totals == [300]
+
+
+def test_speed_up_video_does_not_raise_fps(tmp_path, monkeypatch) -> None:
+    video_kwargs, encode_totals = _run_no_audio_pipeline(
+        tmp_path, monkeypatch, {"max_frame_rate": 60.0}
+    )
+
+    assert video_kwargs["filter_text"] == "fps=30.0"
+    assert encode_totals == [300]
+
+
+def test_speed_up_video_1080_target_skips_scale_for_1080_source(
+    tmp_path, monkeypatch
+) -> None:
+    video_kwargs, _ = _run_no_audio_pipeline(
+        tmp_path, monkeypatch, {"small": True, "small_target_height": 1080}
+    )
+
+    assert "scale=" not in video_kwargs["filter_text"]
+
+
+def test_speed_up_video_1080_target_scales_4k(tmp_path, monkeypatch) -> None:
+    video_kwargs, _ = _run_no_audio_pipeline(
+        tmp_path,
+        monkeypatch,
+        {"small": True, "small_target_height": 1080},
+        metadata_overrides={"width": 3840.0, "height": 2160.0},
+    )
+
+    assert video_kwargs["filter_text"].startswith("scale=-2:1080,")
+
+
+def test_input_to_output_filename_marks_1080() -> None:
+    output = pipeline._input_to_output_filename(
+        Path("talk.mp4"), True, 1080, silent_speed=10.0, sounded_speed=1.0
+    )
+
+    assert output == Path("talk_speedup_small_1080.mp4")
