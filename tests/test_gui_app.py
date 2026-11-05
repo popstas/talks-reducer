@@ -123,6 +123,14 @@ def test_default_remote_destination_with_small_480(tmp_path):
     assert result.name == "clip_speedup_small_480.mp4"
 
 
+def test_default_remote_destination_with_1080(tmp_path):
+    input_path = tmp_path / "clip.mp4"
+    result = app._default_remote_destination(
+        input_path, small=True, small_target_height=1080
+    )
+    assert result.name == "clip_speedup_small_1080.mp4"
+
+
 def test_default_remote_destination_with_codec_suffix(tmp_path):
     input_path = tmp_path / "sample.mp4"
     input_path.write_text("data")

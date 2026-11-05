@@ -27,6 +27,7 @@ def default_remote_destination(
     *,
     small: bool,
     small_480: bool = False,
+    small_target_height: Optional[int] = None,
     add_codec_suffix: bool = False,
     video_codec: str = "h264",
     silent_speed: float | None = None,
@@ -35,7 +36,10 @@ def default_remote_destination(
     """Return the default remote output path for *input_file*."""
 
     normalized_codec = str(video_codec or "h264").strip().lower()
-    target_height = 480 if small_480 else None
+    if small_target_height:
+        target_height: Optional[int] = int(small_target_height)
+    else:
+        target_height = 480 if small_480 else None
 
     return _input_to_output_filename(
         input_file,

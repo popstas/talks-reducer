@@ -2042,3 +2042,60 @@ def test_main_passes_css_to_launch_only_when_supported(monkeypatch) -> None:
         assert captured.get("css") == server._WEB_UI_CSS
     else:
         assert "css" not in captured
+
+
+def _process_video_options(tmp_path: Path, **kwargs: object) -> ProcessingOptions:
+    """Run ``server.process_video`` with a fake pipeline; return its options."""
+
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+    captured: dict = {}
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        captured["options"] = options
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or input_file,
+            frame_rate=30.0,
+            original_duration=10.0,
+            output_duration=5.0,
+            chunk_count=1,
+            used_gpu=False,
+            max_audio_volume=0.5,
+            time_ratio=0.5,
+            size_ratio=0.5,
+        )
+
+    dependencies = server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+    try:
+        list(
+            server.process_video(
+                str(input_file), progress=None, dependencies=dependencies, **kwargs
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+    return captured["options"]
+
+
+def test_process_video_target_height_and_fps_reach_options(tmp_path: Path) -> None:
+    options = _process_video_options(
+        tmp_path, small_video=True, target_height=1080, max_frame_rate=30.0
+    )
+
+    assert options.small_target_height == 1080
+    assert options.max_frame_rate == 30.0
+    assert options.output_file.name.endswith("_small_1080.mp4")
+
+
+def test_process_video_legacy_small_480_still_works(tmp_path: Path) -> None:
+    options = _process_video_options(tmp_path, small_video=True, small_480=True)
+
+    assert options.small_target_height == 480
+    assert options.max_frame_rate is None

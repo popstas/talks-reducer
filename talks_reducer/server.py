@@ -718,6 +718,7 @@ def _build_output_path(
     small: bool,
     *,
     small_480: bool = False,
+    target_height: int = 0,
     add_codec_suffix: bool = False,
     video_codec: str = "h264",
     silent_speed: float | None = None,
@@ -726,11 +727,14 @@ def _build_output_path(
     """Mirror the CLI output naming scheme inside the workspace directory."""
 
     normalized_codec = str(video_codec or "h264").strip().lower()
-    target_height = 480 if small and small_480 else None
+    if target_height > 0:
+        height: Optional[int] = target_height if small else None
+    else:
+        height = 480 if small and small_480 else None
     output_name = _input_to_output_filename(
         input_path,
         small,
-        target_height,
+        height,
         video_codec=normalized_codec,
         add_codec_suffix=add_codec_suffix,
         silent_speed=silent_speed,
@@ -986,6 +990,9 @@ def _stream_pipeline(
     cut_start_seconds: Optional[float],
     cut_end_seconds: Optional[float],
     dependencies: Optional["ProcessVideoDependencies"],
+    *,
+    target_height: int = 0,
+    max_frame_rate: float = 0.0,
 ) -> Iterator[tuple[str, object]]:
     """Run the pipeline, yielding semantic events shared by both handlers.
 
@@ -1026,6 +1033,7 @@ def _stream_pipeline(
         workspace,
         small_video,
         small_480=small_480,
+        target_height=target_height,
         add_codec_suffix=add_codec_suffix,
         video_codec=codec_value,
         silent_speed=normalized_silent_speed,
@@ -1035,7 +1043,7 @@ def _stream_pipeline(
     deps = dependencies or ProcessVideoDependencies()
     events = deps.queue_factory()
 
-    option_kwargs: dict[str, float | str | bool] = {
+    option_kwargs: dict[str, float | int | str | bool] = {
         "video_codec": codec_value,
         "prefer_global_ffmpeg": bool(use_global_ffmpeg),
         "optimize": bool(optimize),
@@ -1048,8 +1056,11 @@ def _stream_pipeline(
         option_kwargs["sounded_speed"] = normalized_sounded_speed
     if normalized_silent_speed is not None:
         option_kwargs["silent_speed"] = normalized_silent_speed
-    if small_video and small_480:
-        option_kwargs["small_target_height"] = 480
+    effective_height = target_height if target_height > 0 else (480 if small_480 else 0)
+    if small_video and effective_height:
+        option_kwargs["small_target_height"] = effective_height
+    if max_frame_rate and max_frame_rate > 0:
+        option_kwargs["max_frame_rate"] = float(max_frame_rate)
     if cut_enabled:
         option_kwargs["cut_start_seconds"] = float(cut_start_seconds or 0.0)
         option_kwargs["cut_end_seconds"] = float(cut_end_seconds or 0.0)
@@ -1273,11 +1284,15 @@ def process_video_api(
     cut_enabled: bool = False,
     cut_start_seconds: Optional[float] = None,
     cut_end_seconds: Optional[float] = None,
+    target_height: int = 0,
+    max_frame_rate: float = 0.0,
 ) -> Iterator[tuple[Optional[str], str, str, Optional[str]]]:
     """Clean-signature wrapper registered via ``gr.api`` (requires type hints).
 
     Preserves the 13-arg positional contract and 4-tuple output that
-    ``service_client`` depends on.
+    ``service_client`` depends on, and accepts two optional trailing args
+    (``target_height``, ``max_frame_rate``) that newer clients send only when
+    needed.
     """
 
     yield from process_video(
@@ -1294,6 +1309,8 @@ def process_video_api(
         cut_enabled,
         cut_start_seconds,
         cut_end_seconds,
+        target_height=target_height,
+        max_frame_rate=max_frame_rate,
     )
 
 
@@ -1314,6 +1331,8 @@ def process_video(
     progress: Optional[gr.Progress] = gr.Progress(track_tqdm=False),
     *,
     dependencies: Optional[ProcessVideoDependencies] = None,
+    target_height: int = 0,
+    max_frame_rate: float = 0.0,
 ) -> Iterator[tuple[Optional[str], str, str, Optional[str]]]:
     """Run the Talks Reducer pipeline for a single uploaded file."""
 
@@ -1332,6 +1351,8 @@ def process_video(
         cut_start_seconds,
         cut_end_seconds,
         dependencies,
+        target_height=target_height,
+        max_frame_rate=max_frame_rate,
     ):
         if kind == "log":
             yield (gr.update(), cast(str, payload), gr.update(), gr.update())
