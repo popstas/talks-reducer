@@ -345,7 +345,7 @@ class TalksReducerGUI:
         self.small_var = tk.BooleanVar(value=self.preferences.get("small_video", True))
         self.small_height_var = tk.IntVar(
             value=resolve_stored_small_height(
-                self.preferences.get("small_height"),
+                self.preferences.get("small_height", None),
                 self.preferences.get("small_video_480", False),
             )
         )
