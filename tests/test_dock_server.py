@@ -37,7 +37,10 @@ def test_build_args_matches_dock_options() -> None:
         "--fps",
         "orig",
     ]
-    assert dock_server.build_args("v.mp4", "720p", 10, "av1", False)[1] == "--small"
+    assert dock_server.build_args("v.mp4", "720p", 10, "av1", False)[1:3] == [
+        "--small",
+        "--720",
+    ]
 
 
 def test_build_args_real_1080_and_fps() -> None:

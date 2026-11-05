@@ -164,7 +164,7 @@ The server maps dock choices to Talks Reducer flags:
 | Preset | `--preset NAME` (the CLI fans the preset's resolution/speed/codec; the payload's other fields are ignored) |
 | orig | `--no-small` |
 | 1080p | `--small --1080` |
-| 720p | `--small` |
+| 720p | `--small --720` |
 | 480p | `--small --480` |
 | FPS | `--fps <orig\|60\|30>` |
 | Speed button | `--silent-speed <1\|5\|10>` |
@@ -174,7 +174,7 @@ The server maps dock choices to Talks Reducer flags:
 Example command for 720p at 5× with HEVC:
 
 ```text
-talks-reducer.exe recording.mkv --small --silent-speed 5 --video-codec hevc
+talks-reducer.exe recording.mkv --small --720 --silent-speed 5 --video-codec hevc
 ```
 
 Output files follow normal Talks Reducer naming (for example `_speedup` /

@@ -116,7 +116,7 @@ def build_args(
         elif resolution == "1080p":
             args.extend(["--small", "--1080"])
         elif resolution == "720p":
-            args.append("--small")
+            args.extend(["--small", "--720"])
         elif resolution == "480p":
             args.extend(["--small", "--480"])
 

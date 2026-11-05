@@ -38,11 +38,13 @@ The preset's resolution is `orig`, `1080p`, `720p` or `480p`, expanded to explic
 inheriting it. The optional `fps` field (`"30"`, `"60"` or `"orig"`) maps to `--fps`. An
 unknown `--preset NAME` errors and lists the valid names.
 
-On a fresh install **Compress** is 1080p, 30 fps, h.264, silence ×1 and **Smallest** is
-480p ×10 h.265 at 30 fps; existing preset lists are never rewritten by the new defaults.
+On a fresh install **Compress** is 1080p, 30 fps, h.264, silence ×1, **Smallest** is
+480p ×10 h.265 at 30 fps, and **Compatible** and **Optimal** say `fps` **orig** explicitly (a
+preset with no fps would keep the cap left by the previously selected one); existing preset lists are never rewritten by the new defaults.
 Before 1080p became a real downscale, `"1080p"` in `settings.json` meant "no scaling". A
 one-time migration, tracked by a `presets_version: 2` marker in `settings.json`, rewrites
-every stored `"1080p"` resolution to `"orig"`; afterwards `"1080p"` means a real downscale.
+every stored `"1080p"` resolution to `"orig"` and adds `fps: "orig"` to every preset that has a
+resolution but no fps; afterwards `"1080p"` means a real downscale.
 
 ## Encoding presets
 
@@ -53,8 +55,8 @@ By default the CLI applies the same tuned encoder settings everywhere: adaptive 
 - `--480` scales down to 480p instead.
 - `--1080` scales down to 1080p. Only sources taller than 1080 px are rescaled; a 1080p source
   logs "Keeping original resolution" and passes through. The output name gets `_small_1080`.
-- `--720` forces the 720p scale explicitly — handy on a seeded GUI launch, where it unchecks
-  the **Target 480p** box even if your stored preference enabled it.
+- `--720` forces the 720p scale explicitly — handy on a seeded GUI launch (the OBS dock sends
+  it for 720p), where it overrides a stored 480p or 1080p height.
 - `--no-small` force-disables the preset, overriding a stored `--small` preference and
   unchecking the **Small video** box on a seeded launch.
 - `--fps {30,60,orig}` caps the output frame rate (any positive number is accepted too). It
