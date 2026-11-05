@@ -32,7 +32,8 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 17890
 DEFAULT_EXE = r"%LOCALAPPDATA%\Programs\talks-reducer\talks-reducer.exe"
 ALLOWED_CODECS: Tuple[str, ...] = ("h264", "hevc", "av1", "mp3")
-ALLOWED_RESOLUTIONS: Tuple[str, ...] = ("1080p", "720p", "480p")
+ALLOWED_RESOLUTIONS: Tuple[str, ...] = ("orig", "1080p", "720p", "480p")
+ALLOWED_FPS: Tuple[str, ...] = ("orig", "30", "60")
 ALLOWED_SPEEDS: Tuple[int, ...] = (1, 5, 10)
 MAX_BODY_BYTES = 1024 * 1024
 DOCK_SERVER_COMMANDS = frozenset({"dock-server", "obs-dock"})
@@ -94,13 +95,15 @@ def build_args(
     codec: str,
     auto_close: bool,
     preset: Optional[str] = None,
+    fps: str = "orig",
 ) -> List[str]:
     """Translate dock options into Talks Reducer command line arguments.
 
     When *preset* names a stored preset the dock emits ``--preset NAME`` for
     full fidelity, letting the CLI fan the preset's resolution/speed/codec/
-    threshold onto the run. Otherwise the legacy resolution/speed/codec mapping
-    is used so a dock without presets behaves exactly as before.
+    threshold onto the run. Otherwise the resolution/speed/codec/fps mapping
+    is used. ``fps`` is always emitted in manual mode so the seeded GUI cannot
+    fall back to a stored cap.
     """
 
     args: List[str] = [input_file]
@@ -108,8 +111,10 @@ def build_args(
     if preset:
         args.extend(["--preset", preset])
     else:
-        if resolution == "1080p":
+        if resolution == "orig":
             args.append("--no-small")
+        elif resolution == "1080p":
+            args.extend(["--small", "--1080"])
         elif resolution == "720p":
             args.append("--small")
         elif resolution == "480p":
@@ -117,6 +122,7 @@ def build_args(
 
         args.extend(["--silent-speed", str(speed)])
         args.extend(["--video-codec", codec])
+        args.extend(["--fps", fps])
 
     if auto_close:
         args.extend(["--open-location", "--auto-close"])
@@ -132,10 +138,11 @@ def start_talks_reducer(
     codec: str,
     auto_close: bool,
     preset: Optional[str] = None,
+    fps: str = "orig",
 ) -> None:
     """Spawn the Talks Reducer executable for a single dock job."""
 
-    args = build_args(input_file, resolution, speed, codec, auto_close, preset)
+    args = build_args(input_file, resolution, speed, codec, auto_close, preset, fps)
     creationflags = _CREATE_NO_WINDOW if os.name == "nt" else 0
     print(f"[dock] launching: {exe_path} {' '.join(args)}", flush=True)
     subprocess.Popen([exe_path, *args], creationflags=creationflags)
@@ -164,6 +171,7 @@ def handle_process(payload: dict, default_exe: Optional[str] = None) -> Tuple[in
     preset = str(payload.get("preset") or "").strip()
     resolution = str(payload.get("resolution") or "").strip()
     codec = str(payload.get("codec") or "h264").strip()
+    fps = str(payload.get("fps") or "orig").strip()
     auto_close = bool(payload.get("autoClose"))
     exe_path = resolve_exe_path(payload.get("exe") or default_exe)
 
@@ -186,15 +194,17 @@ def handle_process(payload: dict, default_exe: Optional[str] = None) -> Tuple[in
         if speed not in ALLOWED_SPEEDS:
             return 400, "Speed must be 1, 5, or 10"
         if resolution not in ALLOWED_RESOLUTIONS:
-            return 400, "Resolution must be 1080p, 720p, or 480p"
+            return 400, "Resolution must be orig, 1080p, 720p, or 480p"
         if codec not in ALLOWED_CODECS:
             return 400, "Codec must be h264, hevc, av1, or mp3"
+        if fps not in ALLOWED_FPS:
+            return 400, "FPS must be orig, 30, or 60"
 
     if not os.path.isfile(exe_path):
         return 400, f"Executable not found: {exe_path}"
 
     start_talks_reducer(
-        exe_path, input_file, resolution, speed, codec, auto_close, preset or None
+        exe_path, input_file, resolution, speed, codec, auto_close, preset or None, fps
     )
     return 202, f"Started talks-reducer: {exe_path}"
 

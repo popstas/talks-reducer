@@ -22,18 +22,42 @@ def test_build_args_matches_dock_options() -> None:
         "5",
         "--video-codec",
         "hevc",
+        "--fps",
+        "orig",
         "--open-location",
         "--auto-close",
     ]
-    assert dock_server.build_args("v.mp4", "1080p", 1, "h264", False) == [
+    assert dock_server.build_args("v.mp4", "orig", 1, "h264", False) == [
         "v.mp4",
         "--no-small",
         "--silent-speed",
         "1",
         "--video-codec",
         "h264",
+        "--fps",
+        "orig",
     ]
     assert dock_server.build_args("v.mp4", "720p", 10, "av1", False)[1] == "--small"
+
+
+def test_build_args_real_1080_and_fps() -> None:
+    assert dock_server.build_args("v.mp4", "1080p", 10, "hevc", False, fps="30") == [
+        "v.mp4",
+        "--small",
+        "--1080",
+        "--silent-speed",
+        "10",
+        "--video-codec",
+        "hevc",
+        "--fps",
+        "30",
+    ]
+
+
+def test_build_args_preset_ignores_fps() -> None:
+    assert dock_server.build_args(
+        "v.mp4", "720p", 10, "h264", False, preset="Compress", fps="30"
+    ) == ["v.mp4", "--preset", "Compress"]
 
 
 def test_resolve_exe_path_expands_environment(monkeypatch) -> None:
@@ -88,7 +112,53 @@ def test_handle_process_validates_and_spawns(tmp_path, monkeypatch) -> None:
 
     assert status == 202
     assert str(exe) in message
-    assert calls == [(str(exe), str(video), "720p", 5, "hevc", True, None)]
+    assert calls == [(str(exe), str(video), "720p", 5, "hevc", True, None, "orig")]
+
+
+def test_handle_process_rejects_unknown_fps(tmp_path, monkeypatch) -> None:
+    video = tmp_path / "clip.mkv"
+    video.write_bytes(b"data")
+    exe = tmp_path / "talks-reducer.exe"
+    exe.write_bytes(b"exe")
+    monkeypatch.setattr(dock_server, "start_talks_reducer", lambda *args: None)
+
+    status, message = dock_server.handle_process(
+        {
+            "file": str(video),
+            "speed": 5,
+            "resolution": "1080p",
+            "codec": "h264",
+            "fps": "45",
+            "exe": str(exe),
+        }
+    )
+
+    assert (status, message) == (400, "FPS must be orig, 30, or 60")
+
+
+def test_handle_process_accepts_orig_resolution_and_fps(tmp_path, monkeypatch) -> None:
+    video = tmp_path / "clip.mkv"
+    video.write_bytes(b"data")
+    exe = tmp_path / "talks-reducer.exe"
+    exe.write_bytes(b"exe")
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        dock_server, "start_talks_reducer", lambda *args: calls.append(args)
+    )
+
+    status, _ = dock_server.handle_process(
+        {
+            "file": str(video),
+            "speed": 1,
+            "resolution": "orig",
+            "codec": "h264",
+            "fps": "30",
+            "exe": str(exe),
+        }
+    )
+
+    assert status == 202
+    assert calls == [(str(exe), str(video), "orig", 1, "h264", False, None, "30")]
 
 
 def test_resolve_dock_html_returns_bundled_file() -> None:
@@ -181,7 +251,9 @@ def test_handle_process_routes_preset(tmp_path, monkeypatch) -> None:
     )
 
     assert status == 202
-    assert calls == [(str(exe), str(video), "", None, "h264", False, "720p fast")]
+    assert calls == [
+        (str(exe), str(video), "", None, "h264", False, "720p fast", "orig")
+    ]
 
 
 def test_handle_process_rejects_unknown_preset(tmp_path, monkeypatch) -> None:
