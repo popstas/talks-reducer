@@ -60,15 +60,18 @@ the fields that are set, and `preset.present_fields()` reports them. Apply/CLI/m
 all skip absent fields (`apply_preset_to_gui`, `_apply_preset_to_args`,
 `preset_to_web_controls` return sparse control maps, `match_preset` compares only
 present fields — a zero-field preset never matches). `load_presets()` seeds five
-`DEFAULT_PRESETS` on first run when the key is absent — **Compatible** (720p ×10 h.264, the
-first-run default on every surface), **Optimal** (720p ×10 h.265), **Smallest** (480p ×10
+`DEFAULT_PRESETS` on first run when the key is absent — **Compatible** (720p ×10 h.264 at
+source fps, the first-run default on every surface), **Optimal** (720p ×10 h.265, source fps), **Smallest** (480p ×10
 h.265, 30 fps), **Compress** (1080p 30 fps h.264, silence ×1) and the deliberately sparse **mp3** (no
 resolution, so it leaves the video settings alone). They are named for the outcome rather
 than the settings, since the values are one hover away (`describe_preset`). `"1080p"` used to
 mean *no scaling* in stored presets; once it became a real downscale, existing lists would have
 silently started scaling, so `settings.json` carries a `presets_version` marker (`2`) and
-`load_presets()` rewrites stored `"1080p"` to `"orig"` exactly once — without the marker an old
-`"1080p"` could not be told from a new one on a later load. Fresh installs seed the v2 defaults
+`load_presets()` rewrites stored `"1080p"` to `"orig"` (and adds `fps: "orig"` to presets
+with a resolution but no fps, since a sparse preset otherwise inherits the previous preset's cap)
+exactly once — without the marker an old
+`"1080p"` could not be told from a new one on a later load. `GUIPreferences` lists the marker in `_EXTERNALLY_OWNED_KEYS`, because its wholesale rewrite
+would otherwise drop it and re-run the migration. Fresh installs seed the v2 defaults
 and write the marker; existing lists never pick up the new default values. An emptied
 list persists as `[]`. Each surface opens on the remembered `selected_preset`, else
 the first preset (`layout.seed_initial_preset`, `server.resolve_initial_web_preset`,

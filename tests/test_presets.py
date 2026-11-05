@@ -585,7 +585,41 @@ def test_default_presets_compress_and_smallest_cap_fps():
 
     assert (compress.resolution, compress.fps) == ("1080p", "30")
     assert smallest.fps == "30"
-    assert find_preset("Compatible", DEFAULT_PRESETS).fps is None
+    assert find_preset("Compatible", DEFAULT_PRESETS).fps == "orig"
+    assert find_preset("Optimal", DEFAULT_PRESETS).fps == "orig"
+    assert find_preset("mp3", DEFAULT_PRESETS).fps is None
+    assert find_preset("mp3", DEFAULT_PRESETS).resolution is None
+
+
+def test_load_presets_migration_adds_fps_orig_to_resolution_presets(tmp_path):
+    path = _config_path(tmp_path)
+    _write(
+        path,
+        {
+            "presets": [
+                {"name": "Old", "resolution": "720p"},
+                {"name": "Capped", "resolution": "480p", "fps": "30"},
+                {"name": "audio", "video_codec": "mp3"},
+            ]
+        },
+    )
+
+    result = load_presets(config_path=path)
+
+    assert [p.fps for p in result] == ["orig", "30", None]
+    stored = _read(path)["presets"]
+    assert stored[0]["fps"] == "orig"
+    assert "fps" not in stored[2]
+
+
+def test_load_presets_second_load_does_not_add_fps(tmp_path):
+    path = _config_path(tmp_path)
+    _write(
+        path,
+        {"presets_version": 2, "presets": [{"name": "HD", "resolution": "720p"}]},
+    )
+
+    assert load_presets(config_path=path)[0].fps is None
 
 
 @pytest.mark.parametrize(

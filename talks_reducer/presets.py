@@ -153,10 +153,13 @@ class Preset:
 # everywhere. "mp3" is deliberately sparse: it carries no resolution, so
 # extracting audio leaves the video settings alone. "Compress" keeps 1080p (a
 # real downscale for 4K sources) at 30 fps; "Smallest" also caps at 30 fps.
+# "Compatible" and "Optimal" say ``fps="orig"`` explicitly: a sparse preset with
+# no fps would keep whatever cap the previously selected preset left behind.
 DEFAULT_PRESETS: List[Preset] = [
     Preset(
         name="Compatible",
         resolution="720p",
+        fps="orig",
         silent_speed=10.0,
         sounded_speed=1.0,
         silent_threshold=0.01,
@@ -165,6 +168,7 @@ DEFAULT_PRESETS: List[Preset] = [
     Preset(
         name="Optimal",
         resolution="720p",
+        fps="orig",
         silent_speed=10.0,
         sounded_speed=1.0,
         silent_threshold=0.01,
@@ -267,13 +271,22 @@ def _stored_presets_version(settings: Mapping[str, object]) -> int:
 
 
 def _migrate_v1_entry(entry: object) -> object:
-    """Rewrite a version-1 preset dict, whose ``"1080p"`` meant "orig"."""
+    """Rewrite a version-1 preset dict into the version-2 schema.
 
-    if isinstance(entry, Mapping) and entry.get("resolution") == "1080p":
-        migrated = dict(entry)
+    ``"1080p"`` meant "orig" in version 1, and a preset with a resolution but
+    no ``fps`` implicitly kept the source frame rate, so it gains
+    ``fps: "orig"`` to stop inheriting the cap of a previously selected preset.
+    Presets without a resolution (e.g. audio-only) are left alone.
+    """
+
+    if not isinstance(entry, Mapping) or entry.get("resolution") is None:
+        return entry
+    migrated = dict(entry)
+    if migrated["resolution"] == "1080p":
         migrated["resolution"] = "orig"
-        return migrated
-    return entry
+    if migrated.get("fps") is None:
+        migrated["fps"] = "orig"
+    return migrated
 
 
 def load_presets(config_path: Optional[Path] = None) -> List[Preset]:
@@ -283,7 +296,8 @@ def load_presets(config_path: Optional[Path] = None) -> List[Preset]:
     ``settings.json`` and returned. An explicitly empty list (the user deleted
     every preset) is preserved and returned as ``[]``. A version-1 file (no
     ``presets_version`` marker) has its ``"1080p"`` presets rewritten to
-    ``"orig"`` once and is re-saved with the marker.
+    ``"orig"`` once, gains ``fps: "orig"`` where it has a resolution but no fps,
+    and is re-saved with the marker.
     """
 
     path = _resolve_config_path(config_path)

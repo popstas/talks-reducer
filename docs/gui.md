@@ -81,7 +81,7 @@ Presets are **sparse**: a preset stores only the settings you choose, so applyin
 just those and leaves everything else as it is. Presets are stored in the shared
 `settings.json`, so a preset created on the desktop GUI also appears in the Web UI and dock
 served from that machine. On first launch five defaults are seeded — **Compatible** (720p,
-silence ×10, h.264), **Optimal** (the same in h.265), **Smallest** (480p h.265, 30 fps), **Compress**
+silence ×10, h.264, source fps), **Optimal** (the same in h.265), **Smallest** (480p h.265, 30 fps), **Compress**
 (1080p 30 fps h.264, no speedup) and **mp3** (audio only, no resolution). Hover a preset button to see
 exactly which settings it applies. Each surface opens on the preset you used last (or the first
 preset when none is remembered).
