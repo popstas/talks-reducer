@@ -184,7 +184,10 @@ class _FakeVar:
 class _FakeGUI:
     def __init__(self, **values):
         self.small_var = _FakeVar(values.get("small", False))
-        self.small_480_var = _FakeVar(values.get("small_480", False))
+        height = values.get("small_height")
+        if height is None:
+            height = 480 if values.get("small_480") else 720
+        self.small_height_var = _FakeVar(height)
         self.silent_speed_var = _FakeVar(values.get("silent_speed", 5.0))
         self.sounded_speed_var = _FakeVar(values.get("sounded_speed", 1.0))
         self.silent_threshold_var = _FakeVar(values.get("silent_threshold", 0.01))
@@ -195,6 +198,7 @@ def test_dialog_initial_selections_defaults_all_unchecked():
     selections = shortcut._dialog_initial_selections(_FakeGUI())
     assert selections == {
         "small": False,
+        "small_1080": False,
         "small_720": False,
         "small_480": False,
         "silent_speed": False,
@@ -258,3 +262,17 @@ def test_build_powershell_script_sets_all_fields_and_escapes_quotes():
     assert "$s.Save()" in script
     # Single quotes in paths are doubled for PowerShell single-quoted strings.
     assert "It''s" in script
+
+
+def test_build_shortcut_args_1080():
+    args = shortcut.build_shortcut_args({"small_1080": True}, _gui_values())
+    assert args[:2] == ["--small", "--1080"]
+
+
+def test_dialog_initial_selections_small_1080():
+    selections = shortcut._dialog_initial_selections(
+        _FakeGUI(small=True, small_height=1080)
+    )
+    assert selections["small_1080"] is True
+    assert selections["small_720"] is False
+    assert selections["small_480"] is False
