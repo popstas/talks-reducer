@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 
 from talks_reducer.gui import shortcut
 
@@ -276,3 +278,28 @@ def test_dialog_initial_selections_small_1080():
     assert selections["small_1080"] is True
     assert selections["small_720"] is False
     assert selections["small_480"] is False
+
+
+def test_write_shortcut_hides_powershell_console_on_windows(monkeypatch) -> None:
+    """Create lnk must not flash a PowerShell console window."""
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    captured_kwargs: dict = {}
+
+    def fake_run(command, *args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(shortcut.subprocess, "run", fake_run)
+
+    shortcut.write_shortcut(
+        "C:/Users/me/Desktop/Talks Reducer.lnk",
+        {
+            "target_path": "C:/app/talks-reducer.exe",
+            "arguments": "",
+            "working_directory": "C:/app",
+            "icon_location": "C:/app/talks-reducer.exe",
+        },
+    )
+
+    assert captured_kwargs.get("creationflags") == 0x08000000

@@ -13,6 +13,8 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING, Iterable, List, Mapping
 
+from ..subprocess_utils import hidden_subprocess_kwargs
+
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from .app import TalksReducerGUI
 
@@ -215,6 +217,7 @@ def write_shortcut(shortcut_path: str, target: Mapping[str, str]) -> None:
         check=True,
         capture_output=True,
         text=True,
+        **hidden_subprocess_kwargs(),
     )
 
 
