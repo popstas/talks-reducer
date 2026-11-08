@@ -1249,3 +1249,41 @@ def test_input_to_output_filename_marks_1080() -> None:
     )
 
     assert output == Path("talk_speedup_small_1080.mp4")
+
+
+def test_resolve_remove_ranges_shifts_and_clips_to_trim_window() -> None:
+    logs: list[str] = []
+    reporter = SimpleNamespace(log=logs.append)
+    options = ProcessingOptions(
+        input_file=Path("in.mp4"),
+        remove_ranges=((5.0, 15.0), (25.0, 40.0), (100.0, 110.0), (1.0, 2.0)),
+    )
+
+    result = pipeline._resolve_remove_ranges(
+        options, cut_start=10.0, effective_duration=20.0, reporter=reporter
+    )
+
+    assert result == [(0.0, 5.0), (15.0, 20.0)]
+    assert any("Ignoring 2 remove range" in line for line in logs)
+
+
+def test_resolve_remove_ranges_empty_when_unset() -> None:
+    reporter = SimpleNamespace(log=lambda _m: None)
+    options = ProcessingOptions(input_file=Path("in.mp4"))
+
+    assert pipeline._resolve_remove_ranges(options, 0.0, 10.0, reporter) == []
+
+
+@pytest.mark.parametrize(
+    "name, speeds, expected",
+    [
+        ("lecture.mp4", (10.0, 1.0), "lecture_speedup_cut.mp4"),
+        ("lecture_speedup.mp4", (1.0, 1.0), "lecture_speedup_cut.mp4"),
+    ],
+)
+def test_input_to_output_filename_adds_cut_token(name, speeds, expected) -> None:
+    output = pipeline._input_to_output_filename(
+        Path(name), silent_speed=speeds[0], sounded_speed=speeds[1], has_cut=True
+    )
+
+    assert output.name == expected

@@ -41,6 +41,10 @@ base_datas = [
         PROJECT_DIR / "talks_reducer" / "resources" / "dock.html",
         "talks_reducer/resources",
     ),
+    (
+        PROJECT_DIR / "talks_reducer" / "resources" / "talks_reducer_cuts.lua",
+        "talks_reducer/resources",
+    ),
 ]
 
 datas = [(str(src), dest) for src, dest in base_datas if src.exists()]

@@ -106,6 +106,24 @@ Look at the commit history to get more examples.
   for the remote path; when off the trim args are omitted. The enabled flag plus
   the last start/end values persist via `GUIPreferences` (`cut_enabled`,
   `cut_start`, `cut_end`).
+  **Remove middle fragments** (`gui/cut_marks_ui.py`, `talks_reducer/cut_marks.py`): the panel's
+  **Remove** label carries a `?` link (`gui.remove_help_button`, `HelpLink.TButton`) to
+  `layout.REMOVE_ARTICLE_URL`, the telegra.ph how-to, because the `c`/`C` marking keys are not
+  discoverable from the panel. The **Remove** entry (`remove_ranges_text_var`) mirrors `gui.remove_ranges`, parsed by
+  `cut_marks.parse_ranges_text` (en dash accepted). The `<video>.cuts.json` sidecar is the source of
+  truth: `load_for_current_input` reads it on input change (`_on_inputs_updated`) and on a seeded
+  launch (`_populate_initial_inputs`), `commit_text` writes it back but only when the ranges actually
+  changed, so a load never rewrites the file. **Mark cuts…** (`open_marker`) launches the player found by
+  `find_player` via `build_player_command` with `--process-instance=multi` (without it mpv.net hands the
+  file to a running instance and the child exits at once, so the GUI sees no close) and the bundled
+  `resources/talks_reducer_cuts.lua` (`c` start/finish, `C` undo). Marks return through a temp JSON
+  passed as `--script-opts=talks_reducer_cuts-file=...` because Lua `io.open` may not handle non-ASCII
+  paths; Python copies the result into the sidecar. **Remove only** runs `remove_only_overrides` (speeds
+  1/1, no scaling, no fps cap, codec kept). In the pipeline `_resolve_remove_ranges` feeds
+  `chunks.apply_remove_ranges`, which splits chunks and tags removed ones `REMOVED_SPEED_INDEX`
+  (infinite speed: zero audio samples, collapsed `setpts`); a run with ranges names the output with a
+  `_cut` token (`has_cut`). CLI: `--remove`/`--remove-file`. Local-only (remote fails with `Remove ranges
+  are local-only`), a single file in the GUI, and Simple mode ignores ranges.
 - **Watch directory** — an **Advanced** setting (`watch_check`,
   `watch_directory_entry`, `watch_browse_button` in `advanced_frame`,
   auto-hidden in Simple mode) that lets you pick a folder for `WatchController`
@@ -145,6 +163,7 @@ launches.
   - `audio.py` handles audio validation, volume analysis, and phase vocoder processing.
   - `chunks.py` builds timing metadata and FFmpeg expressions for frame selection.
   - `glue.py` concatenates several inputs into one file before the pipeline runs (`--glue`, GUI confirmation). It stream-copies only when `inputs_can_be_copied` reports matching probes — FFmpeg will happily copy parts of different resolutions into a file whose frames change size mid-playback — and otherwise re-encodes through the concat filter, scaling every part to the first one's frame size.
+  - `cut_marks.py` owns the remove-range text/JSON formats (`parse_ranges_text`, `format_ranges_text`, `.cuts.json` sidecar I/O via `load_marks`/`save_marks`, `read_marks_file` for `--remove-file`) and the mpv.net launcher (`find_player`, `build_player_command`, `open_player`); the GUI side lives in `gui/cut_marks_ui.py`.
   - `spherical.py` detects 360° metadata (Spherical Mapping + Stereo 3D side data) with a timeout-bounded ffprobe call that never raises, returning `None` for flat videos and for any probe failure. When it finds metadata, glue's copy path and the final encode add `-strict unofficial`, the only way the MOV muxer writes the `sv3d`/`st3d` boxes. On equirectangular sources the pipeline also swaps `scale=-2:H` for `gblur` + `v360` (`spherical_scale_filter`): `scale` drops Spherical Mapping, and so does any filter that changes the frame size before `v360`, which is why the anti-aliasing is a same-size blur (sigma 0.375 × the downscale ratio, skipped under 1.5×) rather than a pre-shrink. Other projections fall back to `scale`, losing the metadata, and log that.
   - `subprocess_utils.py` holds `hidden_subprocess_kwargs()`, which every FFmpeg/ffprobe/PowerShell spawn passes as `**hidden_subprocess_kwargs()` so the windowed Windows build never flashes a console window (`CREATE_NO_WINDOW`, spelled `0x08000000` because the `subprocess` attribute is Windows-only). The flag used to be copied into each call, and the one that missed it flashed a window at the start and end of every conversion; `tests/test_no_console_windows.py` now fails on any `subprocess.run`/`Popen`/`call`/`check_call`/`check_output` call without the helper unless it is in its reasoned `ALLOWED` list.
   - `ffmpeg.py` discovers the FFmpeg binary, detects the hardware encoder per codec (`detect_hardware_backend`: NVENC → AMF → QSV → VideoToolbox, verified by a one-frame trial encode because the bundled build lists every GPU encoder regardless of hardware, cached in `settings.json` under `hardware_backend` for 30 days keyed by the FFmpeg fingerprint; an inconclusive probe — timeout, spawn error, failed encoder listing — is never written to disk and is reused from memory for at most `HARDWARE_INCONCLUSIVE_RETRY_SECONDS` (10 minutes), while a conclusive answer lasts the whole process), and assembles command strings. QSV/AMF arguments live in `_HARDWARE_ENCODER_ARGS`: the QSV `-global_quality` values (hevc 29, av1 31) are calibrated to VMAF ~91 at 720p, the AMF CQP values are provisional and not calibrated (HEVC on the 0–51 QP scale, AV1 on the 0–255 q-index scale), and `_table_encoder_args` drops `-force_key_frames` for QSV because `hevc_qsv` ignores it, leaving `-g`/`-keyint_min`.

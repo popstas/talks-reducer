@@ -68,5 +68,6 @@ include-package-data = true
     "icons/*.png",
     "icons/*.ico",
     "icons/*.icns",
+    "*.lua",
 ]
 

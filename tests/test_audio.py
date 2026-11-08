@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import subprocess
 import sys
 import types
@@ -452,3 +453,33 @@ def test_process_audio_chunks_returns_empty_output_for_empty_inputs():
     assert processed.shape == (0, 1)
     assert processed.size == 0
     assert updated_chunks == []
+
+
+def test_render_chunk_infinite_speed_returns_no_samples() -> None:
+    chunk = np.ones((500, 2), dtype=np.float32)
+
+    result = audio.render_chunk(chunk, math.inf, 10, 1.0)
+
+    assert result.shape == (0, 2)
+
+
+def test_collect_vocoder_jobs_skips_removed_chunks() -> None:
+    jobs, estimated = audio._collect_vocoder_jobs(
+        [[0, 10, 0], [10, 20, 2]], 100.0, [4.0, 1.0, math.inf]
+    )
+
+    assert [job[0] for job in jobs] == [0]
+    assert estimated == 250
+
+
+def test_process_audio_chunks_drops_removed_chunk() -> None:
+    audio_data = np.ones((3000, 2), dtype=np.float32)
+    chunks = [[0, 10, 0], [10, 20, 2], [20, 30, 1]]
+
+    output, updated = audio.process_audio_chunks(
+        audio_data, chunks, 100.0, [1.0, 1.0, math.inf], 10, 1.0
+    )
+
+    assert output.shape[0] == 2000
+    assert updated[1][2] == updated[1][3] == 10
+    assert updated[2][2:] == [10, 20]

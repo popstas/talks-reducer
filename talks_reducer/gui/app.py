@@ -43,6 +43,7 @@ try:
     from ..progress import ProgressHandle
     from ..timecode import format_timecode, parse_timecode
     from ..version_utils import resolve_version
+    from . import cut_marks_ui
     from . import discovery as discovery_helpers
     from . import glue_dialog
     from . import layout as layout_helpers
@@ -95,6 +96,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.cli import gather_input_files
     from talks_reducer.ffmpeg import FFmpegNotFoundError, is_global_ffmpeg_available
     from talks_reducer.glue import prepare_glued_input
+    from talks_reducer.gui import cut_marks_ui
     from talks_reducer.gui import discovery as discovery_helpers
     from talks_reducer.gui import glue_dialog
     from talks_reducer.gui import layout as layout_helpers
@@ -374,6 +376,8 @@ class TalksReducerGUI:
         self.cut_end_text_var = tk.StringVar(
             value=format_timecode(self.cut_end_var.get(), milliseconds=True)
         )
+        self.remove_ranges: list[tuple[float, float]] = []
+        self.remove_ranges_text_var = tk.StringVar(value="")
         self.watch_enabled_var = tk.BooleanVar(
             value=bool(self.preferences.get("watch_enabled", False))
         )
@@ -505,7 +509,7 @@ class TalksReducerGUI:
         # finalized, so it appears directly at its final size without a flash.
         self.root.deiconify()
 
-    def _start_run(self) -> None:
+    def _start_run(self, *, remove_only: bool = False) -> None:
         if self._processing_thread and self._processing_thread.is_alive():
             self.messagebox.showinfo("Processing", "A job is already running.")
             return
@@ -520,6 +524,12 @@ class TalksReducerGUI:
             args = self._collect_arguments()
         except ValueError as exc:
             self.messagebox.showerror("Invalid value", str(exc))
+            return
+
+        if remove_only:
+            args = cut_marks_ui.remove_only_overrides(args)
+        if args.get("remove_ranges") and self.processing_mode_var.get() == "remote":
+            self.messagebox.showerror("Remote mode", "Remove ranges are local-only")
             return
 
         self._append_log("Starting processing…")
@@ -557,6 +567,15 @@ class TalksReducerGUI:
                     self._schedule_on_ui_thread(
                         lambda: self.messagebox.showwarning(
                             "No files", "No supported media files were found."
+                        )
+                    )
+                    self._set_status("Idle")
+                    return
+
+                if args.get("remove_ranges") and len(files) != 1:
+                    self._schedule_on_ui_thread(
+                        lambda: self.messagebox.showerror(
+                            "Remove ranges", "Remove ranges apply to a single file"
                         )
                     )
                     self._set_status("Idle")
@@ -857,6 +876,7 @@ class TalksReducerGUI:
 
         if not getattr(self, "cut_enabled_var", None):
             return
+        cut_marks_ui.load_for_current_input(self)
         if self.cut_enabled_var.get():
             self._update_cut_range_for_input()
             self._on_cut_slider_change("start")
@@ -960,6 +980,12 @@ class TalksReducerGUI:
             button.grid()
         else:
             button.grid_remove()
+        remove_only = getattr(self, "remove_only_button", None)
+        if remove_only is not None:
+            if show and getattr(self, "remove_ranges", None):
+                remove_only.grid()
+            else:
+                remove_only.grid_remove()
 
     def _update_cut_range_for_input(self) -> None:
         """Set the slider range from the duration of the first queued input."""
@@ -1505,6 +1531,8 @@ class TalksReducerGUI:
                 self.input_files.append(resolved)
                 normalized.append(resolved)
 
+        cut_marks_ui.load_for_current_input(self)
+
         if auto_run and normalized:
             # Kick off processing once the event loop becomes idle so the
             # interface has a chance to render before the work starts.
@@ -1639,6 +1667,9 @@ class TalksReducerGUI:
                 )
             args["cut_start_seconds"] = round(cut_start, 3)
             args["cut_end_seconds"] = round(cut_end, 3)
+            remove_ranges = getattr(self, "remove_ranges", None) or []
+            if remove_ranges:
+                args["remove_ranges"] = tuple(remove_ranges)
         return args
 
     def _process_files_via_server(

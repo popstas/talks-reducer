@@ -1510,3 +1510,88 @@ def test_cli_application_remote_480_and_fps() -> None:
     assert call["small_480"] is True
     assert call["small_height"] == 480
     assert call["max_frame_rate"] == pytest.approx(30.0)
+
+
+def test_build_parser_parses_remove_ranges() -> None:
+    parser = cli._build_parser()
+
+    parsed = parser.parse_args(["--remove", "1:20-1:45,12:00-12:30", "input.mp4"])
+
+    assert parsed.remove_text == [(80.0, 105.0), (720.0, 750.0)]
+
+
+def test_build_parser_rejects_bad_remove_range() -> None:
+    with pytest.raises(SystemExit):
+        cli._build_parser().parse_args(["--remove", "1:45-1:20", "input.mp4"])
+
+
+def _run_with(parsed_args):
+    speed_calls: list[cli.ProcessingOptions] = []
+
+    def fake_speed_up(options, reporter):
+        speed_calls.append(options)
+        return SimpleNamespace(output_file=Path("/videos/output.mp4"))
+
+    class DummyReporter:
+        def log(self, message: str) -> None:
+            pass
+
+    app = cli.CliApplication(
+        gather_files=lambda paths, **_kwargs: ["/videos/input.mp4"],
+        send_video=None,
+        speed_up=fake_speed_up,
+        reporter_factory=DummyReporter,
+    )
+    return app.run(parsed_args), speed_calls
+
+
+def test_cli_merges_remove_and_remove_file(tmp_path: Path) -> None:
+    marks = tmp_path / "input.mp4.cuts.json"
+    marks.write_text(
+        '{"version": 1, "source": "input.mp4", "remove": [[30, 40]]}', "utf-8"
+    )
+
+    (exit_code, errors), calls = _run_with(
+        SimpleNamespace(
+            input_file=["input.mp4"], remove_text=[(10.0, 20.0)], remove_file=marks
+        )
+    )
+
+    assert exit_code == 0, errors
+    assert calls[0].remove_ranges == ((10.0, 20.0), (30.0, 40.0))
+
+
+def test_cli_rejects_missing_remove_file(tmp_path: Path) -> None:
+    (exit_code, errors), calls = _run_with(
+        SimpleNamespace(input_file=["input.mp4"], remove_file=tmp_path / "nope.json")
+    )
+
+    assert exit_code == 1
+    assert "nope.json" in errors[0]
+    assert calls == []
+
+
+def test_cli_rejects_remove_ranges_with_server() -> None:
+    (exit_code, errors), calls = _run_with(
+        SimpleNamespace(
+            input_file=["input.mp4"],
+            remove_text=[(1.0, 2.0)],
+            server_url="http://h:9005",
+        )
+    )
+
+    assert exit_code == 1
+    assert errors == ["Error: Remove ranges are local-only"]
+    assert calls == []
+
+
+def test_main_rejects_remove_ranges_with_host(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        cli, "gather_input_files", lambda paths, **_kwargs: ["/videos/input.mp4"]
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--remove", "1-2", "--host", "h", "input.mp4"])
+
+    assert exc.value.code == 1
+    assert "Error: Remove ranges are local-only" in capsys.readouterr().err

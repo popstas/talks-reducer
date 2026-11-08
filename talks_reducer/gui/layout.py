@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 from .. import presets
 from ..icons import find_icon_path
 from ..models import default_temp_folder
+from . import cut_marks_ui
 from .segmented import CustomSpec, Option, SegmentedChoice
 from .tooltips import add_tooltip
 
@@ -142,6 +143,11 @@ BASIC_PRESET_TOLERANCE = 1e-9
 THRESHOLD_ARTICLE_URL = (
     "https://telegra.ph/"
     "How-hard-can-you-trim-silence-before-speech-to-text-breaks-08-03"
+)
+
+REMOVE_ARTICLE_URL = (
+    "https://telegra.ph/"
+    "How-to-cut-fragments-out-of-the-middle-of-a-video-in-Talks-Reducer-11-08"
 )
 
 # Sounded speed offers 1/1.3/1.5/2 as buttons, but the typed range runs to the
@@ -551,6 +557,14 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
     shown only when ``cut_enabled_var`` is set and is available in both Simple and
     Advanced layouts. Slider movement is forwarded to
     ``gui._on_cut_slider_change`` so the application can clamp the handles.
+
+    A third **Remove** row holds an entry with the fragments to drop from the
+    middle of the video (``HH:MM:SS-HH:MM:SS`` list, committed on Enter or focus
+    loss) and a **Mark cuts…** button that opens mpv.net to mark them. The
+    label carries a ``?`` link to the how-to article (``REMOVE_ARTICLE_URL``),
+    since the marking keys are not discoverable from the panel itself. A tall
+    **Remove only** button in the last column runs a fast remove-only pass; it is
+    revealed by ``gui._update_cut_convert_button`` once ranges exist.
     """
 
     panel = gui.ttk.Frame(parent)
@@ -608,6 +622,33 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
     gui.cut_convert_button.grid(
         row=0, column=3, rowspan=2, sticky="nsew", padx=(8, 0), pady=(0, 0)
     )
+
+    remove_label = gui.ttk.Frame(panel)
+    gui.ttk.Label(remove_label, text="Remove").pack(side=gui.tk.LEFT)
+    gui.remove_help_button = gui.ttk.Button(
+        remove_label,
+        text="?",
+        style="HelpLink.TButton",
+        command=lambda: webbrowser.open(REMOVE_ARTICLE_URL),
+    )
+    gui.remove_help_button.pack(side=gui.tk.LEFT)
+    remove_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
+    gui.remove_ranges_entry = gui.ttk.Entry(
+        panel, textvariable=gui.remove_ranges_text_var
+    )
+    gui.remove_ranges_entry.grid(
+        row=2, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(4, 0)
+    )
+    gui.remove_ranges_entry.bind("<Return>", lambda _e: cut_marks_ui.commit_text(gui))
+    gui.remove_ranges_entry.bind("<FocusOut>", lambda _e: cut_marks_ui.commit_text(gui))
+    gui.mark_cuts_button = gui.ttk.Button(
+        panel, text="Mark cuts…", command=lambda: cut_marks_ui.open_marker(gui)
+    )
+    gui.mark_cuts_button.grid(row=2, column=3, sticky="ew", padx=(8, 0), pady=(4, 0))
+    gui.remove_only_button = gui.ttk.Button(
+        panel, text="Remove only", command=lambda: gui._start_run(remove_only=True)
+    )
+    gui.remove_only_button.grid(row=0, column=4, rowspan=2, sticky="nsew", padx=(8, 0))
 
     sliders = getattr(gui, "_sliders", None)
     if isinstance(sliders, list):

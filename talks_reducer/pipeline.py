@@ -20,6 +20,7 @@ from . import audio as audio_utils
 from . import chunks as chunk_utils
 from . import spherical as spherical_utils
 from . import wav_io as wavfile
+from .cut_marks import normalize_ranges
 from .ffmpeg import (
     HARDWARE_BACKEND_LABELS,
     build_audio_only_command,
@@ -339,6 +340,44 @@ def _resolve_trim(
     return cut_start, cut_end, effective_duration, effective_frame_count
 
 
+def _resolve_remove_ranges(
+    options: ProcessingOptions,
+    cut_start: float,
+    effective_duration: float,
+    reporter: ProgressReporter,
+) -> list[tuple[float, float]]:
+    """Return the remove ranges in the timeline of the trimmed input.
+
+    Ranges are given in seconds of the input file; the keep-range trim starts
+    the processed audio at ``cut_start``, so each range is shifted by it and
+    clipped to ``[0, effective_duration]``. Ranges left empty are dropped and
+    counted in the log.
+    """
+
+    ranges = normalize_ranges(getattr(options, "remove_ranges", ()) or ())
+    if not ranges:
+        return []
+
+    shifted: list[tuple[float, float]] = []
+    dropped = 0
+    for start, end in ranges:
+        start = max(0.0, start - cut_start)
+        end = end - cut_start
+        if effective_duration > 0:
+            end = min(end, effective_duration)
+        if end <= start:
+            dropped += 1
+            continue
+        shifted.append((start, end))
+
+    if dropped:
+        reporter.log(f"Ignoring {dropped} remove range(s) outside the kept fragment")
+    if shifted:
+        total = sum(end - start for start, end in shifted)
+        reporter.log(f"Removing {len(shifted)} fragment(s), {total:.2f}s in total")
+    return shifted
+
+
 def resolve_output_path(options: ProcessingOptions, source: Path | None = None) -> Path:
     """Return the output path *options* writes to.
 
@@ -360,6 +399,7 @@ def resolve_output_path(options: ProcessingOptions, source: Path | None = None) 
         silent_speed=options.silent_speed,
         sounded_speed=options.sounded_speed,
         prefer_clean_audio_name=True,
+        has_cut=bool(getattr(options, "remove_ranges", ())),
     )
 
 
@@ -443,6 +483,9 @@ def speed_up_video(
         frame_rate,
         reporter,
     )
+    remove_ranges = _resolve_remove_ranges(
+        options, cut_start_seconds, effective_duration, reporter
+    )
 
     if options.optimize:
         reporter.log("Optimized encoding enabled")
@@ -485,6 +528,9 @@ def speed_up_video(
         reporter.log(
             "No audio stream found. Video will be re-encoded without speed modification."
         )
+        if remove_ranges:
+            reporter.log("Warning: Remove ranges need an audio stream; ignoring them.")
+            remove_ranges = []
 
     # Detected per codec (not every GPU encodes AV1) and only once the job is
     # known to need a video encode, so mp3 exports never spawn a probe.
@@ -520,7 +566,7 @@ def speed_up_video(
     updated_chunks: list[list[int]] = []
     max_audio_volume = 0.0
 
-    if has_audio and not neutral_speeds:
+    if has_audio and (not neutral_speeds or remove_ranges):
         # Process with audio-based speed modification
         audio_bitrate = "128k" if options.optimize else "160k"
         audio_wav = job_temp_path / "audio.wav"
@@ -576,12 +622,15 @@ def speed_up_video(
         )
 
         chunks, _ = chunk_utils.build_chunks(has_loud_audio, options.frame_spreadage)
+        if remove_ranges:
+            chunks = chunk_utils.apply_remove_ranges(chunks, remove_ranges, frame_rate)
 
         reporter.log(f"Processing {len(chunks)} chunks...")
 
         _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
-        new_speeds = [options.silent_speed, options.sounded_speed]
+        # Index 2 is chunk_utils.REMOVED_SPEED_INDEX: removed fragments emit nothing.
+        new_speeds = [options.silent_speed, options.sounded_speed, math.inf]
         # Counted in chunks: see ``process_audio_chunks`` for why sample counts
         # stopped tracking elapsed time.
         audio_chunk_total = len(chunks) if chunks else None
@@ -644,7 +693,7 @@ def speed_up_video(
             spherical_info=spherical_info,
         )
 
-    keep_input_audio = has_audio and neutral_speeds
+    keep_input_audio = has_audio and neutral_speeds and not remove_ranges
     if is_mp3_output:
         # Audio-only render: encode the processed WAV (trim/speed already baked
         # in) when available, otherwise the original input with trim applied.
@@ -857,6 +906,7 @@ def _input_to_output_filename(
     silent_speed: float | None = None,
     sounded_speed: float | None = None,
     prefer_clean_audio_name: bool = False,
+    has_cut: bool = False,
 ) -> Path:
     dot_index = filename.name.rfind(".")
     normalized_silent = _normalize_speed(silent_speed, _DEFAULT_SILENT_SPEED)
@@ -867,7 +917,7 @@ def _input_to_output_filename(
 
     normalized_codec = str(video_codec or "h264").strip().lower()
     is_audio_only = normalized_codec == "mp3"
-    force_codec_suffix = not include_speed_marker and not small
+    force_codec_suffix = not include_speed_marker and not small and not has_cut
     include_codec_suffix = (
         (add_codec_suffix or force_codec_suffix)
         and normalized_codec
@@ -887,6 +937,9 @@ def _input_to_output_filename(
 
     if not optimize and not small:
         suffix_tokens.append("fast")
+
+    if has_cut:
+        suffix_tokens.append("cut")
 
     if include_codec_suffix:
         suffix_tokens.append(normalized_codec)

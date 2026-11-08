@@ -7,7 +7,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 
 def default_temp_folder() -> Path:
@@ -48,6 +48,10 @@ class ProcessingOptions:
 
     ``max_frame_rate`` caps the output frame rate (``None`` keeps the source
     rate); it only ever lowers it.
+
+    ``remove_ranges`` lists ``(start, end)`` fragments, in seconds of the input
+    file, that are dropped from the output; they are applied inside the
+    keep-range trim window.
     """
 
     input_file: Path
@@ -70,6 +74,7 @@ class ProcessingOptions:
     add_codec_suffix: bool = False
     cut_start_seconds: float = 0.0
     cut_end_seconds: float = 0.0
+    remove_ranges: Tuple[Tuple[float, float], ...] = ()
 
 
 @dataclass(frozen=True)

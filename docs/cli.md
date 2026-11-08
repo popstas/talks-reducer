@@ -114,6 +114,19 @@ talks-reducer --cut-start 00:00:10 --cut-end 00:01:00 demo.mp4  # keep 10s–60s
 talks-reducer --cut-start 90 demo.mp4  # drop the first 90 seconds, keep to EOF
 ```
 
+### Removing middle fragments: `--remove` / `--remove-file`
+
+To drop fragments from the *middle* of a recording, pass `--remove RANGES` with comma-separated
+`start-end` pairs (seconds or timecodes, times of the input file), or `--remove-file PATH` with a
+`.cuts.json` file written by the mpv.net marking script (`{"version": 1, "remove": [[80, 105]]}`).
+Both can be combined and may be used together with `--cut-start` / `--cut-end`. The output gets a
+`_cut` suffix. Removing fragments is local-only; it is rejected together with `--server-url`.
+
+```sh
+talks-reducer --remove "1:20-1:45,12:00-12:30.5" demo.mp4
+talks-reducer --remove-file demo.mp4.cuts.json demo.mp4
+```
+
 ## Gluing several parts: `--glue`
 
 A talk recorded in several files becomes one video with `--glue`: the parts are concatenated

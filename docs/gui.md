@@ -135,6 +135,33 @@ The keep range matches the CLI's `--cut-start`/`--cut-end` semantics. The checkb
 last start/end values persist across launches; clearing it (or switching to Simple mode)
 omits the trim entirely.
 
+### Removing fragments from the middle
+
+With **Cut video** on and exactly one local file queued, the panel also has a **Remove** field
+and a **Mark cuts…** button. The field takes comma-separated ranges such as
+`1:20-1:45, 12:00-12:30.5`; invalid text is reverted and logged. The `?` next to the
+**Remove** label opens the
+[step-by-step guide](https://telegra.ph/How-to-cut-fragments-out-of-the-middle-of-a-video-in-Talks-Reducer-11-08).
+
+**Mark cuts…** opens the file in [mpv.net](https://github.com/mpvnet-player/mpv.net/releases)
+(or mpv) with a bundled script: press `c` where a fragment starts and `c` again where it ends,
+`C` undoes the last mark. When the player closes, the fragments appear in the **Remove** field.
+If the player is not found, the button offers to open the mpv.net download page; when it lives
+somewhere unusual, set `mpv_path` in `settings.json` to the full path of `mpvnet.exe` / `mpv`.
+
+Marks are stored in a sidecar next to the video, `<video>.cuts.json`, and loaded again whenever
+you add that file. If the sidecar cannot be written (read-only folder, locked file) the error is
+logged and the ranges stay usable for the current session; if the player leaves no readable
+result, the saved marks are kept untouched.
+
+- **Convert** runs the normal pipeline and drops the fragments; the output gets a `_cut` suffix.
+- **Remove only** is a fast pass for an already-processed file: speeds stay x1, resolution and
+  frame rate stay original, and the codec is the one selected. The output also gets `_cut`.
+
+Removing fragments is local-only (not available in remote mode), works for a single file, and
+Simple mode ignores the ranges entirely. The CLI equivalents are `--remove` and `--remove-file`
+(see [cli.md](cli.md#removing-middle-fragments---remove----remove-file)).
+
 ## Gluing several files
 
 Drop or pick more than one file — or a folder that holds several — and Talks Reducer asks

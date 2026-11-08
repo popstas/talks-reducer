@@ -64,6 +64,61 @@ def build_chunks(
     return chunks[1:], should_include_frame
 
 
+REMOVED_SPEED_INDEX = 2
+
+
+def apply_remove_ranges(
+    chunks: Sequence[Sequence[int]],
+    ranges: Sequence[Tuple[float, float]],
+    frame_rate: float,
+) -> List[List[int]]:
+    """Split *chunks* at the remove ranges and mark the pieces inside them.
+
+    Chunks are ``[start_frame, end_frame, speed_index]`` in source frames.
+    Each range in seconds becomes ``[round(start * fps), round(end * fps))``;
+    pieces inside a range get :data:`REMOVED_SPEED_INDEX`, whose speed the
+    pipeline sets to infinity so the piece produces no output. Adjacent removed
+    pieces are merged and zero-length pieces are never emitted.
+    """
+
+    if not ranges or frame_rate <= 0:
+        return [list(chunk) for chunk in chunks]
+
+    frame_ranges = sorted(
+        (max(0, int(round(start * frame_rate))), int(round(end * frame_rate)))
+        for start, end in ranges
+    )
+    frame_ranges = [(a, b) for a, b in frame_ranges if b > a]
+
+    pieces: List[List[int]] = []
+    for chunk in chunks:
+        start, end, speed = int(chunk[0]), int(chunk[1]), int(chunk[2])
+        cursor = start
+        for cut_start, cut_end in frame_ranges:
+            if cut_end <= cursor or cut_start >= end:
+                continue
+            if cut_start > cursor:
+                pieces.append([cursor, cut_start, speed])
+            piece_end = min(cut_end, end)
+            pieces.append([max(cut_start, cursor), piece_end, REMOVED_SPEED_INDEX])
+            cursor = piece_end
+        if cursor < end:
+            pieces.append([cursor, end, speed])
+
+    merged: List[List[int]] = []
+    for piece in pieces:
+        if (
+            merged
+            and piece[2] == REMOVED_SPEED_INDEX
+            and merged[-1][2] == REMOVED_SPEED_INDEX
+            and merged[-1][1] == piece[0]
+        ):
+            merged[-1][1] = piece[1]
+        else:
+            merged.append(piece)
+    return merged
+
+
 def get_tree_expression(chunks: Sequence[Sequence[int]]) -> str:
     """Return the FFmpeg expression needed to map chunk timing updates."""
 
@@ -90,6 +145,8 @@ def _get_tree_expression_rec(chunks: Sequence[Sequence[int]]) -> str:
 
 
 __all__ = [
+    "REMOVED_SPEED_INDEX",
+    "apply_remove_ranges",
     "detect_loud_frames",
     "build_chunks",
     "get_tree_expression",
