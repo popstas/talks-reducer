@@ -139,7 +139,11 @@ seconds) and loaded again the next time you add that file.
 - **Convert** processes the video as usual and drops the fragments; the output name gets a
   `_cut` suffix (e.g. `lecture_speedup_cut.mp4`).
 - **Remove only** is a fast pass for an already-processed file: speeds stay x1, the picture is
-  left at its original resolution and frame rate, and only the fragments disappear.
+  left at its original resolution and frame rate, and only the fragments disappear. The codec
+  stays the one you selected.
+
+If mpv.net is installed somewhere unusual, set `mpv_path` in `settings.json` to the full path of
+`mpvnet.exe` (or `mpv`). See [docs/gui.md](docs/gui.md#cut-video) for details.
 
 Removing fragments works with local processing only, and Simple mode ignores it. From the
 command line use `--remove RANGES` or `--remove-file PATH` (a `.cuts.json` file):
