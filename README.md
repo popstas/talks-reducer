@@ -93,6 +93,7 @@ talks-reducer --small --480 input.mp4                      # scale down to 480p 
 talks-reducer --small --1080 --fps 30 input.mp4            # 1080p at most, capped to 30 fps
 talks-reducer --video-codec mp3 talk.mp4                   # export audio only, as .mp3
 talks-reducer --cut-start 00:00:10 --cut-end 00:01:00 demo.mp4  # keep only 10s–60s
+talks-reducer --remove "1:20-1:45,12:00-12:30" demo.mp4   # also drop these fragments
 talks-reducer --url http://localhost:9005 demo.mp4         # process on a remote server
 talks-reducer --preset "Smallest" demo.mp4                 # apply a saved preset
 talks-reducer --glue part1.mp4 part2.mp4                   # join the parts into one video first
@@ -121,6 +122,31 @@ and each surface opens on the preset you used last. See
 
 → Full flag reference — codecs, keyframes, silence thresholds, trimming, remote options:
 [docs/cli.md](docs/cli.md).
+
+### Removing fragments from the middle
+
+Besides trimming the start and end, you can cut out fragments from the middle of a video.
+In the desktop GUI (Advanced mode, **Cut video** on, a single local file) press **Mark cuts…**
+to open the video in [mpv.net](https://github.com/mpvnet-player/mpv.net/releases). Press `c`
+where a fragment starts and `c` again where it ends; `C` undoes the last mark. Close the player
+and the fragments appear in the **Remove** field, where you can also edit them by hand
+(`1:20-1:45, 12:00-12:30.5`).
+
+Marks are saved next to the video as `<video>.cuts.json`
+(`{"version": 1, "source": "lecture.mp4", "remove": [[80, 105], [720, 750.5]]}`, times in
+seconds) and loaded again the next time you add that file.
+
+- **Convert** processes the video as usual and drops the fragments; the output name gets a
+  `_cut` suffix (e.g. `lecture_speedup_cut.mp4`).
+- **Remove only** is a fast pass for an already-processed file: speeds stay x1, the picture is
+  left at its original resolution and frame rate, and only the fragments disappear.
+
+Removing fragments works with local processing only, and Simple mode ignores it. From the
+command line use `--remove RANGES` or `--remove-file PATH` (a `.cuts.json` file):
+
+```sh
+talks-reducer --silent-speed 1 --sounded-speed 1 --no-small --fps orig --remove "1:20-1:45" lecture_speedup.mp4
+```
 
 ### 360° videos
 
