@@ -117,7 +117,12 @@ def render_chunk(
 
     This runs both in the pipeline process and inside the worker processes of
     :mod:`talks_reducer.audio_workers`, so it must stay free of pipeline state.
+    An infinite *speed* marks a removed fragment and yields no samples.
     """
+
+    if math.isinf(speed):
+        channels = audio_chunk.shape[1] if audio_chunk.ndim > 1 else 1
+        return np.zeros((0, channels), dtype=np.float32)
 
     if math.isclose(speed, 1.0, rel_tol=1e-9, abs_tol=1e-9):
         # A phase vocoder run at speed 1.0 reproduces its input, so the samples
@@ -154,6 +159,7 @@ def _collect_vocoder_jobs(
     than shipping them to a worker process and back. The workload is measured in
     samples the vocoder will *emit*, since its cost scales with the synthesis
     frames it writes — a chunk sped up ten times is a tenth of the work.
+    Removed fragments (infinite speed) emit nothing and are excluded too.
     """
 
     jobs: List[audio_workers.ChunkJob] = []
@@ -165,7 +171,7 @@ def _collect_vocoder_jobs(
         if end <= start:
             continue
         speed = speeds[int(chunk[2])]
-        if math.isclose(speed, 1.0, rel_tol=1e-9, abs_tol=1e-9):
+        if math.isinf(speed) or math.isclose(speed, 1.0, rel_tol=1e-9, abs_tol=1e-9):
             continue
         jobs.append((index, start, end, speed))
         estimated_output += int((end - start) / speed)
