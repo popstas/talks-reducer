@@ -99,6 +99,5 @@ def test_remove_range_shortens_output(
     )
 
     duration, frames = _probe(output)
-    print(f"MEASURED cap={max_frame_rate} duration={duration} frames={frames}")
     assert duration == pytest.approx(8.0, abs=0.15)
     assert abs(frames - expected_frames) <= 2
