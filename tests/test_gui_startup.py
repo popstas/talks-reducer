@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from types import SimpleNamespace
 from typing import List
 
@@ -766,3 +768,22 @@ def test_parse_seeded_launch_1080_and_fps(tmp_path) -> None:
     _, settings = seeded
     assert settings["small_height"] == 1080
     assert settings["max_frame_rate"] == 30.0
+
+
+def test_tkinter_check_hides_console_on_windows(monkeypatch) -> None:
+    """The Tk self-test subprocess must not flash a console window."""
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    captured_kwargs: dict = {}
+
+    def fake_run(command, *args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return subprocess.CompletedProcess(
+            command, 0, stdout='{"status": "ok"}', stderr=""
+        )
+
+    monkeypatch.setattr(startup.subprocess, "run", fake_run)
+
+    startup._check_tkinter_available()
+
+    assert captured_kwargs.get("creationflags") == 0x08000000

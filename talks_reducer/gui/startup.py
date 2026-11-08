@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from ..cli import _build_parser
 from ..cli import main as cli_main
+from ..subprocess_utils import hidden_subprocess_kwargs
 from .app import TalksReducerGUI
 
 _runtime_logged = False
@@ -78,7 +79,11 @@ if __name__ == "__main__":
 
     try:
         result = subprocess.run(
-            [sys.executable, "-c", test_code], capture_output=True, text=True, timeout=5
+            [sys.executable, "-c", test_code],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            **hidden_subprocess_kwargs(),
         )
 
         output = result.stdout.strip() or result.stderr.strip()

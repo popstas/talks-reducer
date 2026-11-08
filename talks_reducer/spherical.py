@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from .subprocess_utils import hidden_subprocess_kwargs
 
 EQUIRECTANGULAR = "equirectangular"
 PRESERVE_SPHERICAL_ARGS = "-strict unofficial"
@@ -89,7 +90,6 @@ def probe_spherical(path: Path | str) -> Optional[SphericalInfo]:
     flat-video run is never broken by this check.
     """
 
-    creationflags = 0x08000000 if sys.platform == "win32" else 0
     try:
         command = [
             _ffprobe_path(),
@@ -108,7 +108,7 @@ def probe_spherical(path: Path | str) -> Optional[SphericalInfo]:
             capture_output=True,
             text=True,
             check=True,
-            creationflags=creationflags,
+            **hidden_subprocess_kwargs(),
             timeout=PROBE_TIMEOUT_SECONDS,
         )
         return parse_spherical_side_data(completed.stdout or "")

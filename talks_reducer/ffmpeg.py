@@ -14,6 +14,7 @@ from typing import List, NamedTuple, Optional, Sequence, Tuple
 
 from . import config
 from .progress import ProgressReporter, TqdmProgressReporter
+from .subprocess_utils import hidden_subprocess_kwargs
 
 
 class FFmpegNotFoundError(RuntimeError):
@@ -369,11 +370,6 @@ def _write_cached_backend(
 def _probe_ffmpeg_output(args: List[str]) -> Optional[str]:
     """Return stdout from an FFmpeg invocation, handling common failures."""
 
-    creationflags = 0
-    if sys.platform == "win32":
-        # CREATE_NO_WINDOW = 0x08000000
-        creationflags = 0x08000000
-
     try:
         result = subprocess.run(
             args,
@@ -381,7 +377,7 @@ def _probe_ffmpeg_output(args: List[str]) -> Optional[str]:
             capture_output=True,
             text=True,
             timeout=5,
-            creationflags=creationflags,
+            **hidden_subprocess_kwargs(),
         )
     except (
         subprocess.TimeoutExpired,
@@ -531,7 +527,6 @@ def _trial_encode(ffmpeg_path: str, encoder: str) -> Optional[bool]:
     is installed, and only fail once the encoder is opened.
     """
 
-    creationflags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
     try:
         result = subprocess.run(
             [
@@ -554,7 +549,7 @@ def _trial_encode(ffmpeg_path: str, encoder: str) -> Optional[bool]:
             stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=_TRIAL_ENCODE_TIMEOUT_SECONDS,
-            creationflags=creationflags,
+            **hidden_subprocess_kwargs(),
         )
     except (subprocess.TimeoutExpired, OSError):
         return None
@@ -802,12 +797,6 @@ def run_timed_ffmpeg_command(
         print(f"Error parsing command: {exc}", file=sys.stderr)
         raise
 
-    # Hide console window on Windows
-    creationflags = 0
-    if sys.platform == "win32":
-        # CREATE_NO_WINDOW = 0x08000000
-        creationflags = 0x08000000
-
     # Use a new session on Unix so we can kill the whole process group
     popen_kwargs: dict = {}
     if sys.platform != "win32":
@@ -821,7 +810,7 @@ def run_timed_ffmpeg_command(
             universal_newlines=True,
             bufsize=1,
             errors="replace",
-            creationflags=creationflags,
+            **hidden_subprocess_kwargs(),
             **popen_kwargs,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -1001,18 +990,13 @@ def get_video_duration(
         input_file,
     ]
 
-    creationflags = 0
-    if sys.platform == "win32":
-        # CREATE_NO_WINDOW = 0x08000000
-        creationflags = 0x08000000
-
     try:
         result = subprocess.run(
             command,
             capture_output=True,
             text=True,
             timeout=10,
-            creationflags=creationflags,
+            **hidden_subprocess_kwargs(),
         )
     except (
         subprocess.TimeoutExpired,

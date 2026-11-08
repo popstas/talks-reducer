@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -324,31 +326,26 @@ def test_extract_video_metadata_uses_ffprobe(monkeypatch) -> None:
 
     captured_commands: list[list[str]] = []
 
-    class DummyProcess:
-        def communicate(self) -> tuple[str, str]:
-            return (
-                "\n".join(
-                    [
-                        "[STREAM]",
-                        "avg_frame_rate=25/1",
-                        "nb_frames=125",
-                        "width=1920",
-                        "height=1080",
-                        "[/STREAM]",
-                        "[FORMAT]",
-                        "duration=5.0",
-                        "[/FORMAT]",
-                    ]
-                ),
-                "",
-            )
+    stdout = "\n".join(
+        [
+            "[STREAM]",
+            "avg_frame_rate=25/1",
+            "nb_frames=125",
+            "width=1920",
+            "height=1080",
+            "[/STREAM]",
+            "[FORMAT]",
+            "duration=5.0",
+            "[/FORMAT]",
+        ]
+    )
 
-    def fake_popen(command, *args, **kwargs):
+    def fake_run(command, *args, **kwargs):
         captured_commands.append(list(command))
         assert os.fspath(demo_path) in command
-        return DummyProcess()
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
-    monkeypatch.setattr(pipeline.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(pipeline.subprocess, "run", fake_run)
 
     metadata = pipeline._extract_video_metadata(demo_path, frame_rate=30.0)
 
@@ -390,18 +387,41 @@ def test_extract_video_metadata_snaps_noisy_concat_frame_rate(monkeypatch) -> No
 
     monkeypatch.setattr(ffmpeg_module, "get_ffprobe_path", lambda: "ffprobe")
 
-    class DummyProcess:
-        def communicate(self) -> tuple[str, str]:
-            return ("avg_frame_rate=130631680/4354391\nduration=1700.9\n", "")
-
     monkeypatch.setattr(
-        pipeline.subprocess, "Popen", lambda *args, **kwargs: DummyProcess()
+        pipeline.subprocess,
+        "run",
+        lambda command, *args, **kwargs: subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="avg_frame_rate=130631680/4354391\nduration=1700.9\n",
+            stderr="",
+        ),
     )
 
     metadata = pipeline._extract_video_metadata(Path("glued.mp4"), frame_rate=25.0)
 
     assert metadata["frame_rate"] == 30.0
     assert f"fps={metadata['frame_rate']}" == "fps=30.0"
+
+
+def test_extract_video_metadata_hides_console_on_windows(monkeypatch) -> None:
+    """The start/end ffprobe must not flash a console window on Windows."""
+
+    monkeypatch.setattr(ffmpeg_module, "get_ffprobe_path", lambda: "ffprobe")
+    monkeypatch.setattr(sys, "platform", "win32")
+    captured_kwargs: dict = {}
+
+    def fake_run(command, *args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return subprocess.CompletedProcess(
+            command, 0, stdout="avg_frame_rate=30/1\n", stderr=""
+        )
+
+    monkeypatch.setattr(pipeline.subprocess, "run", fake_run)
+
+    pipeline._extract_video_metadata(Path("input.mp4"), frame_rate=25.0)
+
+    assert captured_kwargs.get("creationflags") == 0x08000000
 
 
 def test_stop_requested_handles_callable_and_bool() -> None:
