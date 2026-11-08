@@ -11,15 +11,28 @@ import json
 import logging
 import math
 import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import Callable, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from .icons import find_icon_path
+from .subprocess_utils import hidden_subprocess_kwargs
 from .timecode import format_timecode, parse_timecode
 
 RemoveRange = Tuple[float, float]
 
 MARKS_VERSION = 1
 SIDECAR_SUFFIX = ".cuts.json"
+
+LUA_SCRIPT_NAME = "talks_reducer_cuts.lua"
+MPV_NET_RELEASES_URL = "https://github.com/mpvnet-player/mpv.net/releases"
+
+_SCRIPT_RELATIVE_PATHS = (
+    Path("resources"),
+    Path("talks_reducer") / "resources",
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -167,3 +180,86 @@ def save_marks(video: Path, ranges: Iterable[Sequence[float]]) -> None:
         target.unlink(missing_ok=True)
         return
     write_marks_file(target, normalized, video.name)
+
+
+def find_player(
+    preferred: Optional[str] = None,
+    *,
+    platform: str = sys.platform,
+    which: Callable[[str], Optional[str]] = shutil.which,
+    environ: Mapping[str, str] = os.environ,
+    exists: Callable[[str], bool] = os.path.isfile,
+) -> Optional[Path]:
+    """Return the player to mark cuts with, or ``None`` when none is installed.
+
+    Order: the configured *preferred* path, ``mpvnet``/``mpv`` on ``PATH``,
+    mpv.net's Windows install folders, then Homebrew's ``mpv`` on macOS. The
+    keyword arguments exist so tests can describe a machine without touching
+    the real one.
+    """
+
+    if preferred and exists(preferred):
+        return Path(preferred)
+
+    for name in ("mpvnet", "mpv"):
+        found = which(name)
+        if found:
+            return Path(found)
+
+    candidates: list[str] = []
+    if platform == "win32":
+        program_files = environ.get("ProgramFiles")
+        local_app_data = environ.get("LOCALAPPDATA")
+        if program_files:
+            candidates.append(str(Path(program_files) / "mpv.net" / "mpvnet.exe"))
+        if local_app_data:
+            candidates.append(
+                str(Path(local_app_data) / "Programs" / "mpv.net" / "mpvnet.exe")
+            )
+    elif platform == "darwin":
+        candidates.extend(["/opt/homebrew/bin/mpv", "/usr/local/bin/mpv"])
+
+    for candidate in candidates:
+        if exists(candidate):
+            return Path(candidate)
+    return None
+
+
+def script_path() -> Optional[Path]:
+    """Return the bundled Lua marking script, or ``None`` when it is missing."""
+
+    return find_icon_path(
+        filenames=[LUA_SCRIPT_NAME], relative_paths=_SCRIPT_RELATIVE_PATHS
+    )
+
+
+def build_player_command(
+    player: Path, video: Path, marks_file: Path, script: Path
+) -> list[str]:
+    """Return the command line that opens *video* with the marking script.
+
+    mpv.net defaults to a single instance: a second launch hands the file to
+    the running window and exits at once, which would make the caller read the
+    marks before any were made. ``--process-instance=multi`` keeps the new
+    process alive until its window closes.
+    """
+
+    command = [str(player)]
+    if Path(player).stem.lower() == "mpvnet":
+        command.append("--process-instance=multi")
+    command.append(f"--script={script}")
+    command.append(f"--script-opts=talks_reducer_cuts-file={marks_file}")
+    command.append(str(video))
+    return command
+
+
+def open_player(player: Path, video: Path, marks_file: Path) -> subprocess.Popen:
+    """Launch *player* on *video*, writing marks to *marks_file*."""
+
+    script = script_path()
+    if script is None:
+        raise FileNotFoundError(f"Bundled {LUA_SCRIPT_NAME} is missing")
+    return subprocess.Popen(
+        build_player_command(player, video, marks_file, script),
+        **hidden_subprocess_kwargs(),
+    )

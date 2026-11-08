@@ -100,3 +100,94 @@ def test_read_marks_file_accepts_empty_object_from_lua(tmp_path: Path) -> None:
     path.write_text('{"version": 1, "source": "a.mp4", "remove": {}}', "utf-8")
 
     assert cut_marks.read_marks_file(path) == []
+
+
+def test_find_player_prefers_configured_path() -> None:
+    found = cut_marks.find_player(
+        "D:/tools/mpvnet.exe",
+        platform="win32",
+        which=lambda _n: None,
+        environ={},
+        exists=lambda p: p == "D:/tools/mpvnet.exe",
+    )
+
+    assert found == Path("D:/tools/mpvnet.exe")
+
+
+def test_find_player_uses_path_before_install_dirs() -> None:
+    found = cut_marks.find_player(
+        None,
+        platform="win32",
+        which=lambda n: "C:/bin/mpv.exe" if n == "mpv" else None,
+        environ={"ProgramFiles": "C:/Program Files"},
+        exists=lambda _p: True,
+    )
+
+    assert found == Path("C:/bin/mpv.exe")
+
+
+def test_find_player_falls_back_to_program_files() -> None:
+    expected = str(Path("C:/Program Files") / "mpv.net" / "mpvnet.exe")
+
+    found = cut_marks.find_player(
+        None,
+        platform="win32",
+        which=lambda _n: None,
+        environ={"ProgramFiles": "C:/Program Files"},
+        exists=lambda p: p == expected,
+    )
+
+    assert found == Path(expected)
+
+
+def test_find_player_returns_none_when_missing() -> None:
+    assert (
+        cut_marks.find_player(
+            None,
+            platform="linux",
+            which=lambda _n: None,
+            environ={},
+            exists=lambda _p: False,
+        )
+        is None
+    )
+
+
+def test_build_player_command_for_mpvnet_forces_new_instance() -> None:
+    command = cut_marks.build_player_command(
+        Path("C:/mpv.net/mpvnet.exe"), Path("v.mp4"), Path("m.json"), Path("s.lua")
+    )
+
+    assert command == [
+        str(Path("C:/mpv.net/mpvnet.exe")),
+        "--process-instance=multi",
+        f"--script={Path('s.lua')}",
+        f"--script-opts=talks_reducer_cuts-file={Path('m.json')}",
+        str(Path("v.mp4")),
+    ]
+
+
+def test_build_player_command_for_mpv_has_no_instance_flag() -> None:
+    command = cut_marks.build_player_command(
+        Path("/usr/bin/mpv"), Path("v.mp4"), Path("m.json"), Path("s.lua")
+    )
+
+    assert "--process-instance=multi" not in command
+
+
+def test_lua_script_is_bundled() -> None:
+    path = cut_marks.script_path()
+
+    assert path is not None and path.name == "talks_reducer_cuts.lua"
+    text = path.read_text(encoding="utf-8")
+    assert 'read_options(opts, "talks_reducer_cuts")' in text
+    assert "add_forced_key_binding" in text
+
+
+def test_lua_script_is_packaged() -> None:
+    root = Path(__file__).resolve().parents[1]
+
+    assert '"*.lua"' in (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert "talks_reducer_cuts.lua" in (root / "talks-reducer.spec").read_text(
+        encoding="utf-8"
+    )
