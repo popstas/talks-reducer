@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import audio
+from .cut_marks import normalize_ranges, parse_ranges_text, read_marks_file
 from .dock_server import DOCK_SERVER_COMMANDS
 from .ffmpeg import FFmpegNotFoundError
 from .glue import prepare_glued_input
@@ -35,6 +36,15 @@ def _parse_fps_arg(text: str) -> float:
         raise argparse.ArgumentTypeError(
             f"invalid fps {text!r}: use 30, 60, orig or another positive number"
         ) from exc
+
+
+def _parse_remove_arg(text: str):
+    """argparse ``type`` for ``--remove``: a list of ``(start, end)`` seconds."""
+
+    try:
+        return parse_ranges_text(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 class _ListPresetsAction(argparse.Action):
@@ -272,6 +282,25 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--remove",
+        dest="remove_text",
+        type=_parse_remove_arg,
+        default=None,
+        metavar="RANGES",
+        help=(
+            "Drop fragments from the middle of the video, e.g. "
+            "'1:20-1:45,12:00-12:30.5' (times of the input file). Local processing only."
+        ),
+    )
+    parser.add_argument(
+        "--remove-file",
+        dest="remove_file",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Read fragments to drop from a .cuts.json file (as written by the mpv marking script).",
+    )
+    parser.add_argument(
         "--open-location",
         dest="open_location",
         action="store_true",
@@ -446,6 +475,16 @@ class CliApplication:
                 f"(got --cut-start {cut_start:g}, --cut-end {cut_end:g})."
             ]
 
+        remove_ranges = list(getattr(parsed_args, "remove_text", None) or [])
+        remove_file = getattr(parsed_args, "remove_file", None)
+        if remove_file is not None:
+            if not Path(remove_file).is_file():
+                return 1, [f"Error: --remove-file '{remove_file}' does not exist."]
+            remove_ranges.extend(read_marks_file(Path(remove_file)))
+        remove_ranges = normalize_ranges(remove_ranges)
+        if remove_ranges and getattr(parsed_args, "server_url", None):
+            return 1, ["Error: Remove ranges are local-only"]
+
         allow_audio_only = (
             str(getattr(parsed_args, "video_codec", "") or "").strip().lower() == "mp3"
         )
@@ -502,6 +541,10 @@ class CliApplication:
             key: value for key, value in vars(parsed_args).items() if value is not None
         }
         del args["input_file"]
+        args.pop("remove_text", None)
+        args.pop("remove_file", None)
+        if remove_ranges:
+            args["remove_ranges"] = tuple(remove_ranges)
 
         if "host" in args:
             del args["host"]
@@ -587,6 +630,8 @@ class CliApplication:
                 option_kwargs["cut_end_seconds"] = float(
                     local_options["cut_end_seconds"]
                 )
+            if local_options.get("remove_ranges"):
+                option_kwargs["remove_ranges"] = tuple(local_options["remove_ranges"])
             options = ProcessingOptions(**option_kwargs)
             if glue_source is not None:
                 options = replace(
