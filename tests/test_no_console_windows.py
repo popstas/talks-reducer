@@ -23,7 +23,7 @@ ALLOWED = {
     (
         "cli.py",
         "_launch_server_tray_binary",
-    ): "own _should_hide_subprocess_console() gating; see tests/test_cli.py",
+    ): "deliberately different policy: hides the console only when the parent has none, so the tray's output stays visible from a terminal; see tests/test_cli.py",
     (
         "gui/relaunch.py",
         "spawn_detached",
@@ -61,6 +61,8 @@ def _passes_helper(call: ast.Call) -> bool:
 
 
 def _is_subprocess_spawn(call: ast.Call) -> bool:
+    """Return True when *call* is ``subprocess.<one of SPAWN_FUNCTIONS>(...)``."""
+
     func = call.func
     return (
         isinstance(func, ast.Attribute)
@@ -80,6 +82,8 @@ def _unhidden_spawns() -> Iterator[Spawn]:
 
 
 def _walk(node: ast.AST, relative: str, function: Optional[str]) -> Iterator[Spawn]:
+    """Recursively yield unhidden spawns under *node*, tagged with their nearest enclosing function."""
+
     for child in ast.iter_child_nodes(node):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
             inner = child.name
@@ -95,6 +99,8 @@ def _walk(node: ast.AST, relative: str, function: Optional[str]) -> Iterator[Spa
 
 
 def test_every_subprocess_spawn_hides_its_console() -> None:
+    """Every subprocess spawn outside ALLOWED must pass the hidden-console helper."""
+
     offenders = [
         f"talks_reducer/{path}:{line} in {function}()"
         for path, line, function in _unhidden_spawns()

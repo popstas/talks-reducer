@@ -20,7 +20,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
