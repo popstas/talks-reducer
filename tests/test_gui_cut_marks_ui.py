@@ -100,3 +100,28 @@ def test_remove_only_overrides_keep_codec_and_drop_scaling() -> None:
         "remove_ranges": ((1.0, 2.0),),
     }
     assert args["small"] is True
+
+
+def test_commit_text_unchanged_keeps_sidecar(tmp_path: Path) -> None:
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"")
+    cut_marks.save_marks(video, [(1, 2)])
+    gui, _ = _gui(tmp_path, [str(video)])
+    gui.remove_ranges_text_var.set("")
+
+    cut_marks_ui.commit_text(gui)
+
+    assert cut_marks.sidecar_path(video).exists()
+
+
+def test_commit_text_change_still_saves(tmp_path: Path) -> None:
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"")
+    cut_marks.save_marks(video, [(1, 2)])
+    gui, _ = _gui(tmp_path, [str(video)])
+    cut_marks_ui.load_for_current_input(gui)
+    gui.remove_ranges_text_var.set("")
+
+    cut_marks_ui.commit_text(gui)
+
+    assert not cut_marks.sidecar_path(video).exists()

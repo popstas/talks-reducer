@@ -1531,6 +1531,8 @@ class TalksReducerGUI:
                 self.input_files.append(resolved)
                 normalized.append(resolved)
 
+        cut_marks_ui.load_for_current_input(self)
+
         if auto_run and normalized:
             # Kick off processing once the event loop becomes idle so the
             # interface has a chance to render before the work starts.

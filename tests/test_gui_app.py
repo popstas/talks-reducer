@@ -2891,3 +2891,24 @@ def test_collect_arguments_ignores_remove_ranges_in_simple_mode():
     args = app.TalksReducerGUI._collect_arguments(gui)
 
     assert "remove_ranges" not in args
+
+
+def test_populate_initial_inputs_loads_cut_marks(tmp_path):
+    from talks_reducer import cut_marks
+
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"")
+    cut_marks.save_marks(video, [(1, 2)])
+    text = SimpleNamespace(value="", set=lambda v: None)
+    gui = SimpleNamespace(
+        input_files=[],
+        remove_ranges=[],
+        remove_ranges_text_var=text,
+        _update_cut_convert_button=lambda: None,
+        root=SimpleNamespace(after_idle=lambda fn: None),
+        _start_run=lambda: None,
+    )
+
+    app.TalksReducerGUI._populate_initial_inputs(gui, [str(video)])
+
+    assert gui.remove_ranges == [(1.0, 2.0)]

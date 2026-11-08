@@ -53,9 +53,10 @@ def commit_text(gui) -> None:
         gui._append_log(f"Invalid remove ranges: {exc}")
         set_ranges(gui, gui.remove_ranges)
         return
+    changed = ranges != cut_marks.normalize_ranges(gui.remove_ranges)
     set_ranges(gui, ranges)
     video = current_input_video(gui)
-    if video is not None:
+    if changed and video is not None:
         cut_marks.save_marks(video, ranges)
 
 
