@@ -145,6 +145,11 @@ THRESHOLD_ARTICLE_URL = (
     "How-hard-can-you-trim-silence-before-speech-to-text-breaks-08-03"
 )
 
+REMOVE_ARTICLE_URL = (
+    "https://telegra.ph/"
+    "How-to-cut-fragments-out-of-the-middle-of-a-video-in-Talks-Reducer-11-08"
+)
+
 # Sounded speed offers 1/1.3/1.5/2 as buttons, but the typed range runs to the
 # same ceiling as silent speed: skimming already-watched material at 4x or more
 # is a real use, and nothing downstream caps it.
@@ -555,7 +560,9 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
 
     A third **Remove** row holds an entry with the fragments to drop from the
     middle of the video (``HH:MM:SS-HH:MM:SS`` list, committed on Enter or focus
-    loss) and a **Mark cuts…** button that opens mpv.net to mark them. A tall
+    loss) and a **Mark cuts…** button that opens mpv.net to mark them. The
+    label carries a ``?`` link to the how-to article (``REMOVE_ARTICLE_URL``),
+    since the marking keys are not discoverable from the panel itself. A tall
     **Remove only** button in the last column runs a fast remove-only pass; it is
     revealed by ``gui._update_cut_convert_button`` once ranges exist.
     """
@@ -616,7 +623,16 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
         row=0, column=3, rowspan=2, sticky="nsew", padx=(8, 0), pady=(0, 0)
     )
 
-    gui.ttk.Label(panel, text="Remove").grid(row=2, column=0, sticky="w", pady=(4, 0))
+    remove_label = gui.ttk.Frame(panel)
+    gui.ttk.Label(remove_label, text="Remove").pack(side=gui.tk.LEFT)
+    gui.remove_help_button = gui.ttk.Button(
+        remove_label,
+        text="?",
+        style="HelpLink.TButton",
+        command=lambda: webbrowser.open(REMOVE_ARTICLE_URL),
+    )
+    gui.remove_help_button.pack(side=gui.tk.LEFT)
+    remove_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
     gui.remove_ranges_entry = gui.ttk.Entry(
         panel, textvariable=gui.remove_ranges_text_var
     )

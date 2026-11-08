@@ -130,7 +130,8 @@ In the desktop GUI (Advanced mode, **Cut video** on, a single local file) press 
 to open the video in [mpv.net](https://github.com/mpvnet-player/mpv.net/releases). Press `c`
 where a fragment starts and `c` again where it ends; `C` undoes the last mark. Close the player
 and the fragments appear in the **Remove** field, where you can also edit them by hand
-(`1:20-1:45, 12:00-12:30.5`).
+(`1:20-1:45, 12:00-12:30.5`). The `?` next to **Remove** opens a
+[step-by-step guide](https://telegra.ph/How-to-cut-fragments-out-of-the-middle-of-a-video-in-Talks-Reducer-11-08).
 
 Marks are saved next to the video as `<video>.cuts.json`
 (`{"version": 1, "source": "lecture.mp4", "remove": [[80, 105], [720, 750.5]]}`, times in

@@ -216,7 +216,9 @@ path; when off the trim args are omitted. The enabled flag plus the last
 start/end values persist via `GUIPreferences` (`cut_enabled`, `cut_start`,
 `cut_end`).
   **Remove middle fragments** (`gui/cut_marks_ui.py`, `talks_reducer/cut_marks.py`): the panel's
-  **Remove** entry (`remove_ranges_text_var`) mirrors `gui.remove_ranges`, parsed by
+  **Remove** label carries a `?` link (`gui.remove_help_button`, `HelpLink.TButton`) to
+  `layout.REMOVE_ARTICLE_URL`, the telegra.ph how-to, because the `c`/`C` marking keys are not
+  discoverable from the panel. The **Remove** entry (`remove_ranges_text_var`) mirrors `gui.remove_ranges`, parsed by
   `cut_marks.parse_ranges_text` (en dash accepted). The `<video>.cuts.json` sidecar is the source of
   truth: `load_for_current_input` reads it on input change (`_on_inputs_updated`) and on a seeded
   launch (`_populate_initial_inputs`), `commit_text` writes it back but only when the ranges actually

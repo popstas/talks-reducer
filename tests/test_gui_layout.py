@@ -757,6 +757,24 @@ def test_build_cut_panel_constructs_widgets(monkeypatch):
     assert not gui.cut_panel.grid_remove_calls
 
 
+def test_remove_help_button_opens_the_article(monkeypatch):
+    opened = []
+    monkeypatch.setattr(layout.webbrowser, "open", lambda url: opened.append(url))
+    gui = _build_layout_with_cut(monkeypatch, cut_enabled=True)
+
+    assert gui.remove_help_button.kwargs["text"] == "?"
+    assert gui.remove_help_button.kwargs["style"] == "HelpLink.TButton"
+    gui.remove_help_button.kwargs["command"]()
+    assert opened == [layout.REMOVE_ARTICLE_URL]
+
+
+def test_remove_article_url_points_at_the_telegraph_post():
+    assert layout.REMOVE_ARTICLE_URL == (
+        "https://telegra.ph/"
+        "How-to-cut-fragments-out-of-the-middle-of-a-video-in-Talks-Reducer-11-08"
+    )
+
+
 def test_build_cut_panel_hidden_when_disabled(monkeypatch):
     gui = _build_layout_with_cut(monkeypatch, cut_enabled=False)
 

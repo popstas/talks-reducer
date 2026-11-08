@@ -139,7 +139,9 @@ omits the trim entirely.
 
 With **Cut video** on and exactly one local file queued, the panel also has a **Remove** field
 and a **Mark cuts…** button. The field takes comma-separated ranges such as
-`1:20-1:45, 12:00-12:30.5`; invalid text is reverted and logged.
+`1:20-1:45, 12:00-12:30.5`; invalid text is reverted and logged. The `?` next to the
+**Remove** label opens the
+[step-by-step guide](https://telegra.ph/How-to-cut-fragments-out-of-the-middle-of-a-video-in-Talks-Reducer-11-08).
 
 **Mark cuts…** opens the file in [mpv.net](https://github.com/mpvnet-player/mpv.net/releases)
 (or mpv) with a bundled script: press `c` where a fragment starts and `c` again where it ends,
