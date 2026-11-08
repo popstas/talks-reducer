@@ -709,6 +709,10 @@ def test_on_inputs_updated_refreshes_cut_range_when_enabled():
     calls: list = []
     gui = SimpleNamespace(
         cut_enabled_var=SimpleNamespace(get=lambda: True),
+        input_files=[],
+        remove_ranges=[],
+        remove_ranges_text_var=SimpleNamespace(set=lambda value: None),
+        _update_cut_convert_button=lambda: None,
         _update_cut_range_for_input=lambda: calls.append("range"),
         _on_cut_slider_change=lambda which: calls.append(which),
     )
@@ -722,6 +726,10 @@ def test_on_inputs_updated_noop_when_cut_disabled():
     calls: list = []
     gui = SimpleNamespace(
         cut_enabled_var=SimpleNamespace(get=lambda: False),
+        input_files=[],
+        remove_ranges=[],
+        remove_ranges_text_var=SimpleNamespace(set=lambda value: None),
+        _update_cut_convert_button=lambda: None,
         _update_cut_range_for_input=lambda: calls.append("range"),
         _on_cut_slider_change=lambda which: calls.append(which),
     )
@@ -2856,3 +2864,30 @@ def test_apply_cli_settings_orig_fps_keeps_height():
 
     assert gui.small_height_var.get() == 480
     assert gui.fps_var.get() == "orig"
+
+
+def test_collect_arguments_includes_remove_ranges_when_cut_enabled():
+    gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=lambda: 0.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
+        remove_ranges=[(1.0, 2.0)],
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["remove_ranges"] == ((1.0, 2.0),)
+
+
+def test_collect_arguments_ignores_remove_ranges_in_simple_mode():
+    gui = _make_collect_gui(
+        cut_enabled_var=SimpleNamespace(get=lambda: True),
+        cut_start_var=SimpleNamespace(get=lambda: 0.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+        remove_ranges=[(1.0, 2.0)],
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert "remove_ranges" not in args
