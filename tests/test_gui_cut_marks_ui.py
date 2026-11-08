@@ -125,3 +125,79 @@ def test_commit_text_change_still_saves(tmp_path: Path) -> None:
     cut_marks_ui.commit_text(gui)
 
     assert not cut_marks.sidecar_path(video).exists()
+
+
+def test_commit_text_logs_and_keeps_ranges_when_save_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"")
+    gui, logs = _gui(tmp_path, [str(video)])
+    gui.remove_ranges_text_var.set("5-7")
+
+    def boom(*_args, **_kwargs):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(cut_marks, "save_marks", boom)
+
+    cut_marks_ui.commit_text(gui)
+
+    assert gui.remove_ranges == [(5.0, 7.0)]
+    assert any("Could not save cut marks" in line for line in logs)
+
+
+def test_apply_player_result_saves_and_shows_ranges(tmp_path: Path) -> None:
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"")
+    gui, _ = _gui(tmp_path, [str(video)])
+
+    cut_marks_ui.apply_player_result(gui, video, [(3.0, 4.0)])
+
+    assert cut_marks.load_marks(video) == [(3.0, 4.0)]
+    assert gui.remove_ranges == [(3.0, 4.0)]
+
+
+def test_apply_player_result_keeps_sidecar_when_result_unreadable(
+    tmp_path: Path,
+) -> None:
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"")
+    cut_marks.save_marks(video, [(1, 2)])
+    gui, logs = _gui(tmp_path, [str(video)])
+    cut_marks_ui.load_for_current_input(gui)
+
+    cut_marks_ui.apply_player_result(gui, video, None)
+
+    assert cut_marks.load_marks(video) == [(1.0, 2.0)]
+    assert gui.remove_ranges == [(1.0, 2.0)]
+    assert any("unreadable" in line.lower() for line in logs)
+
+
+def test_apply_player_result_empty_list_clears_sidecar(tmp_path: Path) -> None:
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"")
+    cut_marks.save_marks(video, [(1, 2)])
+    gui, _ = _gui(tmp_path, [str(video)])
+
+    cut_marks_ui.apply_player_result(gui, video, [])
+
+    assert not cut_marks.sidecar_path(video).exists()
+    assert gui.remove_ranges == []
+
+
+def test_apply_player_result_logs_save_failure_but_updates_field(
+    tmp_path: Path, monkeypatch
+) -> None:
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"")
+    gui, logs = _gui(tmp_path, [str(video)])
+
+    def boom(*_args, **_kwargs):
+        raise OSError("locked")
+
+    monkeypatch.setattr(cut_marks, "save_marks", boom)
+
+    cut_marks_ui.apply_player_result(gui, video, [(3.0, 4.0)])
+
+    assert gui.remove_ranges == [(3.0, 4.0)]
+    assert any("Could not save cut marks" in line for line in logs)

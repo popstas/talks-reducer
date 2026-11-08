@@ -119,6 +119,36 @@ def sidecar_path(video: Path) -> Path:
     return video.with_name(video.name + SIDECAR_SUFFIX)
 
 
+def try_read_marks_file(path: Path) -> Optional[List[RemoveRange]]:
+    """Return the ranges in a marks JSON file, or ``None`` when it is unusable.
+
+    ``None`` means the file is missing, unreadable, malformed or of an unknown
+    version; a valid file with no ranges yields ``[]``. Missing files are
+    silent, other failures are logged as warnings.
+    """
+
+    path = Path(path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        _LOGGER.warning("Cannot read marks file %s: %s", path, exc)
+        return None
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        _LOGGER.warning("Ignoring malformed marks file %s: %s", path, exc)
+        return None
+    if not isinstance(data, dict) or data.get("version") != MARKS_VERSION:
+        _LOGGER.warning("Ignoring marks file %s with unknown version", path)
+        return None
+    remove = data.get("remove") or []
+    if not isinstance(remove, list):
+        return []
+    return normalize_ranges(remove)
+
+
 def read_marks_file(path: Path) -> List[RemoveRange]:
     """Return the ranges stored in a marks JSON file, or ``[]``.
 
@@ -126,26 +156,8 @@ def read_marks_file(path: Path) -> List[RemoveRange]:
     as a warning and treated as no marks.
     """
 
-    path = Path(path)
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return []
-    except OSError as exc:
-        _LOGGER.warning("Cannot read marks file %s: %s", path, exc)
-        return []
-    try:
-        data = json.loads(text)
-    except ValueError as exc:
-        _LOGGER.warning("Ignoring malformed marks file %s: %s", path, exc)
-        return []
-    if not isinstance(data, dict) or data.get("version") != MARKS_VERSION:
-        _LOGGER.warning("Ignoring marks file %s with unknown version", path)
-        return []
-    remove = data.get("remove") or []
-    if not isinstance(remove, list):
-        return []
-    return normalize_ranges(remove)
+    ranges = try_read_marks_file(path)
+    return [] if ranges is None else ranges
 
 
 def write_marks_file(

@@ -44,6 +44,36 @@ def load_for_current_input(gui) -> None:
     set_ranges(gui, cut_marks.load_marks(video) if video else [])
 
 
+def _save_marks_logged(gui, video: Path, ranges) -> bool:
+    """Save *ranges* for *video*, logging instead of raising on ``OSError``."""
+
+    try:
+        cut_marks.save_marks(video, ranges)
+    except OSError as exc:
+        gui._append_log(f"Could not save cut marks: {exc}")
+        return False
+    return True
+
+
+def apply_player_result(gui, video: Path, ranges) -> None:
+    """Apply the marks the player left behind; run on the UI thread.
+
+    *ranges* is ``None`` when the player's result file was missing or
+    unreadable: the existing sidecar and the field are then left alone. An empty
+    list is a genuine "removed everything" and deletes the sidecar. A failed
+    save is logged but the in-memory ranges still follow the player.
+    """
+
+    if ranges is None:
+        gui._append_log(
+            "Cut marks from the player were unreadable; keeping saved marks."
+        )
+        return
+    _save_marks_logged(gui, video, ranges)
+    if current_input_video(gui) == video:
+        set_ranges(gui, ranges)
+
+
 def commit_text(gui) -> None:
     """Parse the field; save valid ranges to the sidecar, revert invalid text."""
 
@@ -57,7 +87,7 @@ def commit_text(gui) -> None:
     set_ranges(gui, ranges)
     video = current_input_video(gui)
     if changed and video is not None:
-        cut_marks.save_marks(video, ranges)
+        _save_marks_logged(gui, video, ranges)
 
 
 def remove_only_overrides(args: dict) -> dict:
@@ -110,14 +140,8 @@ def open_marker(gui) -> None:
 
     def wait_for_player() -> None:
         process.wait()
-        ranges = cut_marks.read_marks_file(marks_file)
+        ranges = cut_marks.try_read_marks_file(marks_file)
         marks_file.unlink(missing_ok=True)
-
-        def apply() -> None:
-            cut_marks.save_marks(video, ranges)
-            if current_input_video(gui) == video:
-                set_ranges(gui, ranges)
-
-        gui._schedule_on_ui_thread(apply)
+        gui._schedule_on_ui_thread(lambda: apply_player_result(gui, video, ranges))
 
     threading.Thread(target=wait_for_player, daemon=True).start()

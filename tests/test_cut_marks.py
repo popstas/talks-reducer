@@ -191,3 +191,30 @@ def test_lua_script_is_packaged() -> None:
     assert "talks_reducer_cuts.lua" in (root / "talks-reducer.spec").read_text(
         encoding="utf-8"
     )
+
+
+def test_try_read_marks_file_returns_none_for_unusable_files(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.json"
+    malformed = tmp_path / "bad.json"
+    malformed.write_text("{not json", encoding="utf-8")
+    wrong_version = tmp_path / "v9.json"
+    wrong_version.write_text('{"version": 9, "remove": [[1, 2]]}', encoding="utf-8")
+
+    assert cut_marks.try_read_marks_file(missing) is None
+    assert cut_marks.try_read_marks_file(malformed) is None
+    assert cut_marks.try_read_marks_file(wrong_version) is None
+    assert cut_marks.read_marks_file(missing) == []
+    assert cut_marks.read_marks_file(malformed) == []
+
+
+def test_try_read_marks_file_keeps_valid_empty_and_ranges(tmp_path: Path) -> None:
+    empty = tmp_path / "empty.json"
+    empty.write_text('{"version": 1, "remove": []}', encoding="utf-8")
+    lua_empty = tmp_path / "lua.json"
+    lua_empty.write_text('{"version": 1, "remove": {}}', encoding="utf-8")
+    full = tmp_path / "full.json"
+    full.write_text('{"version": 1, "remove": [[5, 7], [1, 2]]}', encoding="utf-8")
+
+    assert cut_marks.try_read_marks_file(empty) == []
+    assert cut_marks.try_read_marks_file(lua_empty) == []
+    assert cut_marks.try_read_marks_file(full) == [(1.0, 2.0), (5.0, 7.0)]
