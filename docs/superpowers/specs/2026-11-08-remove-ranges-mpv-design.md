@@ -55,9 +55,17 @@ No dependencies beyond the mpv Lua API (works in mpv.net and mpv).
   but only while this script is loaded via `--script=`.
 - OSD line on every change (and on `c`/`C` with no change):
   `Cuts: 2 | 01:20.3–01:45.0, 12:00.0–12:30.5 | [mark 13:05.2…]`.
-- On file load the script reads an existing `.cuts.json` for that file.
+- **Which file it reads and writes.** When launched by talks-reducer the
+  script gets `--script-opts=talks_reducer_cuts-file=<path>`: a JSON file in
+  the system temp folder that the GUI pre-fills with the current marks. The
+  script only ever touches that file; Python copies the result into the real
+  sidecar. Reason: Lua's `io.open` inside mpv is not guaranteed to handle
+  non-ASCII paths on Windows (Cyrillic file names are the common case here),
+  while the temp path is under the user's temp folder. Run standalone (no
+  `file` option), the script falls back to `<video path>.cuts.json`.
+- On file load the script reads that file if it exists.
 - The file is written after every change and on `shutdown`. An empty list
-  deletes the sidecar.
+  writes `"remove": []` (the GUI then deletes the sidecar).
 - Writing uses a temp file + rename so a crash never leaves half a JSON.
 
 Shipped as package data: add `"*.lua"` to `[tool.setuptools.package-data]`
@@ -83,9 +91,16 @@ Pure helpers plus the player launcher; no Tk imports.
      `%LOCALAPPDATA%\Programs\mpv.net\mpvnet.exe`;
   4. macOS: `/opt/homebrew/bin/mpv`, `/usr/local/bin/mpv`.
 - `script_path() -> Path` — resolved via `importlib.resources`, frozen-aware.
-- `open_player(player, video) -> subprocess.Popen` —
-  `[player, f"--script={script_path()}", str(video)]` with
-  `**hidden_subprocess_kwargs()`.
+- `build_player_command(player, video, marks_file) -> list[str]` —
+  `[player, "--script=<lua>", "--script-opts=talks_reducer_cuts-file=<marks_file>", video]`,
+  plus `--process-instance=multi` when the player is mpv.net: its default
+  single-instance mode hands the file to an already running window and exits
+  at once, so the GUI would read the marks before the user made any (and the
+  script would not be loaded).
+- `open_player(player, video, marks_file) -> subprocess.Popen` — runs that
+  command with `**hidden_subprocess_kwargs()`.
+- `read_marks_file(path)` / `write_marks_file(path, ranges, source_name)` —
+  the JSON (de)serialisers `load_marks`/`save_marks` delegate to.
 
 ## 4. Pipeline
 
@@ -136,15 +151,27 @@ chunk frames accordingly.
 
 Ranges are ignored with a warning (`Remove ranges need an audio stream`).
 
+### Output name
+
+A non-empty `remove_ranges` adds a `cut` token to the output name
+(`lecture.mp4` → `lecture_speedup_cut.mp4`, `lecture_speedup.mp4` with
+**Remove only** → `lecture_speedup_cut.mp4`). Because the name already differs
+from the input, the token replaces the forced codec suffix that speeds 1/1
+without `--small` otherwise add.
+
 ## 5. GUI (Advanced only)
 
 Inside the existing Cut panel (`cut_panel`), below the sliders:
 
 - **Mark cuts…** button — `find_player(prefs.mpv_path)`; if `None`, a
   messagebox explains how to install mpv.net with a link to its releases page.
-  Otherwise `open_player` on the selected file; a worker thread waits for the
-  process and, on exit, schedules on the UI thread: `load_marks` → fill the
-  field.
+  Otherwise the GUI writes the current marks to a temp marks file,
+  `open_player`s the selected file with it, and a worker thread waits for the
+  process; on exit it reads the temp file, deletes it, and schedules on the UI
+  thread: `save_marks` (sidecar) → fill the field. Marking needs exactly one
+  queued input that is a file.
+- A run with remove ranges and more than one resolved input file stops with
+  `Remove ranges apply to a single file`.
 - **Remove:** `ttk.Entry` (`remove_ranges_text_var`) showing
   `format_ranges_text`; editable. Commit on Enter/focus-out via
   `parse_ranges_text`; on `ValueError` the field reverts and the status shows
@@ -156,8 +183,9 @@ Inside the existing Cut panel (`cut_panel`), below the sliders:
   silent and sounded speed 1, resolution orig, fps orig, current codec, output
   suffix `_cut`, keep-range trim still applied. **Convert** keeps its meaning
   (current settings) and now also applies the ranges.
-- When ranges are non-empty, dropping a file does not auto-convert — same rule
-  as `InputController._cut_requires_manual_convert` for the trim.
+- Dropping a file does not auto-convert while ranges can apply: ranges only
+  apply with **Cut video** on in Advanced mode, which is exactly when
+  `InputController._cut_requires_manual_convert` already defers the run.
 - `_collect_arguments` passes `remove_ranges` only in Advanced mode with
   **Cut video** on.
 
