@@ -34,6 +34,7 @@ from .ffmpeg import (
 from .models import ProcessingOptions, ProcessingResult
 from .progress import NullProgressReporter, ProgressReporter
 from .spherical import SphericalInfo
+from .subprocess_utils import hidden_subprocess_kwargs
 
 
 class ProcessingAborted(RuntimeError):
@@ -971,14 +972,13 @@ def _extract_video_metadata(input_file: Path, frame_rate: float) -> Dict[str, fl
         "-show_entries",
         "format=duration:stream=avg_frame_rate,nb_frames,width,height",
     ]
-    process = subprocess.Popen(
+    result = subprocess.run(
         command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-        universal_newlines=True,
+        capture_output=True,
+        text=True,
+        **hidden_subprocess_kwargs(),
     )
-    stdout, _ = process.communicate()
+    stdout = result.stdout
 
     match_frame_rate = re.search(r"frame_rate=(\d+)/(\d+)", str(stdout))
     if match_frame_rate is not None:
