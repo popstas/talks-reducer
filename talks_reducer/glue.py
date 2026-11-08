@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence, Tuple
@@ -19,6 +18,7 @@ from . import spherical
 from .ffmpeg import get_ffmpeg_path, run_timed_ffmpeg_command
 from .pipeline import ProcessingAborted, _stop_requested
 from .progress import ProgressReporter
+from .subprocess_utils import hidden_subprocess_kwargs
 
 _FFMPEG_LOG_ARGS = "-hide_banner -loglevel warning -stats"
 
@@ -59,7 +59,6 @@ def _probe_streams(path: Path | str) -> Optional[dict]:
         "json",
         str(path),
     ]
-    creationflags = 0x08000000 if sys.platform == "win32" else 0
 
     try:
         completed = subprocess.run(
@@ -67,7 +66,7 @@ def _probe_streams(path: Path | str) -> Optional[dict]:
             capture_output=True,
             text=True,
             check=True,
-            creationflags=creationflags,
+            **hidden_subprocess_kwargs(),
         )
         streams = json.loads(completed.stdout).get("streams", [])
     except Exception:  # pragma: no cover - defensive probe failure

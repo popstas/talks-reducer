@@ -27,6 +27,7 @@ from typing import List, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
 from .icons import find_icon_path
+from .subprocess_utils import hidden_subprocess_kwargs
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 17890
@@ -43,7 +44,6 @@ DOCK_SERVER_COMMANDS = frozenset({"dock-server", "obs-dock"})
 this set before importing anything heavy, so the three cannot drift apart.
 """
 
-_CREATE_NO_WINDOW = 0x08000000
 
 _WIN_ENV_RE = re.compile(r"%([^%]+)%")
 
@@ -143,9 +143,8 @@ def start_talks_reducer(
     """Spawn the Talks Reducer executable for a single dock job."""
 
     args = build_args(input_file, resolution, speed, codec, auto_close, preset, fps)
-    creationflags = _CREATE_NO_WINDOW if os.name == "nt" else 0
     print(f"[dock] launching: {exe_path} {' '.join(args)}", flush=True)
-    subprocess.Popen([exe_path, *args], creationflags=creationflags)
+    subprocess.Popen([exe_path, *args], **hidden_subprocess_kwargs())
 
 
 def _preset_names() -> List[str]:

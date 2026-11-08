@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import math
 import subprocess
-import sys
 from typing import Callable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -14,6 +13,7 @@ from audiotsm.io.array import ArrayReader, ArrayWriter
 
 from . import audio_workers
 from .ffmpeg import get_ffprobe_path
+from .subprocess_utils import hidden_subprocess_kwargs
 
 PARALLEL_MIN_OUTPUT_SAMPLES = 2_000_000
 """Below this much vocoder output the pool costs more to start than it saves."""
@@ -44,19 +44,13 @@ def is_valid_video_file(filename: str) -> bool:
         "stream=codec_type",
     ]
 
-    # Hide console window on Windows
-    creationflags = 0
-    if sys.platform == "win32":
-        # CREATE_NO_WINDOW = 0x08000000
-        creationflags = 0x08000000
-
     try:
         result = subprocess.run(
             command,
             capture_output=True,
             text=True,
             timeout=5,
-            creationflags=creationflags,
+            **hidden_subprocess_kwargs(),
         )
     except subprocess.TimeoutExpired:
         print("Timeout while checking the input file. Aborting. Command:")
@@ -87,19 +81,13 @@ def is_valid_input_file(filename: str) -> bool:
         "stream=codec_type",
     ]
 
-    # Hide console window on Windows
-    creationflags = 0
-    if sys.platform == "win32":
-        # CREATE_NO_WINDOW = 0x08000000
-        creationflags = 0x08000000
-
     try:
         result = subprocess.run(
             command,
             capture_output=True,
             text=True,
             timeout=5,
-            creationflags=creationflags,
+            **hidden_subprocess_kwargs(),
         )
     except subprocess.TimeoutExpired:
         print("Timeout while checking the input file. Aborting. Command:")

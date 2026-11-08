@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import types
 
 import numpy as np
@@ -418,7 +419,7 @@ def test_is_valid_input_file_sets_creationflags_on_windows(monkeypatch):
     """Windows invocations should request hidden subprocess windows."""
 
     monkeypatch.setattr(audio, "get_ffprobe_path", lambda: "ffprobe")
-    monkeypatch.setattr(audio.sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
 
     captured_kwargs: dict[str, object] = {}
 
