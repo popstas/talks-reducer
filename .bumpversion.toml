@@ -15,7 +15,7 @@ message = "Bump version: {current_version} → {new_version}"
 moveable_tags = []
 commit_args = ""
 setup_hooks = []
-pre_commit_hooks = []
+pre_commit_hooks = ["python scripts/update_changelog.py"]
 post_commit_hooks = []
 
 [[tool.bumpversion.files]]

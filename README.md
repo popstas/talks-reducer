@@ -15,19 +15,27 @@ re-encoding them to much smaller files.
 
 - **Speeds up the silence** — no montage editing.
 - **Shrinks the file** — typically 8–10× smaller, web-friendly.
-- **Fast** — in-memory audio/video processing, auto GPU encoding (NVENC on
-  NVIDIA, AMF on AMD and Quick Sync on Intel for HEVC/AV1, VideoToolbox for HEVC on
-  macOS). Detection results are cached in `settings.json`; see
-  [Hardware encoding](docs/cli.md#hardware-encoding) to reset them.
+- **Fast** — in-memory processing, auto GPU encoding on NVIDIA, AMD, Intel and
+  Apple ([details](docs/cli.md#hardware-encoding)).
 - **Extract audio** — export an audio-only `.mp3` instead of video.
 - **Simple mode** — one drop zone, minimum settings.
 - **Named presets** — save a settings bundle once, apply it on every surface.
-- **Remote mode** — offload to your fastest machine.
 - **Watch mode** — convert the latest video from a recordings folder.
-- **OBS integration** — convert buttons inside an OBS dock.
 - **LNK presets** — drag a video onto a preset shortcut to convert.
 - **Mobile app / WebUI** — use a remote server from your phone.
 - **CLI mode** — batch files and directories from the terminal.
+
+### Advanced features
+
+- **Cut begin, end, inner fragments** — trim the start and end, mark fragments to drop
+  in mpv.net ([how](#removing-fragments-from-the-middle)).
+- **OBS integration** — convert buttons inside an OBS dock
+  ([setup](#obs-processing-dock-windows)).
+- **Remote mode** — offload to your fastest machine ([setup](#remote-server)).
+- **Glue** — join several recordings into one video, in the order you choose
+  ([how](#command-line)).
+- **360° videos** — keep the 360° metadata through gluing and downscaling
+  ([details](#360-videos)).
 
 ## Install
 

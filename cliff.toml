@@ -30,17 +30,9 @@ split_commits = false
 commit_parsers = [
     { message = "^feat", group = "<!-- 0 -->Features" },
     { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
-    { message = "^doc", group = "<!-- 2 -->Documentation" },
-    { message = "^build", group = "<!-- 3 -->Build" },
-    { message = "^chore\\(release\\)", skip = true },
-    { message = "^chore|^ci", group = "<!-- 4 -->Miscellaneous" },
-    { message = "^refactor", group = "<!-- 5 -->Refactor" },
-    { message = "^perf", group = "<!-- 6 -->Performance" },
-    { message = "^style", group = "<!-- 7 -->Styling" },
-    { message = "^test", group = "<!-- 8 -->Testing" },
-    { message = "^wip", skip = true },
-    { message = "^Bump version", skip = true },
-    { body = ".*security", group = "<!-- 9 -->Security" },
+    # The changelog and GitHub release notes are for users: docs, refactors,
+    # tests and chores are left out (see AGENTS.md, "Pull request naming").
+    { message = ".*", skip = true },
 ]
 filter_commits = false
 tag_pattern = "v[0-9].*"

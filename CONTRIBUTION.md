@@ -46,11 +46,13 @@ processes.
 
 Releases are issued by CI: pushing a version tag (`v*`) runs the full pipeline — tests, PyInstaller bundles, the Inno installer, the **GitHub release**, and the **PyPI upload** (see the next section). The recommended flow is therefore:
 
-1. Bump the version with `bump-my-version bump {patch|minor|major}` (updates `talks_reducer/__about__.py`, `version.txt`, and `.bumpversion.toml`).
+1. Bump the version with `bump-my-version bump {patch|minor|major}` (updates `talks_reducer/__about__.py`, `version.txt`, and `.bumpversion.toml`, and regenerates `CHANGELOG.md` — see below).
 2. Commit the bump (`Bump version: <old> → <new>`).
 3. Tag it `v<new-version>` and push both the commit and the tag: `git push origin master --tags`.
 
-CI takes over from the tag — no manual build or upload step is needed. (The committed `CHANGELOG.md` is optional; CI generates the release notes with git-cliff at build time. Regenerate it with `git-cliff -o CHANGELOG.md` only if you want the in-repo changelog refreshed.)
+CI takes over from the tag — no manual build or upload step is needed.
+
+The bump runs `scripts/update_changelog.py` as a pre-commit hook: it regenerates `CHANGELOG.md` with git-cliff, passing the not-yet-created tag (`--tag v<new-version>`) so the release gets its own section, and stages the file for the bump commit. The hook needs `git-cliff` (a dev dependency) in `.venv` or on `PATH`, and fails the bump if it is missing. The in-repo changelog used to be refreshed by hand and silently fell behind for dozens of releases; tying it to the bump keeps it in step. Run `python scripts/update_changelog.py` to refresh it outside a release. CI still builds the GitHub release notes separately with `git-cliff --latest`.
 
 **Manual alternative.** If you need to build and publish by hand, run `python scripts/deploy.py` (optionally with `patch`, `minor`, or `major` to bump the version). The deploy helper runs the test suite, rebuilds the distribution artifacts, validates them with `twine check`, and uploads the release. Provide `TWINE_REPOSITORY_URL` to target TestPyPI instead of PyPI, and ensure you have valid credentials configured in `~/.pypirc` before running the publish step. Install the dev dependencies first: `pip install build twine bump-my-version pytest git-cliff`.
 
