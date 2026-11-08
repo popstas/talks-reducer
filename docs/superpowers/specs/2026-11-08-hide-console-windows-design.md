@@ -89,8 +89,10 @@ reported bug, but a one-line change each):
 New `tests/test_no_console_windows.py`. It parses the AST of every `.py` under
 `talks_reducer/` (AST, not grep, because docstrings and comments mention
 `subprocess.Popen`) and fails on any direct call to `subprocess.run`, `Popen`,
-`call`, `check_call` or `check_output` that does not pass `creationflags` or
-`**hidden_subprocess_kwargs()`, outside an explicit allowlist. The failure
+`call`, `check_call` or `check_output` that does not pass
+`**hidden_subprocess_kwargs()` in the call itself, outside an explicit
+allowlist. A bare `creationflags=` does not count: `creationflags=0` would
+pass a "has the keyword" check. The failure
 message names the file, line and the fix (use `hidden_subprocess_kwargs()`).
 
 The allowlist is keyed by `(module path, enclosing function name)`, so moving
@@ -110,8 +112,11 @@ by the allowlist rather than by trying to infer their contents.
 The test is pure static analysis, so it runs on Linux CI, which is where it
 must catch a regression.
 
-Existing tests stay green unchanged, in particular `test_audio.py` (flag on
-win32) and `test_cli.py` (tray gating). Add a unit test for
+Existing tests stay green, in particular `test_audio.py` (flag on win32) and
+`test_cli.py` (tray gating). Two kinds of small test edits are expected:
+`test_pipeline.py` fakes `subprocess.run` instead of `Popen`, and
+`test_audio.py` patches `sys.platform` instead of `audio.sys.platform`
+(`audio.py` no longer imports `sys`). Add a unit test for
 `hidden_subprocess_kwargs()` on `win32` and `linux`, and one asserting that
 `_extract_video_metadata` passes `creationflags` on win32.
 
