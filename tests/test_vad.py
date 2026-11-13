@@ -180,3 +180,156 @@ def test_engines_agree_on_speech_ratio():
     for (a0, a1), (b0, b1) in zip(found["lite"], found["torch"]):
         assert abs(a0 - b0) <= 512 / 16000
         assert abs(a1 - b1) <= 512 / 16000
+
+
+def test_to_mono_16k_int32_full_scale_normalizes():
+    data = np.array([[np.iinfo(np.int32).min], [np.iinfo(np.int32).max], [0]], np.int32)
+    out = vad.to_mono_16k(data, 16000)
+    assert out.dtype == np.float32
+    assert out.tolist() == pytest.approx([-1.0, 1.0, 0.0], abs=1e-6)
+
+
+def test_to_mono_16k_uint8_normalizes():
+    data = np.array([[0, 0], [128, 128], [255, 255], [0, 255]], np.uint8)
+    out = vad.to_mono_16k(data, 16000)
+    assert out.tolist() == pytest.approx([-1.0, 0.0, 127 / 128, -1 / 256], abs=1e-6)
+
+
+def test_to_mono_16k_downmixes_int16_stereo_before_scaling():
+    data = np.array([[32767, -32768], [16384, 16384], [-32768, -32768]], np.int16)
+    out = vad.to_mono_16k(data, 16000)
+    assert out.tolist() == pytest.approx([-0.5 / 32768, 0.5, -1.0], abs=1e-6)
+
+
+@pytest.mark.parametrize("shape", [(6,), (6, 1)])
+def test_to_mono_16k_leaves_float_input_untouched(shape):
+    data = np.linspace(-2.0, 2.0, 6, dtype=np.float32).reshape(shape)
+    original = data.copy()
+    out = vad.to_mono_16k(data, 16000)
+    assert np.array_equal(data, original)
+    assert out.min() == -1.0 and out.max() == 1.0
+    assert not np.shares_memory(out, data)
+
+
+def test_to_mono_16k_peak_memory_stays_near_one_mono_copy():
+    import tracemalloc
+
+    seconds = 60
+    data = np.random.default_rng(0).integers(
+        -3000, 3000, size=(48000 * seconds, 2), dtype=np.int16
+    )
+    mono_float32_bytes = 48000 * seconds * 4
+    tracemalloc.start()
+    try:
+        vad.to_mono_16k(data, 48000)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 2 * mono_float32_bytes
+
+
+@pytest.mark.parametrize("threshold", [0.15, 0.1])
+def test_speech_intervals_close_at_low_threshold(threshold):
+    probs = np.array([0.9] * 20 + [0.0] * 20 + [0.9] * 20)
+    settings = VadSettings(threshold=threshold, padding_ms=0, min_silence_ms=300)
+    intervals = vad.speech_intervals(probs, 0.032, settings, len(probs) * 0.032)
+    assert len(intervals) == 2
+    assert intervals[0][1] == pytest.approx(0.64, abs=0.01)
+
+
+def test_speech_intervals_dip_inside_hysteresis_never_splits():
+    probs = np.array([0.9] * 20 + [0.4] * 30 + [0.9] * 20)
+    settings = VadSettings(threshold=0.5, padding_ms=0, min_silence_ms=300)
+    intervals = vad.speech_intervals(probs, 0.032, settings, len(probs) * 0.032)
+    assert intervals == [(0.0, pytest.approx(len(probs) * 0.032))]
+
+
+def _broken_module(name, **attributes):
+    """Return a stand-in module whose attributes are the given callables."""
+
+    import types
+
+    module = types.ModuleType(name)
+    for key, value in attributes.items():
+        setattr(module, key, value)
+    return module
+
+
+def _raise(error):
+    def factory(*args, **kwargs):
+        raise error
+
+    return factory
+
+
+@pytest.mark.parametrize("error", [OSError("DLL load failed"), RuntimeError("boom")])
+def test_lite_engine_native_failure_raises_unavailable(monkeypatch, error):
+    monkeypatch.setitem(
+        sys.modules,
+        "silero_vad_lite",
+        _broken_module("silero_vad_lite", SileroVAD=_raise(error)),
+    )
+    with pytest.raises(vad.VadUnavailableError) as info:
+        vad.load_engine("lite")
+    assert "pip install silero-vad-lite" in str(info.value)
+    assert str(error) in str(info.value)
+
+
+@pytest.mark.parametrize(
+    "error", [ImportError("no torch"), OSError("c10.dll"), RuntimeError("jit")]
+)
+def test_torch_engine_load_failure_raises_unavailable(monkeypatch, error):
+    monkeypatch.setitem(sys.modules, "torch", _broken_module("torch"))
+    monkeypatch.setitem(
+        sys.modules,
+        "silero_vad",
+        _broken_module("silero_vad", load_silero_vad=_raise(error)),
+    )
+    with pytest.raises(vad.VadUnavailableError) as info:
+        vad.load_engine("torch")
+    assert "talks-reducer[vad-torch]" in str(info.value)
+    assert str(error) in str(info.value)
+
+
+def test_torch_engine_import_oserror_raises_unavailable(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "torch":
+            raise OSError("WinError 126: fbgemm.dll")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(vad.VadUnavailableError, match="fbgemm.dll"):
+        vad.load_engine("torch")
+
+
+@pytest.mark.parametrize("error", [OSError("libten_vad"), RuntimeError("init")])
+def test_ten_engine_constructor_failure_raises_unavailable_on_load(monkeypatch, error):
+    monkeypatch.setitem(
+        sys.modules, "ten_vad", _broken_module("ten_vad", TenVad=_raise(error))
+    )
+    with pytest.raises(vad.VadUnavailableError) as info:
+        vad.load_engine("ten")
+    assert "talks-reducer[vad-ten]" in str(info.value)
+    assert str(error) in str(info.value)
+
+
+def test_ten_engine_per_call_constructor_failure_raises_unavailable(monkeypatch):
+    calls = []
+
+    class FlakyTenVad:
+        def __init__(self, hop_size):
+            calls.append(hop_size)
+            if len(calls) > 1:
+                raise OSError("second detector failed")
+
+    monkeypatch.setitem(
+        sys.modules, "ten_vad", _broken_module("ten_vad", TenVad=FlakyTenVad)
+    )
+    engine = vad.load_engine("ten")
+    with pytest.raises(vad.VadUnavailableError, match="second detector failed"):
+        engine.probabilities(np.zeros(512, np.float32))

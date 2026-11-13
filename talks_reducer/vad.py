@@ -24,6 +24,7 @@ _TEN_HOP_SAMPLES = 256
 _PROGRESS_BATCH = 1000
 _RESAMPLE_BLOCK_SECONDS = 10
 _HYSTERESIS_MARGIN = 0.15
+_MIN_NEGATIVE_THRESHOLD = 0.01
 
 _INSTALL_HINTS = {
     "lite": "pip install silero-vad-lite",
@@ -33,7 +34,22 @@ _INSTALL_HINTS = {
 
 
 class VadUnavailableError(RuntimeError):
-    """Raised when the requested VAD engine cannot be imported."""
+    """Raised when the requested VAD engine cannot be imported or started."""
+
+
+_ENGINE_LOAD_ERRORS = (ImportError, OSError, RuntimeError)
+
+
+def _unavailable(message: str, exc: BaseException) -> VadUnavailableError:
+    """Return a :class:`VadUnavailableError` carrying *message* and *exc*'s text.
+
+    A missing package raises ``ImportError``, but a package whose native library
+    cannot load (a missing DLL, a wrong architecture) raises ``OSError`` or a
+    ``RuntimeError`` from the constructor; the original text is kept because
+    the install hint alone cannot fix those.
+    """
+
+    return VadUnavailableError(f"{message} ({type(exc).__name__}: {exc})")
 
 
 @dataclass(frozen=True)
@@ -77,53 +93,79 @@ def count_windows(sample_count_16k: int, hop_samples: int) -> int:
     return max(1, math.ceil(sample_count_16k / hop_samples))
 
 
-def _normalize_samples(audio_data: np.ndarray) -> np.ndarray:
-    """Scale integer or float samples into float32 values within [-1, 1]."""
+_INTEGER_SCALES = {
+    np.dtype(np.int16): (0.0, 32768.0),
+    np.dtype(np.int32): (0.0, 2147483648.0),
+    np.dtype(np.uint8): (128.0, 128.0),
+}
 
-    kind = audio_data.dtype
-    if kind == np.int16:
-        data = audio_data.astype(np.float32) / 32768.0
-    elif kind == np.int32:
-        data = (audio_data.astype(np.float64) / 2147483648.0).astype(np.float32)
-    elif kind == np.uint8:
-        data = (audio_data.astype(np.float32) - 128.0) / 128.0
+
+def _mono_float32(audio_data: np.ndarray) -> np.ndarray:
+    """Downmix to one float32 channel scaled into [-1, 1], in a single new array.
+
+    The channels are averaged straight from the source dtype (NumPy casts in
+    small buffers), so the only allocation the size of the input is the mono
+    result; the integer offset, scale and clip then run in place on it. The
+    caller's array is never modified, because the pipeline renders its output
+    from it later.
+    """
+
+    if audio_data.ndim > 1:
+        if audio_data.shape[1] == 1:
+            mono = audio_data[:, 0].astype(np.float32)
+        else:
+            mono = audio_data.mean(axis=1, dtype=np.float32)
     else:
-        data = audio_data.astype(np.float32)
-    return np.clip(data, -1.0, 1.0)
+        mono = audio_data.astype(np.float32)
+    offset, scale = _INTEGER_SCALES.get(audio_data.dtype, (0.0, 1.0))
+    if offset:
+        mono -= offset
+    if scale != 1.0:
+        mono /= scale
+    np.clip(mono, -1.0, 1.0, out=mono)
+    return mono
 
 
-def _resample_to_16k(mono: np.ndarray, sample_rate: int) -> np.ndarray:
-    """Resample a mono signal to 16 kHz without building a full-length index."""
+def _resample_to_16k(audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
+    """Downmix and resample ``audio_data`` to 16 kHz in 10-second output blocks.
 
-    if sample_rate == VAD_SAMPLE_RATE or len(mono) == 0:
-        return mono
+    Each block's source span goes through :func:`_mono_float32` on its own, so
+    no full-length float copy at the source rate is ever built: the only
+    full-length array is the 16 kHz result. Integer ratios average each group
+    of ``factor`` samples; other ratios interpolate linearly.
+    """
+
+    block = VAD_SAMPLE_RATE * _RESAMPLE_BLOCK_SECONDS
     if sample_rate % VAD_SAMPLE_RATE == 0:
         factor = sample_rate // VAD_SAMPLE_RATE
-        usable = len(mono) // factor * factor
-        return mono[:usable].reshape(-1, factor).mean(axis=1, dtype=np.float32)
+        out_length = len(audio_data) // factor
+        out = np.empty(out_length, dtype=np.float32)
+        for start in range(0, out_length, block):
+            stop = min(start + block, out_length)
+            mono = _mono_float32(audio_data[start * factor : stop * factor])
+            out[start:stop] = mono.reshape(-1, factor).mean(axis=1, dtype=np.float32)
+        return out
 
     ratio = sample_rate / VAD_SAMPLE_RATE
-    out_length = int(round(len(mono) * VAD_SAMPLE_RATE / sample_rate))
+    out_length = int(round(len(audio_data) * VAD_SAMPLE_RATE / sample_rate))
     out = np.empty(out_length, dtype=np.float32)
-    block = VAD_SAMPLE_RATE * _RESAMPLE_BLOCK_SECONDS
     for start in range(0, out_length, block):
         stop = min(start + block, out_length)
         positions = np.arange(start, stop, dtype=np.float64) * ratio
         low = int(positions[0])
-        high = min(len(mono), int(positions[-1]) + 2)
-        out[start:stop] = np.interp(
-            positions - low, np.arange(high - low), mono[low:high]
-        )
+        high = min(len(audio_data), int(positions[-1]) + 2)
+        mono = _mono_float32(audio_data[low:high])
+        out[start:stop] = np.interp(positions - low, np.arange(high - low), mono)
     return out
 
 
 def to_mono_16k(audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
     """Convert decoded audio of any dtype and channel count to 16 kHz mono float32."""
 
-    data = _normalize_samples(np.asarray(audio_data))
-    if data.ndim > 1:
-        data = data.mean(axis=1, dtype=np.float32)
-    return _resample_to_16k(data, sample_rate).astype(np.float32, copy=False)
+    data = np.asarray(audio_data)
+    if sample_rate == VAD_SAMPLE_RATE or len(data) == 0:
+        return _mono_float32(data)
+    return _resample_to_16k(data, sample_rate)
 
 
 def speech_intervals(
@@ -136,11 +178,14 @@ def speech_intervals(
 
     Mirrors Silero's ``get_speech_timestamps`` post-processing: a window at or
     above ``threshold`` opens speech, and speech only closes after the
-    probability stays below ``threshold - 0.15`` for ``min_silence_ms``.
+    probability stays below ``max(threshold - 0.15, 0.01)`` for
+    ``min_silence_ms``. The 0.01 floor is Silero's: without it a threshold at or
+    below 0.15 puts the close level at or below zero, which no probability can
+    fall under, so speech would never end.
     """
 
     threshold = settings.threshold
-    negative = threshold - _HYSTERESIS_MARGIN
+    negative = max(threshold - _HYSTERESIS_MARGIN, _MIN_NEGATIVE_THRESHOLD)
     min_silence = settings.min_silence_ms / 1000.0
     raw: list[tuple[float, float]] = []
     triggered = False
@@ -231,12 +276,14 @@ class LiteEngine:
     def __init__(self) -> None:
         try:
             from silero_vad_lite import SileroVAD
-        except ImportError as exc:
-            raise VadUnavailableError(
+
+            self._vad = SileroVAD(VAD_SAMPLE_RATE)
+        except _ENGINE_LOAD_ERRORS as exc:
+            raise _unavailable(
                 "Speedup no voice needs the Silero VAD engine. Install it with: "
-                f"{_INSTALL_HINTS['lite']}"
+                f"{_INSTALL_HINTS['lite']}",
+                exc,
             ) from exc
-        self._vad = SileroVAD(VAD_SAMPLE_RATE)
 
     def probabilities(
         self,
@@ -265,17 +312,19 @@ class TorchEngine:
         try:
             import torch
             from silero_vad import load_silero_vad
-        except ImportError as exc:
-            raise VadUnavailableError(
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", message=".*torch.jit.load.*", category=FutureWarning
+                )
+                self._model = load_silero_vad()
+        except _ENGINE_LOAD_ERRORS as exc:
+            raise _unavailable(
                 "The 'torch' VAD engine needs PyTorch and silero-vad. Install "
-                f"them with: {_INSTALL_HINTS['torch']}"
+                f"them with: {_INSTALL_HINTS['torch']}",
+                exc,
             ) from exc
         self._torch = torch
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message=".*torch.jit.load.*", category=FutureWarning
-            )
-            self._model = load_silero_vad()
 
     def probabilities(
         self,
@@ -302,14 +351,37 @@ class TenEngine:
     hop_samples = _TEN_HOP_SAMPLES
 
     def __init__(self) -> None:
+        """Import ``ten-vad`` and build one detector up front.
+
+        The detector built here is discarded; it exists so a native library
+        that fails to start is reported when the engine is loaded, before the
+        pipeline spends time extracting audio, rather than on the first file.
+        """
+
         try:
             from ten_vad import TenVad
-        except (ImportError, OSError) as exc:
-            raise VadUnavailableError(
-                "The 'ten' VAD engine needs the ten-vad package. Install it "
-                f"with: {_INSTALL_HINTS['ten']}"
-            ) from exc
+        except _ENGINE_LOAD_ERRORS as exc:
+            raise self._unavailable(exc) from exc
         self._factory = TenVad
+        self._new_detector()
+
+    @staticmethod
+    def _unavailable(exc: BaseException) -> VadUnavailableError:
+        """Return the install-hint error for a ``ten-vad`` load failure."""
+
+        return _unavailable(
+            "The 'ten' VAD engine needs the ten-vad package. Install it "
+            f"with: {_INSTALL_HINTS['ten']}",
+            exc,
+        )
+
+    def _new_detector(self):
+        """Return a fresh ``TenVad`` detector, wrapping native start-up errors."""
+
+        try:
+            return self._factory(hop_size=self.hop_samples)
+        except _ENGINE_LOAD_ERRORS as exc:
+            raise self._unavailable(exc) from exc
 
     def probabilities(
         self,
@@ -324,7 +396,7 @@ class TenEngine:
         never leaks between files.
         """
 
-        detector = self._factory(hop_size=self.hop_samples)
+        detector = self._new_detector()
 
         def score(chunk: np.ndarray) -> float:
             samples = np.clip(chunk * 32767.0, -32768, 32767).astype(np.int16)
@@ -337,7 +409,7 @@ def load_engine(name: str) -> VadEngine:
     """Instantiate the VAD engine called ``name``.
 
     Raises ``ValueError`` for unknown names and :class:`VadUnavailableError`
-    when the engine's package is missing.
+    when the engine's package is missing or its native library fails to start.
     """
 
     if name == "lite":
