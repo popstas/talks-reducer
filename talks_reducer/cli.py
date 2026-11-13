@@ -437,6 +437,34 @@ def _apply_preset_to_args(
         parsed_args.vad = bool(preset.vad)
 
 
+def _remote_vad_options(parsed_args: argparse.Namespace) -> Dict[str, object]:
+    """Return the ``send_video`` keyword arguments for ``--vad`` and its settings.
+
+    ``vad`` is ``None`` when neither ``--vad`` nor ``--no-vad`` (nor a preset)
+    decided it, which keeps the local default of loudness detection, so nothing
+    is sent. With ``vad`` on, only the settings the user gave are sent and the
+    server falls back to its own defaults for the rest. ``--vad-engine`` is not
+    forwarded: the server always uses the ``lite`` engine.
+    """
+
+    vad = getattr(parsed_args, "vad", None)
+    if vad is None:
+        return {}
+    options: Dict[str, object] = {"vad": bool(vad)}
+    if not vad:
+        return options
+    threshold = getattr(parsed_args, "vad_threshold", None)
+    if threshold is not None:
+        options["vad_threshold"] = float(threshold)
+    padding = getattr(parsed_args, "vad_padding_ms", None)
+    if padding is not None:
+        options["vad_padding_ms"] = int(padding)
+    min_silence = getattr(parsed_args, "vad_min_silence_ms", None)
+    if min_silence is not None:
+        options["vad_min_silence_ms"] = int(min_silence)
+    return options
+
+
 def gather_input_files(
     paths: List[str], *, allow_audio_only: bool = False
 ) -> List[str]:
@@ -819,6 +847,7 @@ class CliApplication:
         max_frame_rate = getattr(parsed_args, "max_frame_rate", None)
         if max_frame_rate and max_frame_rate > 0:
             remote_option_values["max_frame_rate"] = float(max_frame_rate)
+        remote_option_values.update(_remote_vad_options(parsed_args))
 
         for index, file in enumerate(files, start=1):
             basename = os.path.basename(file)

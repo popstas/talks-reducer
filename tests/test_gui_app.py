@@ -3062,3 +3062,52 @@ def test_collect_arguments_vad_settings_only_when_enabled():
     args = app.TalksReducerGUI._collect_arguments(_vad_collect_gui(vad=False))
     assert args["vad"] is False
     assert not {"vad_threshold", "vad_padding_ms", "vad_min_silence_ms"} & set(args)
+
+
+def test_apply_cli_settings_seeds_vad():
+    """A seeded ``--vad`` ticks the checkbox and overrides Simple mode's preset."""
+
+    gui = _make_settings_gui()
+    gui.vad_var = _RecordingVar(False)
+    gui.vad_threshold_var = _RecordingVar(0.5)
+    gui.vad_padding_var = _RecordingVar(150.0)
+    gui.vad_min_silence_var = _RecordingVar(300.0)
+    gui._seeded_vad = None
+
+    app.TalksReducerGUI._apply_cli_settings(
+        gui,
+        {
+            "vad": True,
+            "vad_threshold": 0.4,
+            "vad_padding_ms": 200,
+            "vad_min_silence_ms": 500,
+        },
+    )
+
+    assert gui.vad_var.get() is True
+    assert gui._seeded_vad is True
+    assert gui.vad_threshold_var.get() == 0.4
+    assert gui.vad_padding_var.get() == 200
+    assert gui.vad_min_silence_var.get() == 500
+
+
+def test_simple_mode_honors_seeded_vad():
+    """A launch flag (OBS dock) beats the Simple dropdown in both directions."""
+
+    seeded_on = _make_collect_gui(
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+        vad_var=SimpleNamespace(get=lambda: True),
+        simple_preset_var=SimpleNamespace(get=lambda: "Optimal"),
+        _simple_presets=_voice_and_optimal_presets(),
+        _seeded_vad=True,
+    )
+    seeded_off = _make_collect_gui(
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+        vad_var=SimpleNamespace(get=lambda: False),
+        simple_preset_var=SimpleNamespace(get=lambda: "Voice"),
+        _simple_presets=_voice_and_optimal_presets(),
+        _seeded_vad=False,
+    )
+
+    assert app.TalksReducerGUI._collect_arguments(seeded_on)["vad"] is True
+    assert app.TalksReducerGUI._collect_arguments(seeded_off)["vad"] is False

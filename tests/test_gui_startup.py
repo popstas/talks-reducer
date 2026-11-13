@@ -787,3 +787,31 @@ def test_tkinter_check_hides_console_on_windows(monkeypatch) -> None:
     startup._check_tkinter_available()
 
     assert captured_kwargs.get("creationflags") == 0x08000000
+
+
+def test_parse_seeded_launch_seeds_vad(tmp_path, monkeypatch) -> None:
+    """``--vad``/``--no-vad`` and a vad preset reach the seeded GUI settings."""
+
+    from talks_reducer import presets as presets_module
+
+    voice = presets_module.Preset(name="Voice", video_codec="hevc", vad=True)
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [voice])
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    _, settings = startup._parse_seeded_launch(
+        [str(video), "--vad", "--vad-threshold", "0.4", "--vad-padding", "200"]
+    )
+    assert settings["vad"] is True
+    assert settings["vad_threshold"] == 0.4
+    assert settings["vad_padding_ms"] == 200
+    assert "vad_min_silence_ms" not in settings
+
+    _, settings = startup._parse_seeded_launch([str(video), "--no-vad"])
+    assert settings["vad"] is False
+
+    _, settings = startup._parse_seeded_launch([str(video), "--preset", "Voice"])
+    assert settings["vad"] is True
+
+    _, settings = startup._parse_seeded_launch([str(video), "--small"])
+    assert "vad" not in settings

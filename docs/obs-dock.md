@@ -108,6 +108,7 @@ panels, items wrap to the next line.
 | **Resolution / Speed** | Moved here from the toolbar when presets exist; shown in the toolbar otherwise |
 | **Codec** | `h264` (default), `hevc`, `av1`, or `mp3` |
 | **FPS** | `orig` (default), `60`, or `30` — caps the output frame rate. Like **Codec** it always lives here and is never moved into the toolbar; when a preset is selected the preset's own fps applies and this control is ignored |
+| **Speedup no voice** | Speeds up only non-voice frames (`--vad`). Like **FPS** it always lives here; when a preset is selected the preset decides and this checkbox is ignored |
 | **Auto close** | When enabled, adds `--open-location --auto-close` |
 | **Talks Reducer** | Path to `talks-reducer.exe`; `%LOCALAPPDATA%` and other `%VAR%` forms are expanded on the server |
 | **Log** | Recent dock and processing messages |
@@ -147,12 +148,13 @@ Settings are stored in the browser `localStorage` under keys prefixed with
 | `fps` | Optional; `orig` (default), `60`, or `30` |
 | `codec` | `h264`, `hevc`, `av1`, `mp3` |
 | `autoClose` | `true` adds `--open-location --auto-close` |
+| `vad` | Optional; `true` adds `--vad`, anything else `--no-vad` (manual mode only) |
 | `exe` | Optional; defaults to `%LOCALAPPDATA%\Programs\talks-reducer\talks-reducer.exe` |
 | `preset` | Optional; a saved preset name. When present the dock emits `--preset NAME` and ignores the resolution/speed/codec fields |
 
 The dock also serves `GET /presets`, which returns the saved preset list as JSON
 (`[{ "name", "resolution", "silent_speed", "sounded_speed", "silent_threshold",
-"video_codec", "fps" }, …]`) — the same list authored in the desktop GUI. The dock fetches
+"video_codec", "fps", "vad" }, …]`, absent fields omitted) — the same list authored in the desktop GUI. The dock fetches
 this to populate its **Preset** dropdown.
 
 ### CLI arguments
@@ -167,6 +169,7 @@ The server maps dock choices to Talks Reducer flags:
 | 720p | `--small --720` |
 | 480p | `--small --480` |
 | FPS | `--fps <orig\|60\|30>` |
+| Speedup no voice | `--vad` when ticked, `--no-vad` otherwise (always stated, so a remembered GUI checkbox or Simple-mode preset cannot decide) |
 | Speed button | `--silent-speed <1\|5\|10>` |
 | Codec | `--video-codec <codec>` |
 | Auto close | `--open-location --auto-close` |

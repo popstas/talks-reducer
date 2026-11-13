@@ -533,6 +533,10 @@ def send_video(
     cut_end_seconds: Optional[float] = None,
     small_height: Optional[int] = None,
     max_frame_rate: Optional[float] = None,
+    vad: bool = False,
+    vad_threshold: Optional[float] = None,
+    vad_padding_ms: Optional[int] = None,
+    vad_min_silence_ms: Optional[int] = None,
     log_callback: Optional[Callable[[str], None]] = None,
     stream_updates: bool = False,
     should_cancel: Optional[Callable[[], bool]] = None,
@@ -552,7 +556,11 @@ def send_video(
     *prefer_global_ffmpeg* when the PATH-provided FFmpeg offers hardware
     encoders that the bundled static build omits. *small_height* selects the
     downscale target (1080 needs an updated server) and *max_frame_rate* caps the
-    output frame rate (also needs an updated server).
+    output frame rate (also needs an updated server). *vad* speeds up non-voice
+    frames on the server with its ``lite`` engine, tuned by the three optional
+    ``vad_*`` settings (``None`` keeps the server defaults); it needs an updated
+    server, so a run without it submits exactly the arguments older servers
+    accept.
     """
 
     if not input_path.exists():
@@ -579,10 +587,18 @@ def send_video(
     frame_rate_cap = (
         float(max_frame_rate) if max_frame_rate and max_frame_rate > 0 else 0.0
     )
-    if target_height not in (0, 480, 720) or frame_rate_cap > 0:
+    if vad or target_height not in (0, 480, 720) or frame_rate_cap > 0:
         # Appended only when needed so a client stays compatible with servers
         # that predate these two parameters for every option that existed then.
+        # The vad values below are positional too, so they need this pair first.
         submit_args = submit_args + (target_height, frame_rate_cap)
+    if vad:
+        submit_args = submit_args + (
+            True,
+            float(vad_threshold) if vad_threshold is not None else None,
+            int(vad_padding_ms) if vad_padding_ms is not None else None,
+            int(vad_min_silence_ms) if vad_min_silence_ms is not None else None,
+        )
     submit_kwargs: dict[str, Any] = {"api_name": "/process_video"}
 
     upload_total: Optional[int] = None

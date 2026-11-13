@@ -1687,3 +1687,56 @@ def test_optimal_after_voice_turns_vad_off(monkeypatch: pytest.MonkeyPatch) -> N
     captured.clear()
     cli.main(["--preset", "Optimal", "input.mp4"])
     assert captured["vad"] is False
+
+
+def test_cli_remote_passes_vad() -> None:
+    """``--url`` with ``--vad`` forwards the vad flag and its explicit settings."""
+
+    def run(**overrides: object) -> dict[str, object]:
+        parsed_args = SimpleNamespace(
+            input_file=["input.mp4"],
+            output_file=None,
+            temp_folder=None,
+            silent_threshold=None,
+            silent_speed=None,
+            sounded_speed=None,
+            frame_spreadage=None,
+            sample_rate=None,
+            keyframe_interval_seconds=None,
+            optimize=True,
+            small=False,
+            server_url="http://localhost:9005/",
+            server_stream=False,
+            host=None,
+            video_codec="h264",
+            prefer_global_ffmpeg=False,
+            **overrides,
+        )
+        send_calls: list[dict[str, object]] = []
+
+        def fake_send_video(**kwargs: object):
+            send_calls.append(dict(kwargs))
+            return Path("/tmp/result.mp4"), "Summary", "Log"
+
+        app = cli.CliApplication(
+            gather_files=lambda paths, **_kwargs: ["/tmp/input.mp4"],
+            send_video=fake_send_video,
+            speed_up=mock.Mock(side_effect=AssertionError("local run")),
+            reporter_factory=mock.Mock(side_effect=AssertionError("reporter")),
+        )
+        exit_code, _errors = app.run(parsed_args)
+        assert exit_code == 0
+        return send_calls[0]
+
+    call = run(vad=True, vad_threshold=0.4, vad_padding_ms=200, vad_min_silence_ms=500)
+    assert call["vad"] is True
+    assert call["vad_threshold"] == 0.4
+    assert call["vad_padding_ms"] == 200
+    assert call["vad_min_silence_ms"] == 500
+
+    call = run(vad=True, vad_threshold=None)
+    assert call["vad"] is True
+    assert "vad_threshold" not in call
+
+    call = run(vad=None)
+    assert "vad" not in call

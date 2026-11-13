@@ -347,6 +347,10 @@ def process_files_via_server(
         "optimize",
         "cut_start_seconds",
         "cut_end_seconds",
+        "vad",
+        "vad_threshold",
+        "vad_padding_ms",
+        "vad_min_silence_ms",
     }
     ignored = [key for key in args if key not in allowed_remote_keys]
     if ignored:
@@ -495,6 +499,10 @@ def process_files_via_server(
                 cut_enabled="cut_start_seconds" in args or "cut_end_seconds" in args,
                 cut_start_seconds=args.get("cut_start_seconds"),
                 cut_end_seconds=args.get("cut_end_seconds"),
+                vad=bool(args.get("vad", False)),
+                vad_threshold=args.get("vad_threshold"),
+                vad_padding_ms=args.get("vad_padding_ms"),
+                vad_min_silence_ms=args.get("vad_min_silence_ms"),
                 stream_updates=True,
                 log_callback=gui._append_log,
                 should_cancel=lambda: gui._stop_requested,

@@ -995,12 +995,22 @@ def _stream_pipeline(
     *,
     target_height: int = 0,
     max_frame_rate: float = 0.0,
+    vad: bool = False,
+    vad_threshold: Optional[float] = None,
+    vad_padding_ms: Optional[int] = None,
+    vad_min_silence_ms: Optional[int] = None,
 ) -> Iterator[tuple[str, object]]:
     """Run the pipeline, yielding semantic events shared by both handlers.
 
     Yields ``("log", full_log)`` on each log update (including the initial
     upload receipt), ``("progress", (current, total, desc))`` for progress, and
     finally ``("done", (result, full_log))``. Raises ``gr.Error`` on failure.
+
+    *vad* switches silence detection to voice detection on the ``lite`` engine
+    (the server never exposes another one); a ``vad_*`` setting left ``None``
+    keeps the :class:`ProcessingOptions` default. A missing engine raises
+    ``VadUnavailableError`` inside the pipeline, which reaches the caller as the
+    usual "Failed to process the video" error carrying its message.
     """
 
     file_path = _coerce_file_path(file_path)
@@ -1066,6 +1076,15 @@ def _stream_pipeline(
     if cut_enabled:
         option_kwargs["cut_start_seconds"] = float(cut_start_seconds or 0.0)
         option_kwargs["cut_end_seconds"] = float(cut_end_seconds or 0.0)
+    if vad:
+        option_kwargs["vad"] = True
+        option_kwargs["vad_engine"] = "lite"
+        if vad_threshold is not None:
+            option_kwargs["vad_threshold"] = float(vad_threshold)
+        if vad_padding_ms is not None:
+            option_kwargs["vad_padding_ms"] = int(vad_padding_ms)
+        if vad_min_silence_ms is not None:
+            option_kwargs["vad_min_silence_ms"] = int(vad_min_silence_ms)
 
     options = ProcessingOptions(
         input_file=input_path,
@@ -1164,7 +1183,7 @@ def preset_to_web_controls(preset: Preset) -> dict[str, object]:
     preset), the ``fps`` radio value, the matching ``speedup`` radio label (``None`` when the silent speed
     is not one of the radio's presets), the ``video_codec`` dropdown value, and
     the numeric ``silent_speed`` / ``silent_threshold`` / ``sounded_speed`` slider
-    values.
+    values, and the ``vad`` (Speedup no voice) checkbox value.
     """
 
     controls: dict[str, object] = {}
@@ -1181,6 +1200,8 @@ def preset_to_web_controls(preset: Preset) -> dict[str, object]:
         controls["silent_threshold"] = float(preset.silent_threshold)
     if preset.sounded_speed is not None:
         controls["sounded_speed"] = float(preset.sounded_speed)
+    if preset.vad is not None:
+        controls["vad"] = bool(preset.vad)
     return controls
 
 
@@ -1213,6 +1234,7 @@ def process_video_ui(
     cut_start_seconds: Optional[float],
     cut_end_seconds: Optional[float],
     fps: str = "orig",
+    vad: bool = False,
     progress: Optional[gr.Progress] = gr.Progress(track_tqdm=False),
     *,
     dependencies: Optional[ProcessVideoDependencies] = None,
@@ -1221,7 +1243,9 @@ def process_video_ui(
 
     The 5-tuple is ``(video, log, summary_compact, details, download)``.
     ``silent_speed`` is the Advanced slider value (the Speedup radio writes into
-    that slider), so a custom slider value is honored.
+    that slider), so a custom slider value is honored. ``vad`` is the Speedup no
+    voice checkbox; the Web UI has no VAD tuning controls, so it runs with the
+    default threshold, padding and pause.
     """
 
     small_video, target_height = _resolution_to_target(resolution)
@@ -1247,6 +1271,7 @@ def process_video_ui(
         dependencies,
         target_height=target_height,
         max_frame_rate=max_frame_rate,
+        vad=bool(vad),
     ):
         if kind == "log":
             yield (
@@ -1292,13 +1317,19 @@ def process_video_api(
     cut_end_seconds: Optional[float] = None,
     target_height: int = 0,
     max_frame_rate: float = 0.0,
+    vad: bool = False,
+    vad_threshold: Optional[float] = None,
+    vad_padding_ms: Optional[int] = None,
+    vad_min_silence_ms: Optional[int] = None,
 ) -> Iterator[tuple[Optional[str], str, str, Optional[str]]]:
     """Clean-signature wrapper registered via ``gr.api`` (requires type hints).
 
     Preserves the 13-arg positional contract and 4-tuple output that
-    ``service_client`` depends on, and accepts two optional trailing args
-    (``target_height``, ``max_frame_rate``) that newer clients send only when
-    needed.
+    ``service_client`` depends on, and accepts optional trailing args that newer
+    clients send only when needed: ``target_height`` and ``max_frame_rate``
+    (positions 13-14), then ``vad`` and its three settings (positions 15-18).
+    New parameters are only ever appended, so an older client's shorter
+    argument list still lines up.
     """
 
     yield from process_video(
@@ -1317,6 +1348,10 @@ def process_video_api(
         cut_end_seconds,
         target_height=target_height,
         max_frame_rate=max_frame_rate,
+        vad=vad,
+        vad_threshold=vad_threshold,
+        vad_padding_ms=vad_padding_ms,
+        vad_min_silence_ms=vad_min_silence_ms,
     )
 
 
@@ -1339,8 +1374,16 @@ def process_video(
     dependencies: Optional[ProcessVideoDependencies] = None,
     target_height: int = 0,
     max_frame_rate: float = 0.0,
+    vad: bool = False,
+    vad_threshold: Optional[float] = None,
+    vad_padding_ms: Optional[int] = None,
+    vad_min_silence_ms: Optional[int] = None,
 ) -> Iterator[tuple[Optional[str], str, str, Optional[str]]]:
-    """Run the Talks Reducer pipeline for a single uploaded file."""
+    """Run the Talks Reducer pipeline for a single uploaded file.
+
+    The ``vad`` arguments are keyword-only (``progress`` holds the next
+    positional slot) and are forwarded unchanged to :func:`_stream_pipeline`.
+    """
 
     for kind, payload in _stream_pipeline(
         file_path,
@@ -1359,6 +1402,10 @@ def process_video(
         dependencies,
         target_height=target_height,
         max_frame_rate=max_frame_rate,
+        vad=bool(vad),
+        vad_threshold=vad_threshold,
+        vad_padding_ms=vad_padding_ms,
+        vad_min_silence_ms=vad_min_silence_ms,
     ):
         if kind == "log":
             yield (gr.update(), cast(str, payload), gr.update(), gr.update())
@@ -1428,7 +1475,8 @@ def build_interface(
         with gr.Accordion("About", open=False):
             gr.Markdown(f"""
                 Drop a video or audio file below. Pick a **Resolution**,
-                **FPS** and **Speedup**, choose the **Video codec**, and processing starts on
+                **FPS** and **Speedup** (tick **Speedup no voice** to speed up only
+                non-voice frames), choose the **Video codec**, and processing starts on
                 upload. Open **Advanced** for encoder toggles and fine-grained
                 speed/threshold controls.
 
@@ -1472,6 +1520,11 @@ def build_interface(
             choices=["1×", "5×", "10×"],
             value=_initial("speedup", "10×"),
             label="Speedup",
+        )
+        vad_checkbox = gr.Checkbox(
+            label="Speedup no voice",
+            value=bool(_initial("vad", False)),
+            info="Detect speech instead of loudness, so only non-voice frames are sped up.",
         )
         codec_dropdown = gr.Dropdown(
             choices=[
@@ -1548,12 +1601,13 @@ def build_interface(
 
         def _apply_preset(
             name: Optional[str],
-        ) -> tuple[object, object, object, object, object, object, object]:
-            """Fan the selected preset onto the resolution/speed/codec controls."""
+        ) -> tuple[object, object, object, object, object, object, object, object]:
+            """Fan the selected preset onto the resolution/speed/codec/vad controls."""
 
             preset = find_preset(name, preset_list) if name else None
             if preset is None:
                 return (
+                    gr.update(),
                     gr.update(),
                     gr.update(),
                     gr.update(),
@@ -1583,6 +1637,7 @@ def build_interface(
                 _upd("silent_threshold"),
                 _upd("sounded_speed"),
                 _upd("fps"),
+                _upd("vad"),
             )
 
         preset_dropdown.change(
@@ -1596,6 +1651,7 @@ def build_interface(
                 silent_threshold_input,
                 sounded_speed_input,
                 fps_radio,
+                vad_checkbox,
             ],
         )
         cut_enabled_checkbox.change(
@@ -1620,6 +1676,7 @@ def build_interface(
                 cut_start_input,
                 cut_end_input,
                 fps_radio,
+                vad_checkbox,
             ],
             outputs=[
                 video_output,

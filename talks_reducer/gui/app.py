@@ -197,11 +197,17 @@ def _resolve_vad_argument(gui: "TalksReducerGUI") -> bool:
     Advanced mode reads the "Speedup no voice" checkbox. Simple mode hides that
     checkbox, so a value remembered from an Advanced session must not leak into
     it: there only the preset selected in the Simple dropdown decides, and only
-    a preset that explicitly sets ``vad`` to ``True`` turns it on.
+    a preset that explicitly sets ``vad`` to ``True`` turns it on. The exception
+    is a launch that stated it (``--vad``/``--no-vad`` or a preset with ``vad``,
+    as the OBS dock sends): ``_seeded_vad`` then wins in Simple mode too, the
+    same way the seeded fps and resolution flags override the dropdown.
     """
 
     if not gui.simple_mode_var.get():
         return bool(gui.vad_var.get())
+    seeded = getattr(gui, "_seeded_vad", None)
+    if seeded is not None:
+        return bool(seeded)
     preset = presets.find_preset(
         gui.simple_preset_var.get(), getattr(gui, "_simple_presets", [])
     )
@@ -509,6 +515,8 @@ class TalksReducerGUI:
         # ``--auto-close`` closes the window once every job succeeds.
         self._open_location_after_convert = False
         self._auto_close_after_convert = False
+        # ``--vad``/``--no-vad`` from the launch; ``None`` leaves it to the GUI.
+        self._seeded_vad: Optional[bool] = None
 
         if cli_settings:
             self._apply_cli_settings(cli_settings)
@@ -1529,6 +1537,15 @@ class TalksReducerGUI:
             self._open_location_after_convert = bool(settings["open_location"])
         if "auto_close" in settings:
             self._auto_close_after_convert = bool(settings["auto_close"])
+        if "vad" in settings:
+            self._seeded_vad = bool(settings["vad"])
+            self.vad_var.set(self._seeded_vad)
+        if "vad_threshold" in settings:
+            self.vad_threshold_var.set(float(settings["vad_threshold"]))
+        if "vad_padding_ms" in settings:
+            self.vad_padding_var.set(int(settings["vad_padding_ms"]))
+        if "vad_min_silence_ms" in settings:
+            self.vad_min_silence_var.set(int(settings["vad_min_silence_ms"]))
 
     def _schedule_auto_close_if_requested(self) -> None:
         """Close the window on the UI thread when ``--auto-close`` was requested.

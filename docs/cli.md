@@ -224,7 +224,10 @@ talks-reducer --host 192.168.1.42 demo.mp4
 
 Remote jobs respect the same timing controls as the local CLI. Provide
 `--silent_threshold`, `--sounded_speed`, or `--silent_speed` to tweak how the server trims
-and accelerates segments without falling back to local mode.
+and accelerates segments without falling back to local mode. `--vad` is forwarded too,
+with `--vad-threshold`, `--vad-padding` and `--vad-min-silence` when given; the server always
+uses the `lite` engine (`--vad-engine` is not sent) and needs `silero-vad-lite` installed.
+`--vad` needs an up-to-date server; runs without it keep working with older servers.
 
 Want to see progress as the remote server works? Add `--server-stream` so the CLI prints
 live progress bars and log lines while you wait for the download. The stream walks through

@@ -362,6 +362,12 @@
             </div>
           </div>
           <div class="row">
+            <label class="check-row" title="Detect speech instead of loudness, so only non-voice frames are sped up. Ignored while a preset is selected.">
+              <input id="vadCheck" type="checkbox" />
+              Speedup no voice
+            </label>
+          </div>
+          <div class="row">
             <label class="check-row">
               <input id="autoClose" type="checkbox" />
               Auto close
@@ -415,6 +421,7 @@
   const obsPassword = $('obsPassword');
   const talksReducerExe = $('talksReducerExe');
   const autoClose = $('autoClose');
+  const vadCheck = $('vadCheck');
   const obsDot = $('obsDot');
   const obsStatus = $('obsStatus');
   const obsStatusWrap = $('obsStatusWrap');
@@ -460,6 +467,7 @@
     if (fpsInput) fpsInput.checked = true;
   }
   autoClose.checked = localStorage.getItem('obsDock.autoClose') === '1';
+  vadCheck.checked = localStorage.getItem('obsDock.vad') === '1';
 
   function log(message) {
     const time = new Date().toLocaleTimeString();
@@ -847,17 +855,21 @@
       payload.resolution = getResolution();
       payload.codec = getCodec();
       payload.fps = getFps();
+      // Like FPS, the checkbox only applies in manual mode: a selected preset
+      // decides Speedup no voice itself.
+      payload.vad = vadCheck.checked;
     }
 
     localStorage.setItem('obsDock.talksReducerExe', payload.exe);
     if (payload.codec) localStorage.setItem('obsDock.videoCodec', payload.codec);
     if (payload.fps) localStorage.setItem('obsDock.fps', payload.fps);
     localStorage.setItem('obsDock.autoClose', payload.autoClose ? '1' : '0');
+    localStorage.setItem('obsDock.vad', vadCheck.checked ? '1' : '0');
 
     if (preset) {
       log(`Processing: preset=${preset}`);
     } else {
-      log(`Processing: speed=${payload.speed}x, resolution=${payload.resolution}, fps=${payload.fps}, codec=${payload.codec}`);
+      log(`Processing: speed=${payload.speed}x, resolution=${payload.resolution}, fps=${payload.fps}, codec=${payload.codec}, vad=${payload.vad ? 'on' : 'off'}`);
     }
 
     try {
@@ -900,6 +912,9 @@
   });
   autoClose.addEventListener('change', () => {
     localStorage.setItem('obsDock.autoClose', autoClose.checked ? '1' : '0');
+  });
+  vadCheck.addEventListener('change', () => {
+    localStorage.setItem('obsDock.vad', vadCheck.checked ? '1' : '0');
   });
 
   speedButtons.forEach((btn) => {

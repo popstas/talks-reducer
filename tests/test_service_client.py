@@ -1551,3 +1551,49 @@ def test_send_video_appends_height_and_fps_when_needed(monkeypatch, tmp_path):
 
     args = _captured_submit_args(monkeypatch, tmp_path, max_frame_rate=30.0)
     assert args[-2:] == (0, 30.0)
+
+
+def test_send_video_appends_vad_tail(monkeypatch, tmp_path):
+    """``vad=True`` appends the height/fps pair and the four vad values."""
+
+    args = _captured_submit_args(
+        monkeypatch,
+        tmp_path,
+        vad=True,
+        vad_threshold=0.4,
+        vad_padding_ms=200,
+        vad_min_silence_ms=500,
+    )
+    assert len(args) == 19
+    assert args[13:] == (0, 0.0, True, 0.4, 200, 500)
+
+    args = _captured_submit_args(
+        monkeypatch,
+        tmp_path,
+        small=True,
+        small_height=1080,
+        max_frame_rate=30.0,
+        vad=True,
+    )
+    assert len(args) == 19
+    assert args[13:] == (1080, 30.0, True, None, None, None)
+
+
+def test_send_video_without_vad_keeps_legacy_args(monkeypatch, tmp_path):
+    """``vad=False`` submits exactly the pre-vad arguments, settings or not."""
+
+    args = _captured_submit_args(
+        monkeypatch,
+        tmp_path,
+        vad=False,
+        vad_threshold=0.4,
+        vad_padding_ms=200,
+        vad_min_silence_ms=500,
+    )
+    assert len(args) == 13
+
+    args = _captured_submit_args(
+        monkeypatch, tmp_path, small=True, small_height=1080, vad=False
+    )
+    assert len(args) == 15
+    assert args[-2:] == (1080, 0.0)

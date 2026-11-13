@@ -123,7 +123,12 @@ remote mode.
 `--vad` is the **Speedup no voice** checkbox in the desktop GUI, beside the Silence speedup
 buttons in Advanced mode. While it is on the Threshold buttons are disabled, since voice
 detection replaces the volume threshold. Simple mode has no checkbox: there the selected
-preset decides, and the **Voice** preset turns it on. Remote mode does not support it yet.
+preset decides, and the **Voice** preset turns it on. Remote mode (`--url`, the GUI's
+**Remote**) sends it with its three settings to the server, which always uses the `lite`
+engine and needs `silero-vad-lite` installed (it reports the missing package as a processing
+error); it needs an up-to-date server, while a run without it still works with older ones.
+The Web UI has a **Speedup no voice** checkbox under **Speedup**, and the OBS dock one in its
+⚙️ Settings panel.
 Advanced settings add **VAD threshold** (0.05-0.95), **Voice padding, ms** (0-2000) and
 **Min pause, ms** (0-5000) rows, remembered between runs and used only while voice detection is
 on (Simple mode's Voice preset uses the remembered values). The progress bar gets a **Voice
