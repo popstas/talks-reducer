@@ -1,5 +1,6 @@
 """Tests for the Silero VAD speech detection module."""
 
+import re
 import sys
 
 import numpy as np
@@ -126,3 +127,56 @@ def test_lite_engine_detects_silence():
     probs = engine.probabilities(np.zeros(32000, np.float32))
     assert len(probs) == vad.count_windows(32000, 512)
     assert (probs < 0.5).all()
+
+
+@pytest.mark.parametrize(
+    "name, module, hint",
+    [
+        ("torch", "silero_vad", "talks-reducer[vad-torch]"),
+        ("ten", "ten_vad", "talks-reducer[vad-ten]"),
+    ],
+)
+def test_load_engine_experimental_missing_raises_unavailable(
+    monkeypatch, name, module, hint
+):
+    monkeypatch.setitem(sys.modules, module, None)
+    with pytest.raises(vad.VadUnavailableError, match=re.escape(hint)):
+        vad.load_engine(name)
+
+
+@pytest.mark.parametrize(
+    "name, module, hop",
+    [("torch", "silero_vad", 512), ("ten", "ten_vad", 256)],
+)
+def test_experimental_engine_detects_silence(name, module, hop):
+    pytest.importorskip(module)
+    engine = vad.load_engine(name)
+    seen = []
+    probs = engine.probabilities(np.zeros(32000, np.float32), seen.append)
+    assert engine.name == name
+    assert engine.hop_samples == hop
+    assert len(probs) == vad.count_windows(32000, hop)
+    assert (probs < 0.5).all()
+    assert sum(seen) == len(probs)
+
+
+def test_engines_agree_on_speech_ratio():
+    pytest.importorskip("silero_vad_lite")
+    pytest.importorskip("silero_vad")
+    rng = np.random.default_rng(0)
+    t = np.arange(48000) / 16000.0
+    voiced = sum(
+        np.sin(2 * np.pi * f * t) / k for k, f in enumerate((120, 240, 360, 480), 1)
+    )
+    signal = np.concatenate([np.zeros(16000), 0.3 * voiced[:16000], np.zeros(16000)])
+    signal = (signal + rng.normal(0, 0.001, signal.shape)).astype(np.float32)
+    settings = VadSettings()
+    found = {}
+    for name in ("lite", "torch"):
+        engine = vad.load_engine(name)
+        probs = engine.probabilities(signal)
+        found[name] = vad.speech_intervals(probs, 512 / 16000, settings, 3.0)
+    assert len(found["lite"]) == len(found["torch"])
+    for (a0, a1), (b0, b1) in zip(found["lite"], found["torch"]):
+        assert abs(a0 - b0) <= 512 / 16000
+        assert abs(a1 - b1) <= 512 / 16000
