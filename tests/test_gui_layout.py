@@ -660,12 +660,12 @@ def test_build_layout_adds_macos_update_button_under_advanced(monkeypatch):
     # button frame, so they appear under Advanced settings.
     assert gui.check_updates_button.args[0] is gui.advanced_frame
     assert gui.update_status_label.args[0] is gui.advanced_frame
-    # Both must sit on row 9 (rows 0-8 are taken by existing Advanced controls:
+    # Both must sit on row 12 (rows 0-11 are taken by existing Advanced controls:
     # the watch-directory line at row 0 pushes the rest down), so a future edit
     # that collides with another row is caught here. The status label sits in a
     # later column than the button so the two never overlap.
-    assert gui.check_updates_button.grid_calls[0][1]["row"] == 9
-    assert gui.update_status_label.grid_calls[0][1]["row"] == 9
+    assert gui.check_updates_button.grid_calls[0][1]["row"] == 12
+    assert gui.update_status_label.grid_calls[0][1]["row"] == 12
     assert (
         gui.update_status_label.grid_calls[0][1]["column"]
         > gui.check_updates_button.grid_calls[0][1]["column"]
@@ -2943,3 +2943,38 @@ def test_vad_toggle_switches_advanced_preset_between_voice_and_optimal(monkeypat
 
     gui.vad_var.set(False)
     assert gui.advanced_preset_var.get() == "Optimal"
+
+
+def test_vad_advanced_rows_registered_in_slider_updaters():
+    """The VAD rows live in the Advanced panel and keep presets/persistence wired."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    for key in ("vad_threshold", "vad_padding_ms", "vad_min_silence_ms"):
+        assert key in gui._slider_updaters
+        assert key not in gui._basic_defaults
+        assert key not in gui._basic_variables
+    assert gui.vad_threshold_var.get() == pytest.approx(0.5)
+    assert gui.vad_padding_var.get() == pytest.approx(150)
+    assert gui.vad_min_silence_var.get() == pytest.approx(300)
+    for control in (
+        gui.vad_threshold_control,
+        gui.vad_padding_control,
+        gui.vad_min_silence_control,
+    ):
+        assert control.frame.grid_calls[0][1]["row"] >= 8
+        assert control.frame.args[0] is gui.advanced_frame
+
+
+def test_vad_rows_do_not_collide_with_advanced_rows():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    rows = [
+        gui.vad_threshold_control.frame.grid_calls[0][1]["row"],
+        gui.vad_padding_control.frame.grid_calls[0][1]["row"],
+        gui.vad_min_silence_control.frame.grid_calls[0][1]["row"],
+        gui.start_in_server_tray_check.grid_calls[0][1]["row"],
+    ]
+    assert len(set(rows)) == len(rows)

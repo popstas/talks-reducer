@@ -124,6 +124,10 @@ remote mode.
 buttons in Advanced mode. While it is on the Threshold buttons are disabled, since voice
 detection replaces the volume threshold. Simple mode has no checkbox: there the selected
 preset decides, and the **Voice** preset turns it on. Remote mode does not support it yet.
+Advanced settings add **VAD threshold** (0.05-0.95), **Voice padding, ms** (0-2000) and
+**Min pause, ms** (0-5000) rows, remembered between runs and used only while voice detection is
+on (Simple mode's Voice preset uses the remembered values). The progress bar gets a **Voice
+detection** stage between audio extraction and audio processing.
 
 **Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec, fps,
 Speedup no voice) you author once in the desktop GUI's Advanced mode and reuse everywhere —

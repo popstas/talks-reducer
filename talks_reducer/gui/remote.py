@@ -369,7 +369,7 @@ def process_files_via_server(
         if normalized_desc.startswith("downloading"):
             gui._cancel_download_wait()
         # Real streamed audio/final progress makes the synthetic audio fallback
-        # timer redundant: cancel it on ``Audio processing:`` and complete the
+        # timer redundant: cancel it on ``Voice detection:``/``Audio processing:`` and complete the
         # audio phase on ``Generating final`` so the timer cannot keep overwriting
         # the status with synthetic percentages.
         gui._apply_stage_transition(desc if isinstance(desc, str) else "")

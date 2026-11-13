@@ -159,6 +159,10 @@ SOUNDED_SPEED_MAXIMUM = 10.0
 # Any threshold may be typed, but past ~0.9 the detector treats almost the whole
 # track as silence, so the control caps there rather than at a nominal 1.0.
 THRESHOLD_MAXIMUM = 0.9
+VAD_THRESHOLD_MIN = 0.05
+VAD_THRESHOLD_MAX = 0.95
+VAD_PADDING_MAX = 2000
+VAD_MIN_SILENCE_MAX = 5000
 
 # The address field shares the Mode row now, so it is sized to fit beside the
 # mode buttons and Discover rather than to the full width of a dedicated row.
@@ -1307,6 +1311,8 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         )
         gui.preferences.update("keyframe_interval_seconds", float(f"{numeric:.6f}"))
 
+    build_vad_settings_rows(gui, first_row=8)
+
     gui.keyframe_interval_control = SegmentedChoice(
         keyframe_row,
         [
@@ -1340,7 +1346,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=gui.start_in_server_tray_var,
     )
     gui.start_in_server_tray_check.grid(
-        row=8, column=0, columnspan=3, sticky="w", pady=4
+        row=11, column=0, columnspan=3, sticky="w", pady=4
     )
 
     # Check updates button + status label (macOS only) live under Advanced so
@@ -1352,7 +1358,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             text="Check updates",
             command=gui._check_for_updates,
         )
-        gui.check_updates_button.grid(row=9, column=0, sticky="w", pady=(8, 0))
+        gui.check_updates_button.grid(row=12, column=0, sticky="w", pady=(8, 0))
 
         gui.update_status_label = gui.ttk.Label(
             gui.advanced_frame,
@@ -1360,7 +1366,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             foreground="gray",
         )
         gui.update_status_label.grid(
-            row=9, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0)
+            row=12, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0)
         )
 
     gui._toggle_advanced(initial=True)
@@ -1617,6 +1623,97 @@ def build_silence_speedup_row(gui: "TalksReducerGUI") -> None:
     gui.vad_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
 
 
+def build_vad_settings_rows(gui: "TalksReducerGUI", *, first_row: int) -> None:
+    """Add the three voice-detection tuning rows to ``advanced_frame``.
+
+    The rows (**VAD threshold**, **Voice padding, ms**, **Min pause, ms**) take
+    ``first_row`` through ``first_row + 2`` and are always shown in Advanced;
+    they only matter while "Speedup no voice" is on, but hiding them behind the
+    checkbox would make the remembered values undiscoverable. Their values are
+    remembered in ``settings.json`` and read by ``_collect_arguments`` only when
+    VAD is active, in Simple mode too.
+    """
+
+    parent = gui.advanced_frame
+    gui.vad_threshold_var = gui.tk.DoubleVar(
+        value=min(
+            max(gui.preferences.get_float("vad_threshold", 0.5), VAD_THRESHOLD_MIN),
+            VAD_THRESHOLD_MAX,
+        )
+    )
+    gui.vad_threshold_control = add_segmented(
+        gui,
+        parent,
+        "VAD threshold",
+        gui.vad_threshold_var,
+        row=first_row,
+        setting_key="vad_threshold",
+        options=[Option(0.3, "0.3"), Option(0.5, "0.5"), Option(0.7, "0.7")],
+        default_value=0.5,
+        custom=CustomSpec(
+            minimum=VAD_THRESHOLD_MIN,
+            maximum=VAD_THRESHOLD_MAX,
+            display_format="{:.2f}",
+        ),
+        tooltip="Speech confidence needed to keep a frame at normal speed",
+        pady=4,
+        basic=False,
+    )
+
+    gui.vad_padding_var = gui.tk.DoubleVar(
+        value=min(
+            max(gui.preferences.get_float("vad_padding_ms", 150), 0), VAD_PADDING_MAX
+        )
+    )
+    gui.vad_padding_control = add_segmented(
+        gui,
+        parent,
+        "Voice padding, ms",
+        gui.vad_padding_var,
+        row=first_row + 1,
+        setting_key="vad_padding_ms",
+        options=[
+            Option(0, "0"),
+            Option(150, "150"),
+            Option(300, "300"),
+            Option(500, "500"),
+        ],
+        default_value=150,
+        custom=CustomSpec(minimum=0, maximum=VAD_PADDING_MAX, display_format="{:.0f}"),
+        tooltip="Keep this much extra time around every spoken phrase",
+        pady=4,
+        basic=False,
+    )
+
+    gui.vad_min_silence_var = gui.tk.DoubleVar(
+        value=min(
+            max(gui.preferences.get_float("vad_min_silence_ms", 300), 0),
+            VAD_MIN_SILENCE_MAX,
+        )
+    )
+    gui.vad_min_silence_control = add_segmented(
+        gui,
+        parent,
+        "Min pause, ms",
+        gui.vad_min_silence_var,
+        row=first_row + 2,
+        setting_key="vad_min_silence_ms",
+        options=[
+            Option(100, "100"),
+            Option(300, "300"),
+            Option(500, "500"),
+            Option(1000, "1000"),
+        ],
+        default_value=300,
+        custom=CustomSpec(
+            minimum=0, maximum=VAD_MIN_SILENCE_MAX, display_format="{:.0f}"
+        ),
+        tooltip="Shortest pause between phrases that gets sped up",
+        pady=4,
+        basic=False,
+    )
+
+
 def update_threshold_for_vad(gui: "TalksReducerGUI") -> None:
     """Lock the Threshold control while "Speedup no voice" is on.
 
@@ -1648,6 +1745,7 @@ def add_segmented(
     tooltip: str | None = None,
     help_url: str | None = None,
     pady: "int | tuple[int, int]" = SETTING_ROW_PADY,
+    basic: bool = True,
 ) -> "SegmentedChoice":
     """Add a labeled row of choice buttons to *parent* and wire it into presets.
 
@@ -1661,6 +1759,12 @@ def add_segmented(
     trailing widget there competes with the buttons for the row's width.
     The created button is exposed as ``control.help_button`` so callers can
     keep a reference to it.
+
+    *basic* controls whether the knob joins the "Basic options" bookkeeping.
+    The Advanced VAD rows pass ``False``: they still register in
+    ``_slider_updaters`` (so persistence and programmatic writes work) but stay
+    out of ``_basic_defaults``/``_basic_variables``, which would make the
+    **Silence ×5** reset macro and the basic-preset highlight touch them.
     """
 
     help_button = None
@@ -1710,9 +1814,10 @@ def add_segmented(
         persist(value)
 
     gui._slider_updaters[setting_key] = apply_and_persist
-    gui._basic_defaults[setting_key] = default_value
-    gui._basic_variables[setting_key] = variable
-    variable.trace_add("write", lambda *_: update_basic_reset_state(gui))
+    if basic:
+        gui._basic_defaults[setting_key] = default_value
+        gui._basic_variables[setting_key] = variable
+        variable.trace_add("write", lambda *_: update_basic_reset_state(gui))
     return control
 
 

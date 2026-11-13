@@ -206,16 +206,20 @@ def test_vad_check_shares_row_with_silence_speedup(root, themed):
     gui.basic_options_frame = ttk.Frame(root)
     gui.basic_options_frame.pack()
 
-    layout.build_silence_speedup_row(gui)
-    root.update()
+    try:
+        layout.build_silence_speedup_row(gui)
+        root.update()
 
-    buttons = gui.basic_preset_control.buttons
-    check = gui.vad_check
-    assert check.winfo_width() > 1 and buttons[-1].winfo_width() > 1
+        buttons = gui.basic_preset_control.buttons
+        check = gui.vad_check
+        assert check.winfo_width() > 1 and buttons[-1].winfo_width() > 1
 
-    def middle(widget) -> float:
-        return widget.winfo_rooty() + widget.winfo_height() / 2
+        def middle(widget) -> float:
+            return widget.winfo_rooty() + widget.winfo_height() / 2
 
-    assert abs(middle(check) - middle(buttons[0])) <= 4
-    assert check.winfo_rootx() >= buttons[-1].winfo_rootx() + buttons[-1].winfo_width()
-    gui.basic_options_frame.destroy()
+        assert abs(middle(check) - middle(buttons[0])) <= 4
+        assert (
+            check.winfo_rootx() >= buttons[-1].winfo_rootx() + buttons[-1].winfo_width()
+        )
+    finally:
+        gui.basic_options_frame.destroy()

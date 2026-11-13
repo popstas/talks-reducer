@@ -15,7 +15,10 @@ from talks_reducer.gui.progress import (
         ("Uploading:", 100, 100, 5.0),
         ("Extracting audio:", 0, 100, 5.0),
         ("Extracting audio:", 100, 100, 10.0),
-        ("Audio processing:", 0, 100, 10.0),
+        ("Voice detection:", 0, 100, 10.0),
+        ("Voice detection:", 50, 100, 12.5),
+        ("Voice detection:", 100, 100, 15.0),
+        ("Audio processing:", 0, 100, 15.0),
         ("Audio processing:", 100, 100, 20.0),
         ("Generating final:", 0, 100, 20.0),
         ("Generating final:", 100, 100, 100.0),
@@ -37,7 +40,7 @@ def test_map_stage_progress_requires_positive_total() -> None:
 
 def test_map_stage_progress_clamps_overshoot_and_negative() -> None:
     assert map_stage_progress("Audio processing:", 200, 100) == pytest.approx(20.0)
-    assert map_stage_progress("Audio processing:", -10, 100) == pytest.approx(10.0)
+    assert map_stage_progress("Audio processing:", -10, 100) == pytest.approx(15.0)
 
 
 def test_map_stage_progress_is_case_insensitive() -> None:
@@ -168,3 +171,7 @@ def test_gui_progress_handle_skips_status_without_a_total() -> None:
     handle.advance(10)
 
     assert statuses == []
+
+
+def test_audio_processing_band_starts_at_15() -> None:
+    assert map_stage_progress("Audio processing:", 0, 100) == pytest.approx(15.0)

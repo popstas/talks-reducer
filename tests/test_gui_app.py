@@ -464,6 +464,9 @@ def _make_collect_gui(**overrides) -> SimpleNamespace:
         simple_mode_var=SimpleNamespace(get=lambda: False),
         vad_var=SimpleNamespace(get=lambda: False),
         simple_preset_var=SimpleNamespace(get=lambda: ""),
+        vad_threshold_var=SimpleNamespace(get=lambda: 0.5),
+        vad_padding_var=SimpleNamespace(get=lambda: 150.0),
+        vad_min_silence_var=SimpleNamespace(get=lambda: 300.0),
         _simple_presets=[],
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
@@ -1057,7 +1060,7 @@ def test_summary_manager_audio_processing_percent_cancels_synthetic_timer():
     gui._cancel_audio_progress.assert_called_once()
     gui._complete_audio_phase.assert_not_called()
     gui._set_progress.assert_called_once()
-    assert gui._set_progress.call_args[0][0] == pytest.approx(14.5)
+    assert gui._set_progress.call_args[0][0] == pytest.approx(17.25)
 
 
 def test_summary_manager_task_percent_never_moves_backwards():
@@ -2972,6 +2975,20 @@ def test_simple_mode_voice_preset_enables_vad():
     assert app.TalksReducerGUI._collect_arguments(gui)["vad"] is True
 
 
+def test_simple_mode_voice_preset_uses_remembered_vad_settings():
+    gui = _make_collect_gui(
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+        simple_preset_var=SimpleNamespace(get=lambda: "Voice"),
+        _simple_presets=_voice_and_optimal_presets(),
+        vad_padding_var=SimpleNamespace(get=lambda: 500.0),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["vad"] is True
+    assert args["vad_padding_ms"] == 500
+
+
 def test_vad_preference_persists():
     updates: list[tuple[str, object]] = []
     gui = SimpleNamespace(
@@ -2984,3 +3001,64 @@ def test_vad_preference_persists():
     PreferenceController(gui).on_vad_change()
 
     assert updates == [("vad_enabled", True)]
+
+
+def test_voice_detection_cancels_synthetic_timer():
+    """Opening the Voice detection stage retires the extraction fallback timer."""
+
+    gui = SimpleNamespace(
+        _complete_audio_phase=MagicMock(),
+        _cancel_audio_progress=MagicMock(),
+    )
+
+    app.TalksReducerGUI._apply_stage_transition(gui, "Voice detection:")
+
+    gui._cancel_audio_progress.assert_called_once()
+    gui._complete_audio_phase.assert_not_called()
+
+
+def _vad_collect_gui(vad: bool, simple: bool = False) -> SimpleNamespace:
+    """Build a stub GUI whose VAD vars hold non-default values."""
+
+    gui = SimpleNamespace(
+        output_var=SimpleNamespace(get=lambda: ""),
+        temp_var=SimpleNamespace(get=lambda: ""),
+        silent_threshold_var=SimpleNamespace(get=lambda: 0.01),
+        sounded_speed_var=SimpleNamespace(get=lambda: 1.0),
+        silent_speed_var=SimpleNamespace(get=lambda: 4.0),
+        frame_margin_var=SimpleNamespace(get=lambda: "2"),
+        sample_rate_var=SimpleNamespace(get=lambda: "48000"),
+        keyframe_interval_var=SimpleNamespace(get=lambda: 30.0),
+        small_var=SimpleNamespace(get=lambda: False),
+        small_height_var=SimpleNamespace(get=lambda: 720),
+        fps_var=SimpleNamespace(get=lambda: "orig"),
+        video_codec_var=SimpleNamespace(get=lambda: "h264", set=lambda value: None),
+        add_codec_suffix_var=SimpleNamespace(get=lambda: False),
+        use_global_ffmpeg_var=SimpleNamespace(get=lambda: False),
+        optimize_var=SimpleNamespace(get=lambda: True),
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        cut_start_var=SimpleNamespace(get=lambda: 0.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
+        simple_mode_var=SimpleNamespace(get=lambda: simple),
+        vad_var=SimpleNamespace(get=lambda: vad),
+        vad_threshold_var=SimpleNamespace(get=lambda: 0.7),
+        vad_padding_var=SimpleNamespace(get=lambda: 300.0),
+        vad_min_silence_var=SimpleNamespace(get=lambda: 500.0),
+        simple_preset_var=SimpleNamespace(get=lambda: ""),
+        preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
+    )
+    gui._parse_float = lambda value, _label: float(value)
+    return gui
+
+
+def test_collect_arguments_vad_settings_only_when_enabled():
+    args = app.TalksReducerGUI._collect_arguments(_vad_collect_gui(vad=True))
+    assert args["vad"] is True
+    assert args["vad_threshold"] == pytest.approx(0.7)
+    assert args["vad_padding_ms"] == 300
+    assert isinstance(args["vad_padding_ms"], int)
+    assert args["vad_min_silence_ms"] == 500
+
+    args = app.TalksReducerGUI._collect_arguments(_vad_collect_gui(vad=False))
+    assert args["vad"] is False
+    assert not {"vad_threshold", "vad_padding_ms", "vad_min_silence_ms"} & set(args)

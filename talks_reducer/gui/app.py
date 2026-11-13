@@ -1681,6 +1681,12 @@ class TalksReducerGUI:
         if max_frame_rate:
             args["max_frame_rate"] = max_frame_rate
         args["vad"] = _resolve_vad_argument(self)
+        if args["vad"]:
+            args["vad_threshold"] = round(float(self.vad_threshold_var.get()), 2)
+            args["vad_padding_ms"] = int(round(float(self.vad_padding_var.get())))
+            args["vad_min_silence_ms"] = int(
+                round(float(self.vad_min_silence_var.get()))
+            )
         # Cut video is an Advanced-only feature; Simple mode never trims even if
         # the flag persisted from a previous Advanced session.
         if self.cut_enabled_var.get() and not self.simple_mode_var.get():
@@ -2027,14 +2033,14 @@ class TalksReducerGUI:
         the log-parsed ``Task: NN%`` milestones — routes its stage label through
         this helper so the fallback timer never keeps overwriting the status with
         synthetic percentages after real progress has begun. Real
-        ``Audio processing:`` progress cancels the timer, while ``Generating
+        ``Voice detection:`` or ``Audio processing:`` progress cancels the timer, while ``Generating
         final`` progress completes the audio phase outright.
         """
 
         normalized = (desc or "").strip().lower()
         if normalized.startswith("generating final"):
             self._complete_audio_phase()
-        elif normalized.startswith("audio processing"):
+        elif normalized.startswith(("voice detection", "audio processing")):
             self._cancel_audio_progress()
 
     def _apply_stage_status(self, desc: str, percent: float) -> None:
