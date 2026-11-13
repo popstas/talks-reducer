@@ -123,15 +123,19 @@ remote mode.
 `--vad` is the **Speedup no voice** checkbox in the desktop GUI, in the Silence speedup row
 in Advanced mode (`--no-vad` forces loudness detection over a remembered choice). While it is on, the Threshold buttons are disabled, since voice detection
 replaces the volume threshold. Simple mode has no checkbox: there the selected preset decides,
-and the **Voice** preset (Optimal plus voice detection) turns it on. The checkbox does not
-remember itself apart from presets — on startup the remembered preset is applied again. The one
+and the **Voice** preset (Optimal plus voice detection) turns it on. The checkbox is
+remembered, but on startup the remembered preset is applied again and overrides it whenever that
+preset sets Speedup no voice (every full default preset does). The one
 exception is a launch flag: `--vad`/`--no-vad` from a shortcut or the OBS dock wins in Simple
 mode too, until you pick a preset in the dropdown. Existing preset lists gain **Voice** once,
-after **Optimal**, and the other full presets get an explicit `vad: false`, so choosing them
+after **Optimal** (a list you emptied stays empty), and the other full presets get an
+explicit `vad: false`, so choosing them
 after **Voice** switches voice detection back off. Remote mode (`--url`, the GUI's
 **Remote**) sends it with its three settings to the server, which always uses the `lite`
 engine and needs `silero-vad-lite` installed (it reports the missing package as a processing
-error); it needs an up-to-date server, while a run without it still works with older ones.
+error); it needs an up-to-date server — an older one would ignore it and speed up by loudness,
+so the client stops with an error asking you to update the server — while a run without it
+still works with older ones.
 The Web UI has a **Speedup no voice** checkbox under **Speedup**, and the OBS dock one in its
 ⚙️ Settings panel.
 Advanced settings add **VAD threshold** (0.05-0.95), **Voice padding, ms** (0-2000) and
@@ -177,8 +181,8 @@ seconds) and loaded again the next time you add that file.
 - **Convert** processes the video as usual and drops the fragments; the output name gets a
   `_cut` suffix (e.g. `lecture_speedup_cut.mp4`).
 - **Remove only** is a fast pass for an already-processed file: speeds stay x1, the picture is
-  left at its original resolution and frame rate, and only the fragments disappear. The codec
-  stays the one you selected.
+  left at its original resolution and frame rate, voice detection is skipped, and only the
+  fragments disappear. The codec stays the one you selected.
 
 If mpv.net is installed somewhere unusual, set `mpv_path` in `settings.json` to the full path of
 `mpvnet.exe` (or `mpv`). See [docs/gui.md](docs/gui.md#cut-video) for details.

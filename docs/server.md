@@ -187,7 +187,9 @@ to stream the server log after the download finishes.
 The Gradio `/process_video` endpoint accepts two optional trailing arguments, `target_height`
 and `max_frame_rate`. Clients send them only when the job asks for 1080p or an FPS cap, so a
 client talking to an older server keeps working for everything else, but 1080p and FPS caps
-need a server updated to this version.
+need a server updated to this version. Speedup no voice appends four more (`vad` and its three
+settings); because an older server would silently drop them, a client with `vad` on checks the
+endpoint's parameter count first and refuses to run against a server that is too old.
 
 The plain CLI can also submit jobs to a server with `--url`/`--host`; see
 [cli.md](cli.md#remote-processing).

@@ -77,7 +77,9 @@ and write the marker; existing lists never pick up the new default values — wi
 deliberate exception: `presets_version` is now `3`, and the v3 migration (`_migrate_v2_entries`)
 adds `vad: false` to every stored *full* preset (one carrying `silent_speed`; sparse presets such
 as mp3 are left alone) and inserts the default **Voice** preset after **Optimal** (appended when
-there is none, skipped when a preset already named `voice` exists). The explicit `vad: false` is
+there is no Optimal; skipped when a preset already named `voice` exists or the stored list is
+empty — a user who deleted every preset must not get back a lone Voice that every surface would
+then open on and apply). The explicit `vad: false` is
 what keeps the new field from leaking — a sparse preset applies only what it states, so without
 it, picking Optimal after Voice would leave voice detection on. Each marker step runs once
 (`1`→`2`→`3`), so the `"1080p"` rewrite and the Voice insertion never repeat. An emptied
@@ -188,9 +190,11 @@ the Silence speedup row and Simple mode hides it with the rest of the basic opti
 swaps its tooltip (`set_tooltip`) for `VAD_THRESHOLD_TOOLTIP`, because the detector replaces the
 volume threshold and a live-looking control that does nothing misleads. `set_enabled` blocks only
 user input: `set_value` keeps writing the bound variable, since presets still apply values to a
-locked control, and `set_options` rebuilds the row in the remembered state. **The checkbox has no
-persistence of its own** — startup re-applies the remembered preset, which sets `vad_var` like any
-other field; do not document or build it as an independent remembered setting. Three more
+locked control, and `set_options` rebuilds the row in the remembered state. The checkbox **is**
+persisted (`vad_enabled`, written by `on_vad_change` and read when `vad_var` is created), but startup
+then re-applies the remembered (else first) preset, and a preset that carries `vad` — every full
+default preset does since v3 — overwrites it; only a sparse preset without `vad`, or an empty preset
+list, leaves the remembered value standing. Document it that way, not as "not remembered". Three more
 Advanced rows (**VAD threshold**, **Voice padding, ms**, **Min pause, ms**, persisted as
 `vad_threshold`/`vad_padding_ms`/`vad_min_silence_ms`) are added with
 `layout.add_segmented(..., basic=False)`: the flag keeps a row out of `_basic_defaults`/`_basic_variables`, so the
@@ -256,7 +260,7 @@ start/end values persist via `GUIPreferences` (`cut_enabled`, `cut_start`,
   `resources/talks_reducer_cuts.lua` (`c` start/finish, `C` undo). Marks return through a temp JSON
   passed as `--script-opts=talks_reducer_cuts-file=...` because Lua `io.open` may not handle non-ASCII
   paths; Python copies the result into the sidecar. **Remove only** runs `remove_only_overrides` (speeds
-  1/1, no scaling, no fps cap, codec kept). In the pipeline `_resolve_remove_ranges` feeds
+  1/1, no scaling, no fps cap, `vad` forced off with its settings dropped, codec kept). In the pipeline `_resolve_remove_ranges` feeds
   `chunks.apply_remove_ranges`, which splits chunks and tags removed ones `REMOVED_SPEED_INDEX`
   (infinite speed: zero audio samples, collapsed `setpts`); a run with ranges names the output with a
   `_cut` token (`has_cut`). CLI: `--remove`/`--remove-file`. Local-only (remote fails with `Remove ranges
@@ -341,7 +345,13 @@ download is streaming the status appends the live transfer rate (e.g.
 (`_download_filedata`, 1 MiB chunks) — gradio would otherwise auto-download the
 same file twice (the `gr.Video` preview and the `gr.File` output). Byte-level
 upload/download progress is coalesced to ~10 Hz via `_ThrottledEmitter` so the
-per-chunk callbacks don't flood the UI thread. The server's queue concurrency is
+per-chunk callbacks don't flood the UI thread. With `vad` on it refuses a server that
+would silently ignore it (gradio accepts extra positional arguments and an old endpoint drops
+them): `_endpoint_parameter_count` reads `client.view_api(...)["named_endpoints"]["/process_video"]`
+and raises `ServerTooOldError` before upload when the endpoint takes fewer parameters than were
+submitted; when the endpoint cannot be described it instead requires a `Voice detection (` log line
+(`VAD_LOG_MARKER`, seen in any streamed or final log) and raises before the result is written
+locally. The server's queue concurrency is
 configurable via `--concurrency` (`server_args.py` → `build_interface`), but file
 transfers bypass the queue so it only affects concurrent processing.
 
@@ -364,7 +374,7 @@ launches.
   - `pipeline.normalize_frame_rate` snaps the probed `avg_frame_rate` with `Fraction.limit_denominator(1001)`. FFmpeg 5.0's concat demuxer (the one the installed Windows build bundles) reports glued 30 fps parts as `130631680/4354391`; written into the `fps=` filter that becomes a rational `hevc_qsv` refuses ("Current frame rate is unsupported"), so every glued QSV run fell back to the CPU. The bound keeps `30000/1001`-style NTSC rates exact.
   - `chunks.py` builds timing metadata and FFmpeg expressions for frame selection.
   - The `Audio processing:` task counts **chunks**, not samples (`total=len(chunks)`, one unit per chunk). The two chunk kinds stopped costing the same once unit-speed chunks were copied instead of resampled: a copy takes microseconds and the phase vocoder takes everything, so a sample-weighted bar sprinted through ~70% of the samples and then crawled.
-  - `vad.py` turns decoded audio into the same per-video-frame boolean mask `chunks.detect_loud_frames` produces, so the pipeline treats either source alike. Audio is downmixed and resampled to 16 kHz in blocks, an engine (`LiteEngine` = `silero-vad-lite`, a regular dependency; `TorchEngine` = `silero-vad`; `TenEngine` = `ten-vad`, the latter two behind the `vad-torch`/`vad-ten` extras and imported lazily, raising `VadUnavailableError` with the install hint) yields one probability per window, and `speech_intervals` applies Silero's hysteresis, the minimum pause and speech lengths, then padding and merging before `intervals_to_frame_mask`. The pipeline runs it as the `Voice detection:` task between extraction and audio processing and logs `Voice detection ({engine}): {seconds:.1f} s, speech {ratio:.0%} of audio`. `--vad-engine` and `--vad-dump` are experimental comparison tools slated for removal (see `docs/TODO.md`); `talks-reducer.spec` collects `silero_vad_lite`'s `data/` folder (its DLL and ONNX model, invisible to import analysis) and excludes `torch`, `silero_vad` and `ten_vad` so the heavy engines never enter the bundle.
+  - `vad.py` turns decoded audio into the same per-video-frame boolean mask `chunks.detect_loud_frames` produces, so the pipeline treats either source alike. Audio is downmixed and resampled to 16 kHz in blocks, an engine (`LiteEngine` = `silero-vad-lite`, a regular dependency; `TorchEngine` = `silero-vad`; `TenEngine` = `ten-vad`, the latter two behind the `vad-torch`/`vad-ten` extras and imported lazily, raising `VadUnavailableError` with the install hint — also for a native library that fails to start, `OSError`/`RuntimeError` from the import or constructor, with the original text appended; `TenEngine` builds a probe detector at load time for that reason) yields one probability per window, and `speech_intervals` applies Silero's hysteresis (close level `max(threshold - 0.15, 0.01)`: without the floor a threshold ≤ 0.15 never ends speech), the minimum pause and speech lengths, then padding and merging before `intervals_to_frame_mask`. `to_mono_16k` downmixes, scales and resamples per 10-second block straight from the source dtype, so the only full-length array is the 16 kHz result (a full-rate float copy cost ~4× the input on long recordings). The pipeline loads the engine (`_load_vad_engine`) before extracting audio, so a missing engine fails at once, and runs it as the `Voice detection:` task between extraction and audio processing and logs `Voice detection ({engine}): {seconds:.1f} s, speech {ratio:.0%} of audio`. `--vad-engine` and `--vad-dump` are experimental comparison tools slated for removal (see `docs/TODO.md`); `talks-reducer.spec` collects `silero_vad_lite`'s `data/` folder (its DLL and ONNX model, invisible to import analysis) and excludes `torch`, `silero_vad` and `ten_vad` so the heavy engines never enter the bundle.
   - `glue.py` concatenates several inputs into one file before the pipeline runs (`--glue`, GUI confirmation). It stream-copies only when `inputs_can_be_copied` reports matching probes — FFmpeg will happily copy parts of different resolutions into a file whose frames change size mid-playback — and otherwise re-encodes through the concat filter, scaling every part to the first one's frame size.
   - `cut_marks.py` owns the remove-range text/JSON formats (`parse_ranges_text`, `format_ranges_text`, `.cuts.json` sidecar I/O via `load_marks`/`save_marks`, `read_marks_file` for `--remove-file`) and the mpv.net launcher (`find_player`, `build_player_command`, `open_player`); the GUI side lives in `gui/cut_marks_ui.py`.
   - `spherical.py` detects 360° metadata (Spherical Mapping + Stereo 3D side data) with a timeout-bounded ffprobe call that never raises, returning `None` for flat videos and for any probe failure. When it finds metadata, glue's copy path and the final encode add `-strict unofficial`, the only way the MOV muxer writes the `sv3d`/`st3d` boxes. On equirectangular sources the pipeline also swaps `scale=-2:H` for `gblur` + `v360` (`spherical_scale_filter`): `scale` drops Spherical Mapping, and so does any filter that changes the frame size before `v360`, which is why the anti-aliasing is a same-size blur (sigma 0.375 × the downscale ratio, skipped under 1.5×) rather than a pre-shrink. Other projections fall back to `scale`, losing the metadata, and log that.

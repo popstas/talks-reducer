@@ -51,8 +51,9 @@ resolution but no fps; afterwards `"1080p"` means a real downscale.
 `presets_version: 3` adds the `vad` field. That migration is a deliberate exception to "existing
 lists never pick up new defaults": every stored full preset gains `vad: false`, so choosing it
 after **Voice** switches voice detection back off instead of inheriting it, and the **Voice**
-preset (Optimal plus `vad: true`) is inserted after **Optimal** unless a preset already has that
-name. `--preset Voice` therefore behaves like `--preset Optimal --vad`; an explicit `--vad` or
+preset (Optimal plus `vad: true`) is inserted after **Optimal** (appended when there is no
+Optimal) unless a preset already has that name or the list is empty. `--preset Voice`
+therefore behaves like `--preset Optimal --vad`; an explicit `--vad` or
 `--no-vad` still wins.
 
 ## Encoding presets
@@ -254,7 +255,9 @@ Remote jobs respect the same timing controls as the local CLI. Provide
 and accelerates segments without falling back to local mode. `--vad` is forwarded too,
 with `--vad-threshold`, `--vad-padding` and `--vad-min-silence` when given; the server always
 uses the `lite` engine (`--vad-engine` is not sent) and needs `silero-vad-lite` installed.
-`--vad` needs an up-to-date server; runs without it keep working with older servers.
+`--vad` needs an up-to-date server: an older one would ignore it and speed up by loudness, so
+the client checks the server's API and stops with an error asking you to update the server.
+Runs without it keep working with older servers.
 
 Want to see progress as the remote server works? Add `--server-stream` so the CLI prints
 live progress bars and log lines while you wait for the download. The stream walks through
