@@ -26,9 +26,13 @@ dependencies = [
     # Provides the CA bundle the update checker needs so HTTPS verification
     # works in frozen builds that lack the system certificates.
     "certifi>=2023.7.22",
+    # Silero VAD for "Speedup no voice".
+    "silero-vad-lite>=0.4.0; python_version >= \"3.10\"",
 ]
 
 [project.optional-dependencies]
+vad-torch = ["silero-vad>=6.0"]
+vad-ten = ["ten-vad>=1.0.6"]
 dev = [
     "build>=1.0.0",
     "twine>=4.0.0",
