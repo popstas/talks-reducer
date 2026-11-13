@@ -191,6 +191,23 @@ def _resolve_prefer_global_ffmpeg(
     return prefer_global
 
 
+def _resolve_vad_argument(gui: "TalksReducerGUI") -> bool:
+    """Return whether the run should speed up non-voice frames (``--vad``).
+
+    Advanced mode reads the "Speedup no voice" checkbox. Simple mode hides that
+    checkbox, so a value remembered from an Advanced session must not leak into
+    it: there only the preset selected in the Simple dropdown decides, and only
+    a preset that explicitly sets ``vad`` to ``True`` turns it on.
+    """
+
+    if not gui.simple_mode_var.get():
+        return bool(gui.vad_var.get())
+    preset = presets.find_preset(
+        gui.simple_preset_var.get(), getattr(gui, "_simple_presets", [])
+    )
+    return preset is not None and preset.vad is True
+
+
 class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
 
@@ -396,6 +413,9 @@ class TalksReducerGUI:
         self.add_codec_suffix_var = tk.BooleanVar(
             value=bool(self.preferences.get("add_codec_suffix", False))
         )
+        self.vad_var = tk.BooleanVar(
+            value=bool(self.preferences.get("vad_enabled", False))
+        )
         self.optimize_var = tk.BooleanVar(
             value=bool(self.preferences.get("optimize", True))
         )
@@ -423,6 +443,7 @@ class TalksReducerGUI:
         self.watch_directory_var.trace_add("write", self._on_watch_change)
         self.video_codec_var.trace_add("write", self._on_video_codec_change)
         self.add_codec_suffix_var.trace_add("write", self._on_add_codec_suffix_change)
+        self.vad_var.trace_add("write", self._on_vad_change)
         self.optimize_var.trace_add("write", self._on_optimize_change)
         self.use_global_ffmpeg_var.trace_add("write", self._on_use_global_ffmpeg_change)
         self.start_in_server_tray_var.trace_add(
@@ -1348,6 +1369,9 @@ class TalksReducerGUI:
     def _on_add_codec_suffix_change(self, *_: object) -> None:
         self.preference_controller.on_add_codec_suffix_change(*_)
 
+    def _on_vad_change(self, *_: object) -> None:
+        self.preference_controller.on_vad_change(*_)
+
     def _on_optimize_change(self, *_: object) -> None:
         self.preference_controller.on_optimize_change(*_)
 
@@ -1656,6 +1680,7 @@ class TalksReducerGUI:
             max_frame_rate = None
         if max_frame_rate:
             args["max_frame_rate"] = max_frame_rate
+        args["vad"] = _resolve_vad_argument(self)
         # Cut video is an Advanced-only feature; Simple mode never trims even if
         # the flag persisted from a previous Advanced session.
         if self.cut_enabled_var.get() and not self.simple_mode_var.get():

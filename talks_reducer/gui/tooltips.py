@@ -34,6 +34,18 @@ class _Tooltip:
         widget.bind("<Leave>", self._on_leave)
         widget.bind("<ButtonPress>", self._on_leave)
 
+    @property
+    def text(self) -> str:
+        """Return the text the next hover will show."""
+
+        return self._text
+
+    def set_text(self, text: str) -> None:
+        """Replace the tooltip text, closing a bubble that shows the old one."""
+
+        self._text = text
+        self._hide()
+
     def _on_enter(self, _event: Any = None) -> None:
         """Schedule the tooltip to appear after a short delay."""
 

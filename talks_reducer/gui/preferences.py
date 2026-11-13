@@ -235,6 +235,11 @@ class PreferenceController:
             "add_codec_suffix", bool(self.gui.add_codec_suffix_var.get())
         )
 
+    def on_vad_change(self, *_: object) -> None:
+        """Persist the "Speedup no voice" checkbox as ``vad_enabled``."""
+
+        self.gui.preferences.update("vad_enabled", bool(self.gui.vad_var.get()))
+
     def on_optimize_change(self, *_: object) -> None:
         self.gui.preferences.update("optimize", bool(self.gui.optimize_var.get()))
 

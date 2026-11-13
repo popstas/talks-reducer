@@ -137,6 +137,7 @@ class SegmentedChoice:
         self._custom_value: Optional[float] = None
         self._selected_index: Optional[int] = None
         self._editing = False
+        self._enabled = True
 
         self.frame = ttk.Frame(parent)
         self.buttons = []
@@ -167,8 +168,9 @@ class SegmentedChoice:
             self.custom_entry.bind("<Escape>", self._cancel_custom_edit)
             self.custom_entry.bind("<FocusOut>", self._commit_custom_edit)
 
+        self.tooltip = None
         if tooltip:
-            add_tooltip(self.frame, tooltip, tk_module=tk)
+            self.tooltip = add_tooltip(self.frame, tooltip, tk_module=tk)
 
         if variable is not None:
             variable.trace_add("write", self._on_variable_write)
@@ -222,6 +224,43 @@ class SegmentedChoice:
         else:
             self._selected_index = None
             self._apply_styles()
+        if not self._enabled:
+            self._apply_enabled_state()
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether the buttons and the custom slot accept input."""
+
+        return self._enabled
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable every option button and the custom slot.
+
+        Only user input is blocked: :meth:`set_value` keeps writing the bound
+        variable, because presets still apply values to a locked control. The
+        state is remembered so :meth:`set_options` rebuilds the row locked too.
+        """
+
+        self._enabled = bool(enabled)
+        self._apply_enabled_state()
+
+    def _apply_enabled_state(self) -> None:
+        """Push the remembered enabled state onto every interactive widget."""
+
+        state = "normal" if self._enabled else "disabled"
+        widgets = list(self.buttons)
+        if self.custom_button is not None:
+            widgets.extend([self.custom_button, self.custom_entry])
+        for widget in widgets:
+            widget.configure(state=state)
+
+    def set_tooltip(self, text: str) -> None:
+        """Replace the group tooltip, attaching one if the control had none."""
+
+        if self.tooltip is None:
+            self.tooltip = add_tooltip(self.frame, text, tk_module=self._tk)
+        else:
+            self.tooltip.set_text(text)
 
     def get_value(self) -> Optional[Value]:
         """Return the currently selected value, or ``None`` when unbound."""

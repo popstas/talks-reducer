@@ -120,9 +120,14 @@ downscales sources taller than 1080 px. `--fps 30|60|orig` (or any positive numb
 output frame rate and never raises it. The 1080p and FPS options need an up-to-date server in
 remote mode.
 
-**Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec, fps)
-you author once in the desktop GUI's Advanced mode and reuse everywhere — Simple mode, the
-Web UI, the OBS dock, and the CLI (`--preset`). When saving you pick which settings the preset
+`--vad` is the **Speedup no voice** checkbox in the desktop GUI, beside the Silence speedup
+buttons in Advanced mode. While it is on the Threshold buttons are disabled, since voice
+detection replaces the volume threshold. Simple mode has no checkbox: there the selected
+preset decides, and the **Voice** preset turns it on. Remote mode does not support it yet.
+
+**Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec, fps,
+Speedup no voice) you author once in the desktop GUI's Advanced mode and reuse everywhere —
+Simple mode, the Web UI, the OBS dock, and the CLI (`--preset`). When saving you pick which settings the preset
 controls, so a preset can be partial (e.g. codec-only) and applying it leaves your other
 settings alone. They live in the shared `settings.json`, so one list appears on every surface,
 and each surface opens on the preset you used last. See
