@@ -233,12 +233,16 @@ def _apply_simple_preset(gui: "TalksReducerGUI") -> None:
 
     The chosen name is looked up in the cached preset list, fanned onto the GUI
     vars, and persisted via ``selected_preset`` so the choice survives relaunch.
+    Choosing a preset also releases a launch-seeded ``--vad``/``--no-vad``
+    (``_seeded_vad``): from then on the user's pick decides Speedup no voice,
+    just as it already overwrites the seeded fps and resolution vars.
     """
 
     name = gui.simple_preset_var.get()
     preset = presets.find_preset(name, getattr(gui, "_simple_presets", []))
     if preset is None:
         return
+    gui._seeded_vad = None
     apply_preset_to_gui(gui, preset)
     presets.set_selected_preset(name)
 

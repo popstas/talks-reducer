@@ -3111,3 +3111,51 @@ def test_simple_mode_honors_seeded_vad():
 
     assert app.TalksReducerGUI._collect_arguments(seeded_on)["vad"] is True
     assert app.TalksReducerGUI._collect_arguments(seeded_off)["vad"] is False
+
+
+def _seeded_simple_gui(seeded: bool, selected: str) -> SimpleNamespace:
+    """A Simple-mode GUI launched with ``--vad``/``--no-vad`` (*seeded*)."""
+
+    selection = {"name": selected}
+    return _make_collect_gui(
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+        vad_var=SimpleNamespace(get=lambda: seeded),
+        simple_preset_var=SimpleNamespace(get=lambda: selection["name"]),
+        _simple_presets=_voice_and_optimal_presets(),
+        _seeded_vad=seeded,
+        _selection=selection,
+    )
+
+
+def test_simple_preset_pick_releases_seeded_no_vad(monkeypatch):
+    """After a ``--no-vad`` launch, choosing Voice runs with voice detection."""
+
+    from talks_reducer.gui import layout
+
+    monkeypatch.setattr(layout, "apply_preset_to_gui", lambda gui, preset: None)
+    monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
+    gui = _seeded_simple_gui(seeded=False, selected="Optimal")
+    assert app.TalksReducerGUI._collect_arguments(gui)["vad"] is False
+
+    gui._selection["name"] = "Voice"
+    layout._apply_simple_preset(gui)
+
+    assert gui._seeded_vad is None
+    assert app.TalksReducerGUI._collect_arguments(gui)["vad"] is True
+
+
+def test_simple_preset_pick_releases_seeded_vad(monkeypatch):
+    """After a ``--vad`` launch, choosing a non-voice preset turns it off."""
+
+    from talks_reducer.gui import layout
+
+    monkeypatch.setattr(layout, "apply_preset_to_gui", lambda gui, preset: None)
+    monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
+    gui = _seeded_simple_gui(seeded=True, selected="Voice")
+    gui._selection["name"] = "Optimal"
+    assert app.TalksReducerGUI._collect_arguments(gui)["vad"] is True
+
+    layout._apply_simple_preset(gui)
+
+    assert gui._seeded_vad is None
+    assert app.TalksReducerGUI._collect_arguments(gui)["vad"] is False

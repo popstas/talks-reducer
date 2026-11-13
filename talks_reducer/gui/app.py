@@ -199,8 +199,11 @@ def _resolve_vad_argument(gui: "TalksReducerGUI") -> bool:
     it: there only the preset selected in the Simple dropdown decides, and only
     a preset that explicitly sets ``vad`` to ``True`` turns it on. The exception
     is a launch that stated it (``--vad``/``--no-vad`` or a preset with ``vad``,
-    as the OBS dock sends): ``_seeded_vad`` then wins in Simple mode too, the
-    same way the seeded fps and resolution flags override the dropdown.
+    as the OBS dock sends): ``_seeded_vad`` then wins in Simple mode too, until
+    the user picks a Simple preset, which clears it (``_apply_simple_preset``).
+    The seeded fps and resolution need no such flag because they are plain var
+    values that a later preset pick overwrites; Simple mode ignores ``vad_var``,
+    so the seeded vad has to be held separately and released explicitly.
     """
 
     if not gui.simple_mode_var.get():
