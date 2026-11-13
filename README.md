@@ -102,6 +102,7 @@ talks-reducer --small --1080 --fps 30 input.mp4            # 1080p at most, capp
 talks-reducer --video-codec mp3 talk.mp4                   # export audio only, as .mp3
 talks-reducer --cut-start 00:00:10 --cut-end 00:01:00 demo.mp4  # keep only 10s–60s
 talks-reducer --remove "1:20-1:45,12:00-12:30" demo.mp4   # also drop these fragments
+talks-reducer --vad demo.mp4   # speed up non-voice frames (Silero VAD; pip install silero-vad-lite)
 talks-reducer --url http://localhost:9005 demo.mp4         # process on a remote server
 talks-reducer --preset "Smallest" demo.mp4                 # apply a saved preset
 talks-reducer --glue part1.mp4 part2.mp4                   # join the parts into one video first

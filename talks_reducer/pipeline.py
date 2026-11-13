@@ -19,6 +19,7 @@ from talks_reducer.version_utils import resolve_version
 from . import audio as audio_utils
 from . import chunks as chunk_utils
 from . import spherical as spherical_utils
+from . import vad as vad_utils
 from . import wav_io as wavfile
 from .cut_marks import normalize_ranges
 from .ffmpeg import (
@@ -36,6 +37,7 @@ from .models import ProcessingOptions, ProcessingResult
 from .progress import NullProgressReporter, ProgressReporter
 from .spherical import SphericalInfo
 from .subprocess_utils import hidden_subprocess_kwargs
+from .timecode import format_timecode
 
 
 class ProcessingAborted(RuntimeError):
@@ -378,6 +380,78 @@ def _resolve_remove_ranges(
     return shifted
 
 
+def _detect_voice_mask(
+    options: ProcessingOptions,
+    audio_data: np.ndarray,
+    sample_rate: int,
+    frame_rate: float,
+    frame_count: int,
+    output_path: Path,
+    reporter: ProgressReporter,
+) -> np.ndarray:
+    """Return the per-frame speech mask produced by Silero VAD.
+
+    The engine is loaded once so the progress total can be derived from its hop
+    size. ``VadUnavailableError`` is deliberately not caught: a missing engine
+    must fail the run rather than silently fall back to loudness detection.
+    """
+
+    settings = vad_utils.VadSettings(
+        engine=options.vad_engine,
+        threshold=options.vad_threshold,
+        padding_ms=options.vad_padding_ms,
+        min_silence_ms=options.vad_min_silence_ms,
+    )
+    engine = vad_utils.load_engine(settings.engine)
+    samples_16k = math.ceil(
+        audio_data.shape[0] * vad_utils.VAD_SAMPLE_RATE / sample_rate
+    )
+    total_windows = vad_utils.count_windows(samples_16k, engine.hop_samples)
+
+    with reporter.task(
+        desc="Voice detection:", total=total_windows, unit="windows"
+    ) as vad_task:
+        result = vad_utils.detect_voice_frames(
+            audio_data,
+            sample_rate,
+            frame_rate,
+            frame_count,
+            settings,
+            engine=engine,
+            progress=vad_task.advance,
+        )
+
+    reporter.log(
+        f"Voice detection ({result.engine}): {result.seconds:.1f} s, "
+        f"speech {result.speech_ratio:.0%} of audio"
+    )
+    if options.vad_dump:
+        _write_vad_dump(options, result, output_path, reporter)
+    return result.mask
+
+
+def _write_vad_dump(
+    options: ProcessingOptions,
+    result: vad_utils.VadResult,
+    output_path: Path,
+    reporter: ProgressReporter,
+) -> None:
+    """Write the speech intervals next to the output as ``<stem>.vad-<engine>.txt``."""
+
+    dump_path = (
+        output_path.parent / f"{options.input_file.stem}.vad-{result.engine}.txt"
+    )
+    lines = [
+        f"{format_timecode(begin, milliseconds=True)}\t"
+        f"{format_timecode(end, milliseconds=True)}\n"
+        for begin, end in result.intervals
+    ]
+    dump_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(dump_path, "w", encoding="utf-8", newline="") as handle:
+        handle.writelines(lines)
+    reporter.log(f"VAD intervals written to {dump_path}")
+
+
 def resolve_output_path(options: ProcessingOptions, source: Path | None = None) -> Path:
     """Return the output path *options* writes to.
 
@@ -613,13 +687,24 @@ def speed_up_video(
 
         _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
-        has_loud_audio = chunk_utils.detect_loud_frames(
-            audio_data,
-            audio_frame_count,
-            samples_per_frame,
-            max_audio_volume,
-            options.silent_threshold,
-        )
+        if options.vad:
+            has_loud_audio = _detect_voice_mask(
+                options,
+                audio_data,
+                wav_sample_rate,
+                frame_rate,
+                audio_frame_count,
+                output_path,
+                reporter,
+            )
+        else:
+            has_loud_audio = chunk_utils.detect_loud_frames(
+                audio_data,
+                audio_frame_count,
+                samples_per_frame,
+                max_audio_volume,
+                options.silent_threshold,
+            )
 
         chunks, _ = chunk_utils.build_chunks(has_loud_audio, options.frame_spreadage)
         if remove_ranges:

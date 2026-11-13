@@ -75,6 +75,12 @@ class ProcessingOptions:
     cut_start_seconds: float = 0.0
     cut_end_seconds: float = 0.0
     remove_ranges: Tuple[Tuple[float, float], ...] = ()
+    vad: bool = False
+    vad_engine: str = "lite"
+    vad_threshold: float = 0.5
+    vad_padding_ms: int = 150
+    vad_min_silence_ms: int = 300
+    vad_dump: bool = False
 
 
 @dataclass(frozen=True)

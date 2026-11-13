@@ -1595,3 +1595,67 @@ def test_main_rejects_remove_ranges_with_host(monkeypatch, capsys) -> None:
 
     assert exc.value.code == 1
     assert "Error: Remove ranges are local-only" in capsys.readouterr().err
+
+
+def test_vad_flags_map_to_options() -> None:
+    parsed_args = cli._build_parser().parse_args(
+        [
+            "--vad",
+            "--vad-engine",
+            "torch",
+            "--vad-threshold",
+            "0.6",
+            "--vad-padding",
+            "200",
+            "--vad-min-silence",
+            "400",
+            "--vad-dump",
+            "input.mp4",
+        ]
+    )
+    speed_calls: list[cli.ProcessingOptions] = []
+
+    def fake_speed_up(options: cli.ProcessingOptions, reporter: object):
+        speed_calls.append(options)
+        return SimpleNamespace(output_file=Path("/videos/output.mp4"))
+
+    class DummyReporter:
+        def log(self, message: str) -> None:
+            pass
+
+    app = cli.CliApplication(
+        gather_files=lambda paths, **_kwargs: ["/videos/input.mp4"],
+        send_video=None,
+        speed_up=fake_speed_up,
+        reporter_factory=DummyReporter,
+    )
+
+    exit_code, _ = app.run(parsed_args)
+
+    assert exit_code == 0
+    options = speed_calls[0]
+    assert options.vad is True
+    assert options.vad_engine == "torch"
+    assert options.vad_threshold == pytest.approx(0.6)
+    assert options.vad_padding_ms == 200
+    assert options.vad_min_silence_ms == 400
+    assert options.vad_dump is True
+
+
+def test_vad_defaults_leave_options_untouched() -> None:
+    parsed_args = cli._build_parser().parse_args(["input.mp4"])
+
+    assert parsed_args.vad is None
+    assert parsed_args.vad_engine is None
+    assert parsed_args.vad_dump is False
+
+
+def test_no_vad_flag_sets_false() -> None:
+    parsed_args = cli._build_parser().parse_args(["--no-vad", "input.mp4"])
+
+    assert parsed_args.vad is False
+
+
+def test_vad_engine_rejects_unknown() -> None:
+    with pytest.raises(SystemExit):
+        cli._build_parser().parse_args(["--vad-engine", "bogus", "input.mp4"])
