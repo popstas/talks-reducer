@@ -89,7 +89,7 @@ def test_load_presets_skips_malformed_entries(tmp_path):
 
     result = load_presets(config_path=path)
 
-    assert [preset.name for preset in result] == ["Good"]
+    assert [preset.name for preset in result] == ["Good", "Voice"]
 
 
 def test_save_and_load_round_trip(tmp_path):
@@ -132,7 +132,7 @@ def test_load_presets_ignores_non_mapping_entries(tmp_path):
 
     result = load_presets(config_path=path)
 
-    assert [preset.name for preset in result] == ["Good"]
+    assert [preset.name for preset in result] == ["Good", "Voice"]
 
 
 def test_load_presets_non_list_value_returns_empty(tmp_path):
@@ -518,9 +518,9 @@ def test_load_presets_migrates_v1_1080p_to_orig(tmp_path):
 
     result = load_presets(config_path=path)
 
-    assert [p.resolution for p in result] == ["orig", "720p"]
+    assert [p.resolution for p in result[:2]] == ["orig", "720p"]
     stored = _read(path)
-    assert stored["presets_version"] == 2
+    assert stored["presets_version"] == 3
     assert stored["presets"][0]["resolution"] == "orig"
     assert stored["theme"] == "dark"
 
@@ -540,7 +540,7 @@ def test_load_presets_seed_writes_version_marker(tmp_path):
 
     load_presets(config_path=path)
 
-    assert _read(path)["presets_version"] == 2
+    assert _read(path)["presets_version"] == 3
 
 
 def test_save_presets_writes_version_marker(tmp_path):
@@ -548,7 +548,7 @@ def test_save_presets_writes_version_marker(tmp_path):
 
     save_presets([Preset(name="x", resolution="1080p")], config_path=path)
 
-    assert _read(path)["presets_version"] == 2
+    assert _read(path)["presets_version"] == 3
 
 
 def test_preset_fps_round_trips_sparse():
@@ -606,7 +606,7 @@ def test_load_presets_migration_adds_fps_orig_to_resolution_presets(tmp_path):
 
     result = load_presets(config_path=path)
 
-    assert [p.fps for p in result] == ["orig", "30", None]
+    assert [p.fps for p in result[:3]] == ["orig", "30", None]
     stored = _read(path)["presets"]
     assert stored[0]["fps"] == "orig"
     assert "fps" not in stored[2]
@@ -654,3 +654,170 @@ def test_parse_fps_token_rejects_invalid(token):
 )
 def test_format_fps_token(value, expected):
     assert presets.format_fps_token(value) == expected
+
+
+def test_vad_round_trips_sparse():
+    preset = Preset(name="x", vad=True)
+
+    assert preset.to_dict() == {"name": "x", "vad": True}
+    assert Preset.from_dict({"name": "x", "vad": True}).vad is True
+    assert Preset.from_dict({"name": "x", "vad": False}).vad is False
+    assert Preset.from_dict({"name": "x"}).vad is None
+    assert preset.present_fields() == {"vad"}
+    assert Preset(name="x", vad=False).to_dict() == {"name": "x", "vad": False}
+
+
+def test_preset_to_cli_args_vad_true_false():
+    assert preset_to_cli_args(Preset(name="p", vad=True)) == ["--vad"]
+    assert preset_to_cli_args(Preset(name="p", vad=False)) == ["--no-vad"]
+    assert preset_to_cli_args(Preset(name="p")) == []
+
+
+def test_describe_preset_lists_vad():
+    assert presets.describe_preset(Preset(name="p", vad=True)) == (
+        "Speedup no voice: on"
+    )
+    assert presets.describe_preset(Preset(name="p", vad=False)) == (
+        "Speedup no voice: off"
+    )
+
+
+def test_match_preset_distinguishes_vad():
+    base = {
+        "resolution": "720p",
+        "fps": "orig",
+        "silent_speed": 10.0,
+        "sounded_speed": 1.0,
+        "silent_threshold": 0.01,
+        "video_codec": "hevc",
+    }
+
+    assert match_preset({**base, "vad": True}, DEFAULT_PRESETS) == "Voice"
+    assert match_preset({**base, "vad": False}, DEFAULT_PRESETS) == "Optimal"
+    assert match_preset(base, DEFAULT_PRESETS) == "Optimal"
+
+
+def test_default_presets_voice_follows_optimal():
+    names = [preset.name for preset in DEFAULT_PRESETS]
+
+    assert names == ["Compatible", "Optimal", "Voice", "Smallest", "Compress", "mp3"]
+    voice = find_preset("Voice", DEFAULT_PRESETS)
+    assert voice.vad is True
+    assert (voice.resolution, voice.video_codec) == ("720p", "hevc")
+    assert all(p.vad is False for p in DEFAULT_PRESETS if p.name != "Voice")
+
+
+def test_fresh_install_seeds_voice_and_v3_marker(tmp_path):
+    path = _config_path(tmp_path)
+
+    result = load_presets(config_path=path)
+
+    assert "Voice" in [p.name for p in result]
+    stored = _read(path)
+    assert stored["presets_version"] == 3
+    assert find_preset("Voice", result).vad is True
+
+
+def _v2_entry(name: str, **extra) -> dict:
+    return {
+        "name": name,
+        "resolution": "720p",
+        "fps": "orig",
+        "silent_speed": 10.0,
+        "sounded_speed": 1.0,
+        "silent_threshold": 0.01,
+        "video_codec": "hevc",
+        **extra,
+    }
+
+
+def test_v2_migration_adds_vad_false_and_inserts_voice_after_optimal(tmp_path):
+    path = _config_path(tmp_path)
+    _write(
+        path,
+        {
+            "presets_version": 2,
+            "theme": "dark",
+            "presets": [_v2_entry("Compatible"), _v2_entry("Optimal"), _v2_entry("Z")],
+        },
+    )
+
+    result = load_presets(config_path=path)
+
+    assert [p.name for p in result] == ["Compatible", "Optimal", "Voice", "Z"]
+    assert [p.vad for p in result] == [False, False, True, False]
+    stored = _read(path)
+    assert stored["presets_version"] == 3
+    assert stored["theme"] == "dark"
+    assert stored["presets"][2]["vad"] is True
+
+
+def test_v2_migration_keeps_existing_voice_preset(tmp_path):
+    path = _config_path(tmp_path)
+    _write(
+        path,
+        {
+            "presets_version": 2,
+            "presets": [_v2_entry("Optimal"), _v2_entry("voice", silent_speed=5.0)],
+        },
+    )
+
+    result = load_presets(config_path=path)
+
+    assert [p.name for p in result] == ["Optimal", "voice"]
+    assert result[1].silent_speed == 5.0
+    assert result[1].vad is False
+
+
+def test_v2_migration_appends_voice_when_no_optimal(tmp_path):
+    path = _config_path(tmp_path)
+    _write(
+        path,
+        {"presets_version": 2, "presets": [_v2_entry("A"), _v2_entry("B")]},
+    )
+
+    result = load_presets(config_path=path)
+
+    assert [p.name for p in result] == ["A", "B", "Voice"]
+
+
+def test_v1_file_migrates_through_v3(tmp_path):
+    path = _config_path(tmp_path)
+    _write(
+        path,
+        {"presets": [{"name": "Optimal", "resolution": "1080p", "silent_speed": 10.0}]},
+    )
+
+    result = load_presets(config_path=path)
+
+    assert [p.name for p in result] == ["Optimal", "Voice"]
+    assert result[0].resolution == "orig"
+    assert result[0].fps == "orig"
+    assert result[0].vad is False
+    assert _read(path)["presets_version"] == 3
+
+
+def test_migration_leaves_sparse_preset_without_silent_speed_alone(tmp_path):
+    path = _config_path(tmp_path)
+    _write(
+        path,
+        {"presets_version": 2, "presets": [{"name": "audio", "video_codec": "mp3"}]},
+    )
+
+    result = load_presets(config_path=path)
+
+    assert result[0].vad is None
+    assert "vad" not in _read(path)["presets"][0]
+
+
+def test_v3_file_is_not_migrated_again(tmp_path):
+    path = _config_path(tmp_path)
+    _write(
+        path,
+        {"presets_version": 3, "presets": [{"name": "Optimal", "silent_speed": 5.0}]},
+    )
+
+    result = load_presets(config_path=path)
+
+    assert [p.name for p in result] == ["Optimal"]
+    assert result[0].vad is None

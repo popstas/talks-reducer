@@ -131,7 +131,7 @@ def test_save_preserves_presets_version_marker(tmp_path):
     assert presets.save_presets([presets.Preset(name="x")], config_path=config_path)
     prefs.update("small_video", True)
 
-    assert load_settings(config_path)[presets.PRESETS_VERSION_KEY] == 2
+    assert load_settings(config_path)[presets.PRESETS_VERSION_KEY] == 3
 
 
 def test_seeded_real_1080p_preset_survives_preference_save(tmp_path):

@@ -31,9 +31,10 @@ RESOLUTIONS = ("orig", "1080p", "720p", "480p")
 FPS_VALUES = ("30", "60", "orig")
 
 # Schema marker. Version 1 files used ``"1080p"`` for "no scaling"; version 2
-# gives ``"1080p"`` its literal meaning and spells "no scaling" as ``"orig"``.
+# gives ``"1080p"`` its literal meaning and spells "no scaling" as ``"orig"``;
+# version 3 adds the boolean ``vad`` field and seeds the Voice preset.
 PRESETS_VERSION_KEY = "presets_version"
-PRESETS_VERSION = 2
+PRESETS_VERSION = 3
 
 # Label shown in an authoring dropdown when the live knobs match no stored
 # preset. Mirrors :func:`match_preset` returning ``None``.
@@ -53,6 +54,7 @@ PRESET_VALUE_FIELDS = (
     "sounded_speed",
     "silent_threshold",
     "video_codec",
+    "vad",
 )
 
 # Human-readable names for the value fields, shared by the Save/Update dialog's
@@ -64,6 +66,7 @@ PRESET_FIELD_LABELS = {
     "sounded_speed": "Sounded speed",
     "silent_threshold": "Silent threshold",
     "video_codec": "Codec",
+    "vad": "Speedup no voice",
 }
 
 # Display names for the codec identifiers stored in a preset, matching the
@@ -95,6 +98,7 @@ class Preset:
     sounded_speed: Optional[float] = None
     silent_threshold: Optional[float] = None
     video_codec: Optional[str] = None
+    vad: Optional[bool] = None
 
     def to_dict(self) -> dict[str, object]:
         """Return the JSON dict stored in ``settings.json``.
@@ -127,6 +131,10 @@ class Preset:
             value = data.get(key)
             return float(value) if value is not None else None
 
+        def _opt_bool(key: str) -> Optional[bool]:
+            value = data.get(key)
+            return bool(value) if value is not None else None
+
         return cls(
             name=str(data.get("name", "")),
             resolution=_opt_str("resolution"),
@@ -135,6 +143,7 @@ class Preset:
             sounded_speed=_opt_float("sounded_speed"),
             silent_threshold=_opt_float("silent_threshold"),
             video_codec=_opt_str("video_codec"),
+            vad=_opt_bool("vad"),
         )
 
     def present_fields(self) -> set:
@@ -164,6 +173,7 @@ DEFAULT_PRESETS: List[Preset] = [
         sounded_speed=1.0,
         silent_threshold=0.01,
         video_codec="h264",
+        vad=False,
     ),
     Preset(
         name="Optimal",
@@ -173,6 +183,17 @@ DEFAULT_PRESETS: List[Preset] = [
         sounded_speed=1.0,
         silent_threshold=0.01,
         video_codec="hevc",
+        vad=False,
+    ),
+    Preset(
+        name="Voice",
+        resolution="720p",
+        fps="orig",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="hevc",
+        vad=True,
     ),
     Preset(
         name="Smallest",
@@ -182,6 +203,7 @@ DEFAULT_PRESETS: List[Preset] = [
         sounded_speed=1.0,
         silent_threshold=0.01,
         video_codec="hevc",
+        vad=False,
     ),
     Preset(
         name="Compress",
@@ -191,6 +213,7 @@ DEFAULT_PRESETS: List[Preset] = [
         sounded_speed=1.0,
         silent_threshold=0.01,
         video_codec="h264",
+        vad=False,
     ),
     Preset(
         name="mp3",
@@ -198,6 +221,7 @@ DEFAULT_PRESETS: List[Preset] = [
         sounded_speed=1.0,
         silent_threshold=0.01,
         video_codec="mp3",
+        vad=False,
     ),
 ]
 
@@ -289,6 +313,44 @@ def _migrate_v1_entry(entry: object) -> object:
     return migrated
 
 
+def _migrate_v2_entries(raw: list) -> list:
+    """Rewrite a version-2 preset list into the version-3 schema.
+
+    Every full preset (one carrying ``silent_speed``) gains ``vad: False`` so
+    that selecting it after Voice turns the voice detector back off rather than
+    inheriting it; sparse presets without ``silent_speed`` are left alone. The
+    default Voice preset is inserted after Optimal (or appended when there is no
+    Optimal) unless a preset already named ``voice`` exists. This is a
+    deliberate exception to "existing lists never pick up new defaults".
+    """
+
+    migrated: list = []
+    for entry in raw:
+        if (
+            isinstance(entry, Mapping)
+            and entry.get("silent_speed") is not None
+            and "vad" not in entry
+        ):
+            entry = {**entry, "vad": False}
+        migrated.append(entry)
+
+    def _named(entry: object, name: str) -> bool:
+        return (
+            isinstance(entry, Mapping) and str(entry.get("name", "")).casefold() == name
+        )
+
+    if any(_named(entry, "voice") for entry in migrated):
+        return migrated
+
+    voice = next(p for p in DEFAULT_PRESETS if p.name == "Voice").to_dict()
+    for index, entry in enumerate(migrated):
+        if _named(entry, "optimal"):
+            migrated.insert(index + 1, voice)
+            return migrated
+    migrated.append(voice)
+    return migrated
+
+
 def load_presets(config_path: Optional[Path] = None) -> List[Preset]:
     """Return the stored presets, seeding :data:`DEFAULT_PRESETS` on first run.
 
@@ -296,8 +358,9 @@ def load_presets(config_path: Optional[Path] = None) -> List[Preset]:
     ``settings.json`` and returned. An explicitly empty list (the user deleted
     every preset) is preserved and returned as ``[]``. A version-1 file (no
     ``presets_version`` marker) has its ``"1080p"`` presets rewritten to
-    ``"orig"`` once, gains ``fps: "orig"`` where it has a resolution but no fps,
-    and is re-saved with the marker.
+    ``"orig"`` once, gains ``fps: "orig"`` where it has a resolution but no fps;
+    any file below version 3 then runs :func:`_migrate_v2_entries`, and the
+    result is re-saved once with the current marker.
     """
 
     path = _resolve_config_path(config_path)
@@ -318,8 +381,12 @@ def load_presets(config_path: Optional[Path] = None) -> List[Preset]:
     if not isinstance(raw, list):
         return []
 
-    if _stored_presets_version(settings) < PRESETS_VERSION:
-        raw = [_migrate_v1_entry(entry) for entry in raw]
+    stored_version = _stored_presets_version(settings)
+    if stored_version < PRESETS_VERSION:
+        if stored_version < 2:
+            raw = [_migrate_v1_entry(entry) for entry in raw]
+        if stored_version < 3:
+            raw = _migrate_v2_entries(raw)
         settings[PRESETS_KEY] = raw
         settings[PRESETS_VERSION_KEY] = PRESETS_VERSION
         # Best-effort: a failed write migrates again on the next load, which
@@ -453,6 +520,8 @@ def preset_to_cli_args(preset: Preset) -> List[str]:
         args.extend(["--silent-threshold", _format_number(preset.silent_threshold)])
     if preset.video_codec is not None:
         args.extend(["--video-codec", str(preset.video_codec)])
+    if preset.vad is not None:
+        args.append("--vad" if preset.vad else "--no-vad")
 
     return args
 
@@ -478,6 +547,8 @@ def describe_preset_fields(preset: Preset) -> List[str]:
             rendered = _format_number(value)
         elif field == "video_codec":
             rendered = CODEC_LABELS.get(str(value), str(value))
+        elif field == "vad":
+            rendered = "on" if value else "off"
         else:
             rendered = str(value)
         lines.append(f"{PRESET_FIELD_LABELS[field]}: {rendered}")
@@ -502,7 +573,8 @@ def match_preset(
 ) -> Optional[str]:
     """Reverse-match live *values* to a preset name, or ``None`` for "Custom".
 
-    ``values`` supplies ``resolution``, ``fps`` and ``video_codec`` (compared exactly)
+    ``values`` supplies ``resolution``, ``fps``, ``video_codec`` and ``vad``
+    (compared exactly, a missing ``vad`` counting as off)
     plus ``silent_speed``, ``sounded_speed``, and ``silent_threshold`` (compared
     within :data:`MATCH_TOLERANCE`). A sparse preset matches when **every field
     it defines** equals the live value; the params it omits are ignored. A preset
@@ -522,6 +594,8 @@ def match_preset(
         ):
             continue
         if "fps" in present and preset.fps != str(values.get("fps", "")):
+            continue
+        if "vad" in present and preset.vad != bool(values.get("vad", False)):
             continue
 
         matched = True

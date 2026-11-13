@@ -433,6 +433,8 @@ def _apply_preset_to_args(
         and "video_codec" not in explicit
     ):
         parsed_args.video_codec = str(preset.video_codec)
+    if getattr(preset, "vad", None) is not None and "vad" not in explicit:
+        parsed_args.vad = bool(preset.vad)
 
 
 def gather_input_files(

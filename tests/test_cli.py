@@ -1659,3 +1659,31 @@ def test_no_vad_flag_sets_false() -> None:
 def test_vad_engine_rejects_unknown() -> None:
     with pytest.raises(SystemExit):
         cli._build_parser().parse_args(["--vad-engine", "bogus", "input.mp4"])
+
+
+def test_explicit_no_vad_beats_voice_preset(monkeypatch: pytest.MonkeyPatch) -> None:
+    preset = _make_preset(name="Voice", vad=True)
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: [preset])
+    captured: dict = {}
+    _capture_cli_application(monkeypatch, captured)
+
+    cli.main(["--preset", "Voice", "--no-vad", "input.mp4"])
+
+    assert captured["vad"] is False
+
+
+def test_optimal_after_voice_turns_vad_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    stored = [
+        _make_preset(name="Voice", vad=True),
+        _make_preset(name="Optimal", vad=False),
+    ]
+    monkeypatch.setattr(presets_module, "load_presets", lambda *a, **k: stored)
+
+    captured: dict = {}
+    _capture_cli_application(monkeypatch, captured)
+    cli.main(["--preset", "Voice", "input.mp4"])
+    assert captured["vad"] is True
+
+    captured.clear()
+    cli.main(["--preset", "Optimal", "input.mp4"])
+    assert captured["vad"] is False
