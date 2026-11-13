@@ -321,9 +321,13 @@ def _migrate_v2_entries(raw: list) -> list:
     inheriting it; sparse presets without ``silent_speed`` are left alone. The
     default Voice preset is inserted after Optimal (or appended when there is no
     Optimal) unless a preset already named ``voice`` exists. This is a
-    deliberate exception to "existing lists never pick up new defaults".
+    deliberate exception to "existing lists never pick up new defaults" -- but
+    not for an empty list: the user deleted every preset on purpose, and a lone
+    Voice would become the first preset and auto-apply on every surface.
     """
 
+    if not raw:
+        return []
     migrated: list = []
     for entry in raw:
         if (
@@ -389,8 +393,9 @@ def load_presets(config_path: Optional[Path] = None) -> List[Preset]:
             raw = _migrate_v2_entries(raw)
         settings[PRESETS_KEY] = raw
         settings[PRESETS_VERSION_KEY] = PRESETS_VERSION
-        # Best-effort: a failed write migrates again on the next load, which
-        # is safe because only a version-1 file is ever rewritten.
+        # Best-effort: a failed write leaves the old marker and the old list
+        # on disk, so the next load re-runs the same migration from the same
+        # input (version 1 and 2 files alike) and nothing is applied twice.
         config.save_settings(path, settings)
 
     presets: List[Preset] = []

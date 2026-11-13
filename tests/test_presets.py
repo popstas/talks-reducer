@@ -821,3 +821,18 @@ def test_v3_file_is_not_migrated_again(tmp_path):
 
     assert [p.name for p in result] == ["Optimal"]
     assert result[0].vad is None
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [{"presets": [], "presets_version": 2}, {"presets": []}],
+    ids=["v2", "v1"],
+)
+def test_migration_keeps_an_emptied_list_empty(tmp_path, stored):
+    """A user who deleted every preset does not get Voice back on upgrade."""
+
+    path = _config_path(tmp_path)
+    _write(path, {**stored, "theme": "dark"})
+
+    assert load_presets(config_path=path) == []
+    assert _read(path) == {"presets": [], "presets_version": 3, "theme": "dark"}
