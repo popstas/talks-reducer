@@ -44,8 +44,8 @@ the embedded player to find the timestamps.
 
 A **Preset** dropdown near the top lists the saved presets from the shared `settings.json`
 (the same list the desktop GUI authors). Selecting a preset sets the resolution, FPS, speedup,
-silent/sounded speed sliders, silent threshold, and codec controls to its values (when a
-preset's silent speed is not one of the speedup radio's presets, only the slider is set);
+silent/sounded speed sliders, silent threshold, codec and Speedup no voice controls to its
+values (when a preset's silent speed is not one of the speedup radio's presets, only the slider is set);
 the dropdown is hidden when no presets are defined. See [gui.md](gui.md#presets) for how
 presets are created.
 
