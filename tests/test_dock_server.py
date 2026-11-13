@@ -433,6 +433,36 @@ def test_handle_process_forwards_vad(tmp_path, monkeypatch) -> None:
     assert calls[0][-1] is True
 
 
+@pytest.mark.parametrize("value", ["false", "true", "1", 1, None])
+def test_handle_process_vad_needs_json_true(tmp_path, monkeypatch, value) -> None:
+    """Only a JSON ``true`` adds ``--vad``; a string such as ``"false"`` does not."""
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    exe = tmp_path / "talks-reducer.exe"
+    exe.write_bytes(b"x")
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        dock_server,
+        "start_talks_reducer",
+        lambda *args: calls.append(args),
+    )
+
+    status, _ = dock_server.handle_process(
+        {
+            "file": str(video),
+            "resolution": "720p",
+            "speed": 10,
+            "codec": "hevc",
+            "vad": value,
+            "exe": str(exe),
+        }
+    )
+
+    assert status == 202
+    assert calls[0][-1] is False
+
+
 def test_dock_html_has_persistent_vad_checkbox() -> None:
     """The checkbox sits in the Settings panel, outside the relocated controls."""
 

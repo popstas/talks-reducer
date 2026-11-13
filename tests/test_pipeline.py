@@ -1310,9 +1310,21 @@ class _FakeVadEngine:
 
 
 def _run_vad_pipeline(
-    tmp_path, monkeypatch, *, vad, mask=None, detect_error=None, **option_overrides
+    tmp_path,
+    monkeypatch,
+    *,
+    vad,
+    mask=None,
+    detect_error=None,
+    load_engine=None,
+    ffmpeg_calls=None,
+    **option_overrides,
 ):
-    """Run ``speed_up_video`` with stubbed audio analysis and a fake VAD."""
+    """Run ``speed_up_video`` with stubbed audio analysis and a fake VAD.
+
+    *load_engine* replaces ``vad.load_engine`` and *ffmpeg_calls*, when given,
+    records every ``run_timed_ffmpeg_command`` invocation as ``(desc, command)``.
+    """
 
     from talks_reducer import vad as vad_module
 
@@ -1351,6 +1363,7 @@ def _run_vad_pipeline(
     def fake_detect(audio, rate, frame_rate, frame_count, settings, **kwargs):
         state["vad_calls"] += 1
         state["settings"] = settings
+        state["engine"] = kwargs.get("engine")
         if detect_error is not None:
             raise detect_error
         if kwargs.get("progress"):
@@ -1372,7 +1385,9 @@ def _run_vad_pipeline(
     monkeypatch.setattr(pipeline.chunk_utils, "detect_loud_frames", fake_loud)
     monkeypatch.setattr(pipeline.chunk_utils, "build_chunks", spy_build_chunks)
     monkeypatch.setattr(vad_module, "detect_voice_frames", fake_detect)
-    monkeypatch.setattr(vad_module, "load_engine", lambda name: _FakeVadEngine())
+    monkeypatch.setattr(
+        vad_module, "load_engine", load_engine or (lambda name: _FakeVadEngine())
+    )
 
     def fake_process_chunks(audio, chunks, *args, **kwargs):
         state["chunks"] = chunks
@@ -1393,7 +1408,11 @@ def _run_vad_pipeline(
         build_extract_audio_command=lambda *args, **kwargs: "extract-command",
         build_video_commands=lambda *args, **kwargs: ("ffmpeg", "cmd", False),
         build_audio_only_command=lambda *args, **kwargs: "audio-only-command",
-        run_timed_ffmpeg_command=lambda command, **kwargs: None,
+        run_timed_ffmpeg_command=lambda command, **kwargs: (
+            None
+            if ffmpeg_calls is None
+            else ffmpeg_calls.append((kwargs.get("desc"), command))
+        ),
     )
     options = ProcessingOptions(
         input_file=input_file,
@@ -1462,6 +1481,66 @@ def test_vad_unavailable_propagates(tmp_path, monkeypatch) -> None:
             vad=True,
             detect_error=vad_module.VadUnavailableError("pip install silero-vad-lite"),
         )
+
+
+def test_vad_missing_engine_fails_before_audio_extraction(
+    tmp_path, monkeypatch
+) -> None:
+    from talks_reducer import vad as vad_module
+
+    def missing_engine(name):
+        raise vad_module.VadUnavailableError("pip install silero-vad-lite")
+
+    ffmpeg_calls: list = []
+    with pytest.raises(vad_module.VadUnavailableError):
+        _run_vad_pipeline(
+            tmp_path,
+            monkeypatch,
+            vad=True,
+            load_engine=missing_engine,
+            ffmpeg_calls=ffmpeg_calls,
+        )
+
+    assert ffmpeg_calls == []
+    assert list((tmp_path / "temp").glob("job_*")) == []
+
+
+def test_vad_engine_is_loaded_once_and_reused(tmp_path, monkeypatch) -> None:
+    loaded: list = []
+
+    def load_engine(name):
+        engine = _FakeVadEngine()
+        loaded.append((name, engine))
+        return engine
+
+    ffmpeg_calls: list = []
+    _, state, _, _ = _run_vad_pipeline(
+        tmp_path,
+        monkeypatch,
+        vad=True,
+        load_engine=load_engine,
+        ffmpeg_calls=ffmpeg_calls,
+    )
+
+    assert [name for name, _ in loaded] == ["fake"]
+    assert state["engine"] is loaded[0][1]
+    assert ffmpeg_calls[0][0] == "Extracting audio:"
+
+
+def test_vad_engine_not_loaded_when_audio_is_not_analysed(
+    tmp_path, monkeypatch
+) -> None:
+    def unexpected_load(name):
+        raise AssertionError("engine loaded for a run that never analyses audio")
+
+    _run_vad_pipeline(
+        tmp_path,
+        monkeypatch,
+        vad=True,
+        load_engine=unexpected_load,
+        silent_speed=1.0,
+        sounded_speed=1.0,
+    )
 
 
 def test_vad_dump_writes_intervals_file(tmp_path, monkeypatch) -> None:

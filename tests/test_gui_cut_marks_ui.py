@@ -96,6 +96,7 @@ def test_remove_only_overrides_keep_codec_and_drop_scaling() -> None:
     assert result == {
         "silent_speed": 1.0,
         "sounded_speed": 1.0,
+        "vad": False,
         "video_codec": "hevc",
         "remove_ranges": ((1.0, 2.0),),
     }
@@ -201,3 +202,27 @@ def test_apply_player_result_logs_save_failure_but_updates_field(
 
     assert gui.remove_ranges == [(3.0, 4.0)]
     assert any("Could not save cut marks" in line for line in logs)
+
+
+def test_remove_only_overrides_turn_voice_detection_off() -> None:
+    """A remove-only pass must not run VAD: speeds are 1, so it would only cost."""
+
+    args = {
+        "silent_speed": 10.0,
+        "sounded_speed": 1.0,
+        "vad": True,
+        "vad_threshold": 0.4,
+        "vad_padding_ms": 200,
+        "vad_min_silence_ms": 500,
+        "remove_ranges": ((1.0, 2.0),),
+    }
+
+    result = cut_marks_ui.remove_only_overrides(args)
+
+    assert result == {
+        "silent_speed": 1.0,
+        "sounded_speed": 1.0,
+        "vad": False,
+        "remove_ranges": ((1.0, 2.0),),
+    }
+    assert args["vad"] is True

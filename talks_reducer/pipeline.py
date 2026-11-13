@@ -380,8 +380,30 @@ def _resolve_remove_ranges(
     return shifted
 
 
+def _load_vad_engine(
+    options: ProcessingOptions,
+    job_temp_path: Path,
+    dependencies: PipelineDependencies,
+) -> vad_utils.VadEngine:
+    """Load the VAD engine named by *options*, before any audio is extracted.
+
+    Loading first makes a missing or broken engine fail in a moment instead of
+    after a long extraction. ``VadUnavailableError`` (and ``ValueError`` for an
+    unknown name) still propagates -- a missing engine must fail the run rather
+    than silently fall back to loudness detection -- but the job's temp folder
+    is removed first, like the pipeline's other early exits.
+    """
+
+    try:
+        return vad_utils.load_engine(options.vad_engine)
+    except Exception:
+        dependencies.delete_path(job_temp_path)
+        raise
+
+
 def _detect_voice_mask(
     options: ProcessingOptions,
+    engine: vad_utils.VadEngine,
     audio_data: np.ndarray,
     sample_rate: int,
     frame_rate: float,
@@ -391,9 +413,8 @@ def _detect_voice_mask(
 ) -> np.ndarray:
     """Return the per-frame speech mask produced by Silero VAD.
 
-    The engine is loaded once so the progress total can be derived from its hop
-    size. ``VadUnavailableError`` is deliberately not caught: a missing engine
-    must fail the run rather than silently fall back to loudness detection.
+    *engine* comes from :func:`_load_vad_engine`, loaded before extraction; its
+    hop size sets the progress total.
     """
 
     settings = vad_utils.VadSettings(
@@ -402,7 +423,6 @@ def _detect_voice_mask(
         padding_ms=options.vad_padding_ms,
         min_silence_ms=options.vad_min_silence_ms,
     )
-    engine = vad_utils.load_engine(settings.engine)
     samples_16k = math.ceil(
         audio_data.shape[0] * vad_utils.VAD_SAMPLE_RATE / sample_rate
     )
@@ -645,6 +665,11 @@ def speed_up_video(
         audio_bitrate = "128k" if options.optimize else "160k"
         audio_wav = job_temp_path / "audio.wav"
         extraction_sample_rate = options.sample_rate
+        vad_engine = (
+            _load_vad_engine(options, job_temp_path, dependencies)
+            if options.vad
+            else None
+        )
 
         extract_command = dependencies.build_extract_audio_command(
             os.fspath(input_path),
@@ -687,9 +712,10 @@ def speed_up_video(
 
         _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
-        if options.vad:
+        if vad_engine is not None:
             has_loud_audio = _detect_voice_mask(
                 options,
+                vad_engine,
                 audio_data,
                 wav_sample_rate,
                 frame_rate,

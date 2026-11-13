@@ -24,6 +24,7 @@ from .pipeline import resolve_output_path, speed_up_video
 from .presets import parse_fps_token, resolution_to_small
 from .progress import TqdmProgressReporter
 from .timecode import parse_timecode
+from .vad import VadUnavailableError
 from .version_utils import resolve_version
 
 
@@ -731,7 +732,7 @@ class CliApplication:
 
             try:
                 result = self._speed_up(options, reporter=reporter)
-            except FFmpegNotFoundError as exc:
+            except (FFmpegNotFoundError, VadUnavailableError) as exc:
                 message = str(exc)
                 return 1, [*error_messages, message]
 

@@ -16,7 +16,14 @@ from typing import Iterable, Optional, Sequence
 
 from .. import cut_marks
 
-_OVERRIDDEN_KEYS = ("small", "small_target_height", "max_frame_rate")
+_OVERRIDDEN_KEYS = (
+    "small",
+    "small_target_height",
+    "max_frame_rate",
+    "vad_threshold",
+    "vad_padding_ms",
+    "vad_min_silence_ms",
+)
 
 
 def current_input_video(gui) -> Optional[Path]:
@@ -94,13 +101,16 @@ def remove_only_overrides(args: dict) -> dict:
     """Return *args* for a pass that only drops fragments from a finished file.
 
     Speeds go to 1 so remaining silence is not sped up a second time, and
-    scaling and the fps cap are removed so the picture is left as it is. The
+    scaling and the fps cap are removed so the picture is left as it is. Voice
+    detection is turned off (and its settings dropped): with both speeds at 1
+    its mask changes nothing, so running Silero would only cost time. The
     codec stays as selected.
     """
 
     result = {key: value for key, value in args.items() if key not in _OVERRIDDEN_KEYS}
     result["silent_speed"] = 1.0
     result["sounded_speed"] = 1.0
+    result["vad"] = False
     return result
 
 

@@ -170,7 +170,9 @@ def handle_process(payload: dict, default_exe: Optional[str] = None) -> Tuple[in
     payload carries a ``preset`` name the resolution/speed/codec fields are
     ignored (the preset drives them via ``--preset NAME``) and only the preset
     name is validated against the stored list. The optional boolean ``vad``
-    field (Speedup no voice) applies only in manual mode.
+    field (Speedup no voice) applies only in manual mode, and only a JSON
+    ``true`` turns it on: the string ``"false"`` is truthy, so ``bool()`` on
+    the payload value would have added ``--vad`` for it.
     """
 
     print(f"[dock] /process payload: {payload}", flush=True)
@@ -180,7 +182,7 @@ def handle_process(payload: dict, default_exe: Optional[str] = None) -> Tuple[in
     codec = str(payload.get("codec") or "h264").strip()
     fps = str(payload.get("fps") or "orig").strip()
     auto_close = bool(payload.get("autoClose"))
-    vad = bool(payload.get("vad"))
+    vad = payload.get("vad") is True
     exe_path = resolve_exe_path(payload.get("exe") or default_exe)
 
     try:

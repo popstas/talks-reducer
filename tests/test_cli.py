@@ -1740,3 +1740,31 @@ def test_cli_remote_passes_vad() -> None:
 
     call = run(vad=None)
     assert "vad" not in call
+
+
+def test_cli_application_reports_missing_vad_engine_without_traceback() -> None:
+    """A missing VAD engine ends the run with its install hint as the error."""
+
+    from talks_reducer.vad import VadUnavailableError
+
+    parsed_args = SimpleNamespace(input_file=["input.mp4"], vad=True)
+
+    def fake_speed_up(options: cli.ProcessingOptions, reporter: object):
+        assert options.vad is True
+        raise VadUnavailableError("Install it with: pip install silero-vad-lite")
+
+    class DummyReporter:
+        def log(self, message: str) -> None:
+            pass
+
+    app = cli.CliApplication(
+        gather_files=lambda paths, **_kwargs: ["/videos/input.mp4"],
+        send_video=None,
+        speed_up=fake_speed_up,
+        reporter_factory=DummyReporter,
+    )
+
+    exit_code, error_messages = app.run(parsed_args)
+
+    assert exit_code == 1
+    assert error_messages == ["Install it with: pip install silero-vad-lite"]
