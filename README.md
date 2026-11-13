@@ -120,10 +120,15 @@ downscales sources taller than 1080 px. `--fps 30|60|orig` (or any positive numb
 output frame rate and never raises it. The 1080p and FPS options need an up-to-date server in
 remote mode.
 
-`--vad` is the **Speedup no voice** checkbox in the desktop GUI, beside the Silence speedup
-buttons in Advanced mode. While it is on the Threshold buttons are disabled, since voice
-detection replaces the volume threshold. Simple mode has no checkbox: there the selected
-preset decides, and the **Voice** preset turns it on. Remote mode (`--url`, the GUI's
+`--vad` is the **Speedup no voice** checkbox in the desktop GUI, in the Silence speedup row
+in Advanced mode (`--no-vad` forces loudness detection over a remembered choice). While it is on, the Threshold buttons are disabled, since voice detection
+replaces the volume threshold. Simple mode has no checkbox: there the selected preset decides,
+and the **Voice** preset (Optimal plus voice detection) turns it on. The checkbox does not
+remember itself apart from presets — on startup the remembered preset is applied again. The one
+exception is a launch flag: `--vad`/`--no-vad` from a shortcut or the OBS dock wins in Simple
+mode too, until you pick a preset in the dropdown. Existing preset lists gain **Voice** once,
+after **Optimal**, and the other full presets get an explicit `vad: false`, so choosing them
+after **Voice** switches voice detection back off. Remote mode (`--url`, the GUI's
 **Remote**) sends it with its three settings to the server, which always uses the `lite`
 engine and needs `silero-vad-lite` installed (it reports the missing package as a processing
 error); it needs an up-to-date server, while a run without it still works with older ones.
@@ -132,7 +137,16 @@ The Web UI has a **Speedup no voice** checkbox under **Speedup**, and the OBS do
 Advanced settings add **VAD threshold** (0.05-0.95), **Voice padding, ms** (0-2000) and
 **Min pause, ms** (0-5000) rows, remembered between runs and used only while voice detection is
 on (Simple mode's Voice preset uses the remembered values). The progress bar gets a **Voice
-detection** stage between audio extraction and audio processing.
+detection** stage between audio extraction and audio processing, and the log prints
+`Voice detection (lite): 2.4 s, speech 61% of audio`.
+
+*Experimental engines.* The default `lite` engine ships with Talks Reducer
+(`silero-vad-lite`). Two heavier engines are opt-in for comparison via
+`--vad-engine`: `torch` (reference Silero VAD, `pip install talks-reducer[vad-torch]`, pulls in
+PyTorch) and `ten` (TEN VAD, `pip install talks-reducer[vad-ten]`; check the TEN VAD license
+before redistributing anything built with it). `--vad-dump` writes the detected speech
+intervals to `<input>.vad-<engine>.txt` next to the output. These two flags and both extras are
+experimental and will be removed before release; neither engine is part of the Windows build.
 
 **Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec, fps,
 Speedup no voice) you author once in the desktop GUI's Advanced mode and reuse everywhere —

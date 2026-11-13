@@ -51,28 +51,36 @@ it. The remote path gets the same treatment by wrapping
 rather than the temp input. Nothing is persisted: the question is asked on every
 multi-file run, and a single file never triggers it.
 - **Presets** — user-named bundles of processing settings (`resolution` — `orig`/`1080p`/
-`720p`/`480p` — `silent_speed`, `sounded_speed`, `silent_threshold`, `video_codec`, and a
-sparse `fps` cap stored as `"30"`/`"60"`/`"orig"`) stored in the
+`720p`/`480p` — `silent_speed`, `sounded_speed`, `silent_threshold`, `video_codec`, a
+sparse `fps` cap stored as `"30"`/`"60"`/`"orig"`, and the boolean `vad` — "Speedup no voice") stored in the
 shared `settings.json` (`presets` key) via `talks_reducer/presets.py` and applied
 read-only on every surface (Simple mode, Web UI, OBS dock, CLI `--preset`). Presets
 are **sparse**: every value field on `Preset` is `Optional`, `to_dict()` stores only
 the fields that are set, and `preset.present_fields()` reports them. Apply/CLI/match
 all skip absent fields (`apply_preset_to_gui`, `_apply_preset_to_args`,
 `preset_to_web_controls` return sparse control maps, `match_preset` compares only
-present fields — a zero-field preset never matches). `load_presets()` seeds five
+present fields — a zero-field preset never matches). `load_presets()` seeds six
 `DEFAULT_PRESETS` on first run when the key is absent — **Compatible** (720p ×10 h.264 at
-source fps, the first-run default on every surface), **Optimal** (720p ×10 h.265, source fps), **Smallest** (480p ×10
+source fps, the first-run default on every surface), **Optimal** (720p ×10 h.265, source fps), **Voice**
+(Optimal plus `vad=True`), **Smallest** (480p ×10
 h.265, 30 fps), **Compress** (1080p 30 fps h.264, silence ×1) and the deliberately sparse **mp3** (no
 resolution, so it leaves the video settings alone). They are named for the outcome rather
 than the settings, since the values are one hover away (`describe_preset`). `"1080p"` used to
 mean *no scaling* in stored presets; once it became a real downscale, existing lists would have
-silently started scaling, so `settings.json` carries a `presets_version` marker (`2`) and
+silently started scaling, so `settings.json` carries a `presets_version` marker (`2` when it was introduced, `3` now — see below) and
 `load_presets()` rewrites stored `"1080p"` to `"orig"` (and adds `fps: "orig"` to presets
 with a resolution but no fps, since a sparse preset otherwise inherits the previous preset's cap)
 exactly once — without the marker an old
 `"1080p"` could not be told from a new one on a later load. `GUIPreferences` lists the marker in `_EXTERNALLY_OWNED_KEYS`, because its wholesale rewrite
 would otherwise drop it and re-run the migration. Fresh installs seed the v2 defaults
-and write the marker; existing lists never pick up the new default values. An emptied
+and write the marker; existing lists never pick up the new default values — with one
+deliberate exception: `presets_version` is now `3`, and the v3 migration (`_migrate_v2_entries`)
+adds `vad: false` to every stored *full* preset (one carrying `silent_speed`; sparse presets such
+as mp3 are left alone) and inserts the default **Voice** preset after **Optimal** (appended when
+there is none, skipped when a preset already named `voice` exists). The explicit `vad: false` is
+what keeps the new field from leaking — a sparse preset applies only what it states, so without
+it, picking Optimal after Voice would leave voice detection on. Each marker step runs once
+(`1`→`2`→`3`), so the `"1080p"` rewrite and the Voice insertion never repeat. An emptied
 list persists as `[]`. Each surface opens on the remembered `selected_preset`, else
 the first preset (`layout.seed_initial_preset`, `server.resolve_initial_web_preset`,
 dock `populatePresetDropdown`). **Simple mode** replaces the old
@@ -173,7 +181,27 @@ also a `SegmentedChoice` (`gui.basic_preset_control`, `variable=None`, highlight
 `update_basic_preset_highlight`); **Silence ×5** (`gui.reset_basic_button`) used to disable
 itself when the sliders already matched the defaults, but a button rendered as "selected" must
 not simultaneously be disabled, so `update_basic_reset_state` no longer disables it — clicking
-it always re-applies the defaults.
+it always re-applies the defaults. The **Speedup no voice** checkbox (`gui.vad_check`, bound to
+`vad_var`) is packed into `basic_presets_frame` right after that macro row, so it reads as part of
+the Silence speedup row and Simple mode hides it with the rest of the basic options. While it is on,
+`update_threshold_for_vad` calls `SegmentedChoice.set_enabled(False)` on the Threshold control and
+swaps its tooltip (`set_tooltip`) for `VAD_THRESHOLD_TOOLTIP`, because the detector replaces the
+volume threshold and a live-looking control that does nothing misleads. `set_enabled` blocks only
+user input: `set_value` keeps writing the bound variable, since presets still apply values to a
+locked control, and `set_options` rebuilds the row in the remembered state. **The checkbox has no
+persistence of its own** — startup re-applies the remembered preset, which sets `vad_var` like any
+other field; do not document or build it as an independent remembered setting. Three more
+Advanced rows (**VAD threshold**, **Voice padding, ms**, **Min pause, ms**, persisted as
+`vad_threshold`/`vad_padding_ms`/`vad_min_silence_ms`) are added with
+`layout.add_segmented(..., basic=False)`: the flag keeps a row out of `_basic_defaults`/`_basic_variables`, so the
+**Silence ×5** reset macro and the basic-preset highlight never touch it — these knobs tune a
+feature rather than describe the output. In Simple mode `_resolve_vad_argument` ignores `vad_var` entirely —
+a value remembered from an Advanced session must not leak into a mode with no checkbox — so only the
+selected preset decides, with one exception: a launch that stated `--vad`/`--no-vad` (or a preset
+with `vad`, as the OBS dock sends) stores it in `gui._seeded_vad`, which wins in Simple mode until
+`_apply_simple_preset` clears it on the user's first preset pick. Seeded fps and resolution need no
+such flag because they are plain var values a later preset pick overwrites; `vad_var` is never read
+in Simple mode, so its override has to be held and released explicitly.
 - **Resolution** — a `SegmentedChoice` (**1080p** / **720p** / **480p** / **orig**) in the basic options
 panel, replacing the old **Small video** + **480p** checkboxes. `orig` leaves the source
 resolution untouched and corresponds to the CLI's `--no-small`. The control is a *projection*:
@@ -336,13 +364,14 @@ launches.
   - `pipeline.normalize_frame_rate` snaps the probed `avg_frame_rate` with `Fraction.limit_denominator(1001)`. FFmpeg 5.0's concat demuxer (the one the installed Windows build bundles) reports glued 30 fps parts as `130631680/4354391`; written into the `fps=` filter that becomes a rational `hevc_qsv` refuses ("Current frame rate is unsupported"), so every glued QSV run fell back to the CPU. The bound keeps `30000/1001`-style NTSC rates exact.
   - `chunks.py` builds timing metadata and FFmpeg expressions for frame selection.
   - The `Audio processing:` task counts **chunks**, not samples (`total=len(chunks)`, one unit per chunk). The two chunk kinds stopped costing the same once unit-speed chunks were copied instead of resampled: a copy takes microseconds and the phase vocoder takes everything, so a sample-weighted bar sprinted through ~70% of the samples and then crawled.
+  - `vad.py` turns decoded audio into the same per-video-frame boolean mask `chunks.detect_loud_frames` produces, so the pipeline treats either source alike. Audio is downmixed and resampled to 16 kHz in blocks, an engine (`LiteEngine` = `silero-vad-lite`, a regular dependency; `TorchEngine` = `silero-vad`; `TenEngine` = `ten-vad`, the latter two behind the `vad-torch`/`vad-ten` extras and imported lazily, raising `VadUnavailableError` with the install hint) yields one probability per window, and `speech_intervals` applies Silero's hysteresis, the minimum pause and speech lengths, then padding and merging before `intervals_to_frame_mask`. The pipeline runs it as the `Voice detection:` task between extraction and audio processing and logs `Voice detection ({engine}): {seconds:.1f} s, speech {ratio:.0%} of audio`. `--vad-engine` and `--vad-dump` are experimental comparison tools slated for removal (see `docs/TODO.md`); `talks-reducer.spec` collects `silero_vad_lite`'s `data/` folder (its DLL and ONNX model, invisible to import analysis) and excludes `torch`, `silero_vad` and `ten_vad` so the heavy engines never enter the bundle.
   - `glue.py` concatenates several inputs into one file before the pipeline runs (`--glue`, GUI confirmation). It stream-copies only when `inputs_can_be_copied` reports matching probes — FFmpeg will happily copy parts of different resolutions into a file whose frames change size mid-playback — and otherwise re-encodes through the concat filter, scaling every part to the first one's frame size.
   - `cut_marks.py` owns the remove-range text/JSON formats (`parse_ranges_text`, `format_ranges_text`, `.cuts.json` sidecar I/O via `load_marks`/`save_marks`, `read_marks_file` for `--remove-file`) and the mpv.net launcher (`find_player`, `build_player_command`, `open_player`); the GUI side lives in `gui/cut_marks_ui.py`.
   - `spherical.py` detects 360° metadata (Spherical Mapping + Stereo 3D side data) with a timeout-bounded ffprobe call that never raises, returning `None` for flat videos and for any probe failure. When it finds metadata, glue's copy path and the final encode add `-strict unofficial`, the only way the MOV muxer writes the `sv3d`/`st3d` boxes. On equirectangular sources the pipeline also swaps `scale=-2:H` for `gblur` + `v360` (`spherical_scale_filter`): `scale` drops Spherical Mapping, and so does any filter that changes the frame size before `v360`, which is why the anti-aliasing is a same-size blur (sigma 0.375 × the downscale ratio, skipped under 1.5×) rather than a pre-shrink. Other projections fall back to `scale`, losing the metadata, and log that.
   - `subprocess_utils.py` holds `hidden_subprocess_kwargs()`, which every FFmpeg/ffprobe/PowerShell spawn passes as `**hidden_subprocess_kwargs()` so the windowed Windows build never flashes a console window (`CREATE_NO_WINDOW`, spelled `0x08000000` because the `subprocess` attribute is Windows-only). The flag used to be copied into each call, and the one that missed it flashed a window at the start and end of every conversion; `tests/test_no_console_windows.py` now fails on any `subprocess.run`/`Popen`/`call`/`check_call`/`check_output` call without the helper unless it is in its reasoned `ALLOWED` list.
   - `ffmpeg.py` discovers the FFmpeg binary, detects the hardware encoder per codec (`detect_hardware_backend`: NVENC → AMF → QSV → VideoToolbox, verified by a one-frame trial encode because the bundled build lists every GPU encoder regardless of hardware, cached in `settings.json` under `hardware_backend` for 30 days keyed by the FFmpeg fingerprint; an inconclusive probe — timeout, spawn error, failed encoder listing — is never written to disk and is reused from memory for at most `HARDWARE_INCONCLUSIVE_RETRY_SECONDS` (10 minutes), while a conclusive answer lasts the whole process), and assembles command strings. QSV/AMF arguments live in `_HARDWARE_ENCODER_ARGS`: the QSV `-global_quality` values (hevc 29, av1 31) are calibrated to VMAF ~91 at 720p, the AMF CQP values are provisional and not calibrated (HEVC on the 0–51 QP scale, AV1 on the 0–255 q-index scale), and `_table_encoder_args` drops `-force_key_frames` for QSV because `hevc_qsv` ignores it, leaving `-g`/`-keyint_min`.
-  - `gui/progress.py` defines `STAGE_PROGRESS_RANGES` and `map_stage_progress()`, which map each remote pipeline stage onto fixed GUI percentage bands (`Uploading:` 0–5%, `Extracting audio:` 5–10%, `Audio processing:` 10–20%, `Generating final` 20–100%). The widths follow measured stage cost — on real runs the encode is 83–93% of the wall clock — so they were rebalanced when the audio stage got ~20× faster; the 15% the audio band used to hold now empties in a blink and reads as the bar jumping. `TalksReducerGUI.AUDIO_PROCESSING_RATIO` (the synthetic 0–5% timer's pace, ~0.3% of the source duration) is calibrated against the same measurements.
-  - `gui/segmented.py` defines `SegmentedChoice`, the button-row control (with an optional custom-value `…` slot) used throughout the Advanced "Basic options" panel in place of `tk.Scale` sliders.
+  - `gui/progress.py` defines `STAGE_PROGRESS_RANGES` and `map_stage_progress()`, which map each remote pipeline stage onto fixed GUI percentage bands (`Uploading:` 0–5%, `Extracting audio:` 5–10%, `Voice detection:` 10–15%, `Audio processing:` 15–20%, `Generating final` 20–100%). `Voice detection:` takes 5% out of the audio-processing band because it only runs when voice detection is on; a run without it simply skips that band, and the bar never moves backwards because `_set_progress_monotonic` floors it. The widths follow measured stage cost — on real runs the encode is 83–93% of the wall clock — so they were rebalanced when the audio stage got ~20× faster; the 15% the audio band used to hold now empties in a blink and reads as the bar jumping. `TalksReducerGUI.AUDIO_PROCESSING_RATIO` (the synthetic 0–5% timer's pace, ~0.3% of the source duration) is calibrated against the same measurements.
+  - `gui/segmented.py` defines `SegmentedChoice`, the button-row control (with an optional custom-value `…` slot) used throughout the Advanced "Basic options" panel in place of `tk.Scale` sliders. It can be locked with `set_enabled(False)` (used for Threshold while Speedup no voice is on); the state is remembered across `set_options` rebuilds.
 - `requirements.txt` — Python dependencies for local development.
 - `default.nix` — reproducible environment definition for Nix users.
 - `CONTRIBUTION.md` — development workflow, formatting expectations, and release checklist.
@@ -371,6 +400,7 @@ launches.
 - Never read `progress_var` from a worker thread to compute the next value: it is applied via a queued `root.after` callback and will be stale. `_progress_floor` is the single source of truth.
 - Every progress channel — structured `progress.advance`, remote streaming, frame/time encode parsing, log-only `Task: NN%` milestones, and the synthetic audio timer — must route through `_set_progress_monotonic()`.
 - **The status text is a separate channel from the bar, and every stage needs a writer.** The bar advances from `_GuiProgressHandle._on_update`; the text does not. A local run's writers are the synthetic fallback timer (`_advance_audio_progress`), the `Task: NN%` log milestones `run_timed_ffmpeg_command` emits every 10%, and `_apply_stage_status` — the local counterpart of `gui/remote.py:_handle_remote_progress`, which coalesces each structured task's own 0–100% to whole percents (the audio stage advances once per chunk). `Audio processing:` has none of the others: it runs no FFmpeg, so it logs no milestones, and opening the stage cancels the timer. Without `_apply_stage_status` the text froze mid-ramp for the whole stage while the bar kept moving.
+- **`Voice detection:` is its own stage with its own band, and it cancels the synthetic timer like `Audio processing:` does.** It counts 16 kHz windows (`unit="windows"`), so the bar fills from real work between the extraction ramp and the audio-processing band (`STAGE_PROGRESS_RANGES`: 10–15% and 15–20%). Local (`gui/progress.py`, `summaries.py`) and remote (`gui/remote.py:_handle_remote_progress`) runs both route the stage label through `map_stage_progress`; `_apply_stage_transition` retires the synthetic timer on a `voice detection` prefix just as on `audio processing`, and `_apply_stage_status` writes any structured stage's own percentage generically, so a new stage needs the bar band and the timer-cancel prefix or the frozen-status bug above returns. A run without voice detection never opens the stage, so its band stays empty and the next one starts where the previous ended.
 - **The synthetic timer covers extraction, not audio processing, and its label says so.** It starts on the `Extracting audio...` log and is retired by the first real percentage; FFmpeg emits no frame counter for an audio-only output, so extraction reports nothing until it finishes and the ramp is the only feedback there. It used to render `Audio processing: NN%`, which made the real chunk count look like a restart when it took over at 1%. `AUDIO_PROCESSING_RATIO` still paces it against the source duration.
 - `gui/taskbar.py` mirrors the bar onto the **Windows** taskbar button via `ITaskbarList3` (pure `ctypes`, no new dependency). `create_taskbar_progress()` returns a null-backed no-op on every other platform and on any COM failure, so call sites need no platform guard. `TaskbarProgress` holds terminal states: `finish()`/`set_error()` set a hold that drops later `set_value()` calls, and only `on_focus()` (bound to `<FocusIn>` on `root`), `begin()`, or `clear()` release it — that hold is what keeps 100% visible until the user returns to the window. Hooks: `_start_run` → `begin()`; `_reset_progress_baseline` → `begin()` (via `_schedule_on_ui_thread`, since it is called from the worker thread and COM lives in the Tk main thread's apartment); `_set_progress`'s updater → `set_value()`; `_set_status` → `_update_taskbar_for_status()` (a focused window → `clear()` outright, otherwise success → `finish()`, `Error` → `set_error()`; `Aborted` always → `clear()`); `_on_close` → `clear()`.
 - `_set_status` also calls `_ring_completion_bell()`, which rings Tk's `root.bell()` on a success or `Error` status and stays silent for `Aborted`, for every non-terminal status, and whenever `_is_window_focused()` is true. It is cross-platform (unlike the taskbar) and `suppress(Exception)`-guarded, since a display without a bell raises rather than staying quiet.
