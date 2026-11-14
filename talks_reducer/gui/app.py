@@ -569,6 +569,7 @@ class TalksReducerGUI:
             self.messagebox.showerror("Remote mode", "Remove ranges are local-only")
             return
 
+        self._start_log_run()
         self._append_log("Starting processing…")
         self._stop_requested = False
         self._taskbar.begin()
@@ -650,7 +651,7 @@ class TalksReducerGUI:
 
                 for index, file in enumerate(files, start=1):
                     self._reset_progress_baseline()
-                    self._append_log(f"Processing: {os.path.basename(file)}")
+                    self._begin_conversion_log(os.path.basename(file), args)
                     options = self._create_processing_options(Path(file), args)
                     if glue_source is not None:
                         options = dataclasses.replace(
@@ -659,7 +660,9 @@ class TalksReducerGUI:
                                 options, source=glue_source
                             ),
                         )
+                    started = time.monotonic()
                     result = speed_up_video(options, reporter=reporter)
+                    elapsed = time.monotonic() - started
                     self._last_output = result.output_file
                     self._last_time_ratio = result.time_ratio
                     self._last_size_ratio = result.size_ratio
@@ -670,12 +673,14 @@ class TalksReducerGUI:
                         else None
                     )
 
-                    # Create completion message with ratios if available
-                    completion_msg = f"Completed: {result.output_file}"
-                    if result.time_ratio is not None and result.size_ratio is not None:
-                        completion_msg += f" (Time: {result.time_ratio:.2%}, Size: {result.size_ratio:.2%})"
-
-                    self._append_log(completion_msg)
+                    self._log_conversion_summary(
+                        result.output_file,
+                        elapsed_seconds=elapsed,
+                        time_ratio=result.time_ratio,
+                        output_duration=result.output_duration,
+                        size_ratio=result.size_ratio,
+                        output_size=self._last_output_size,
+                    )
                     if open_after_convert:
                         self._schedule_on_ui_thread(
                             lambda path=result.output_file: self._open_in_file_manager(
@@ -683,7 +688,7 @@ class TalksReducerGUI:
                             )
                         )
 
-                self._append_log("All jobs finished successfully.")
+                self._finish_run()
                 self._schedule_on_ui_thread(
                     lambda: self.open_button.configure(state=self.tk.NORMAL)
                 )
