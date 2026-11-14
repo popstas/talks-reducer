@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 from ..pipeline import ProcessingAborted
 from .progress import map_stage_progress
+from .summaries import measure_media
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from .app import TalksReducerGUI
@@ -274,6 +275,32 @@ class _TransferSpeedTracker:
         return self._rate_mb_s
 
 
+def _measure_remote_result(
+    input_path: Path,
+    output_path: Path,
+    summary_ratios: tuple[Optional[float], Optional[float]],
+) -> tuple[Optional[float], Optional[float], Optional[float], Optional[int]]:
+    """Return ``(time_ratio, size_ratio, output_duration, output_size)``.
+
+    Both files are local once the download finishes, so the ratios are measured
+    here at full precision; the server's Markdown summary rounds them to whole
+    percents. Its values are the fallback when a file cannot be measured.
+    """
+
+    summary_time, summary_size = summary_ratios
+    input_duration, input_size = measure_media(input_path)
+    output_duration, output_size = measure_media(output_path)
+    time_ratio = (
+        output_duration / input_duration
+        if output_duration and input_duration
+        else summary_time
+    )
+    size_ratio = (
+        output_size / input_size if output_size and input_size else summary_size
+    )
+    return time_ratio, size_ratio, output_duration, output_size
+
+
 def process_files_via_server(
     gui: "TalksReducerGUI",
     files: List[str],
@@ -450,6 +477,7 @@ def process_files_via_server(
             # previous file left near 100%, so failing to reset it would keep the
             # next file's lower-mapped progress pinned at the old value.
             gui._reset_progress_baseline()
+        gui._begin_conversion_log(basename, args)
         gui._append_log(f"Uploading {index}/{len(files)}: {basename} to {server_url}")
         input_path = Path(file)
 
@@ -481,6 +509,7 @@ def process_files_via_server(
                 sounded_speed=args.get("sounded_speed"),
             )
 
+        started = time.perf_counter()
         try:
             destination, summary, log_text = service_module.send_video(
                 input_path=input_path,
@@ -531,12 +560,23 @@ def process_files_via_server(
         # no waiting heartbeat lingers into the next file of a batch even when the
         # job produced no ``Downloading:`` events to cancel it.
         gui._cancel_download_wait()
+        elapsed = time.perf_counter() - started
         gui._last_output = Path(destination)
-        time_ratio, size_ratio = parse_summary(summary)
+        time_ratio, size_ratio, output_duration, output_size = _measure_remote_result(
+            input_path, gui._last_output, parse_summary(summary)
+        )
         gui._last_time_ratio = time_ratio
         gui._last_size_ratio = size_ratio
-        for line in summary.splitlines():
-            gui._append_log(line)
+        gui._last_output_duration = output_duration
+        gui._last_output_size = output_size
+        gui._log_conversion_summary(
+            gui._last_output,
+            elapsed_seconds=elapsed,
+            time_ratio=time_ratio,
+            output_duration=output_duration,
+            size_ratio=size_ratio,
+            output_size=output_size,
+        )
         if log_text.strip():
             gui._append_log("Server log:")
             for line in log_text.splitlines():
@@ -546,7 +586,7 @@ def process_files_via_server(
                 lambda path=gui._last_output: gui._open_in_file_manager(path)
             )
 
-    gui._append_log("All jobs finished successfully.")
+    gui._finish_run()
     gui._schedule_on_ui_thread(lambda: gui.open_button.configure(state=gui.tk.NORMAL))
     gui._schedule_on_ui_thread(gui._clear_input_files)
     return True

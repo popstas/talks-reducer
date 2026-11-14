@@ -6,12 +6,14 @@ from typing import Callable, Optional
 import pytest
 
 from talks_reducer.gui import remote as remote_module
+from talks_reducer.gui import summaries as summaries_module
 from talks_reducer.gui.remote import (
     check_remote_server,
     check_remote_server_for_gui,
     format_server_host,
     normalize_server_url,
 )
+from talks_reducer.gui.summaries import format_conversion_summary
 
 
 class DummyResponse:
@@ -48,6 +50,11 @@ class StubGUI:
         self.download_wait_begin_count = 0
         self.download_wait_cancel_count = 0
         self.logs: list[str] = []
+        self.headers: list[str] = []
+        self.summary_stats: list[dict[str, object]] = []
+        self.finish_run_calls = 0
+        self._last_output_duration: float | None = None
+        self._last_output_size: int | None = None
         self.progress_values: list[float] = []
         self._progress_value = 0.0
         self._progress_floor = 0.0
@@ -74,6 +81,17 @@ class StubGUI:
 
     def _append_log(self, message: str) -> None:
         self.logs.append(message)
+
+    def _begin_conversion_log(self, filename: str, args: dict) -> None:
+        self.headers.append(filename)
+        self.logs.append(f"### Processing {filename}")
+
+    def _log_conversion_summary(self, output_file: Path, **stats: object) -> None:
+        self.summary_stats.append(stats)
+        self.logs.extend(format_conversion_summary(output_file, **stats))
+
+    def _finish_run(self) -> None:
+        self.finish_run_calls += 1
 
     def _apply_stage_transition(self, desc: str) -> None:
         self.stage_transitions.append(desc)
@@ -410,7 +428,15 @@ def test_process_files_via_server_processes_each_file(tmp_path: Path) -> None:
     assert gui._last_output == tmp_path / "output.mp4"
     assert gui._last_time_ratio == 0.5
     assert gui._last_size_ratio == 0.25
-    assert "Uploading 1/1: input.mp4" in gui.logs[0]
+    assert any("Uploading 1/1: input.mp4" in line for line in gui.logs)
+    assert gui.headers == ["input.mp4"]
+    assert gui.logs.index("### Processing input.mp4") < next(
+        i for i, line in enumerate(gui.logs) if line.startswith("Uploading 1/1")
+    )
+    assert "Summary line" not in gui.logs
+    assert "All jobs finished successfully." not in gui.logs
+    assert gui.finish_run_calls == 1
+    assert any(line.startswith("Completed: ") for line in gui.logs)
     assert "Server log:" in gui.logs
     assert any("Server log entry" == line for line in gui.logs)
     assert summary_calls == ["Summary line\nDetails"]
@@ -1074,3 +1100,46 @@ def test_gui_remote_passes_vad_settings(tmp_path: Path) -> None:
     assert send_calls[1]["vad"] is False
     assert send_calls[1]["vad_threshold"] is None
     assert not any("ignores the following" in message for message in gui.logs)
+
+
+def test_process_files_via_server_measures_local_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ratios come from the local input and download, not the rounded summary."""
+
+    source = tmp_path / "input.mp4"
+    source.write_bytes(b"x" * 400)
+    downloaded = tmp_path / "output.mp4"
+    downloaded.write_bytes(b"x" * 100)
+    durations = {str(source): 100.0, str(downloaded): 50.0}
+    monkeypatch.setattr(
+        summaries_module, "get_video_duration", lambda path, *_: durations[path]
+    )
+    gui = StubGUI()
+
+    def load_client() -> object:
+        return SimpleNamespace(
+            send_video=lambda **kwargs: (str(downloaded), "**Size:** 99%", "")
+        )
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(source)],
+        args={},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, **_: downloaded,
+        parse_summary=lambda text: (0.99, 0.99),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    assert gui._last_time_ratio == 0.5
+    assert gui._last_size_ratio == 0.25
+    assert gui._last_output_size == 100
+    assert gui._last_output_duration == 50.0
+    stats = gui.summary_stats[0]
+    assert stats["time_ratio"] == 0.5
+    assert stats["output_duration"] == 50.0
+    assert stats["elapsed_seconds"] >= 0
