@@ -3264,7 +3264,7 @@ def test_gui_wrappers_delegate_to_summary_manager():
     gui.summary_manager.begin_conversion.assert_called_once_with(
         "### Processing a.mp4: mp3"
     )
-    gui.summary_manager.append_separator.assert_called_once()
+    gui.summary_manager.append_separator.assert_called_once_with(after_any_output=True)
     gui.summary_manager.finish_run.assert_called_once()
     assert [c[0][0] for c in gui._append_log.call_args_list] == [
         f"Completed: {Path('out.mp4')}",
@@ -3366,3 +3366,25 @@ def test_local_run_failure_does_not_finish_run(tmp_path, monkeypatch):
 
     gui._finish_run.assert_not_called()
     gui._set_status.assert_called_with("Aborted")
+
+
+def test_run_separator_follows_a_run_that_never_opened_a_block():
+    """A glue cancel or ``No files`` run still gets separated from the next run."""
+
+    gui = _make_summary_gui()
+    manager = summaries.SummaryManager(gui)
+
+    manager.append_separator(after_any_output=True)  # empty widget: nothing
+    manager.append_log("Starting processing…")
+    manager.append_log("Processing aborted by user.")
+    manager.append_separator(after_any_output=True)
+    manager.append_log("Starting processing…")
+    manager.begin_conversion("### Processing a.mp4: orig")
+
+    assert gui.inserted == [
+        "Starting processing…\n",
+        "Processing aborted by user.\n",
+        "\n\n",
+        "Starting processing…\n",
+        "### Processing a.mp4: orig\n",
+    ]

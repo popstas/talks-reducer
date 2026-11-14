@@ -1143,3 +1143,35 @@ def test_process_files_via_server_measures_local_files(
     assert stats["time_ratio"] == 0.5
     assert stats["output_duration"] == 50.0
     assert stats["elapsed_seconds"] >= 0
+
+
+def test_process_files_via_server_summary_closes_the_block(tmp_path: Path) -> None:
+    """The server log dump comes before the summary, which ends the block."""
+
+    gui = StubGUI()
+
+    def load_client() -> object:
+        return SimpleNamespace(
+            send_video=lambda **kwargs: (
+                str(tmp_path / "output.mp4"),
+                "Summary",
+                "server line 1\nserver line 2",
+            )
+        )
+
+    remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, **_: tmp_path / "output.mp4",
+        parse_summary=lambda text: (0.5, 0.25),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    completed = next(i for i, l in enumerate(gui.logs) if l.startswith("Completed: "))
+    assert gui.logs.index("Server log:") < completed
+    assert gui.logs[completed + 1].startswith("Duration: ")
+    assert completed + 2 == len(gui.logs)

@@ -329,7 +329,10 @@ def measure_media(path: Path) -> Tuple[Optional[float], Optional[int]]:
         size: Optional[int] = path.stat().st_size
     except OSError:
         return None, None
-    duration = get_video_duration(str(path))
+    try:
+        duration = get_video_duration(str(path))
+    except Exception:  # a blocked or undecodable ffprobe must not fail the run
+        duration = 0.0
     return (duration if duration and duration > 0 else None), size
 
 
@@ -339,9 +342,13 @@ class SummaryManager:
     def __init__(self, gui: "TalksReducerGUI") -> None:
         self.gui = gui
         self._block_written = False
+        self._output_since_separator = False
 
-    def _write(self, text: str) -> None:
+    def _write(self, text: str, *, separator: bool = False) -> None:
         """Append raw *text* to the log widget on the Tk thread."""
+
+        if not separator:
+            self._output_since_separator = True
 
         def updater() -> None:
             self.gui.log_text.configure(state=self.gui.tk.NORMAL)
@@ -355,18 +362,25 @@ class SummaryManager:
         self.update_status_from_message(message)
         self._write(message + "\n")
 
-    def append_separator(self) -> None:
-        """Insert two blank lines when a conversion block was written before.
+    def append_separator(self, *, after_any_output: bool = False) -> None:
+        """Insert two blank lines between log blocks.
 
-        The flag is consumed, so a new run separates once before its
-        ``Starting processing…`` line and its first header does not separate
-        again.
+        A header separates only after a previous conversion block, so a batch's
+        files are split from each other but a run's first header is not split
+        from its own ``Starting processing…`` line. A run start passes
+        ``after_any_output`` and separates after anything logged since the last
+        separator, which also covers runs that ended before any header (a
+        cancelled glue order, no supported files). Both flags are consumed.
         """
 
-        if not self._block_written:
+        needed = (
+            self._output_since_separator if after_any_output else self._block_written
+        )
+        if not needed:
             return
         self._block_written = False
-        self._write("\n\n")
+        self._output_since_separator = False
+        self._write("\n\n", separator=True)
 
     def begin_conversion(self, header: str) -> None:
         """Open a conversion block: separator, header, then a per-file reset.

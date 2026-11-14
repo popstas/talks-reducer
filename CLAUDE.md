@@ -363,8 +363,11 @@ file manager.
 The log is a run of per-conversion blocks. `SummaryManager.begin_conversion` writes the
 `### Processing <file>: <params>` header (`summaries.format_conversion_header`) *without*
 parsing it, then performs the per-file progress reset itself; `append_separator` inserts the
-two blank lines only once a block exists and is called at run start too, so a new run separates
-before its `Starting processing…` line. Each block ends with `format_conversion_summary`
+two blank lines before a header only once a previous block exists, and at run start
+(`after_any_output=True`) after anything logged since the last separator, so a new run separates
+before its `Starting processing…` line even when the previous run never opened a block. A
+remote block dumps `Server log:` before its summary, so every block ends with
+`format_conversion_summary`
 (`Completed:` + `Duration/Time/Size`); remote runs measure both local files with
 `measure_media` because the server's Markdown summary rounds to whole percents. The success
 status comes from `SummaryManager.finish_run()`, called directly by the local worker and

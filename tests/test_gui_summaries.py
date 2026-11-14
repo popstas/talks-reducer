@@ -165,3 +165,19 @@ def test_measure_media_zero_duration_is_unknown(
     monkeypatch.setattr(summaries, "get_video_duration", lambda *_: 0.0)
 
     assert measure_media(media) == (None, 1)
+
+
+def test_measure_media_probe_error_degrades_to_unknown_duration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A blocked or undecodable ffprobe must not fail a finished download."""
+
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"x" * 4)
+
+    def blocked(*_args: object) -> float:
+        raise PermissionError("ffprobe.exe locked")
+
+    monkeypatch.setattr(summaries, "get_video_duration", blocked)
+
+    assert measure_media(media) == (None, 4)

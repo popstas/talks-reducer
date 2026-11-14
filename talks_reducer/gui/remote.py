@@ -569,6 +569,10 @@ def process_files_via_server(
         gui._last_size_ratio = size_ratio
         gui._last_output_duration = output_duration
         gui._last_output_size = output_size
+        if log_text.strip():
+            gui._append_log("Server log:")
+            for line in log_text.splitlines():
+                gui._append_log(line)
         gui._log_conversion_summary(
             gui._last_output,
             elapsed_seconds=elapsed,
@@ -577,10 +581,6 @@ def process_files_via_server(
             size_ratio=size_ratio,
             output_size=output_size,
         )
-        if log_text.strip():
-            gui._append_log("Server log:")
-            for line in log_text.splitlines():
-                gui._append_log(line)
         if open_after_convert:
             gui._schedule_on_ui_thread(
                 lambda path=gui._last_output: gui._open_in_file_manager(path)

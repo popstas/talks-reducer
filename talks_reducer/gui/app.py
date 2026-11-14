@@ -1946,7 +1946,7 @@ class TalksReducerGUI:
     def _start_log_run(self) -> None:
         """Separate a new run from the previous conversion block in the log."""
 
-        self.summary_manager.append_separator()
+        self.summary_manager.append_separator(after_any_output=True)
 
     def _begin_conversion_log(self, filename: str, args: Mapping[str, object]) -> None:
         """Open a log block with the ``### Processing`` header for one file."""
