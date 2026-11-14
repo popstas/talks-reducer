@@ -1,6 +1,12 @@
 # Changelog
 
 
+## v1.9.0 - 2026-11-14
+
+### Features
+
+- Speed up non-voice parts with Silero VAD (Speedup no voice) (#167)
+
 ## v1.8.0 - 2026-11-08
 
 ### Features
