@@ -1078,7 +1078,6 @@ def _stream_pipeline(
         option_kwargs["cut_end_seconds"] = float(cut_end_seconds or 0.0)
     if vad:
         option_kwargs["vad"] = True
-        option_kwargs["vad_engine"] = "lite"
         if vad_threshold is not None:
             option_kwargs["vad_threshold"] = float(vad_threshold)
         if vad_padding_ms is not None:

@@ -2228,7 +2228,6 @@ def test_process_video_api_passes_vad_to_options(
         vad_min_silence_ms=500,
     )
     assert options.vad is True
-    assert options.vad_engine == "lite"
     assert options.vad_threshold == 0.4
     assert options.vad_padding_ms == 200
     assert options.vad_min_silence_ms == 500
@@ -2240,7 +2239,6 @@ def test_process_video_vad_defaults_when_settings_missing(tmp_path: Path) -> Non
     options = _process_video_options(tmp_path, small_video=False, vad=True)
 
     assert options.vad is True
-    assert options.vad_engine == "lite"
     assert options.vad_threshold == 0.5
     assert options.vad_padding_ms == 150
     assert options.vad_min_silence_ms == 300
@@ -2346,7 +2344,6 @@ def test_process_video_ui_passes_vad(tmp_path: Path) -> None:
         server._cleanup_workspaces()
 
     assert captured["options"].vad is True
-    assert captured["options"].vad_engine == "lite"
 
 
 def test_build_interface_has_vad_checkbox_wired_to_preset() -> None:

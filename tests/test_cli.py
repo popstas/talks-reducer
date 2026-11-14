@@ -1601,15 +1601,12 @@ def test_vad_flags_map_to_options() -> None:
     parsed_args = cli._build_parser().parse_args(
         [
             "--vad",
-            "--vad-engine",
-            "torch",
             "--vad-threshold",
             "0.6",
             "--vad-padding",
             "200",
             "--vad-min-silence",
             "400",
-            "--vad-dump",
             "input.mp4",
         ]
     )
@@ -1635,30 +1632,21 @@ def test_vad_flags_map_to_options() -> None:
     assert exit_code == 0
     options = speed_calls[0]
     assert options.vad is True
-    assert options.vad_engine == "torch"
     assert options.vad_threshold == pytest.approx(0.6)
     assert options.vad_padding_ms == 200
     assert options.vad_min_silence_ms == 400
-    assert options.vad_dump is True
 
 
 def test_vad_defaults_leave_options_untouched() -> None:
     parsed_args = cli._build_parser().parse_args(["input.mp4"])
 
     assert parsed_args.vad is None
-    assert parsed_args.vad_engine is None
-    assert parsed_args.vad_dump is False
 
 
 def test_no_vad_flag_sets_false() -> None:
     parsed_args = cli._build_parser().parse_args(["--no-vad", "input.mp4"])
 
     assert parsed_args.vad is False
-
-
-def test_vad_engine_rejects_unknown() -> None:
-    with pytest.raises(SystemExit):
-        cli._build_parser().parse_args(["--vad-engine", "bogus", "input.mp4"])
 
 
 def test_explicit_no_vad_beats_voice_preset(monkeypatch: pytest.MonkeyPatch) -> None:

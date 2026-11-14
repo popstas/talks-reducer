@@ -37,7 +37,6 @@ from .models import ProcessingOptions, ProcessingResult
 from .progress import NullProgressReporter, ProgressReporter
 from .spherical import SphericalInfo
 from .subprocess_utils import hidden_subprocess_kwargs
-from .timecode import format_timecode
 
 
 class ProcessingAborted(RuntimeError):
@@ -381,21 +380,20 @@ def _resolve_remove_ranges(
 
 
 def _load_vad_engine(
-    options: ProcessingOptions,
     job_temp_path: Path,
     dependencies: PipelineDependencies,
 ) -> vad_utils.VadEngine:
-    """Load the VAD engine named by *options*, before any audio is extracted.
+    """Load the VAD engine before any audio is extracted.
 
     Loading first makes a missing or broken engine fail in a moment instead of
-    after a long extraction. ``VadUnavailableError`` (and ``ValueError`` for an
-    unknown name) still propagates -- a missing engine must fail the run rather
-    than silently fall back to loudness detection -- but the job's temp folder
-    is removed first, like the pipeline's other early exits.
+    after a long extraction. ``VadUnavailableError`` still propagates -- a
+    missing engine must fail the run rather than silently fall back to loudness
+    detection -- but the job's temp folder is removed first, like the pipeline's
+    other early exits.
     """
 
     try:
-        return vad_utils.load_engine(options.vad_engine)
+        return vad_utils.load_engine()
     except Exception:
         dependencies.delete_path(job_temp_path)
         raise
@@ -408,7 +406,6 @@ def _detect_voice_mask(
     sample_rate: int,
     frame_rate: float,
     frame_count: int,
-    output_path: Path,
     reporter: ProgressReporter,
 ) -> np.ndarray:
     """Return the per-frame speech mask produced by Silero VAD.
@@ -418,7 +415,6 @@ def _detect_voice_mask(
     """
 
     settings = vad_utils.VadSettings(
-        engine=options.vad_engine,
         threshold=options.vad_threshold,
         padding_ms=options.vad_padding_ms,
         min_silence_ms=options.vad_min_silence_ms,
@@ -445,31 +441,7 @@ def _detect_voice_mask(
         f"Voice detection ({result.engine}): {result.seconds:.1f} s, "
         f"speech {result.speech_ratio:.0%} of audio"
     )
-    if options.vad_dump:
-        _write_vad_dump(options, result, output_path, reporter)
     return result.mask
-
-
-def _write_vad_dump(
-    options: ProcessingOptions,
-    result: vad_utils.VadResult,
-    output_path: Path,
-    reporter: ProgressReporter,
-) -> None:
-    """Write the speech intervals next to the output as ``<stem>.vad-<engine>.txt``."""
-
-    dump_path = (
-        output_path.parent / f"{options.input_file.stem}.vad-{result.engine}.txt"
-    )
-    lines = [
-        f"{format_timecode(begin, milliseconds=True)}\t"
-        f"{format_timecode(end, milliseconds=True)}\n"
-        for begin, end in result.intervals
-    ]
-    dump_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(dump_path, "w", encoding="utf-8", newline="") as handle:
-        handle.writelines(lines)
-    reporter.log(f"VAD intervals written to {dump_path}")
 
 
 def resolve_output_path(options: ProcessingOptions, source: Path | None = None) -> Path:
@@ -666,9 +638,7 @@ def speed_up_video(
         audio_wav = job_temp_path / "audio.wav"
         extraction_sample_rate = options.sample_rate
         vad_engine = (
-            _load_vad_engine(options, job_temp_path, dependencies)
-            if options.vad
-            else None
+            _load_vad_engine(job_temp_path, dependencies) if options.vad else None
         )
 
         extract_command = dependencies.build_extract_audio_command(
@@ -720,7 +690,6 @@ def speed_up_video(
                 wav_sample_rate,
                 frame_rate,
                 audio_frame_count,
-                output_path,
                 reporter,
             )
         else:

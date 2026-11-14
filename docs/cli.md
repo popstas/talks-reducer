@@ -175,7 +175,7 @@ Flag names accept either hyphens or underscores where both spellings exist
 By default Talks Reducer detects speech with volume thresholding; adjust
 `--silent_threshold` to fine-tune when segments count as silence. `--vad` swaps that for
 Silero VAD, so only frames without a voice are sped up rather than frames below a volume.
-The default `lite` engine,
+The engine,
 `silero-vad-lite`, is a regular dependency, so no PyTorch is pulled in. With `--vad` the
 volume threshold is ignored.
 
@@ -184,15 +184,9 @@ volume threshold is ignored.
 - `--vad-threshold` — speech probability a window needs to count as voice (default `0.5`).
 - `--vad-padding MS` — padding added around each speech interval (default `150`).
 - `--vad-min-silence MS` — non-voice needed to end a speech interval (default `300`).
-- `--vad-engine lite|torch|ten` — *experimental*: pick the backend. `torch` needs
-  `pip install talks-reducer[vad-torch]` and `ten` needs `pip install talks-reducer[vad-ten]`
-  (check the TEN VAD license before redistributing). Neither is part of the Windows build.
-- `--vad-dump` — *experimental*: write the detected speech intervals to
-  `<input>.vad-<engine>.txt` next to the output file.
 
 The run prints a `Voice detection (lite): 2.4 s, speech 61% of audio` line and shows a
-**Voice detection** stage in the progress output. The two experimental flags and the extras
-will be removed before release.
+**Voice detection** stage in the progress output.
 
 ### Hardware encoding
 
@@ -253,8 +247,8 @@ talks-reducer --host 192.168.1.42 demo.mp4
 Remote jobs respect the same timing controls as the local CLI. Provide
 `--silent_threshold`, `--sounded_speed`, or `--silent_speed` to tweak how the server trims
 and accelerates segments without falling back to local mode. `--vad` is forwarded too,
-with `--vad-threshold`, `--vad-padding` and `--vad-min-silence` when given; the server always
-uses the `lite` engine (`--vad-engine` is not sent) and needs `silero-vad-lite` installed.
+with `--vad-threshold`, `--vad-padding` and `--vad-min-silence` when given; the server needs
+`silero-vad-lite` installed.
 `--vad` needs an up-to-date server: an older one would ignore it and speed up by loudness, so
 the client checks the server's API and stops with an error asking you to update the server.
 Runs without it keep working with older servers.

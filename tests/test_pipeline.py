@@ -1386,7 +1386,7 @@ def _run_vad_pipeline(
     monkeypatch.setattr(pipeline.chunk_utils, "build_chunks", spy_build_chunks)
     monkeypatch.setattr(vad_module, "detect_voice_frames", fake_detect)
     monkeypatch.setattr(
-        vad_module, "load_engine", load_engine or (lambda name: _FakeVadEngine())
+        vad_module, "load_engine", load_engine or (lambda: _FakeVadEngine())
     )
 
     def fake_process_chunks(audio, chunks, *args, **kwargs):
@@ -1420,7 +1420,6 @@ def _run_vad_pipeline(
         temp_folder=tmp_path / "temp",
         video_codec="mp3",
         vad=vad,
-        vad_engine="fake",
         **option_overrides,
     )
     reporter = _RecordingReporter()
@@ -1488,7 +1487,7 @@ def test_vad_missing_engine_fails_before_audio_extraction(
 ) -> None:
     from talks_reducer import vad as vad_module
 
-    def missing_engine(name):
+    def missing_engine():
         raise vad_module.VadUnavailableError("pip install silero-vad-lite")
 
     ffmpeg_calls: list = []
@@ -1508,9 +1507,9 @@ def test_vad_missing_engine_fails_before_audio_extraction(
 def test_vad_engine_is_loaded_once_and_reused(tmp_path, monkeypatch) -> None:
     loaded: list = []
 
-    def load_engine(name):
+    def load_engine():
         engine = _FakeVadEngine()
-        loaded.append((name, engine))
+        loaded.append(engine)
         return engine
 
     ffmpeg_calls: list = []
@@ -1522,15 +1521,15 @@ def test_vad_engine_is_loaded_once_and_reused(tmp_path, monkeypatch) -> None:
         ffmpeg_calls=ffmpeg_calls,
     )
 
-    assert [name for name, _ in loaded] == ["fake"]
-    assert state["engine"] is loaded[0][1]
+    assert len(loaded) == 1
+    assert state["engine"] is loaded[0]
     assert ffmpeg_calls[0][0] == "Extracting audio:"
 
 
 def test_vad_engine_not_loaded_when_audio_is_not_analysed(
     tmp_path, monkeypatch
 ) -> None:
-    def unexpected_load(name):
+    def unexpected_load():
         raise AssertionError("engine loaded for a run that never analyses audio")
 
     _run_vad_pipeline(
@@ -1541,13 +1540,3 @@ def test_vad_engine_not_loaded_when_audio_is_not_analysed(
         silent_speed=1.0,
         sounded_speed=1.0,
     )
-
-
-def test_vad_dump_writes_intervals_file(tmp_path, monkeypatch) -> None:
-    _, _, _, options = _run_vad_pipeline(tmp_path, monkeypatch, vad=True, vad_dump=True)
-
-    dump = options.output_file.parent / "input.vad-fake.txt"
-    assert dump.read_text(encoding="utf-8").splitlines() == [
-        "00:00:00.000\t00:00:00.500",
-        "00:00:00.750\t00:00:01.000",
-    ]

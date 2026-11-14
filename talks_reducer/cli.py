@@ -148,12 +148,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Force loudness-based silence detection, overriding a stored --vad preference.",
     )
     parser.add_argument(
-        "--vad-engine",
-        dest="vad_engine",
-        choices=["lite", "torch", "ten"],
-        help="VAD backend used with --vad. Defaults to lite.",
-    )
-    parser.add_argument(
         "--vad-threshold",
         dest="vad_threshold",
         type=float,
@@ -172,13 +166,6 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="MS",
         help="Milliseconds of non-voice needed to end a speech interval. Defaults to 300.",
-    )
-    parser.add_argument(
-        "--vad-dump",
-        dest="vad_dump",
-        action="store_true",
-        default=False,
-        help="Experimental: write the detected speech intervals to <input>.vad-<engine>.txt next to the output file.",
     )
     parser.add_argument(
         "-S",
@@ -444,8 +431,7 @@ def _remote_vad_options(parsed_args: argparse.Namespace) -> Dict[str, object]:
     ``vad`` is ``None`` when neither ``--vad`` nor ``--no-vad`` (nor a preset)
     decided it, which keeps the local default of loudness detection, so nothing
     is sent. With ``vad`` on, only the settings the user gave are sent and the
-    server falls back to its own defaults for the rest. ``--vad-engine`` is not
-    forwarded: the server always uses the ``lite`` engine.
+    server falls back to its own defaults for the rest.
     """
 
     vad = getattr(parsed_args, "vad", None)
@@ -711,8 +697,6 @@ class CliApplication:
                 option_kwargs["remove_ranges"] = tuple(local_options["remove_ranges"])
             if "vad" in local_options:
                 option_kwargs["vad"] = bool(local_options["vad"])
-            if "vad_engine" in local_options:
-                option_kwargs["vad_engine"] = str(local_options["vad_engine"])
             if "vad_threshold" in local_options:
                 option_kwargs["vad_threshold"] = float(local_options["vad_threshold"])
             if "vad_padding_ms" in local_options:
@@ -721,8 +705,6 @@ class CliApplication:
                 option_kwargs["vad_min_silence_ms"] = int(
                     local_options["vad_min_silence_ms"]
                 )
-            if local_options.get("vad_dump"):
-                option_kwargs["vad_dump"] = True
             options = ProcessingOptions(**option_kwargs)
             if glue_source is not None:
                 options = replace(

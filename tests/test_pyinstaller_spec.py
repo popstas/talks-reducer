@@ -76,11 +76,3 @@ def test_spec_collects_silero_vad_lite() -> None:
     targets = _collect_call_targets()
     assert ("collect_data_files", "silero_vad_lite") in targets
     assert ("collect_dynamic_libs", "silero_vad_lite") in targets
-
-
-def test_experimental_vad_engines_are_not_bundled() -> None:
-    """The torch and TEN engines are opt-in extras and must stay out of the build."""
-
-    excludes = _default_excludes()
-    for module in ("torch", "silero_vad", "ten_vad"):
-        assert module in excludes

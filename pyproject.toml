@@ -31,8 +31,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-vad-torch = ["silero-vad>=6.0"]
-vad-ten = ["ten-vad>=1.0.6"]
 dev = [
     "build>=1.0.0",
     "twine>=4.0.0",

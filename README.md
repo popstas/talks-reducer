@@ -63,6 +63,8 @@ pipx install talks-reducer     # or into an isolated environment
 uv tool install talks-reducer  # or with uv
 ```
 
+Speedup no voice (`--vad`) needs Python 3.10 or newer; its `silero-vad-lite` dependency ships wheels for Windows x64, macOS (arm64, x86_64) and Linux x86_64 only, so Linux arm64 would need a source build.
+
 ## OBS Processing Dock (Windows)
 
 For OBS Studio recordings, a Custom Browser Dock starts Talks Reducer right after you stop
@@ -131,8 +133,8 @@ mode too, until you pick a preset in the dropdown. Existing preset lists gain **
 after **Optimal** (a list you emptied stays empty), and the other full presets get an
 explicit `vad: false`, so choosing them
 after **Voice** switches voice detection back off. Remote mode (`--url`, the GUI's
-**Remote**) sends it with its three settings to the server, which always uses the `lite`
-engine and needs `silero-vad-lite` installed (it reports the missing package as a processing
+**Remote**) sends it with its three settings to the server, which needs `silero-vad-lite`
+installed (it reports the missing package as a processing
 error); it needs an up-to-date server — an older one would ignore it and speed up by loudness,
 so the client stops with an error asking you to update the server — while a run without it
 still works with older ones.
@@ -143,14 +145,6 @@ Advanced settings add **VAD threshold** (0.05-0.95), **Voice padding, ms** (0-20
 on (Simple mode's Voice preset uses the remembered values). The progress bar gets a **Voice
 detection** stage between audio extraction and audio processing, and the log prints
 `Voice detection (lite): 2.4 s, speech 61% of audio`.
-
-*Experimental engines.* The default `lite` engine ships with Talks Reducer
-(`silero-vad-lite`). Two heavier engines are opt-in for comparison via
-`--vad-engine`: `torch` (reference Silero VAD, `pip install talks-reducer[vad-torch]`, pulls in
-PyTorch) and `ten` (TEN VAD, `pip install talks-reducer[vad-ten]`; check the TEN VAD license
-before redistributing anything built with it). `--vad-dump` writes the detected speech
-intervals to `<input>.vad-<engine>.txt` next to the output. These two flags and both extras are
-experimental and will be removed before release; neither engine is part of the Windows build.
 
 **Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec, fps,
 Speedup no voice) you author once in the desktop GUI's Advanced mode and reuse everywhere —

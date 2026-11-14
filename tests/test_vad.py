@@ -1,6 +1,5 @@
 """Tests for the Silero VAD speech detection module."""
 
-import re
 import sys
 
 import numpy as np
@@ -110,76 +109,21 @@ def test_detect_voice_frames_reports_progress():
     assert sum(seen) == vad.count_windows(32000, 512)
 
 
-def test_load_engine_unknown_raises_value_error():
-    with pytest.raises(ValueError):
-        vad.load_engine("nope")
-
-
 def test_load_engine_missing_package_raises_unavailable(monkeypatch):
     monkeypatch.setitem(sys.modules, "silero_vad_lite", None)
     with pytest.raises(vad.VadUnavailableError, match="pip install silero-vad-lite"):
-        vad.load_engine("lite")
+        vad.load_engine()
 
 
 def test_lite_engine_detects_silence():
     pytest.importorskip("silero_vad_lite")
-    engine = vad.load_engine("lite")
-    probs = engine.probabilities(np.zeros(32000, np.float32))
-    assert len(probs) == vad.count_windows(32000, 512)
-    assert (probs < 0.5).all()
-
-
-@pytest.mark.parametrize(
-    "name, module, hint",
-    [
-        ("torch", "silero_vad", "talks-reducer[vad-torch]"),
-        ("ten", "ten_vad", "talks-reducer[vad-ten]"),
-    ],
-)
-def test_load_engine_experimental_missing_raises_unavailable(
-    monkeypatch, name, module, hint
-):
-    monkeypatch.setitem(sys.modules, module, None)
-    with pytest.raises(vad.VadUnavailableError, match=re.escape(hint)):
-        vad.load_engine(name)
-
-
-@pytest.mark.parametrize(
-    "name, module, hop",
-    [("torch", "silero_vad", 512), ("ten", "ten_vad", 256)],
-)
-def test_experimental_engine_detects_silence(name, module, hop):
-    pytest.importorskip(module)
-    engine = vad.load_engine(name)
+    engine = vad.load_engine()
     seen = []
     probs = engine.probabilities(np.zeros(32000, np.float32), seen.append)
-    assert engine.name == name
-    assert engine.hop_samples == hop
-    assert len(probs) == vad.count_windows(32000, hop)
+    assert engine.hop_samples == 512
+    assert len(probs) == vad.count_windows(32000, 512)
     assert (probs < 0.5).all()
     assert sum(seen) == len(probs)
-
-
-def test_engines_agree_on_speech_ratio():
-    pytest.importorskip("silero_vad_lite")
-    pytest.importorskip("silero_vad")
-    rng = np.random.default_rng(0)
-    t = np.arange(48000) / 16000.0
-    voiced = sum(
-        np.sin(2 * np.pi * f * t) / k for k, f in enumerate((120, 240, 360, 480), 1)
-    )
-    signal = np.concatenate([np.zeros(16000), 0.3 * voiced[:16000], np.zeros(16000)])
-    signal = (signal + rng.normal(0, 0.001, signal.shape)).astype(np.float32)
-    settings = VadSettings()
-    found = {}
-    for name in ("lite", "torch"):
-        engine = vad.load_engine(name)
-        probs = engine.probabilities(signal)
-        found[name] = vad.speech_intervals(probs, 512 / 16000, settings, 3.0)
-    assert len(found["lite"]) == len(found["torch"])
-    for (a0, a1), (b0, b1) in zip(found["lite"], found["torch"]):
-        assert abs(a0 - b0) <= 512 / 16000
-        assert abs(a1 - b1) <= 512 / 16000
 
 
 def test_to_mono_16k_int32_full_scale_normalizes():
@@ -270,66 +214,6 @@ def test_lite_engine_native_failure_raises_unavailable(monkeypatch, error):
         _broken_module("silero_vad_lite", SileroVAD=_raise(error)),
     )
     with pytest.raises(vad.VadUnavailableError) as info:
-        vad.load_engine("lite")
+        vad.load_engine()
     assert "pip install silero-vad-lite" in str(info.value)
     assert str(error) in str(info.value)
-
-
-@pytest.mark.parametrize(
-    "error", [ImportError("no torch"), OSError("c10.dll"), RuntimeError("jit")]
-)
-def test_torch_engine_load_failure_raises_unavailable(monkeypatch, error):
-    monkeypatch.setitem(sys.modules, "torch", _broken_module("torch"))
-    monkeypatch.setitem(
-        sys.modules,
-        "silero_vad",
-        _broken_module("silero_vad", load_silero_vad=_raise(error)),
-    )
-    with pytest.raises(vad.VadUnavailableError) as info:
-        vad.load_engine("torch")
-    assert "talks-reducer[vad-torch]" in str(info.value)
-    assert str(error) in str(info.value)
-
-
-def test_torch_engine_import_oserror_raises_unavailable(monkeypatch):
-    import builtins
-
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "torch":
-            raise OSError("WinError 126: fbgemm.dll")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.delitem(sys.modules, "torch", raising=False)
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-    with pytest.raises(vad.VadUnavailableError, match="fbgemm.dll"):
-        vad.load_engine("torch")
-
-
-@pytest.mark.parametrize("error", [OSError("libten_vad"), RuntimeError("init")])
-def test_ten_engine_constructor_failure_raises_unavailable_on_load(monkeypatch, error):
-    monkeypatch.setitem(
-        sys.modules, "ten_vad", _broken_module("ten_vad", TenVad=_raise(error))
-    )
-    with pytest.raises(vad.VadUnavailableError) as info:
-        vad.load_engine("ten")
-    assert "talks-reducer[vad-ten]" in str(info.value)
-    assert str(error) in str(info.value)
-
-
-def test_ten_engine_per_call_constructor_failure_raises_unavailable(monkeypatch):
-    calls = []
-
-    class FlakyTenVad:
-        def __init__(self, hop_size):
-            calls.append(hop_size)
-            if len(calls) > 1:
-                raise OSError("second detector failed")
-
-    monkeypatch.setitem(
-        sys.modules, "ten_vad", _broken_module("ten_vad", TenVad=FlakyTenVad)
-    )
-    engine = vad.load_engine("ten")
-    with pytest.raises(vad.VadUnavailableError, match="second detector failed"):
-        engine.probabilities(np.zeros(512, np.float32))

@@ -165,7 +165,7 @@ for _pkg in ("safehttpx", "groovy"):
 
 # "Speedup no voice" loads ``silero_vad_lite`` lazily, and the package keeps its native
 # DLL and ONNX model in a ``data`` folder that import analysis never sees. Collect both
-# so the frozen build can run ``--vad``; the heavier torch/TEN engines stay excluded.
+# so the frozen build can run ``--vad``.
 binaries_vad = []
 try:
     datas.extend(collect_data_files("silero_vad_lite"))
@@ -216,8 +216,6 @@ DEFAULT_EXCLUDES = [
     "numba",
     "cupy",
     "torch",
-    "silero_vad",
-    "ten_vad",
     "torchvision",
     "torchaudio",
     "tensorflow",

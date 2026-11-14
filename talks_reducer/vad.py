@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import math
 import time
-import warnings
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol, Sequence
 
@@ -17,27 +16,21 @@ import numpy as np
 
 VAD_SAMPLE_RATE = 16000
 MIN_SPEECH_MS = 250
-ENGINE_NAMES = ("lite", "torch", "ten")
 
 _LITE_HOP_SAMPLES = 512
-_TEN_HOP_SAMPLES = 256
 _PROGRESS_BATCH = 1000
 _RESAMPLE_BLOCK_SECONDS = 10
 _HYSTERESIS_MARGIN = 0.15
 _MIN_NEGATIVE_THRESHOLD = 0.01
 
-_INSTALL_HINTS = {
-    "lite": "pip install silero-vad-lite",
-    "torch": "pip install talks-reducer[vad-torch]",
-    "ten": "pip install talks-reducer[vad-ten]",
-}
+_INSTALL_HINT = "pip install silero-vad-lite"
 
 
 class VadUnavailableError(RuntimeError):
-    """Raised when the requested VAD engine cannot be imported or started."""
+    """Raised when the VAD engine cannot be imported or started."""
 
 
-_ENGINE_LOAD_ERRORS = (ImportError, OSError, RuntimeError)
+_LOAD_ERRORS = (ImportError, OSError, RuntimeError)
 
 
 def _unavailable(message: str, exc: BaseException) -> VadUnavailableError:
@@ -56,7 +49,6 @@ def _unavailable(message: str, exc: BaseException) -> VadUnavailableError:
 class VadSettings:
     """User-tunable VAD parameters."""
 
-    engine: str = "lite"
     threshold: float = 0.5
     padding_ms: int = 150
     min_silence_ms: int = 300
@@ -238,35 +230,6 @@ def intervals_to_frame_mask(
     return mask
 
 
-def _windowed_probabilities(
-    audio: np.ndarray,
-    hop: int,
-    score: Callable[[np.ndarray], float],
-    progress: Optional[Callable[[int], None]],
-) -> np.ndarray:
-    """Score ``audio`` one ``hop``-sample window at a time.
-
-    The final window is zero-padded, and ``progress`` receives window counts in
-    batches of ``_PROGRESS_BATCH`` plus the remainder.
-    """
-
-    total = count_windows(len(audio), hop)
-    probs = np.zeros(total, dtype=np.float32)
-    pending = 0
-    for index in range(total):
-        chunk = audio[index * hop : (index + 1) * hop]
-        if len(chunk) < hop:
-            chunk = np.pad(chunk, (0, hop - len(chunk)))
-        probs[index] = score(chunk)
-        pending += 1
-        if progress is not None and pending >= _PROGRESS_BATCH:
-            progress(pending)
-            pending = 0
-    if progress is not None and pending:
-        progress(pending)
-    return probs
-
-
 class LiteEngine:
     """Silero VAD through the dependency-light ``silero-vad-lite`` package."""
 
@@ -278,10 +241,10 @@ class LiteEngine:
             from silero_vad_lite import SileroVAD
 
             self._vad = SileroVAD(VAD_SAMPLE_RATE)
-        except _ENGINE_LOAD_ERRORS as exc:
+        except _LOAD_ERRORS as exc:
             raise _unavailable(
                 "Speedup no voice needs the Silero VAD engine. Install it with: "
-                f"{_INSTALL_HINTS['lite']}",
+                f"{_INSTALL_HINT}",
                 exc,
             ) from exc
 
@@ -290,137 +253,40 @@ class LiteEngine:
         audio: np.ndarray,
         progress: Optional[Callable[[int], None]] = None,
     ) -> np.ndarray:
-        """Return one speech probability per 512-sample window."""
+        """Return one speech probability per 512-sample window.
 
-        return _windowed_probabilities(
-            audio,
-            self.hop_samples,
-            lambda chunk: self._vad.process(
+        The final window is zero-padded, and ``progress`` receives window counts
+        in batches of ``_PROGRESS_BATCH`` plus the remainder.
+        """
+
+        hop = self.hop_samples
+        total = count_windows(len(audio), hop)
+        probs = np.zeros(total, dtype=np.float32)
+        pending = 0
+        for index in range(total):
+            chunk = audio[index * hop : (index + 1) * hop]
+            if len(chunk) < hop:
+                chunk = np.pad(chunk, (0, hop - len(chunk)))
+            probs[index] = self._vad.process(
                 memoryview(np.ascontiguousarray(chunk, np.float32))
-            ),
-            progress,
-        )
+            )
+            pending += 1
+            if progress is not None and pending >= _PROGRESS_BATCH:
+                progress(pending)
+                pending = 0
+        if progress is not None and pending:
+            progress(pending)
+        return probs
 
 
-class TorchEngine:
-    """Silero VAD through the reference PyTorch ``silero-vad`` package."""
+def load_engine() -> VadEngine:
+    """Instantiate the Silero VAD engine.
 
-    name = "torch"
-    hop_samples = _LITE_HOP_SAMPLES
-
-    def __init__(self) -> None:
-        try:
-            import torch
-            from silero_vad import load_silero_vad
-
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore", message=".*torch.jit.load.*", category=FutureWarning
-                )
-                self._model = load_silero_vad()
-        except _ENGINE_LOAD_ERRORS as exc:
-            raise _unavailable(
-                "The 'torch' VAD engine needs PyTorch and silero-vad. Install "
-                f"them with: {_INSTALL_HINTS['torch']}",
-                exc,
-            ) from exc
-        self._torch = torch
-
-    def probabilities(
-        self,
-        audio: np.ndarray,
-        progress: Optional[Callable[[int], None]] = None,
-    ) -> np.ndarray:
-        """Return one speech probability per 512-sample window."""
-
-        torch = self._torch
-        self._model.reset_states()
-
-        def score(chunk: np.ndarray) -> float:
-            tensor = torch.from_numpy(np.ascontiguousarray(chunk, np.float32))
-            return self._model(tensor, VAD_SAMPLE_RATE).item()
-
-        with torch.no_grad():
-            return _windowed_probabilities(audio, self.hop_samples, score, progress)
-
-
-class TenEngine:
-    """TEN VAD (``ten-vad``), an experimental engine with 16 ms windows."""
-
-    name = "ten"
-    hop_samples = _TEN_HOP_SAMPLES
-
-    def __init__(self) -> None:
-        """Import ``ten-vad`` and build one detector up front.
-
-        The detector built here is discarded; it exists so a native library
-        that fails to start is reported when the engine is loaded, before the
-        pipeline spends time extracting audio, rather than on the first file.
-        """
-
-        try:
-            from ten_vad import TenVad
-        except _ENGINE_LOAD_ERRORS as exc:
-            raise self._unavailable(exc) from exc
-        self._factory = TenVad
-        self._new_detector()
-
-    @staticmethod
-    def _unavailable(exc: BaseException) -> VadUnavailableError:
-        """Return the install-hint error for a ``ten-vad`` load failure."""
-
-        return _unavailable(
-            "The 'ten' VAD engine needs the ten-vad package. Install it "
-            f"with: {_INSTALL_HINTS['ten']}",
-            exc,
-        )
-
-    def _new_detector(self):
-        """Return a fresh ``TenVad`` detector, wrapping native start-up errors."""
-
-        try:
-            return self._factory(hop_size=self.hop_samples)
-        except _ENGINE_LOAD_ERRORS as exc:
-            raise self._unavailable(exc) from exc
-
-    def probabilities(
-        self,
-        audio: np.ndarray,
-        progress: Optional[Callable[[int], None]] = None,
-    ) -> np.ndarray:
-        """Return one speech probability per 256-sample window.
-
-        TEN VAD takes int16 frames and returns ``(probability, flag)``; only the
-        probability is used, because thresholding belongs to
-        :func:`speech_intervals`. A fresh detector is created per call so state
-        never leaks between files.
-        """
-
-        detector = self._new_detector()
-
-        def score(chunk: np.ndarray) -> float:
-            samples = np.clip(chunk * 32767.0, -32768, 32767).astype(np.int16)
-            return detector.process(samples)[0]
-
-        return _windowed_probabilities(audio, self.hop_samples, score, progress)
-
-
-def load_engine(name: str) -> VadEngine:
-    """Instantiate the VAD engine called ``name``.
-
-    Raises ``ValueError`` for unknown names and :class:`VadUnavailableError`
-    when the engine's package is missing or its native library fails to start.
+    Raises :class:`VadUnavailableError` when ``silero-vad-lite`` is missing or
+    its native library fails to start.
     """
 
-    if name == "lite":
-        return LiteEngine()
-    if name == "torch":
-        return TorchEngine()
-    if name == "ten":
-        return TenEngine()
-    raise ValueError(
-        f"Unknown VAD engine '{name}'. Choose one of: {', '.join(ENGINE_NAMES)}"
-    )
+    return LiteEngine()
 
 
 def detect_voice_frames(
@@ -435,7 +301,7 @@ def detect_voice_frames(
 ) -> VadResult:
     """Return a per-video-frame speech mask for ``audio_data``."""
 
-    engine = engine if engine is not None else load_engine(settings.engine)
+    engine = engine if engine is not None else load_engine()
     audio = to_mono_16k(audio_data, sample_rate)
     total_seconds = len(audio) / VAD_SAMPLE_RATE
     started = time.perf_counter()
