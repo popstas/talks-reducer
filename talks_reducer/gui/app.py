@@ -22,6 +22,7 @@ from typing import (
     Callable,
     Iterable,
     List,
+    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -63,6 +64,8 @@ try:
     from .summaries import (
         SummaryManager,
         default_remote_destination,
+        format_conversion_header,
+        format_conversion_summary,
         is_encode_target_duration_unknown,
         is_encode_total_frames_unknown,
         parse_current_frame,
@@ -116,6 +119,8 @@ except ImportError:  # pragma: no cover - handled at runtime
     from talks_reducer.gui.summaries import (
         SummaryManager,
         default_remote_destination,
+        format_conversion_header,
+        format_conversion_summary,
         is_encode_target_duration_unknown,
         is_encode_total_frames_unknown,
         parse_current_frame,
@@ -1932,6 +1937,27 @@ class TalksReducerGUI:
 
     def _append_log(self, message: str) -> None:
         self.summary_manager.append_log(message)
+
+    def _start_log_run(self) -> None:
+        """Separate a new run from the previous conversion block in the log."""
+
+        self.summary_manager.append_separator()
+
+    def _begin_conversion_log(self, filename: str, args: Mapping[str, object]) -> None:
+        """Open a log block with the ``### Processing`` header for one file."""
+
+        self.summary_manager.begin_conversion(format_conversion_header(filename, args))
+
+    def _log_conversion_summary(self, output_file: Path, **stats: object) -> None:
+        """Close a log block with the ``Completed:`` and ratio summary lines."""
+
+        for line in format_conversion_summary(output_file, **stats):
+            self._append_log(line)
+
+    def _finish_run(self) -> None:
+        """Show the success status once every job in the run has finished."""
+
+        self.summary_manager.finish_run()
 
     def _update_status_from_message(self, message: str) -> None:
         self.summary_manager.update_status_from_message(message)

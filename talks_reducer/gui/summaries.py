@@ -338,17 +338,116 @@ class SummaryManager:
 
     def __init__(self, gui: "TalksReducerGUI") -> None:
         self.gui = gui
+        self._block_written = False
 
-    def append_log(self, message: str) -> None:
-        self.update_status_from_message(message)
+    def _write(self, text: str) -> None:
+        """Append raw *text* to the log widget on the Tk thread."""
 
         def updater() -> None:
             self.gui.log_text.configure(state=self.gui.tk.NORMAL)
-            self.gui.log_text.insert(self.gui.tk.END, message + "\n")
+            self.gui.log_text.insert(self.gui.tk.END, text)
             self.gui.log_text.see(self.gui.tk.END)
             self.gui.log_text.configure(state=self.gui.tk.DISABLED)
 
         self.gui.log_text.after(0, updater)
+
+    def append_log(self, message: str) -> None:
+        self.update_status_from_message(message)
+        self._write(message + "\n")
+
+    def append_separator(self) -> None:
+        """Insert two blank lines when a conversion block was written before.
+
+        The flag is consumed, so a new run separates once before its
+        ``Starting processing…`` line and its first header does not separate
+        again.
+        """
+
+        if not self._block_written:
+            return
+        self._block_written = False
+        self._write("\n\n")
+
+    def begin_conversion(self, header: str) -> None:
+        """Open a conversion block: separator, header, then a per-file reset.
+
+        The header bypasses :meth:`update_status_from_message` so its wording
+        never drives state; the reset it performs is the one the old
+        ``Processing:`` log line used to trigger through the parser.
+        """
+
+        self.append_separator()
+        self._write(header + "\n")
+        self.gui._reset_progress_baseline()
+        self.gui._video_duration_seconds = None
+        self.gui._encode_target_duration_seconds = None
+        self.gui._encode_total_frames = None
+        self.gui._encode_current_frame = None
+        self.gui._last_progress_seconds = None
+        self.gui._reset_audio_progress_state(clear_source=True)
+        self.gui._set_status("processing", "Processing")
+        self._block_written = True
+
+    def finish_run(self) -> None:
+        """Show the success status for a run whose every job succeeded.
+
+        Called directly by the local worker and the remote loop; it used to be
+        triggered by an ``All jobs finished successfully.`` log line.
+        """
+
+        status_components: List[str] = []
+        if self.gui._run_start_time is not None:
+            finish_time = time.monotonic()
+            runtime_seconds = max(0.0, finish_time - self.gui._run_start_time)
+            duration_str = self.format_progress_time(runtime_seconds)
+            status_components.append(f"{duration_str}")
+        else:
+            finished_seconds = next(
+                (
+                    value
+                    for value in (
+                        self.gui._last_progress_seconds,
+                        self.gui._encode_target_duration_seconds,
+                        self.gui._video_duration_seconds,
+                    )
+                    if value is not None
+                ),
+                None,
+            )
+
+            if finished_seconds is not None:
+                duration_str = self.format_progress_time(finished_seconds)
+                status_components.append(f"{duration_str}")
+            else:
+                status_components.append("Finished")
+
+        if (
+            self.gui._last_time_ratio is not None
+            and self.gui._last_size_ratio is not None
+        ):
+            time_part = f"time: {self.gui._last_time_ratio:.0%}"
+            if self.gui._last_output_duration is not None:
+                time_part += (
+                    f" ({self.format_progress_time(self.gui._last_output_duration)})"
+                )
+
+            size_part = f"size: {self.gui._last_size_ratio:.0%}"
+            if self.gui._last_output_size is not None:
+                size_part += f" ({format_file_size(self.gui._last_output_size)})"
+
+            status_components.append(f"{time_part}, {size_part}")
+
+        status_msg = ", ".join(status_components)
+
+        self.gui._reset_audio_progress_state(clear_source=True)
+        self.gui._set_status("success", status_msg)
+        self.gui._set_progress(100)
+        self.gui._run_start_time = None
+        self.gui._video_duration_seconds = None
+        self.gui._encode_target_duration_seconds = None
+        self.gui._encode_total_frames = None
+        self.gui._encode_current_frame = None
+        self.gui._last_progress_seconds = None
 
     def update_status_from_message(self, message: str) -> None:
         normalized = message.strip().lower()
@@ -496,60 +595,6 @@ class SummaryManager:
 
     def handle_status_transitions(self, normalized_message: str) -> bool:
         """Handle high-level status transitions for *normalized_message*."""
-
-        if "all jobs finished successfully" in normalized_message:
-            status_components: List[str] = []
-            if self.gui._run_start_time is not None:
-                finish_time = time.monotonic()
-                runtime_seconds = max(0.0, finish_time - self.gui._run_start_time)
-                duration_str = self.format_progress_time(runtime_seconds)
-                status_components.append(f"{duration_str}")
-            else:
-                finished_seconds = next(
-                    (
-                        value
-                        for value in (
-                            self.gui._last_progress_seconds,
-                            self.gui._encode_target_duration_seconds,
-                            self.gui._video_duration_seconds,
-                        )
-                        if value is not None
-                    ),
-                    None,
-                )
-
-                if finished_seconds is not None:
-                    duration_str = self.format_progress_time(finished_seconds)
-                    status_components.append(f"{duration_str}")
-                else:
-                    status_components.append("Finished")
-
-            if (
-                self.gui._last_time_ratio is not None
-                and self.gui._last_size_ratio is not None
-            ):
-                time_part = f"time: {self.gui._last_time_ratio:.0%}"
-                if self.gui._last_output_duration is not None:
-                    time_part += f" ({self.format_progress_time(self.gui._last_output_duration)})"
-
-                size_part = f"size: {self.gui._last_size_ratio:.0%}"
-                if self.gui._last_output_size is not None:
-                    size_part += f" ({format_file_size(self.gui._last_output_size)})"
-
-                status_components.append(f"{time_part}, {size_part}")
-
-            status_msg = ", ".join(status_components)
-
-            self.gui._reset_audio_progress_state(clear_source=True)
-            self.gui._set_status("success", status_msg)
-            self.gui._set_progress(100)
-            self.gui._run_start_time = None
-            self.gui._video_duration_seconds = None
-            self.gui._encode_target_duration_seconds = None
-            self.gui._encode_total_frames = None
-            self.gui._encode_current_frame = None
-            self.gui._last_progress_seconds = None
-            return True
 
         if normalized_message.startswith("extracting audio"):
             self.gui._reset_audio_progress_state(clear_source=False)
