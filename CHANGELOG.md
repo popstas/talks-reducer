@@ -1,6 +1,12 @@
 # Changelog
 
 
+## v1.9.1 - 2026-11-14
+
+### Features
+
+- Separate GUI log into per-conversion blocks with a summary (#168)
+
 ## v1.9.0 - 2026-11-14
 
 ### Features
