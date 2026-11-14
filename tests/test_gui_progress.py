@@ -175,3 +175,14 @@ def test_gui_progress_handle_skips_status_without_a_total() -> None:
 
 def test_audio_processing_band_starts_at_15() -> None:
     assert map_stage_progress("Audio processing:", 0, 100) == pytest.approx(15.0)
+
+
+def test_gui_handle_logs_completed_once() -> None:
+    """``run_timed_ffmpeg_command`` finishes inside ``with``; log one line."""
+
+    logs: list[str] = []
+    reporter = _TkProgressReporter(logs.append)
+    with reporter.task(desc="Extracting audio:", total=5) as task:
+        task.finish()
+
+    assert logs.count("Extracting audio: completed") == 1

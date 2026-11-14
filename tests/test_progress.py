@@ -99,3 +99,18 @@ def test_tqdm_progress_reporter_log_uses_tqdm_write(
     reporter.log("hello world")
 
     assert calls == ["hello world"]
+
+
+def test_callback_handle_finish_fires_once_inside_with_block() -> None:
+    """An explicit ``finish()`` inside ``with`` must not fire ``on_finish`` twice."""
+
+    finished: list[str] = []
+    handle = progress.CallbackProgressHandle(
+        desc="Generating final:",
+        total=10,
+        on_finish=lambda current, total, desc: finished.append(desc),
+    )
+    with handle as task:
+        task.finish()
+
+    assert finished == ["Generating final:"]
