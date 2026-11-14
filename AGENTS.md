@@ -152,6 +152,19 @@ a background thread. Once every queued job succeeds an **Open last output**
 button appears so you can jump straight to the exported file in your system
 file manager.
 
+The log is a run of per-conversion blocks. `SummaryManager.begin_conversion` writes the
+`### Processing <file>: <params>` header (`summaries.format_conversion_header`) *without*
+parsing it, then performs the per-file progress reset itself; `append_separator` inserts the
+two blank lines only once a block exists and is called at run start too, so a new run separates
+before its `Starting processing…` line. Each block ends with `format_conversion_summary`
+(`Completed:` + `Duration/Time/Size`); remote runs measure both local files with
+`measure_media` because the server's Markdown summary rounds to whole percents. The success
+status comes from `SummaryManager.finish_run()`, called directly by the local worker and
+`remote.process_files_via_server` — it used to be triggered by an `All jobs finished
+successfully.` log line, and log wording must not drive state. `CallbackProgressHandle.finish()`
+is idempotent because `run_timed_ffmpeg_command` calls it inside its `with` block, which
+logged every `<stage> completed` twice.
+
 The GUI stores your last-used Simple mode, Small video, Open after convert, and
 theme preferences in a cross-platform configuration file so they persist across
 launches.

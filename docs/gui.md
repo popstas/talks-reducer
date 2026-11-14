@@ -220,6 +220,14 @@ Progress updates stream into the 10-line log panel while the processing runs in 
 thread. Once every queued job succeeds an **Open last output** button appears so you can jump
 straight to the exported file in your system file manager.
 
+Each conversion is one block in the log: it opens with a
+`### Processing <file>: <settings>` header (resolution, codec, fps, speeds, and the threshold
+or `no voice`), blocks are separated by two blank lines, and each ends with
+`Completed: <output path>` plus a `Duration: …, Time: …%, Size: …%` line — the conversion's
+wall-clock time, then the output's length and size relative to the source. Remote runs
+measure both files locally after the download, so their percentages are as precise as
+local ones.
+
 ### Taskbar progress and completion bell
 
 On **Windows** the taskbar button mirrors the in-window progress bar while a conversion runs,
