@@ -5,9 +5,11 @@ from __future__ import annotations
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Mapping, Optional, Tuple
 
+from ..ffmpeg import get_video_duration
 from ..pipeline import _input_to_output_filename
+from ..timecode import format_timecode
 from .progress import map_stage_progress
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
@@ -215,14 +217,120 @@ def parse_task_percent(message: str) -> tuple[bool, Optional[tuple[str, float]]]
     return True, (f"{desc}:", percent)
 
 
-def format_file_size(size_bytes: int) -> str:
-    """Return a compact human-readable file size string."""
+def format_file_size(size_bytes: int, *, sep: str = "") -> str:
+    """Return a compact human-readable file size string.
+
+    ``sep`` goes between the number and the unit: the status bar keeps the
+    compact ``1.5MB`` while the log summary reads ``1.5 MB``.
+    """
     value = float(size_bytes)
     for unit in ("B", "KB", "MB", "GB"):
         if abs(value) < 1024:
-            return f"{value:.0f}{unit}" if unit == "B" else f"{value:.1f}{unit}"
+            number = f"{value:.0f}" if unit == "B" else f"{value:.1f}"
+            return f"{number}{sep}{unit}"
         value /= 1024
-    return f"{value:.1f}TB"
+    return f"{value:.1f}{sep}TB"
+
+
+_CODEC_LABELS = {"h264": "h.264", "hevc": "h.265", "av1": "av1", "mp3": "mp3"}
+
+
+def format_conversion_params(args: Mapping[str, object]) -> str:
+    """Describe the effective settings of one conversion for the log header.
+
+    ``args`` is the dict built by ``TalksReducerGUI._collect_arguments``. The
+    order is fixed — resolution, codec, fps, speeds, threshold (or ``no voice``
+    when voice detection replaces it), then trim and remove ranges — so headers
+    of consecutive runs line up. An mp3 run drops resolution and fps because
+    its output has no video.
+    """
+
+    codec = str(args.get("video_codec") or "h264").strip().lower()
+    parts: List[str] = []
+    if codec != "mp3":
+        height = args.get("small_target_height")
+        parts.append(f"{height}p" if args.get("small") and height else "orig")
+    parts.append(_CODEC_LABELS.get(codec, codec))
+    if codec != "mp3":
+        fps = args.get("max_frame_rate")
+        parts.append(f"{float(fps):g} fps" if fps else "orig fps")
+    if args.get("silent_speed") is not None:
+        parts.append(f"silent ×{float(args['silent_speed']):g}")
+    if args.get("sounded_speed") is not None:
+        parts.append(f"sounded ×{float(args['sounded_speed']):g}")
+    if args.get("vad"):
+        parts.append("no voice")
+    elif args.get("silent_threshold") is not None:
+        parts.append(f"threshold {float(args['silent_threshold']):g}")
+    if "cut_start_seconds" in args or "cut_end_seconds" in args:
+        start = float(args.get("cut_start_seconds") or 0.0)
+        end = float(args.get("cut_end_seconds") or 0.0)
+        end_text = format_timecode(end) if end > 0 else "end"
+        parts.append(f"cut {format_timecode(start)}–{end_text}")
+    remove_ranges = args.get("remove_ranges") or ()
+    if remove_ranges:
+        count = len(remove_ranges)  # type: ignore[arg-type]
+        parts.append(f"remove {count} range" + ("" if count == 1 else "s"))
+    return ", ".join(parts)
+
+
+def format_conversion_header(filename: str, args: Mapping[str, object]) -> str:
+    """Return the ``### Processing <file>: <params>`` line opening a log block."""
+
+    params = format_conversion_params(args)
+    header = f"### Processing {filename}"
+    return f"{header}: {params}" if params else header
+
+
+def format_conversion_summary(
+    output_file: Path,
+    *,
+    elapsed_seconds: Optional[float],
+    time_ratio: Optional[float],
+    output_duration: Optional[float],
+    size_ratio: Optional[float],
+    output_size: Optional[int],
+) -> List[str]:
+    """Return the ``Completed:`` line plus the ``Duration/Time/Size`` line.
+
+    Each part of the second line is skipped when its inputs are unknown, and
+    the line itself is dropped when nothing is known.
+    """
+
+    parts: List[str] = []
+    if elapsed_seconds is not None:
+        parts.append(f"Duration: {format_timecode(max(0.0, elapsed_seconds))}")
+    if time_ratio is not None:
+        time_part = f"Time: {time_ratio:.2%}"
+        if output_duration is not None:
+            time_part += f" ({format_timecode(max(0.0, output_duration))})"
+        parts.append(time_part)
+    if size_ratio is not None:
+        size_part = f"Size: {size_ratio:.2%}"
+        if output_size is not None:
+            size_part += f" ({format_file_size(output_size, sep=' ')})"
+        parts.append(size_part)
+
+    lines = [f"Completed: {output_file}"]
+    if parts:
+        lines.append(", ".join(parts))
+    return lines
+
+
+def measure_media(path: Path) -> Tuple[Optional[float], Optional[int]]:
+    """Return ``(duration_seconds, size_bytes)`` for *path*, ``None`` if unknown.
+
+    A missing file is never probed, so a failed or redirected download costs no
+    ffprobe call; a probe that reports ``0.0`` counts as unknown.
+    """
+
+    path = Path(path)
+    try:
+        size: Optional[int] = path.stat().st_size
+    except OSError:
+        return None, None
+    duration = get_video_duration(str(path))
+    return (duration if duration and duration > 0 else None), size
 
 
 class SummaryManager:
