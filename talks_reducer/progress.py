@@ -103,6 +103,7 @@ class CallbackProgressHandle(AbstractContextManager[ProgressHandle]):
         self._on_finish = on_finish
         self._infer_total_on_finish = infer_total_on_finish
         self._on_start = on_start
+        self._finished = False
 
         if self._on_start is not None:
             self._on_start(self._desc, self._total)
@@ -125,6 +126,16 @@ class CallbackProgressHandle(AbstractContextManager[ProgressHandle]):
             self._on_update(self._current, self._total, self._desc)
 
     def finish(self) -> None:
+        """Complete the task, firing the finish callbacks only once.
+
+        ``run_timed_ffmpeg_command`` calls ``finish()`` inside its ``with``
+        block and ``__exit__`` calls it again; without the guard every stage
+        logged ``<stage> completed`` twice.
+        """
+
+        if self._finished:
+            return
+        self._finished = True
         if self._total is not None and self._current < self._total:
             self._current = self._total
         elif self._total is None and self._infer_total_on_finish:

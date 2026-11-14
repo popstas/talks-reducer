@@ -984,6 +984,16 @@ def _make_summary_gui(progress_value: float = 0.0) -> SimpleNamespace:
         gui._set_progress(value)
 
     gui._set_progress_monotonic = _set_progress_monotonic
+
+    # A log widget stub that runs ``after(0, fn)`` at once and records inserts.
+    gui.inserted = []
+    gui.tk = SimpleNamespace(NORMAL="normal", DISABLED="disabled", END="end")
+    gui.log_text = SimpleNamespace(
+        configure=lambda **_: None,
+        insert=lambda _index, text: gui.inserted.append(text),
+        see=lambda _index: None,
+        after=lambda _delay, fn: fn(),
+    )
     return gui
 
 
@@ -3159,3 +3169,222 @@ def test_simple_preset_pick_releases_seeded_vad(monkeypatch):
 
     assert gui._seeded_vad is None
     assert app.TalksReducerGUI._collect_arguments(gui)["vad"] is False
+
+
+def test_begin_conversion_separates_only_after_a_block():
+    """Two blank lines go between blocks, never before the first one."""
+
+    gui = _make_summary_gui()
+    manager = summaries.SummaryManager(gui)
+
+    manager.append_separator()  # empty widget: nothing to separate
+    manager.begin_conversion("### Processing a.mp4: orig")
+    manager.append_log("Completed: a")
+    manager.begin_conversion("### Processing b.mp4: orig")
+
+    assert gui.inserted == [
+        "### Processing a.mp4: orig\n",
+        "Completed: a\n",
+        "\n\n",
+        "### Processing b.mp4: orig\n",
+    ]
+
+
+def test_run_separator_consumes_block_flag():
+    """A new run separates before ``Starting processing…``, not after it."""
+
+    gui = _make_summary_gui()
+    manager = summaries.SummaryManager(gui)
+
+    manager.begin_conversion("### Processing a.mp4: orig")
+    manager.append_separator()
+    manager.append_log("Starting processing…")
+    manager.begin_conversion("### Processing b.mp4: orig")
+
+    assert gui.inserted.count("\n\n") == 1
+    assert gui.inserted.index("\n\n") < gui.inserted.index("Starting processing…\n")
+
+
+def test_begin_conversion_resets_progress_and_status():
+    gui = _make_summary_gui()
+    gui._progress_floor = 100.0
+    gui._encode_total_frames = 500
+
+    summaries.SummaryManager(gui).begin_conversion("### Processing a.mp4: orig")
+
+    gui._reset_progress_baseline.assert_called_once()
+    gui._reset_audio_progress_state.assert_called_once_with(clear_source=True)
+    gui._set_status.assert_called_with("processing", "Processing")
+    assert gui._encode_total_frames is None
+
+
+def test_finish_run_sets_success_status():
+    gui = _make_summary_gui()
+    gui._run_start_time = None
+    gui._last_time_ratio = 0.5
+    gui._last_size_ratio = 0.25
+    gui._last_output_duration = None
+    gui._last_output_size = None
+
+    summaries.SummaryManager(gui).finish_run()
+
+    assert gui._set_status.call_args[0][0] == "success"
+    gui._set_progress.assert_called_with(100)
+
+
+def test_old_marker_text_no_longer_finishes_the_run():
+    gui = _make_summary_gui()
+    gui._run_start_time = None
+    gui._last_time_ratio = None
+    gui._last_size_ratio = None
+
+    summaries.SummaryManager(gui).update_status_from_message(
+        "All jobs finished successfully."
+    )
+
+    assert all(call[0][0] != "success" for call in gui._set_status.call_args_list)
+
+
+def test_gui_wrappers_delegate_to_summary_manager():
+    gui = SimpleNamespace(summary_manager=MagicMock(), _append_log=MagicMock())
+
+    app.TalksReducerGUI._begin_conversion_log(gui, "a.mp4", {"video_codec": "mp3"})
+    app.TalksReducerGUI._start_log_run(gui)
+    app.TalksReducerGUI._finish_run(gui)
+    app.TalksReducerGUI._log_conversion_summary(
+        gui,
+        Path("out.mp4"),
+        elapsed_seconds=5,
+        time_ratio=None,
+        output_duration=None,
+        size_ratio=None,
+        output_size=None,
+    )
+
+    gui.summary_manager.begin_conversion.assert_called_once_with(
+        "### Processing a.mp4: mp3"
+    )
+    gui.summary_manager.append_separator.assert_called_once_with(after_any_output=True)
+    gui.summary_manager.finish_run.assert_called_once()
+    assert [c[0][0] for c in gui._append_log.call_args_list] == [
+        f"Completed: {Path('out.mp4')}",
+        "Duration: 00:00:05",
+    ]
+
+
+class _SyncThread:
+    """``threading.Thread`` stand-in that runs the worker on ``start()``."""
+
+    def __init__(self, target, daemon=None):  # noqa: ANN001
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
+
+    def is_alive(self) -> bool:
+        return False
+
+
+def _make_local_run_gui(files: list[str]) -> MagicMock:
+    """Stub GUI wired just enough for ``_start_run`` to drive a local run."""
+
+    gui = MagicMock()
+    gui.logs = []
+    gui._processing_thread = None
+    gui.input_files = files
+    gui._collect_arguments.return_value = {"video_codec": "h264"}
+    gui.processing_mode_var.get.return_value = "local"
+    gui.open_after_convert_var.get.return_value = False
+    gui._open_location_after_convert = False
+    gui.server_url_var.get.return_value = ""
+    gui._maybe_glue_inputs.side_effect = lambda queued, args, reporter: (queued, None)
+    gui._schedule_on_ui_thread.side_effect = lambda callback: None
+    gui._append_log.side_effect = gui.logs.append
+    gui.summary_manager.begin_conversion.side_effect = gui.logs.append
+    gui._begin_conversion_log.side_effect = (
+        lambda name, args: app.TalksReducerGUI._begin_conversion_log(gui, name, args)
+    )
+    gui._log_conversion_summary.side_effect = (
+        lambda path, **stats: app.TalksReducerGUI._log_conversion_summary(
+            gui, path, **stats
+        )
+    )
+    return gui
+
+
+def test_local_run_logs_header_summary_and_finishes(tmp_path, monkeypatch):
+    files = []
+    for name in ("a.mp4", "b.mp4"):
+        (tmp_path / name).write_bytes(b"in")
+        files.append(str(tmp_path / name))
+    output = tmp_path / "out.mp4"
+    output.write_bytes(b"x" * 10)
+
+    def fake_speed_up_video(options, reporter=None):  # noqa: ANN001
+        return SimpleNamespace(
+            output_file=output,
+            time_ratio=0.9931,
+            size_ratio=0.0157,
+            output_duration=733.0,
+        )
+
+    monkeypatch.setattr(app, "speed_up_video", fake_speed_up_video)
+    monkeypatch.setattr(app, "gather_input_files", lambda inputs, **_: list(inputs))
+    monkeypatch.setattr(app.threading, "Thread", _SyncThread)
+    gui = _make_local_run_gui(files)
+
+    app.TalksReducerGUI._start_run(gui)
+
+    headers = [line for line in gui.logs if line.startswith("### Processing ")]
+    assert [h.split(":")[0] for h in headers] == [
+        "### Processing a.mp4",
+        "### Processing b.mp4",
+    ]
+    completed = [i for i, line in enumerate(gui.logs) if line.startswith("Completed: ")]
+    assert len(completed) == 2
+    for index in completed:
+        assert gui.logs[index + 1].startswith("Duration: ")
+        assert "Time: 99.31% (00:12:13)" in gui.logs[index + 1]
+    assert not any(line.startswith("Processing: ") for line in gui.logs)
+    assert "All jobs finished successfully." not in gui.logs
+    gui._start_log_run.assert_called_once()
+    gui._finish_run.assert_called_once()
+
+
+def test_local_run_failure_does_not_finish_run(tmp_path, monkeypatch):
+    (tmp_path / "a.mp4").write_bytes(b"in")
+
+    def aborting_speed_up_video(options, reporter=None):  # noqa: ANN001
+        raise app.ProcessingAborted("stopped")
+
+    monkeypatch.setattr(app, "speed_up_video", aborting_speed_up_video)
+    monkeypatch.setattr(app, "gather_input_files", lambda inputs, **_: list(inputs))
+    monkeypatch.setattr(app.threading, "Thread", _SyncThread)
+    gui = _make_local_run_gui([str(tmp_path / "a.mp4")])
+
+    app.TalksReducerGUI._start_run(gui)
+
+    gui._finish_run.assert_not_called()
+    gui._set_status.assert_called_with("Aborted")
+
+
+def test_run_separator_follows_a_run_that_never_opened_a_block():
+    """A glue cancel or ``No files`` run still gets separated from the next run."""
+
+    gui = _make_summary_gui()
+    manager = summaries.SummaryManager(gui)
+
+    manager.append_separator(after_any_output=True)  # empty widget: nothing
+    manager.append_log("Starting processing…")
+    manager.append_log("Processing aborted by user.")
+    manager.append_separator(after_any_output=True)
+    manager.append_log("Starting processing…")
+    manager.begin_conversion("### Processing a.mp4: orig")
+
+    assert gui.inserted == [
+        "Starting processing…\n",
+        "Processing aborted by user.\n",
+        "\n\n",
+        "Starting processing…\n",
+        "### Processing a.mp4: orig\n",
+    ]
