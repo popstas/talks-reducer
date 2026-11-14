@@ -63,6 +63,8 @@ pipx install talks-reducer     # or into an isolated environment
 uv tool install talks-reducer  # or with uv
 ```
 
+Speedup no voice (`--vad`) needs Python 3.10 or newer; its `silero-vad-lite` dependency ships wheels for Windows x64, macOS (arm64, x86_64) and Linux x86_64 only, so Linux arm64 would need a source build.
+
 ## OBS Processing Dock (Windows)
 
 For OBS Studio recordings, a Custom Browser Dock starts Talks Reducer right after you stop
@@ -102,6 +104,7 @@ talks-reducer --small --1080 --fps 30 input.mp4            # 1080p at most, capp
 talks-reducer --video-codec mp3 talk.mp4                   # export audio only, as .mp3
 talks-reducer --cut-start 00:00:10 --cut-end 00:01:00 demo.mp4  # keep only 10s–60s
 talks-reducer --remove "1:20-1:45,12:00-12:30" demo.mp4   # also drop these fragments
+talks-reducer --vad demo.mp4   # speed up non-voice frames (Silero VAD; pip install silero-vad-lite)
 talks-reducer --url http://localhost:9005 demo.mp4         # process on a remote server
 talks-reducer --preset "Smallest" demo.mp4                 # apply a saved preset
 talks-reducer --glue part1.mp4 part2.mp4                   # join the parts into one video first
@@ -119,9 +122,33 @@ downscales sources taller than 1080 px. `--fps 30|60|orig` (or any positive numb
 output frame rate and never raises it. The 1080p and FPS options need an up-to-date server in
 remote mode.
 
-**Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec, fps)
-you author once in the desktop GUI's Advanced mode and reuse everywhere — Simple mode, the
-Web UI, the OBS dock, and the CLI (`--preset`). When saving you pick which settings the preset
+`--vad` is the **Speedup no voice** checkbox in the desktop GUI, in the Silence speedup row
+in Advanced mode (`--no-vad` forces loudness detection over a remembered choice). While it is on, the Threshold buttons are disabled, since voice detection
+replaces the volume threshold. Simple mode has no checkbox: there the selected preset decides,
+and the **Voice** preset (Optimal plus voice detection) turns it on. The checkbox is
+remembered, but on startup the remembered preset is applied again and overrides it whenever that
+preset sets Speedup no voice (every full default preset does). The one
+exception is a launch flag: `--vad`/`--no-vad` from a shortcut or the OBS dock wins in Simple
+mode too, until you pick a preset in the dropdown. Existing preset lists gain **Voice** once,
+after **Optimal** (a list you emptied stays empty), and the other full presets get an
+explicit `vad: false`, so choosing them
+after **Voice** switches voice detection back off. Remote mode (`--url`, the GUI's
+**Remote**) sends it with its three settings to the server, which needs `silero-vad-lite`
+installed (it reports the missing package as a processing
+error); it needs an up-to-date server — an older one would ignore it and speed up by loudness,
+so the client stops with an error asking you to update the server — while a run without it
+still works with older ones.
+The Web UI has a **Speedup no voice** checkbox under **Speedup**, and the OBS dock one in its
+⚙️ Settings panel.
+Advanced settings add **VAD threshold** (0.05-0.95), **Voice padding, ms** (0-2000) and
+**Min pause, ms** (0-5000) rows, remembered between runs and used only while voice detection is
+on (Simple mode's Voice preset uses the remembered values). The progress bar gets a **Voice
+detection** stage between audio extraction and audio processing, and the log prints
+`Voice detection (lite): 2.4 s, speech 61% of audio`.
+
+**Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec, fps,
+Speedup no voice) you author once in the desktop GUI's Advanced mode and reuse everywhere —
+Simple mode, the Web UI, the OBS dock, and the CLI (`--preset`). When saving you pick which settings the preset
 controls, so a preset can be partial (e.g. codec-only) and applying it leaves your other
 settings alone. They live in the shared `settings.json`, so one list appears on every surface,
 and each surface opens on the preset you used last. See
@@ -148,8 +175,8 @@ seconds) and loaded again the next time you add that file.
 - **Convert** processes the video as usual and drops the fragments; the output name gets a
   `_cut` suffix (e.g. `lecture_speedup_cut.mp4`).
 - **Remove only** is a fast pass for an already-processed file: speeds stay x1, the picture is
-  left at its original resolution and frame rate, and only the fragments disappear. The codec
-  stays the one you selected.
+  left at its original resolution and frame rate, voice detection is skipped, and only the
+  fragments disappear. The codec stays the one you selected.
 
 If mpv.net is installed somewhere unusual, set `mpv_path` in `settings.json` to the full path of
 `mpvnet.exe` (or `mpv`). See [docs/gui.md](docs/gui.md#cut-video) for details.

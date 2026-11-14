@@ -24,6 +24,7 @@ def test_build_args_matches_dock_options() -> None:
         "hevc",
         "--fps",
         "orig",
+        "--no-vad",
         "--open-location",
         "--auto-close",
     ]
@@ -36,6 +37,7 @@ def test_build_args_matches_dock_options() -> None:
         "h264",
         "--fps",
         "orig",
+        "--no-vad",
     ]
     assert dock_server.build_args("v.mp4", "720p", 10, "av1", False)[1:3] == [
         "--small",
@@ -54,6 +56,7 @@ def test_build_args_real_1080_and_fps() -> None:
         "hevc",
         "--fps",
         "30",
+        "--no-vad",
     ]
 
 
@@ -115,7 +118,9 @@ def test_handle_process_validates_and_spawns(tmp_path, monkeypatch) -> None:
 
     assert status == 202
     assert str(exe) in message
-    assert calls == [(str(exe), str(video), "720p", 5, "hevc", True, None, "orig")]
+    assert calls == [
+        (str(exe), str(video), "720p", 5, "hevc", True, None, "orig", False)
+    ]
 
 
 def test_handle_process_rejects_unknown_fps(tmp_path, monkeypatch) -> None:
@@ -161,7 +166,9 @@ def test_handle_process_accepts_orig_resolution_and_fps(tmp_path, monkeypatch) -
     )
 
     assert status == 202
-    assert calls == [(str(exe), str(video), "orig", 1, "h264", False, None, "30")]
+    assert calls == [
+        (str(exe), str(video), "orig", 1, "h264", False, None, "30", False)
+    ]
 
 
 def test_resolve_dock_html_returns_bundled_file() -> None:
@@ -255,7 +262,7 @@ def test_handle_process_routes_preset(tmp_path, monkeypatch) -> None:
 
     assert status == 202
     assert calls == [
-        (str(exe), str(video), "", None, "h264", False, "720p fast", "orig")
+        (str(exe), str(video), "", None, "h264", False, "720p fast", "orig", False)
     ]
 
 
@@ -378,3 +385,92 @@ def test_cli_dispatches_obs_dock_alias(monkeypatch) -> None:
     cli.main(["obs-dock", "--host", "0.0.0.0"])
 
     assert captured == [["--host", "0.0.0.0"]]
+
+
+def test_dock_build_args_vad() -> None:
+    """Manual mode always states vad; a preset decides it on its own."""
+
+    manual_on = dock_server.build_args("v.mp4", "720p", 10, "hevc", False, vad=True)
+    assert manual_on[-1] == "--vad"
+    assert "--no-vad" not in manual_on
+
+    manual_off = dock_server.build_args("v.mp4", "720p", 10, "hevc", False)
+    assert manual_off[-1] == "--no-vad"
+    assert "--vad" not in manual_off
+
+    with_preset = dock_server.build_args(
+        "v.mp4", "720p", 10, "hevc", False, preset="Voice", vad=True
+    )
+    assert with_preset == ["v.mp4", "--preset", "Voice"]
+
+
+def test_handle_process_forwards_vad(tmp_path, monkeypatch) -> None:
+    """The ``vad`` payload field reaches ``start_talks_reducer``."""
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    exe = tmp_path / "talks-reducer.exe"
+    exe.write_bytes(b"x")
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        dock_server,
+        "start_talks_reducer",
+        lambda *args: calls.append(args),
+    )
+
+    status, _ = dock_server.handle_process(
+        {
+            "file": str(video),
+            "resolution": "720p",
+            "speed": 10,
+            "codec": "hevc",
+            "vad": True,
+            "exe": str(exe),
+        }
+    )
+
+    assert status == 202
+    assert calls[0][-1] is True
+
+
+@pytest.mark.parametrize("value", ["false", "true", "1", 1, None])
+def test_handle_process_vad_needs_json_true(tmp_path, monkeypatch, value) -> None:
+    """Only a JSON ``true`` adds ``--vad``; a string such as ``"false"`` does not."""
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    exe = tmp_path / "talks-reducer.exe"
+    exe.write_bytes(b"x")
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        dock_server,
+        "start_talks_reducer",
+        lambda *args: calls.append(args),
+    )
+
+    status, _ = dock_server.handle_process(
+        {
+            "file": str(video),
+            "resolution": "720p",
+            "speed": 10,
+            "codec": "hevc",
+            "vad": value,
+            "exe": str(exe),
+        }
+    )
+
+    assert status == 202
+    assert calls[0][-1] is False
+
+
+def test_dock_html_has_persistent_vad_checkbox() -> None:
+    """The checkbox sits in the Settings panel, outside the relocated controls."""
+
+    html = dock_server.resolve_dock_html().read_text(encoding="utf-8")
+    settings_panel = html[html.index('<details class="settings">') :]
+    manual_controls = html[: html.index('<details class="settings">')]
+
+    assert 'id="vadCheck"' in settings_panel
+    assert "vadCheck" not in manual_controls
+    assert "payload.vad = vadCheck.checked" in html
+    assert "localStorage.setItem('obsDock.vad'" in html

@@ -1287,3 +1287,256 @@ def test_input_to_output_filename_adds_cut_token(name, speeds, expected) -> None
     )
 
     assert output.name == expected
+
+
+class _RecordingReporter(NullProgressReporter):
+    """Reporter that records log lines and task descriptions."""
+
+    def __init__(self) -> None:
+        self.logs: list[str] = []
+        self.tasks: list[tuple[str, object, str]] = []
+
+    def log(self, message: str) -> None:
+        self.logs.append(message)
+
+    def task(self, *, desc: str = "", total=None, unit: str = ""):
+        self.tasks.append((desc, total, unit))
+        return super().task(desc=desc, total=total, unit=unit)
+
+
+class _FakeVadEngine:
+    name = "fake"
+    hop_samples = 512
+
+
+def _run_vad_pipeline(
+    tmp_path,
+    monkeypatch,
+    *,
+    vad,
+    mask=None,
+    detect_error=None,
+    load_engine=None,
+    ffmpeg_calls=None,
+    **option_overrides,
+):
+    """Run ``speed_up_video`` with stubbed audio analysis and a fake VAD.
+
+    *load_engine* replaces ``vad.load_engine`` and *ffmpeg_calls*, when given,
+    records every ``run_timed_ffmpeg_command`` invocation as ``(desc, command)``.
+    """
+
+    from talks_reducer import vad as vad_module
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"fake")
+    metadata = {
+        "frame_rate": 30.0,
+        "duration": 1.0,
+        "frame_count": 30,
+        "width": 1920.0,
+        "height": 1080.0,
+    }
+    monkeypatch.setattr(
+        pipeline, "_extract_video_metadata", lambda path, frame_rate: dict(metadata)
+    )
+    monkeypatch.setattr(audio_module, "has_audio_stream", lambda path: True)
+    monkeypatch.setattr(
+        pipeline.wavfile,
+        "read",
+        lambda path: (48000, np.zeros((48000, 2), dtype=np.int16)),
+    )
+    monkeypatch.setattr(
+        pipeline.wavfile,
+        "write",
+        lambda path, *args, **kwargs: Path(path).write_bytes(b""),
+    )
+    monkeypatch.setattr(audio_module, "get_max_volume", lambda data: 1.0)
+
+    state = {"loud_calls": 0, "vad_calls": 0, "mask_seen": None, "chunks": None}
+    voice_mask = np.ones(30, dtype=bool) if mask is None else mask
+
+    def fake_loud(*args, **kwargs):
+        state["loud_calls"] += 1
+        return np.ones(30, dtype=bool)
+
+    def fake_detect(audio, rate, frame_rate, frame_count, settings, **kwargs):
+        state["vad_calls"] += 1
+        state["settings"] = settings
+        state["engine"] = kwargs.get("engine")
+        if detect_error is not None:
+            raise detect_error
+        if kwargs.get("progress"):
+            kwargs["progress"](3)
+        return vad_module.VadResult(
+            mask=voice_mask,
+            intervals=[(0.0, 0.5), (0.75, 1.0)],
+            engine="fake",
+            seconds=0.25,
+            speech_ratio=0.5,
+        )
+
+    real_build_chunks = pipeline.chunk_utils.build_chunks
+
+    def spy_build_chunks(mask_arg, spreadage):
+        state["mask_seen"] = np.asarray(mask_arg)
+        return real_build_chunks(mask_arg, spreadage)
+
+    monkeypatch.setattr(pipeline.chunk_utils, "detect_loud_frames", fake_loud)
+    monkeypatch.setattr(pipeline.chunk_utils, "build_chunks", spy_build_chunks)
+    monkeypatch.setattr(vad_module, "detect_voice_frames", fake_detect)
+    monkeypatch.setattr(
+        vad_module, "load_engine", load_engine or (lambda: _FakeVadEngine())
+    )
+
+    def fake_process_chunks(audio, chunks, *args, **kwargs):
+        state["chunks"] = chunks
+        return np.zeros((10, 2)), [[0, 30, 1, 30]]
+
+    monkeypatch.setattr(
+        audio_module,
+        "process_audio_chunks",
+        fake_process_chunks,
+    )
+    monkeypatch.setattr(
+        pipeline.chunk_utils, "get_tree_expression", lambda chunks: "0/TB/FR"
+    )
+
+    dependencies = pipeline.PipelineDependencies(
+        get_ffmpeg_path=lambda prefer_global=False: "ffmpeg",
+        detect_hardware_backend=lambda _codec, _path: None,
+        build_extract_audio_command=lambda *args, **kwargs: "extract-command",
+        build_video_commands=lambda *args, **kwargs: ("ffmpeg", "cmd", False),
+        build_audio_only_command=lambda *args, **kwargs: "audio-only-command",
+        run_timed_ffmpeg_command=lambda command, **kwargs: (
+            None
+            if ffmpeg_calls is None
+            else ffmpeg_calls.append((kwargs.get("desc"), command))
+        ),
+    )
+    options = ProcessingOptions(
+        input_file=input_file,
+        output_file=tmp_path / "out" / "output.mp3",
+        temp_folder=tmp_path / "temp",
+        video_codec="mp3",
+        vad=vad,
+        **option_overrides,
+    )
+    reporter = _RecordingReporter()
+    result = pipeline.speed_up_video(
+        options, reporter=reporter, dependencies=dependencies
+    )
+    return result, state, reporter, options
+
+
+def test_vad_off_uses_loud_frame_detection(tmp_path, monkeypatch) -> None:
+    _, state, _, _ = _run_vad_pipeline(tmp_path, monkeypatch, vad=False)
+
+    assert state["vad_calls"] == 0
+    assert state["loud_calls"] == 1
+
+
+def test_vad_on_replaces_loud_frame_detection(tmp_path, monkeypatch) -> None:
+    mask = np.zeros(30, dtype=bool)
+    mask[5:20] = True
+    _, state, reporter, _ = _run_vad_pipeline(
+        tmp_path, monkeypatch, vad=True, mask=mask
+    )
+
+    assert state["loud_calls"] == 0
+    assert state["vad_calls"] == 1
+    assert state["mask_seen"].tolist() == mask.tolist()
+    assert any(line.startswith("Voice detection (fake):") for line in reporter.logs)
+    assert ("Voice detection:", 32, "windows") in reporter.tasks
+
+
+def test_vad_all_noise_produces_single_silent_chunk(tmp_path, monkeypatch) -> None:
+    _, state, _, _ = _run_vad_pipeline(
+        tmp_path, monkeypatch, vad=True, mask=np.zeros(30, dtype=bool)
+    )
+
+    assert len(state["chunks"]) == 1
+    assert all(chunk[2] == 0 for chunk in state["chunks"])
+
+
+def test_vad_with_remove_ranges_keeps_removed_chunks(tmp_path, monkeypatch) -> None:
+    _, state, _, _ = _run_vad_pipeline(
+        tmp_path, monkeypatch, vad=True, remove_ranges=((0.2, 0.4),)
+    )
+
+    assert any(
+        chunk[2] == pipeline.chunk_utils.REMOVED_SPEED_INDEX
+        for chunk in state["chunks"]
+    )
+
+
+def test_vad_unavailable_propagates(tmp_path, monkeypatch) -> None:
+    from talks_reducer import vad as vad_module
+
+    with pytest.raises(vad_module.VadUnavailableError):
+        _run_vad_pipeline(
+            tmp_path,
+            monkeypatch,
+            vad=True,
+            detect_error=vad_module.VadUnavailableError("pip install silero-vad-lite"),
+        )
+
+
+def test_vad_missing_engine_fails_before_audio_extraction(
+    tmp_path, monkeypatch
+) -> None:
+    from talks_reducer import vad as vad_module
+
+    def missing_engine():
+        raise vad_module.VadUnavailableError("pip install silero-vad-lite")
+
+    ffmpeg_calls: list = []
+    with pytest.raises(vad_module.VadUnavailableError):
+        _run_vad_pipeline(
+            tmp_path,
+            monkeypatch,
+            vad=True,
+            load_engine=missing_engine,
+            ffmpeg_calls=ffmpeg_calls,
+        )
+
+    assert ffmpeg_calls == []
+    assert list((tmp_path / "temp").glob("job_*")) == []
+
+
+def test_vad_engine_is_loaded_once_and_reused(tmp_path, monkeypatch) -> None:
+    loaded: list = []
+
+    def load_engine():
+        engine = _FakeVadEngine()
+        loaded.append(engine)
+        return engine
+
+    ffmpeg_calls: list = []
+    _, state, _, _ = _run_vad_pipeline(
+        tmp_path,
+        monkeypatch,
+        vad=True,
+        load_engine=load_engine,
+        ffmpeg_calls=ffmpeg_calls,
+    )
+
+    assert len(loaded) == 1
+    assert state["engine"] is loaded[0]
+    assert ffmpeg_calls[0][0] == "Extracting audio:"
+
+
+def test_vad_engine_not_loaded_when_audio_is_not_analysed(
+    tmp_path, monkeypatch
+) -> None:
+    def unexpected_load():
+        raise AssertionError("engine loaded for a run that never analyses audio")
+
+    _run_vad_pipeline(
+        tmp_path,
+        monkeypatch,
+        vad=True,
+        load_engine=unexpected_load,
+        silent_speed=1.0,
+        sounded_speed=1.0,
+    )

@@ -117,3 +117,28 @@ def test_leave_destroys_tooltip_window():
     widget.bindings["<Leave>"](None)
 
     assert created["window"].destroyed is True
+
+
+def test_set_text_changes_what_the_next_hover_shows():
+    labels: list[FakeLabel] = []
+
+    class RecordingLabel(FakeLabel):
+        def __init__(self, master, **kwargs):
+            super().__init__(master, **kwargs)
+            labels.append(self)
+
+    tk_module = SimpleNamespace(Toplevel=FakeToplevel, Label=RecordingLabel)
+    widget = FakeWidget()
+    tooltip = add_tooltip(widget, "before", tk_module=tk_module)
+
+    widget.bindings["<Enter>"](None)
+    _, show = widget.after_calls[-1]
+    first = show()
+    tooltip.set_text("after")
+
+    assert tooltip.text == "after"
+    assert first.destroyed is True, "a visible bubble with stale text is closed"
+    widget.bindings["<Enter>"](None)
+    _, show = widget.after_calls[-1]
+    show()
+    assert labels[-1].kwargs.get("text") == "after"

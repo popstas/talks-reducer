@@ -19,6 +19,7 @@ from talks_reducer.version_utils import resolve_version
 from . import audio as audio_utils
 from . import chunks as chunk_utils
 from . import spherical as spherical_utils
+from . import vad as vad_utils
 from . import wav_io as wavfile
 from .cut_marks import normalize_ranges
 from .ffmpeg import (
@@ -378,6 +379,71 @@ def _resolve_remove_ranges(
     return shifted
 
 
+def _load_vad_engine(
+    job_temp_path: Path,
+    dependencies: PipelineDependencies,
+) -> vad_utils.VadEngine:
+    """Load the VAD engine before any audio is extracted.
+
+    Loading first makes a missing or broken engine fail in a moment instead of
+    after a long extraction. ``VadUnavailableError`` still propagates -- a
+    missing engine must fail the run rather than silently fall back to loudness
+    detection -- but the job's temp folder is removed first, like the pipeline's
+    other early exits.
+    """
+
+    try:
+        return vad_utils.load_engine()
+    except Exception:
+        dependencies.delete_path(job_temp_path)
+        raise
+
+
+def _detect_voice_mask(
+    options: ProcessingOptions,
+    engine: vad_utils.VadEngine,
+    audio_data: np.ndarray,
+    sample_rate: int,
+    frame_rate: float,
+    frame_count: int,
+    reporter: ProgressReporter,
+) -> np.ndarray:
+    """Return the per-frame speech mask produced by Silero VAD.
+
+    *engine* comes from :func:`_load_vad_engine`, loaded before extraction; its
+    hop size sets the progress total.
+    """
+
+    settings = vad_utils.VadSettings(
+        threshold=options.vad_threshold,
+        padding_ms=options.vad_padding_ms,
+        min_silence_ms=options.vad_min_silence_ms,
+    )
+    samples_16k = math.ceil(
+        audio_data.shape[0] * vad_utils.VAD_SAMPLE_RATE / sample_rate
+    )
+    total_windows = vad_utils.count_windows(samples_16k, engine.hop_samples)
+
+    with reporter.task(
+        desc="Voice detection:", total=total_windows, unit="windows"
+    ) as vad_task:
+        result = vad_utils.detect_voice_frames(
+            audio_data,
+            sample_rate,
+            frame_rate,
+            frame_count,
+            settings,
+            engine=engine,
+            progress=vad_task.advance,
+        )
+
+    reporter.log(
+        f"Voice detection ({result.engine}): {result.seconds:.1f} s, "
+        f"speech {result.speech_ratio:.0%} of audio"
+    )
+    return result.mask
+
+
 def resolve_output_path(options: ProcessingOptions, source: Path | None = None) -> Path:
     """Return the output path *options* writes to.
 
@@ -571,6 +637,9 @@ def speed_up_video(
         audio_bitrate = "128k" if options.optimize else "160k"
         audio_wav = job_temp_path / "audio.wav"
         extraction_sample_rate = options.sample_rate
+        vad_engine = (
+            _load_vad_engine(job_temp_path, dependencies) if options.vad else None
+        )
 
         extract_command = dependencies.build_extract_audio_command(
             os.fspath(input_path),
@@ -613,13 +682,24 @@ def speed_up_video(
 
         _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
-        has_loud_audio = chunk_utils.detect_loud_frames(
-            audio_data,
-            audio_frame_count,
-            samples_per_frame,
-            max_audio_volume,
-            options.silent_threshold,
-        )
+        if vad_engine is not None:
+            has_loud_audio = _detect_voice_mask(
+                options,
+                vad_engine,
+                audio_data,
+                wav_sample_rate,
+                frame_rate,
+                audio_frame_count,
+                reporter,
+            )
+        else:
+            has_loud_audio = chunk_utils.detect_loud_frames(
+                audio_data,
+                audio_frame_count,
+                samples_per_frame,
+                max_audio_volume,
+                options.silent_threshold,
+            )
 
         chunks, _ = chunk_utils.build_chunks(has_loud_audio, options.frame_spreadage)
         if remove_ranges:

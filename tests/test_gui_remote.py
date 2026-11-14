@@ -1027,3 +1027,50 @@ def test_process_files_via_server_sends_height_and_fps(tmp_path: Path) -> None:
     assert send_calls[0]["small_height"] == 1080
     assert send_calls[0]["max_frame_rate"] == 30.0
     assert destination_calls[0]["small_target_height"] == 1080
+
+
+def test_gui_remote_passes_vad_settings(tmp_path: Path) -> None:
+    """Remote runs forward vad and its settings without the ignored warning."""
+
+    gui = StubGUI()
+    send_calls: list[dict[str, object]] = []
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            send_calls.append(kwargs)
+            return (str(tmp_path / "output.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    def run(args: dict[str, object]) -> None:
+        result = remote_module.process_files_via_server(
+            gui,
+            files=[str(tmp_path / "input.mp4")],
+            args=args,
+            server_url="http://example.com",
+            open_after_convert=False,
+            default_remote_destination=lambda path, small, small_480, **kwargs: tmp_path
+            / path.name,
+            parse_summary=lambda text: (None, None),  # noqa: ARG005
+            load_service_client=load_client,
+            check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+        )
+        assert result is True
+
+    run(
+        {
+            "vad": True,
+            "vad_threshold": 0.4,
+            "vad_padding_ms": 200,
+            "vad_min_silence_ms": 500,
+        }
+    )
+    run({"vad": False})
+
+    assert send_calls[0]["vad"] is True
+    assert send_calls[0]["vad_threshold"] == 0.4
+    assert send_calls[0]["vad_padding_ms"] == 200
+    assert send_calls[0]["vad_min_silence_ms"] == 500
+    assert send_calls[1]["vad"] is False
+    assert send_calls[1]["vad_threshold"] is None
+    assert not any("ignores the following" in message for message in gui.logs)

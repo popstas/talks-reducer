@@ -6,18 +6,20 @@ Full flag reference for the `talks-reducer` command. See the
 ## Named presets
 
 A **preset** is a saved bundle of processing settings — resolution, silent/sounded speed,
-silent threshold, video codec, and an optional frame-rate cap (`fps`) — authored once in the desktop GUI (Advanced mode) and
+silent threshold, video codec, an optional frame-rate cap (`fps`) and the Speedup no voice
+flag (`vad`) — authored once in the desktop GUI (Advanced mode) and
 applied read-only on every other surface, including the CLI. Presets live in the shared
 `settings.json` (the same file the GUI, Web UI, and OBS dock read), so one canonical list
 appears everywhere.
 
 - `--list-presets` prints the stored preset names, one per line, and exits (no input file
-  required). On a fresh install the five seeded defaults are printed:
+  required). On a fresh install the six seeded defaults are printed:
 
   ```sh
   talks-reducer --list-presets
   # Compatible
   # Optimal
+  # Voice
   # Smallest
   # Compress
   # mp3
@@ -45,6 +47,14 @@ Before 1080p became a real downscale, `"1080p"` in `settings.json` meant "no sca
 one-time migration, tracked by a `presets_version: 2` marker in `settings.json`, rewrites
 every stored `"1080p"` resolution to `"orig"` and adds `fps: "orig"` to every preset that has a
 resolution but no fps; afterwards `"1080p"` means a real downscale.
+
+`presets_version: 3` adds the `vad` field. That migration is a deliberate exception to "existing
+lists never pick up new defaults": every stored full preset gains `vad: false`, so choosing it
+after **Voice** switches voice detection back off instead of inheriting it, and the **Voice**
+preset (Optimal plus `vad: true`) is inserted after **Optimal** (appended when there is no
+Optimal) unless a preset already has that name or the list is empty. `--preset Voice`
+therefore behaves like `--preset Optimal --vad`; an explicit `--vad` or
+`--no-vad` still wins.
 
 ## Encoding presets
 
@@ -162,9 +172,21 @@ Flag names accept either hyphens or underscores where both spellings exist
 
 ### Speech detection
 
-Talks Reducer relies on its built-in volume thresholding to detect speech. Adjust
-`--silent_threshold` if you need to fine-tune when segments count as silence. Dropping the
-optional Silero VAD integration keeps the install lightweight and avoids pulling in PyTorch.
+By default Talks Reducer detects speech with volume thresholding; adjust
+`--silent_threshold` to fine-tune when segments count as silence. `--vad` swaps that for
+Silero VAD, so only frames without a voice are sped up rather than frames below a volume.
+The engine,
+`silero-vad-lite`, is a regular dependency, so no PyTorch is pulled in. With `--vad` the
+volume threshold is ignored.
+
+- `--vad` / `--no-vad` — turn voice detection on, or force it off over a preset or a
+  remembered choice.
+- `--vad-threshold` — speech probability a window needs to count as voice (default `0.5`).
+- `--vad-padding MS` — padding added around each speech interval (default `150`).
+- `--vad-min-silence MS` — non-voice needed to end a speech interval (default `300`).
+
+The run prints a `Voice detection (lite): 2.4 s, speech 61% of audio` line and shows a
+**Voice detection** stage in the progress output.
 
 ### Hardware encoding
 
@@ -224,7 +246,12 @@ talks-reducer --host 192.168.1.42 demo.mp4
 
 Remote jobs respect the same timing controls as the local CLI. Provide
 `--silent_threshold`, `--sounded_speed`, or `--silent_speed` to tweak how the server trims
-and accelerates segments without falling back to local mode.
+and accelerates segments without falling back to local mode. `--vad` is forwarded too,
+with `--vad-threshold`, `--vad-padding` and `--vad-min-silence` when given; the server needs
+`silero-vad-lite` installed.
+`--vad` needs an up-to-date server: an older one would ignore it and speed up by loudness, so
+the client checks the server's API and stops with an error asking you to update the server.
+Runs without it keep working with older servers.
 
 Want to see progress as the remote server works? Add `--server-stream` so the CLI prints
 live progress bars and log lines while you wait for the download. The stream walks through

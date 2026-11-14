@@ -45,3 +45,34 @@ def test_pandas_is_not_excluded_from_bundle() -> None:
     # pandas needs its timezone data, so those must not be excluded either.
     assert "pytz" not in excludes
     assert "tzdata" not in excludes
+
+
+def _collect_call_targets() -> set[tuple[str, str]]:
+    """Return ``(collector, package)`` pairs for literal ``collect_*`` calls."""
+
+    tree = ast.parse(SPEC_PATH.read_text(encoding="utf-8"))
+    targets: set[tuple[str, str]] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id.startswith("collect_")
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            targets.add((node.func.id, node.args[0].value))
+    return targets
+
+
+def test_spec_collects_silero_vad_lite() -> None:
+    """The lite VAD engine loads its DLL and ONNX model from its ``data`` folder.
+
+    PyInstaller's import analysis only sees the Python files, so without these
+    explicit collectors the frozen bundle would fail ``--vad`` with a missing
+    ``silero_vad_lite.dll``.
+    """
+
+    targets = _collect_call_targets()
+    assert ("collect_data_files", "silero_vad_lite") in targets
+    assert ("collect_dynamic_libs", "silero_vad_lite") in targets

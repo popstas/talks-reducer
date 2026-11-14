@@ -159,6 +159,10 @@ SOUNDED_SPEED_MAXIMUM = 10.0
 # Any threshold may be typed, but past ~0.9 the detector treats almost the whole
 # track as silence, so the control caps there rather than at a nominal 1.0.
 THRESHOLD_MAXIMUM = 0.9
+VAD_THRESHOLD_MIN = 0.05
+VAD_THRESHOLD_MAX = 0.95
+VAD_PADDING_MAX = 2000
+VAD_MIN_SILENCE_MAX = 5000
 
 # The address field shares the Mode row now, so it is sized to fit beside the
 # mode buttons and Discover rather than to the full width of a dedicated row.
@@ -177,6 +181,10 @@ THRESHOLD_TOOLTIP = (
     "0.10 — the last sane limit for painless silence removal"
 )
 
+# Shown on the Threshold control while "Speedup no voice" is on: VAD decides
+# what to speed up, so the volume threshold has no effect on the run.
+VAD_THRESHOLD_TOOLTIP = "Not used with Speedup no voice"
+
 
 def apply_preset_to_gui(gui: "TalksReducerGUI", preset: "presets.Preset") -> None:
     """Fan a stored :class:`~talks_reducer.presets.Preset` onto the GUI vars.
@@ -188,7 +196,8 @@ def apply_preset_to_gui(gui: "TalksReducerGUI", preset: "presets.Preset") -> Non
     height) so a preset always wins over a persisted ``--small`` default, and
     the fps cap writes ``fps_var``. Speeds and the threshold route through the basic-slider
     updaters when they exist so the slider labels and persisted preferences stay
-    in sync; the codec updates the shared ``video_codec_var``.
+    in sync; the codec updates the shared ``video_codec_var`` and ``vad`` the
+    "Speedup no voice" checkbox's ``vad_var``.
     """
 
     if preset.resolution is not None:
@@ -215,6 +224,8 @@ def apply_preset_to_gui(gui: "TalksReducerGUI", preset: "presets.Preset") -> Non
 
     if preset.video_codec is not None:
         gui.video_codec_var.set(preset.video_codec)
+    if preset.vad is not None:
+        gui.vad_var.set(bool(preset.vad))
 
 
 def _apply_simple_preset(gui: "TalksReducerGUI") -> None:
@@ -222,12 +233,16 @@ def _apply_simple_preset(gui: "TalksReducerGUI") -> None:
 
     The chosen name is looked up in the cached preset list, fanned onto the GUI
     vars, and persisted via ``selected_preset`` so the choice survives relaunch.
+    Choosing a preset also releases a launch-seeded ``--vad``/``--no-vad``
+    (``_seeded_vad``): from then on the user's pick decides Speedup no voice,
+    just as it already overwrites the seeded fps and resolution vars.
     """
 
     name = gui.simple_preset_var.get()
     preset = presets.find_preset(name, getattr(gui, "_simple_presets", []))
     if preset is None:
         return
+    gui._seeded_vad = None
     apply_preset_to_gui(gui, preset)
     presets.set_selected_preset(name)
 
@@ -237,9 +252,10 @@ def advanced_preset_values(gui: "TalksReducerGUI") -> dict:
 
     ``small_var``/``small_height_var`` collapse back into the resolution value
     (``orig``/``1080p``/``720p``/``480p``) and the fps cap, speeds, threshold,
-    and codec read from their shared GUI vars so the result can be fed straight to
-    :func:`~talks_reducer.presets.match_preset` or
-    :func:`~talks_reducer.presets.Preset`.
+    codec and the "Speedup no voice" flag read from their shared GUI vars so the
+    result can be fed straight to :func:`~talks_reducer.presets.match_preset` or
+    :func:`~talks_reducer.presets.Preset`. ``vad`` is what tells Voice apart from
+    Optimal, which share every other value.
     """
 
     return {
@@ -249,6 +265,7 @@ def advanced_preset_values(gui: "TalksReducerGUI") -> dict:
         "sounded_speed": gui.sounded_speed_var.get(),
         "silent_threshold": gui.silent_threshold_var.get(),
         "video_codec": gui.video_codec_var.get(),
+        "vad": bool(gui.vad_var.get()),
     }
 
 
@@ -268,15 +285,24 @@ def build_sparse_preset(name: str, values: dict, selected_fields) -> "presets.Pr
     Only the fields named in *selected_fields* are copied off *values* into the
     resulting preset; every other field is left ``None`` so the preset controls
     just the checked params. Pure (no Tk) so it is unit-testable.
+
+    ``vad`` is stored as a real bool: through the ``str`` branch ``False`` would
+    become the truthy string ``"False"`` and reload as switched on.
     """
 
     float_fields = {"silent_speed", "sounded_speed", "silent_threshold"}
+    bool_fields = {"vad"}
     kwargs: dict = {"name": name}
     for field in presets.PRESET_VALUE_FIELDS:
         if field not in selected_fields or field not in values:
             continue
         raw = values[field]
-        kwargs[field] = float(raw) if field in float_fields else str(raw)
+        if field in float_fields:
+            kwargs[field] = float(raw)
+        elif field in bool_fields:
+            kwargs[field] = bool(raw)
+        else:
+            kwargs[field] = str(raw)
     return presets.Preset(**kwargs)
 
 
@@ -306,6 +332,7 @@ def refresh_advanced_preset_selection(gui: "TalksReducerGUI") -> None:
         "sounded_speed_var",
         "silent_threshold_var",
         "video_codec_var",
+        "vad_var",
     )
     if not all(hasattr(gui, name) for name in required_vars):
         # The basic-options controls are built one at a time, so a variable
@@ -891,12 +918,14 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.advanced_preset_frame = advanced_preset_frame
 
     # Editing any knob flips the Advanced dropdown to "Custom"; slider vars route
-    # through ``update_basic_reset_state`` while the small/fps/codec vars trace here.
+    # through ``update_basic_reset_state`` while the small/fps/codec/vad vars
+    # trace here.
     for _preset_var in (
         gui.small_var,
         gui.small_height_var,
         gui.fps_var,
         gui.video_codec_var,
+        gui.vad_var,
     ):
         _preset_var.trace_add(
             "write", lambda *_: refresh_advanced_preset_selection(gui)
@@ -913,38 +942,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     )
     gui.basic_options_frame.columnconfigure(1, weight=1)
 
-    gui.ttk.Label(gui.basic_options_frame, text="Silence speedup").grid(
-        row=0, column=0, sticky="w", pady=SETTING_ROW_PADY
-    )
-    # Parented on ``basic_options_frame``, not merely gridded into it: ``grid``
-    # is handled by the widget's own parent, so a frame created under
-    # ``options_frame`` would land in *that* grid — which is what once pushed
-    # this row up next to the Preset strip.
-    gui.basic_presets_frame = gui.ttk.Frame(gui.basic_options_frame)
-    gui.basic_presets_frame.grid(
-        row=0, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY
-    )
-
-    gui.basic_preset_control = SegmentedChoice(
-        gui.basic_presets_frame,
-        [
-            Option("silence_x10", "Silence ×10"),
-            Option("silence_x5", "Silence ×5"),
-            Option("compress_only", "No speedup"),
-        ],
-        tk=gui.tk,
-        ttk=gui.ttk,
-        variable=None,
-        on_change=lambda value: gui._apply_basic_preset(value),
-    )
-    gui.basic_preset_control.frame.pack(side=gui.tk.LEFT)
-    gui.basic_preset_buttons = {
-        "silence_x10": gui.basic_preset_control.buttons[0],
-        "silence_x5": gui.basic_preset_control.buttons[1],
-        "compress_only": gui.basic_preset_control.buttons[2],
-    }
-    # The macro that restores the defaults is now x10, not x5.
-    gui.reset_basic_button = gui.basic_preset_buttons["silence_x10"]
+    build_silence_speedup_row(gui)
 
     gui.ttk.Label(gui.basic_options_frame, text="Resolution").grid(
         row=1, column=0, sticky="w", pady=SETTING_ROW_PADY
@@ -1088,7 +1086,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         tooltip=THRESHOLD_TOOLTIP,
         help_url=THRESHOLD_ARTICLE_URL,
     )
+    gui.threshold_control = threshold_control
     gui.threshold_help_button = threshold_control.help_button
+    gui.vad_var.trace_add("write", lambda *_: update_threshold_for_vad(gui))
+    update_threshold_for_vad(gui)
 
     gui.ttk.Label(gui.basic_options_frame, text="Mode").grid(
         row=7, column=0, sticky="w", pady=SETTING_ROW_PADY
@@ -1314,6 +1315,8 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         )
         gui.preferences.update("keyframe_interval_seconds", float(f"{numeric:.6f}"))
 
+    build_vad_settings_rows(gui, first_row=8)
+
     gui.keyframe_interval_control = SegmentedChoice(
         keyframe_row,
         [
@@ -1347,7 +1350,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         variable=gui.start_in_server_tray_var,
     )
     gui.start_in_server_tray_check.grid(
-        row=8, column=0, columnspan=3, sticky="w", pady=4
+        row=11, column=0, columnspan=3, sticky="w", pady=4
     )
 
     # Check updates button + status label (macOS only) live under Advanced so
@@ -1359,7 +1362,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             text="Check updates",
             command=gui._check_for_updates,
         )
-        gui.check_updates_button.grid(row=9, column=0, sticky="w", pady=(8, 0))
+        gui.check_updates_button.grid(row=12, column=0, sticky="w", pady=(8, 0))
 
         gui.update_status_label = gui.ttk.Label(
             gui.advanced_frame,
@@ -1367,7 +1370,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             foreground="gray",
         )
         gui.update_status_label.grid(
-            row=9, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0)
+            row=12, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0)
         )
 
     gui._toggle_advanced(initial=True)
@@ -1572,6 +1575,166 @@ def add_entry(
         button.grid(row=row, column=2, padx=(8, 0))
 
 
+def build_silence_speedup_row(gui: "TalksReducerGUI") -> None:
+    """Build row 0 of ``basic_options_frame``: the Silence speedup macros.
+
+    The row holds the ``Silence ×10`` / ``Silence ×5`` / ``No speedup`` group
+    followed by the "Speedup no voice" checkbox (``vad_check``, bound to
+    ``vad_var``). Both are packed into ``basic_presets_frame``, so the checkbox
+    takes no grid cell of its own and shares whatever visibility the row has —
+    Simple mode hides it together with the rest of ``basic_options_frame``.
+
+    ``basic_presets_frame`` is parented on ``basic_options_frame``, not merely
+    gridded into it: ``grid`` is handled by the widget's own parent, so a frame
+    created under ``options_frame`` would land in *that* grid — which is what
+    once pushed this row up next to the Preset strip.
+    """
+
+    gui.ttk.Label(gui.basic_options_frame, text="Silence speedup").grid(
+        row=0, column=0, sticky="w", pady=SETTING_ROW_PADY
+    )
+    gui.basic_presets_frame = gui.ttk.Frame(gui.basic_options_frame)
+    gui.basic_presets_frame.grid(
+        row=0, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY
+    )
+
+    gui.basic_preset_control = SegmentedChoice(
+        gui.basic_presets_frame,
+        [
+            Option("silence_x10", "Silence ×10"),
+            Option("silence_x5", "Silence ×5"),
+            Option("compress_only", "No speedup"),
+        ],
+        tk=gui.tk,
+        ttk=gui.ttk,
+        variable=None,
+        on_change=lambda value: gui._apply_basic_preset(value),
+    )
+    gui.basic_preset_control.frame.pack(side=gui.tk.LEFT)
+    gui.basic_preset_buttons = {
+        "silence_x10": gui.basic_preset_control.buttons[0],
+        "silence_x5": gui.basic_preset_control.buttons[1],
+        "compress_only": gui.basic_preset_control.buttons[2],
+    }
+    # The macro that restores the defaults is now x10, not x5.
+    gui.reset_basic_button = gui.basic_preset_buttons["silence_x10"]
+
+    gui.vad_check = gui.ttk.Checkbutton(
+        gui.basic_presets_frame,
+        text="Speedup no voice",
+        variable=gui.vad_var,
+    )
+    gui.vad_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
+
+
+def build_vad_settings_rows(gui: "TalksReducerGUI", *, first_row: int) -> None:
+    """Add the three voice-detection tuning rows to ``advanced_frame``.
+
+    The rows (**VAD threshold**, **Voice padding, ms**, **Min pause, ms**) take
+    ``first_row`` through ``first_row + 2`` and are always shown in Advanced;
+    they only matter while "Speedup no voice" is on, but hiding them behind the
+    checkbox would make the remembered values undiscoverable. Their values are
+    remembered in ``settings.json`` and read by ``_collect_arguments`` only when
+    VAD is active, in Simple mode too.
+    """
+
+    parent = gui.advanced_frame
+    gui.vad_threshold_var = gui.tk.DoubleVar(
+        value=min(
+            max(gui.preferences.get_float("vad_threshold", 0.5), VAD_THRESHOLD_MIN),
+            VAD_THRESHOLD_MAX,
+        )
+    )
+    gui.vad_threshold_control = add_segmented(
+        gui,
+        parent,
+        "VAD threshold",
+        gui.vad_threshold_var,
+        row=first_row,
+        setting_key="vad_threshold",
+        options=[Option(0.3, "0.3"), Option(0.5, "0.5"), Option(0.7, "0.7")],
+        default_value=0.5,
+        custom=CustomSpec(
+            minimum=VAD_THRESHOLD_MIN,
+            maximum=VAD_THRESHOLD_MAX,
+            display_format="{:.2f}",
+        ),
+        tooltip="Speech confidence needed to keep a frame at normal speed",
+        pady=4,
+        basic=False,
+    )
+
+    gui.vad_padding_var = gui.tk.DoubleVar(
+        value=min(
+            max(gui.preferences.get_float("vad_padding_ms", 150), 0), VAD_PADDING_MAX
+        )
+    )
+    gui.vad_padding_control = add_segmented(
+        gui,
+        parent,
+        "Voice padding, ms",
+        gui.vad_padding_var,
+        row=first_row + 1,
+        setting_key="vad_padding_ms",
+        options=[
+            Option(0, "0"),
+            Option(150, "150"),
+            Option(300, "300"),
+            Option(500, "500"),
+        ],
+        default_value=150,
+        custom=CustomSpec(minimum=0, maximum=VAD_PADDING_MAX, display_format="{:.0f}"),
+        tooltip="Keep this much extra time around every spoken phrase",
+        pady=4,
+        basic=False,
+    )
+
+    gui.vad_min_silence_var = gui.tk.DoubleVar(
+        value=min(
+            max(gui.preferences.get_float("vad_min_silence_ms", 300), 0),
+            VAD_MIN_SILENCE_MAX,
+        )
+    )
+    gui.vad_min_silence_control = add_segmented(
+        gui,
+        parent,
+        "Min pause, ms",
+        gui.vad_min_silence_var,
+        row=first_row + 2,
+        setting_key="vad_min_silence_ms",
+        options=[
+            Option(100, "100"),
+            Option(300, "300"),
+            Option(500, "500"),
+            Option(1000, "1000"),
+        ],
+        default_value=300,
+        custom=CustomSpec(
+            minimum=0, maximum=VAD_MIN_SILENCE_MAX, display_format="{:.0f}"
+        ),
+        tooltip="Shortest pause between phrases that gets sped up",
+        pady=4,
+        basic=False,
+    )
+
+
+def update_threshold_for_vad(gui: "TalksReducerGUI") -> None:
+    """Lock the Threshold control while "Speedup no voice" is on.
+
+    VAD picks the frames to speed up, so the volume threshold has no effect on
+    such a run. Its buttons and custom slot are disabled and the tooltip says
+    why; switching VAD off restores the control and its original tooltip. A
+    no-op until the threshold control exists.
+    """
+
+    control = getattr(gui, "threshold_control", None)
+    if control is None:
+        return
+    vad_enabled = bool(gui.vad_var.get())
+    control.set_enabled(not vad_enabled)
+    control.set_tooltip(VAD_THRESHOLD_TOOLTIP if vad_enabled else THRESHOLD_TOOLTIP)
+
+
 def add_segmented(
     gui: "TalksReducerGUI",
     parent: "tk.Misc",
@@ -1586,6 +1749,7 @@ def add_segmented(
     tooltip: str | None = None,
     help_url: str | None = None,
     pady: "int | tuple[int, int]" = SETTING_ROW_PADY,
+    basic: bool = True,
 ) -> "SegmentedChoice":
     """Add a labeled row of choice buttons to *parent* and wire it into presets.
 
@@ -1599,6 +1763,12 @@ def add_segmented(
     trailing widget there competes with the buttons for the row's width.
     The created button is exposed as ``control.help_button`` so callers can
     keep a reference to it.
+
+    *basic* controls whether the knob joins the "Basic options" bookkeeping.
+    The Advanced VAD rows pass ``False``: they still register in
+    ``_slider_updaters`` (so persistence and programmatic writes work) but stay
+    out of ``_basic_defaults``/``_basic_variables``, which would make the
+    **Silence ×5** reset macro and the basic-preset highlight touch them.
     """
 
     help_button = None
@@ -1648,9 +1818,10 @@ def add_segmented(
         persist(value)
 
     gui._slider_updaters[setting_key] = apply_and_persist
-    gui._basic_defaults[setting_key] = default_value
-    gui._basic_variables[setting_key] = variable
-    variable.trace_add("write", lambda *_: update_basic_reset_state(gui))
+    if basic:
+        gui._basic_defaults[setting_key] = default_value
+        gui._basic_variables[setting_key] = variable
+        variable.trace_add("write", lambda *_: update_basic_reset_state(gui))
     return control
 
 

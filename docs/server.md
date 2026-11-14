@@ -44,8 +44,8 @@ the embedded player to find the timestamps.
 
 A **Preset** dropdown near the top lists the saved presets from the shared `settings.json`
 (the same list the desktop GUI authors). Selecting a preset sets the resolution, FPS, speedup,
-silent/sounded speed sliders, silent threshold, and codec controls to its values (when a
-preset's silent speed is not one of the speedup radio's presets, only the slider is set);
+silent/sounded speed sliders, silent threshold, codec and Speedup no voice controls to its
+values (when a preset's silent speed is not one of the speedup radio's presets, only the slider is set);
 the dropdown is hidden when no presets are defined. See [gui.md](gui.md#presets) for how
 presets are created.
 
@@ -187,7 +187,9 @@ to stream the server log after the download finishes.
 The Gradio `/process_video` endpoint accepts two optional trailing arguments, `target_height`
 and `max_frame_rate`. Clients send them only when the job asks for 1080p or an FPS cap, so a
 client talking to an older server keeps working for everything else, but 1080p and FPS caps
-need a server updated to this version.
+need a server updated to this version. Speedup no voice appends four more (`vad` and its three
+settings); because an older server would silently drop them, a client with `vad` on checks the
+endpoint's parameter count first and refuses to run against a server that is too old.
 
 The plain CLI can also submit jobs to a server with `--url`/`--host`; see
 [cli.md](cli.md#remote-processing).

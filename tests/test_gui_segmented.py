@@ -98,6 +98,9 @@ class _Widget:
     def pack_forget(self):
         self.packed = False
 
+    def destroy(self):
+        self.packed = False
+
     def configure(self, **kwargs):
         self.kwargs.update(kwargs)
         if "style" in kwargs:
@@ -410,3 +413,67 @@ def test_retyping_in_a_persistent_entry_commits_without_reopening():
     control.custom_entry.bindings["<Return>"](None)
 
     assert variable.get() == 7.25
+
+
+def _state(widget):
+    return widget.kwargs.get("state", "normal")
+
+
+def test_set_enabled_false_disables_every_button_and_the_custom_slot():
+    control, _ = _build(variable=_Var(1.0), custom=SPEED_CUSTOM)
+
+    control.set_enabled(False)
+
+    assert control.enabled is False
+    assert {_state(button) for button in control.buttons} == {"disabled"}
+    assert _state(control.custom_button) == "disabled"
+    assert _state(control.custom_entry) == "disabled"
+
+    control.set_enabled(True)
+
+    assert control.enabled is True
+    assert {_state(button) for button in control.buttons} == {"normal"}
+    assert _state(control.custom_button) == "normal"
+    assert _state(control.custom_entry) == "normal"
+
+
+def test_disabled_state_survives_rebuilding_the_options():
+    control, _ = _build(variable=_Var(1.0))
+    control.set_enabled(False)
+
+    control.set_options([Option(1.0, "1"), Option(3.0, "3")])
+
+    assert {_state(button) for button in control.buttons} == {"disabled"}
+
+
+def test_set_value_still_lands_while_disabled():
+    """Presets write the threshold programmatically even while it is locked."""
+
+    variable = _Var(1.0)
+    control, _ = _build(variable=variable, custom=SPEED_CUSTOM)
+    control.set_enabled(False)
+
+    control.set_value(5.0)
+
+    assert variable.get() == 5.0
+
+
+def test_set_tooltip_replaces_the_group_tooltip_text():
+    tk, ttk = _make_modules()
+    control = SegmentedChoice(
+        object(), SPEED_OPTIONS, tk=tk, ttk=ttk, tooltip="original"
+    )
+    assert control.tooltip.text == "original"
+
+    control.set_tooltip("replacement")
+
+    assert control.tooltip.text == "replacement"
+
+
+def test_set_tooltip_attaches_one_when_the_control_had_none():
+    control, _ = _build()
+    assert control.tooltip is None
+
+    control.set_tooltip("added later")
+
+    assert control.tooltip.text == "added later"

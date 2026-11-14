@@ -78,3 +78,12 @@ def test_parse_ratios_from_new_server_summary(tmp_path) -> None:
     time_ratio, size_ratio = parse_ratios_from_summary(summary)
     assert time_ratio == 0.83  # (83%)
     assert size_ratio == 0.50  # (50%)
+
+
+def test_task_percent_pattern_matches_voice_detection():
+    from talks_reducer.gui.summaries import parse_task_percent
+
+    assert parse_task_percent("Voice detection: 40%") == (
+        True,
+        ("Voice detection:", 40.0),
+    )

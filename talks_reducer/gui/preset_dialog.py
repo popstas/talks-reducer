@@ -79,7 +79,10 @@ def open_save_preset_dialog(
         var = gui.tk.BooleanVar(value=key in checked)
         field_vars[key] = var
         if key in values:
-            text = f"{label}: {values[key]}"
+            value = values[key]
+            if isinstance(value, bool):
+                value = "on" if value else "off"
+            text = f"{label}: {value}"
         else:
             text = label
         gui.ttk.Checkbutton(dialog, text=text, variable=var).grid(

@@ -1509,7 +1509,29 @@ def cwd_tmp_path(monkeypatch, tmp_path):
     return tmp_path
 
 
-def _captured_submit_args(monkeypatch, tmp_path, **send_kwargs):
+class ApiInfoClient(DummyClient):
+    """Dummy client whose ``view_api`` reports *parameter_count* parameters."""
+
+    def __init__(self, server_url: str, parameter_count=None, error=None) -> None:
+        super().__init__(server_url)
+        self.parameter_count = parameter_count
+        self.error = error
+        self.view_api_calls = []
+
+    def view_api(self, **kwargs):
+        self.view_api_calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        parameters = [{"parameter_name": f"p{i}"} for i in range(self.parameter_count)]
+        return {"named_endpoints": {"/process_video": {"parameters": parameters}}}
+
+
+VAD_LOG = "Extracting audio...\nVoice detection (lite): 0.4 s, speech 61% of audio"
+
+
+def _captured_submit_args(
+    monkeypatch, tmp_path, *, client=None, log="log", **send_kwargs
+):
     """Run ``send_video`` against a dummy client; return the positional args."""
 
     input_file = tmp_path / "input.mp4"
@@ -1517,10 +1539,8 @@ def _captured_submit_args(monkeypatch, tmp_path, **send_kwargs):
     server_file = tmp_path / "server_output.mp4"
     server_file.write_bytes(b"processed")
 
-    client_instance = DummyClient("http://localhost:9005/")
-    client_instance.job_outputs = [
-        (str(server_file), "log", "summary", str(server_file))
-    ]
+    client_instance = client or DummyClient("http://localhost:9005/")
+    client_instance.job_outputs = [(str(server_file), log, "summary", str(server_file))]
     monkeypatch.setattr(service_client, "Client", lambda url: client_instance)
     monkeypatch.setattr(
         service_client, "gradio_file", lambda path: SimpleNamespace(path=path)
@@ -1551,3 +1571,150 @@ def test_send_video_appends_height_and_fps_when_needed(monkeypatch, tmp_path):
 
     args = _captured_submit_args(monkeypatch, tmp_path, max_frame_rate=30.0)
     assert args[-2:] == (0, 30.0)
+
+
+def test_send_video_appends_vad_tail(monkeypatch, tmp_path):
+    """``vad=True`` appends the height/fps pair and the four vad values."""
+
+    args = _captured_submit_args(
+        monkeypatch,
+        tmp_path,
+        client=ApiInfoClient("http://localhost:9005/", parameter_count=19),
+        vad=True,
+        vad_threshold=0.4,
+        vad_padding_ms=200,
+        vad_min_silence_ms=500,
+    )
+    assert len(args) == 19
+    assert args[13:] == (0, 0.0, True, 0.4, 200, 500)
+
+    args = _captured_submit_args(
+        monkeypatch,
+        tmp_path,
+        log=VAD_LOG,
+        small=True,
+        small_height=1080,
+        max_frame_rate=30.0,
+        vad=True,
+    )
+    assert len(args) == 19
+    assert args[13:] == (1080, 30.0, True, None, None, None)
+
+
+def test_send_video_without_vad_keeps_legacy_args(monkeypatch, tmp_path):
+    """``vad=False`` submits exactly the pre-vad arguments, settings or not."""
+
+    args = _captured_submit_args(
+        monkeypatch,
+        tmp_path,
+        vad=False,
+        vad_threshold=0.4,
+        vad_padding_ms=200,
+        vad_min_silence_ms=500,
+    )
+    assert len(args) == 13
+
+    args = _captured_submit_args(
+        monkeypatch, tmp_path, small=True, small_height=1080, vad=False
+    )
+    assert len(args) == 15
+    assert args[-2:] == (1080, 0.0)
+
+
+def test_send_video_vad_rejects_server_without_vad_parameters(monkeypatch, tmp_path):
+    """A server whose endpoint stops at 15 parameters would ignore ``vad``."""
+
+    client = ApiInfoClient("http://localhost:9005/", parameter_count=15)
+    with pytest.raises(service_client.ServerTooOldError, match="(?i)update the server"):
+        _captured_submit_args(monkeypatch, tmp_path, client=client, vad=True)
+
+    assert client.submissions == []
+    assert client.view_api_calls == [{"print_info": False, "return_format": "dict"}]
+    assert not (tmp_path / "out.mp4").exists()
+
+
+def test_send_video_vad_accepts_server_with_vad_parameters(monkeypatch, tmp_path):
+    """A 19-parameter endpoint passes without needing the log marker."""
+
+    client = ApiInfoClient("http://localhost:9005/", parameter_count=19)
+    args = _captured_submit_args(monkeypatch, tmp_path, client=client, vad=True)
+
+    assert len(args) == 19
+    assert (tmp_path / "out.mp4").read_bytes() == b"processed"
+
+
+def test_send_video_without_vad_skips_endpoint_check(monkeypatch, tmp_path):
+    """Runs without ``vad`` never inspect the endpoint, so old servers work."""
+
+    client = ApiInfoClient("http://localhost:9005/", parameter_count=13)
+    args = _captured_submit_args(monkeypatch, tmp_path, client=client, vad=False)
+
+    assert len(args) == 13
+    assert client.view_api_calls == []
+
+
+@pytest.mark.parametrize(
+    "client",
+    [
+        DummyClient("http://localhost:9005/"),
+        ApiInfoClient("http://localhost:9005/", error=RuntimeError("no info")),
+    ],
+    ids=["no-view-api", "view-api-raises"],
+)
+def test_send_video_vad_fallback_fails_without_voice_detection_log(
+    monkeypatch, tmp_path, client
+):
+    """Without endpoint info, a log lacking ``Voice detection (`` fails the run."""
+
+    with pytest.raises(service_client.ServerTooOldError, match="(?i)update the server"):
+        _captured_submit_args(
+            monkeypatch, tmp_path, client=client, log="Extracting audio...", vad=True
+        )
+
+    assert not (tmp_path / "out.mp4").exists()
+
+
+@pytest.mark.parametrize(
+    "client",
+    [
+        DummyClient("http://localhost:9005/"),
+        ApiInfoClient("http://localhost:9005/", error=KeyError("named_endpoints")),
+    ],
+    ids=["no-view-api", "view-api-raises"],
+)
+def test_send_video_vad_fallback_accepts_voice_detection_log(
+    monkeypatch, tmp_path, client
+):
+    """Without endpoint info, a ``Voice detection (`` log line proves vad ran."""
+
+    _captured_submit_args(monkeypatch, tmp_path, client=client, log=VAD_LOG, vad=True)
+
+    assert (tmp_path / "out.mp4").read_bytes() == b"processed"
+
+
+def test_send_video_vad_fallback_sees_streamed_log_lines(monkeypatch, tmp_path):
+    """The marker counts even when it only arrived in an intermediate update."""
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"input")
+    server_file = tmp_path / "server_output.mp4"
+    server_file.write_bytes(b"processed")
+
+    client = DummyClient("http://localhost:9005/")
+    client.job_outputs = [
+        (None, VAD_LOG, "", None),
+        (str(server_file), "Completed", "summary", str(server_file)),
+    ]
+    monkeypatch.setattr(service_client, "Client", lambda url: client)
+    monkeypatch.setattr(
+        service_client, "gradio_file", lambda path: SimpleNamespace(path=path)
+    )
+
+    destination, _, _ = service_client.send_video(
+        input_path=input_file,
+        output_path=tmp_path / "out.mp4",
+        server_url="http://localhost:9005/",
+        vad=True,
+    )
+
+    assert destination.read_bytes() == b"processed"

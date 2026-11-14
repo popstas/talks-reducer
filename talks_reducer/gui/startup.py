@@ -168,6 +168,10 @@ def _gui_settings_from_namespace(parsed: argparse.Namespace) -> Dict[str, object
         "temp_folder",
         "open_location",
         "auto_close",
+        "vad",
+        "vad_threshold",
+        "vad_padding_ms",
+        "vad_min_silence_ms",
     ):
         if key in provided:
             settings[key] = provided[key]

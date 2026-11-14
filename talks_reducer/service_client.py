@@ -32,6 +32,50 @@ except ImportError:  # pragma: no cover - allow running as script
 # or misattribute each other's hooks while a transfer is in flight.
 _TRANSFER_PATCH_LOCK = threading.Lock()
 
+PROCESS_VIDEO_API_NAME = "/process_video"
+VAD_LOG_MARKER = "Voice detection ("
+
+
+class ServerTooOldError(RuntimeError):
+    """Raised when the server would silently ignore an option the client sent.
+
+    Gradio accepts extra positional arguments and the endpoint drops them, so
+    an old server given ``vad`` processes by loudness without any error; the
+    client has to detect that itself and refuse the result.
+    """
+
+
+def _server_too_old_for_vad(server_url: str) -> ServerTooOldError:
+    """Return the error raised when *server_url* cannot run Speedup no voice."""
+
+    return ServerTooOldError(
+        f"The server at {server_url} is too old for Speedup no voice: it would "
+        "ignore the setting and speed up by loudness. Update the server, or turn "
+        "Speedup no voice off."
+    )
+
+
+def _endpoint_parameter_count(client: Any, api_name: str) -> Optional[int]:
+    """Return how many parameters *api_name* accepts, or ``None`` when unknown.
+
+    Reads ``client.view_api`` (gradio_client's cached endpoint description, so
+    no extra request). A client without it, a call that raises, or a
+    description missing the endpoint all count as unknown rather than as an
+    old server, so the caller can fall back to another check.
+    """
+
+    view_api = getattr(client, "view_api", None)
+    if not callable(view_api):
+        return None
+    try:
+        info = view_api(print_info=False, return_format="dict")
+        parameters = info["named_endpoints"][api_name]["parameters"]
+    except Exception:
+        return None
+    if not isinstance(parameters, (list, tuple)):
+        return None
+    return len(parameters)
+
 
 class _ProgressFileReader:
     """Proxy a binary file object and report each chunk read to a callback.
@@ -533,6 +577,10 @@ def send_video(
     cut_end_seconds: Optional[float] = None,
     small_height: Optional[int] = None,
     max_frame_rate: Optional[float] = None,
+    vad: bool = False,
+    vad_threshold: Optional[float] = None,
+    vad_padding_ms: Optional[int] = None,
+    vad_min_silence_ms: Optional[int] = None,
     log_callback: Optional[Callable[[str], None]] = None,
     stream_updates: bool = False,
     should_cancel: Optional[Callable[[], bool]] = None,
@@ -552,7 +600,14 @@ def send_video(
     *prefer_global_ffmpeg* when the PATH-provided FFmpeg offers hardware
     encoders that the bundled static build omits. *small_height* selects the
     downscale target (1080 needs an updated server) and *max_frame_rate* caps the
-    output frame rate (also needs an updated server).
+    output frame rate (also needs an updated server). *vad* speeds up non-voice
+    frames on the server with its ``lite`` engine, tuned by the three optional
+    ``vad_*`` settings (``None`` keeps the server defaults); it needs an updated
+    server, so a run without it submits exactly the arguments older servers
+    accept. With *vad* on, :class:`ServerTooOldError` is raised before upload
+    when the endpoint takes fewer parameters than were submitted or, when the
+    endpoint cannot be described, after processing when no log line starts
+    with ``Voice detection (`` -- before anything is written locally.
     """
 
     if not input_path.exists():
@@ -579,11 +634,26 @@ def send_video(
     frame_rate_cap = (
         float(max_frame_rate) if max_frame_rate and max_frame_rate > 0 else 0.0
     )
-    if target_height not in (0, 480, 720) or frame_rate_cap > 0:
+    if vad or target_height not in (0, 480, 720) or frame_rate_cap > 0:
         # Appended only when needed so a client stays compatible with servers
         # that predate these two parameters for every option that existed then.
+        # The vad values below are positional too, so they need this pair first.
         submit_args = submit_args + (target_height, frame_rate_cap)
-    submit_kwargs: dict[str, Any] = {"api_name": "/process_video"}
+    if vad:
+        submit_args = submit_args + (
+            True,
+            float(vad_threshold) if vad_threshold is not None else None,
+            int(vad_padding_ms) if vad_padding_ms is not None else None,
+            int(vad_min_silence_ms) if vad_min_silence_ms is not None else None,
+        )
+    verify_vad_in_log = False
+    if vad:
+        accepted = _endpoint_parameter_count(client, PROCESS_VIDEO_API_NAME)
+        if accepted is None:
+            verify_vad_in_log = True
+        elif accepted < len(submit_args):
+            raise _server_too_old_for_vad(server_url)
+    submit_kwargs: dict[str, Any] = {"api_name": PROCESS_VIDEO_API_NAME}
 
     upload_total: Optional[int] = None
     transfer_progress_installed = False
@@ -629,10 +699,15 @@ def send_video(
             raise ProcessingAborted("Remote processing cancelled by user.")
 
     printed_lines = 0
+    vad_log_seen = False
 
     def _emit_new_lines(log_text: str) -> None:
-        nonlocal printed_lines
-        if log_callback is None or not log_text:
+        nonlocal printed_lines, vad_log_seen
+        if not log_text:
+            return
+        if VAD_LOG_MARKER in log_text:
+            vad_log_seen = True
+        if log_callback is None:
             return
         lines = log_text.splitlines()
         if printed_lines < len(lines):
@@ -678,6 +753,9 @@ def send_video(
         _emit_new_lines(log_text)
     else:
         log_text = ""
+
+    if verify_vad_in_log and not vad_log_seen:
+        raise _server_too_old_for_vad(server_url)
 
     target = download_path or video_path
     if not target:

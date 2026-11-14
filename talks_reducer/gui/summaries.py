@@ -15,7 +15,7 @@ if TYPE_CHECKING:  # pragma: no cover - imported for typing only
 
 
 _TASK_PERCENT_PATTERN = re.compile(
-    r"(?P<desc>Uploading|Extracting audio|Audio processing|"
+    r"(?P<desc>Uploading|Extracting audio|Voice detection|Audio processing|"
     r"Generating final(?:\s*\(fallback\))?)\s*:\s*"
     r"(?P<percent>\d+(?:\.\d+)?)\s*%",
     re.IGNORECASE,
@@ -373,7 +373,7 @@ class SummaryManager:
         normalized_desc = task_label.strip().lower()
         if normalized_desc.startswith("generating final"):
             self.gui._complete_audio_phase()
-        elif normalized_desc.startswith("audio processing"):
+        elif normalized_desc.startswith(("voice detection", "audio processing")):
             self.gui._cancel_audio_progress()
 
         bar_value = map_stage_progress(task_label, percent, 100)

@@ -24,6 +24,7 @@ from .pipeline import resolve_output_path, speed_up_video
 from .presets import parse_fps_token, resolution_to_small
 from .progress import TqdmProgressReporter
 from .timecode import parse_timecode
+from .vad import VadUnavailableError
 from .version_utils import resolve_version
 
 
@@ -132,6 +133,39 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         dest="silent_threshold",
         help="The volume amount that frames' audio needs to surpass to be considered sounded. Defaults to 0.01.",
+    )
+    parser.add_argument(
+        "--vad",
+        dest="vad",
+        action="store_true",
+        default=None,
+        help="Detect speech with Silero VAD instead of loudness, so only non-voice frames are sped up. Needs: pip install silero-vad-lite.",
+    )
+    parser.add_argument(
+        "--no-vad",
+        dest="vad",
+        action="store_false",
+        help="Force loudness-based silence detection, overriding a stored --vad preference.",
+    )
+    parser.add_argument(
+        "--vad-threshold",
+        dest="vad_threshold",
+        type=float,
+        help="Speech probability a window needs to count as voice. Defaults to 0.5.",
+    )
+    parser.add_argument(
+        "--vad-padding",
+        dest="vad_padding_ms",
+        type=int,
+        metavar="MS",
+        help="Milliseconds of padding added around each speech interval. Defaults to 150.",
+    )
+    parser.add_argument(
+        "--vad-min-silence",
+        dest="vad_min_silence_ms",
+        type=int,
+        metavar="MS",
+        help="Milliseconds of non-voice needed to end a speech interval. Defaults to 300.",
     )
     parser.add_argument(
         "-S",
@@ -387,6 +421,35 @@ def _apply_preset_to_args(
         and "video_codec" not in explicit
     ):
         parsed_args.video_codec = str(preset.video_codec)
+    if getattr(preset, "vad", None) is not None and "vad" not in explicit:
+        parsed_args.vad = bool(preset.vad)
+
+
+def _remote_vad_options(parsed_args: argparse.Namespace) -> Dict[str, object]:
+    """Return the ``send_video`` keyword arguments for ``--vad`` and its settings.
+
+    ``vad`` is ``None`` when neither ``--vad`` nor ``--no-vad`` (nor a preset)
+    decided it, which keeps the local default of loudness detection, so nothing
+    is sent. With ``vad`` on, only the settings the user gave are sent and the
+    server falls back to its own defaults for the rest.
+    """
+
+    vad = getattr(parsed_args, "vad", None)
+    if vad is None:
+        return {}
+    options: Dict[str, object] = {"vad": bool(vad)}
+    if not vad:
+        return options
+    threshold = getattr(parsed_args, "vad_threshold", None)
+    if threshold is not None:
+        options["vad_threshold"] = float(threshold)
+    padding = getattr(parsed_args, "vad_padding_ms", None)
+    if padding is not None:
+        options["vad_padding_ms"] = int(padding)
+    min_silence = getattr(parsed_args, "vad_min_silence_ms", None)
+    if min_silence is not None:
+        options["vad_min_silence_ms"] = int(min_silence)
+    return options
 
 
 def gather_input_files(
@@ -632,6 +695,16 @@ class CliApplication:
                 )
             if local_options.get("remove_ranges"):
                 option_kwargs["remove_ranges"] = tuple(local_options["remove_ranges"])
+            if "vad" in local_options:
+                option_kwargs["vad"] = bool(local_options["vad"])
+            if "vad_threshold" in local_options:
+                option_kwargs["vad_threshold"] = float(local_options["vad_threshold"])
+            if "vad_padding_ms" in local_options:
+                option_kwargs["vad_padding_ms"] = int(local_options["vad_padding_ms"])
+            if "vad_min_silence_ms" in local_options:
+                option_kwargs["vad_min_silence_ms"] = int(
+                    local_options["vad_min_silence_ms"]
+                )
             options = ProcessingOptions(**option_kwargs)
             if glue_source is not None:
                 options = replace(
@@ -641,7 +714,7 @@ class CliApplication:
 
             try:
                 result = self._speed_up(options, reporter=reporter)
-            except FFmpegNotFoundError as exc:
+            except (FFmpegNotFoundError, VadUnavailableError) as exc:
                 message = str(exc)
                 return 1, [*error_messages, message]
 
@@ -757,6 +830,7 @@ class CliApplication:
         max_frame_rate = getattr(parsed_args, "max_frame_rate", None)
         if max_frame_rate and max_frame_rate > 0:
             remote_option_values["max_frame_rate"] = float(max_frame_rate)
+        remote_option_values.update(_remote_vad_options(parsed_args))
 
         for index, file in enumerate(files, start=1):
             basename = os.path.basename(file)

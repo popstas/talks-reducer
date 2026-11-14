@@ -15,7 +15,11 @@ try:
 except Exception:  # pragma: no cover - macOS-only helper may not import elsewhere
     BUNDLE = None
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+)
 
 block_cipher = None
 
@@ -158,6 +162,16 @@ for _pkg in ("safehttpx", "groovy"):
         datas.extend(collect_data_files(_pkg))
     except Exception:
         pass
+
+# "Speedup no voice" loads ``silero_vad_lite`` lazily, and the package keeps its native
+# DLL and ONNX model in a ``data`` folder that import analysis never sees. Collect both
+# so the frozen build can run ``--vad``.
+binaries_vad = []
+try:
+    datas.extend(collect_data_files("silero_vad_lite"))
+    binaries_vad.extend(collect_dynamic_libs("silero_vad_lite"))
+except Exception:
+    pass
 
 hiddenimports = ["tkinterdnd2"]
 hiddenimports.extend(collect_submodules("talks_reducer"))
@@ -379,7 +393,7 @@ if sys.platform.startswith("win"):
 a = Analysis(
     ["launcher.py"],
     pathex=pathex,
-    binaries=binaries,
+    binaries=binaries + binaries_vad,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

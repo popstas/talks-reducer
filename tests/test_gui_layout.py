@@ -282,6 +282,7 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         small_var=BooleanVarStub(value=True),
         small_height_var=IntVarStub(value=720),
         fps_var=StringVarStub(value="orig"),
+        vad_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
         cut_enabled_var=BooleanVarStub(value=False),
@@ -566,6 +567,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         small_var=BooleanVarStub(value=True),
         small_height_var=IntVarStub(value=720),
         fps_var=StringVarStub(value="orig"),
+        vad_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
         cut_enabled_var=BooleanVarStub(value=False),
@@ -658,12 +660,12 @@ def test_build_layout_adds_macos_update_button_under_advanced(monkeypatch):
     # button frame, so they appear under Advanced settings.
     assert gui.check_updates_button.args[0] is gui.advanced_frame
     assert gui.update_status_label.args[0] is gui.advanced_frame
-    # Both must sit on row 9 (rows 0-8 are taken by existing Advanced controls:
+    # Both must sit on row 12 (rows 0-11 are taken by existing Advanced controls:
     # the watch-directory line at row 0 pushes the rest down), so a future edit
     # that collides with another row is caught here. The status label sits in a
     # later column than the button so the two never overlap.
-    assert gui.check_updates_button.grid_calls[0][1]["row"] == 9
-    assert gui.update_status_label.grid_calls[0][1]["row"] == 9
+    assert gui.check_updates_button.grid_calls[0][1]["row"] == 12
+    assert gui.update_status_label.grid_calls[0][1]["row"] == 12
     assert (
         gui.update_status_label.grid_calls[0][1]["column"]
         > gui.check_updates_button.grid_calls[0][1]["column"]
@@ -858,6 +860,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         small_var=BooleanVarStub(value=True),
         small_height_var=IntVarStub(value=720),
         fps_var=StringVarStub(value="orig"),
+        vad_var=BooleanVarStub(value=False),
         optimize_var=BooleanVarStub(value=True),
         open_after_convert_var=BooleanVarStub(value=False),
         cut_enabled_var=BooleanVarStub(value=False),
@@ -1665,6 +1668,7 @@ def _make_preset_target_gui() -> SimpleNamespace:
         small_var=BooleanVarStub(value=True),
         small_height_var=IntVarStub(value=720),
         fps_var=StringVarStub(value="orig"),
+        vad_var=BooleanVarStub(value=False),
         video_codec_var=StringVarStub(value="h264"),
         silent_speed_var=silent,
         sounded_speed_var=sounded,
@@ -1877,6 +1881,7 @@ def _make_advanced_preset_gui() -> SimpleNamespace:
         small_var=BooleanVarStub(value=True),
         small_height_var=IntVarStub(value=720),
         fps_var=StringVarStub(value="orig"),
+        vad_var=BooleanVarStub(value=False),
         video_codec_var=StringVarStub(value="h264"),
         silent_speed_var=silent,
         sounded_speed_var=sounded,
@@ -2140,6 +2145,7 @@ def test_refresh_advanced_preset_selection_skips_before_knobs_exist():
         small_var=BooleanVarStub(value=True),
         small_height_var=IntVarStub(value=720),
         fps_var=StringVarStub(value="orig"),
+        vad_var=BooleanVarStub(value=False),
         video_codec_var=StringVarStub(value="h264"),
         silent_speed_var=DummyVar(10.0),
         _simple_presets=list(_TEST_PRESETS),
@@ -2805,3 +2811,170 @@ def test_fps_row_sits_under_codec():
     }
 
     assert rows["FPS"] == rows["Codec"] + 1
+
+
+def test_vad_check_packed_in_silence_speedup_row():
+    """The checkbox trails the Silence speedup buttons inside the same frame."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    check = gui.vad_check
+    assert check.args[0] is gui.basic_presets_frame
+    assert check.kwargs["text"] == "Speedup no voice"
+    assert check.kwargs["variable"] is gui.vad_var
+    assert check.pack_calls == [((), {"side": "left", "padx": layout.CHECKBOX_ROW_GAP})]
+    assert gui.basic_preset_control.frame.args[0] is gui.basic_presets_frame
+
+
+def test_apply_preset_to_gui_sets_vad():
+    gui = _make_preset_target_gui()
+
+    layout.apply_preset_to_gui(gui, Preset(name="Voice", vad=True))
+    assert gui.vad_var.get() is True
+
+    layout.apply_preset_to_gui(gui, Preset(name="Optimal", vad=False))
+    assert gui.vad_var.get() is False
+
+
+def test_apply_preset_without_vad_leaves_var():
+    gui = _make_preset_target_gui()
+    gui.vad_var.set(True)
+
+    layout.apply_preset_to_gui(gui, Preset(name="Codec only", video_codec="hevc"))
+
+    assert gui.vad_var.get() is True
+
+
+def _last_states(control) -> set:
+    """Return the last ``state`` each threshold widget was configured with."""
+
+    widgets = list(control.buttons) + [control.custom_button, control.custom_entry]
+    last = set()
+    for widget in widgets:
+        states = [kw["state"] for _a, kw in widget.configure_calls if "state" in kw]
+        last.add(states[-1] if states else None)
+    return last
+
+
+def test_threshold_disabled_when_vad_on():
+    """VAD replaces the volume threshold, so its control is locked meanwhile."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    control = gui.threshold_control
+
+    assert control.tooltip.text == layout.THRESHOLD_TOOLTIP
+
+    gui.vad_var.set(True)
+    assert _last_states(control) == {"disabled"}
+    assert control.tooltip.text == layout.VAD_THRESHOLD_TOOLTIP
+    assert layout.VAD_THRESHOLD_TOOLTIP == "Not used with Speedup no voice"
+
+    gui.vad_var.set(False)
+    assert _last_states(control) == {"normal"}
+    assert control.tooltip.text == layout.THRESHOLD_TOOLTIP
+
+
+def test_threshold_starts_disabled_when_vad_was_remembered():
+    gui = _make_layout_gui(vad_var=BooleanVarStub(value=True))
+    layout.build_layout(gui)
+
+    assert gui.threshold_control.enabled is False
+    assert gui.threshold_control.tooltip.text == layout.VAD_THRESHOLD_TOOLTIP
+
+
+def test_update_threshold_for_vad_tolerates_missing_control():
+    gui = SimpleNamespace(vad_var=BooleanVarStub(value=True))
+
+    layout.update_threshold_for_vad(gui)
+
+
+def test_advanced_preset_values_include_vad():
+    gui = _make_advanced_preset_gui()
+
+    assert layout.advanced_preset_values(gui)["vad"] is False
+    gui.vad_var.set(True)
+    assert layout.advanced_preset_values(gui)["vad"] is True
+
+
+def test_build_sparse_preset_stores_vad_as_bool():
+    """``str(False)`` is truthy, so ``vad`` must not go through the str branch."""
+
+    preset = layout.build_sparse_preset("Off", {"vad": False}, {"vad"})
+    assert preset.vad is False
+    assert Preset.from_dict(preset.to_dict()).vad is False
+
+    preset = layout.build_sparse_preset("On", {"vad": True}, {"vad"})
+    assert preset.vad is True
+
+
+def test_vad_toggle_switches_advanced_preset_between_voice_and_optimal(monkeypatch):
+    optimal = Preset(
+        name="Optimal",
+        resolution="720p",
+        fps="orig",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="hevc",
+        vad=False,
+    )
+    voice = Preset(
+        name="Voice",
+        resolution="720p",
+        fps="orig",
+        silent_speed=10.0,
+        sounded_speed=1.0,
+        silent_threshold=0.01,
+        video_codec="hevc",
+        vad=True,
+    )
+    monkeypatch.setattr(
+        layout.presets, "load_presets", lambda *a, **k: [optimal, voice]
+    )
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+    layout.apply_preset_to_gui(gui, optimal)
+    assert gui.advanced_preset_var.get() == "Optimal"
+
+    gui.vad_var.set(True)
+    assert gui.advanced_preset_var.get() == "Voice"
+
+    gui.vad_var.set(False)
+    assert gui.advanced_preset_var.get() == "Optimal"
+
+
+def test_vad_advanced_rows_registered_in_slider_updaters():
+    """The VAD rows live in the Advanced panel and keep presets/persistence wired."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    for key in ("vad_threshold", "vad_padding_ms", "vad_min_silence_ms"):
+        assert key in gui._slider_updaters
+        assert key not in gui._basic_defaults
+        assert key not in gui._basic_variables
+    assert gui.vad_threshold_var.get() == pytest.approx(0.5)
+    assert gui.vad_padding_var.get() == pytest.approx(150)
+    assert gui.vad_min_silence_var.get() == pytest.approx(300)
+    for control in (
+        gui.vad_threshold_control,
+        gui.vad_padding_control,
+        gui.vad_min_silence_control,
+    ):
+        assert control.frame.grid_calls[0][1]["row"] >= 8
+        assert control.frame.args[0] is gui.advanced_frame
+
+
+def test_vad_rows_do_not_collide_with_advanced_rows():
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    rows = [
+        gui.vad_threshold_control.frame.grid_calls[0][1]["row"],
+        gui.vad_padding_control.frame.grid_calls[0][1]["row"],
+        gui.vad_min_silence_control.frame.grid_calls[0][1]["row"],
+        gui.start_in_server_tray_check.grid_calls[0][1]["row"],
+    ]
+    assert len(set(rows)) == len(rows)

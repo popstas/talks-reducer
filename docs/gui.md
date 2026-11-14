@@ -26,7 +26,18 @@ rows grouped under four quiet headings — **Basic options**, **Speed & silence*
 **Processing & appearance**:
 
 - **Silence speedup** offers the three shortcuts **Silence ×10**, **Silence ×5** and
-  **No speedup**, each setting the speed and threshold knobs below in one click.
+  **No speedup**, each setting the speed and threshold knobs below in one click. A
+  **Speedup no voice** checkbox sits to their right: while it is on, only frames without a
+  voice (Silero VAD) are sped up, and the **Threshold** buttons are disabled with a tooltip
+  saying so, since voice detection replaces the volume threshold. Remote mode sends it to the
+  server too (an up-to-date server is required; an older one would ignore it, so the run stops
+  with an error asking you to update the server instead of speeding up by loudness). In
+  Advanced mode the checkbox is remembered between launches, but the preset re-applied at
+  startup overrides it whenever that preset sets Speedup no voice.
+- **VAD threshold**, **Voice padding, ms** and **Min pause, ms** rows (Advanced only) tune the
+  voice detector: the speech probability a window needs, the padding kept around speech, and
+  how long a pause must last to end a speech interval. They are remembered between runs and
+  matter only while **Speedup no voice** is on.
 - **Resolution** offers **1080p**, **720p**, **480p** and **orig**. `orig` keeps the source
   resolution untouched (the CLI's `--no-small`); the others match `--small --1080`,
   `--small --720` and `--small --480`. **1080p** only downscales sources taller than 1080 px.
@@ -75,28 +86,34 @@ competes with the buttons for width.
 ## Presets
 
 A **preset** is a named bundle of processing settings — any of resolution (orig/1080p/720p/480p),
-silent and sounded speed, silent threshold, video codec, and frame-rate cap (FPS) — that you author once and apply
+frame-rate cap (FPS), silent and sounded speed, silent threshold, video codec, and Speedup no
+voice — that you author once and apply
 read-only everywhere: Simple mode, the Web UI, the OBS dock, and the CLI's `--preset` flag.
 Presets are **sparse**: a preset stores only the settings you choose, so applying it changes
 just those and leaves everything else as it is. Presets are stored in the shared
 `settings.json`, so a preset created on the desktop GUI also appears in the Web UI and dock
-served from that machine. On first launch five defaults are seeded — **Compatible** (720p,
-silence ×10, h.264, source fps), **Optimal** (the same in h.265), **Smallest** (480p h.265, 30 fps), **Compress**
+served from that machine. On first launch six defaults are seeded — **Compatible** (720p,
+silence ×10, h.264, source fps), **Optimal** (the same in h.265), **Voice** (Optimal with
+Speedup no voice), **Smallest** (480p h.265, 30 fps), **Compress**
 (1080p 30 fps h.264, no speedup) and **mp3** (audio only, no resolution). Hover a preset button to see
 exactly which settings it applies. Each surface opens on the preset you used last (or the first
 preset when none is remembered).
 
 **Simple mode** exposes only a **Preset** dropdown; selecting a preset applies its fields and
-persists the choice (it is re-selected on the next launch).
+persists the choice (it is re-selected on the next launch). It has no **Speedup no voice**
+checkbox: the selected preset decides, and **Voice** turns it on. The one exception is a
+launch flag (`--vad`/`--no-vad` from a shortcut or the OBS dock), which wins until you pick a
+preset in the dropdown. (The Advanced-mode checkbox is remembered, but Simple mode never reads
+it.)
 
 **Advanced mode** adds a management strip above the encoding knobs with a row of **Preset**
 buttons — one per saved preset, plus **Custom**, which selects itself whenever the current
 settings match no saved preset — and **Save as… / Update / Delete** buttons:
 
-- **Save as…** opens a dialog with a name field plus a checkbox per setting (resolution, silent
-  speed, sounded speed, silent threshold, codec) — like the "Create link" dialog. Only the
-  checked settings are captured, so you can save, for example, a codec-only preset. Reusing an
-  existing name overwrites it.
+- **Save as…** opens a dialog with a name field plus a checkbox per setting (resolution, FPS,
+  silent speed, sounded speed, silent threshold, codec, Speedup no voice) — like the "Create
+  link" dialog. Only the checked settings are captured, so you can save, for example, a
+  codec-only preset. Reusing an existing name overwrites it.
 - **Update** opens the same dialog pre-filled with the selected preset's name and the settings
   it already controls, then overwrites it with the checked live values.
 - **Delete** removes the selected preset.
@@ -156,7 +173,8 @@ result, the saved marks are kept untouched.
 
 - **Convert** runs the normal pipeline and drops the fragments; the output gets a `_cut` suffix.
 - **Remove only** is a fast pass for an already-processed file: speeds stay x1, resolution and
-  frame rate stay original, and the codec is the one selected. The output also gets `_cut`.
+  frame rate stay original, voice detection is skipped, and the codec is the one selected.
+  The output also gets `_cut`.
 
 Removing fragments is local-only (not available in remote mode), works for a single file, and
 Simple mode ignores the ranges entirely. The CLI equivalents are `--remove` and `--remove-file`

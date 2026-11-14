@@ -2091,6 +2091,7 @@ def test_build_interface_preset_change_handler_registered() -> None:
         "Silent threshold",
         "Sounded speed",
         "FPS",
+        "Speedup no voice",
     ]
 
 
@@ -2170,3 +2171,197 @@ def test_process_video_legacy_small_480_still_works(tmp_path: Path) -> None:
 
     assert options.small_target_height == 480
     assert options.max_frame_rate is None
+
+
+def test_process_video_api_passes_vad_to_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The four vad values ride positional slots 15-18 after height and fps."""
+
+    captured: dict = {}
+
+    def _fake_process_video(*args: object, **kwargs: object):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        yield (None, "log", "summary", None)
+
+    monkeypatch.setattr(server, "process_video", _fake_process_video)
+
+    list(
+        server.process_video_api(
+            "clip.mp4",
+            True,
+            False,
+            True,
+            "h264",
+            False,
+            False,
+            None,
+            None,
+            None,
+            False,
+            None,
+            None,
+            720,
+            30.0,
+            True,
+            0.4,
+            200,
+            500,
+        )
+    )
+
+    assert captured["kwargs"]["target_height"] == 720
+    assert captured["kwargs"]["max_frame_rate"] == 30.0
+    assert captured["kwargs"]["vad"] is True
+    assert captured["kwargs"]["vad_threshold"] == 0.4
+    assert captured["kwargs"]["vad_padding_ms"] == 200
+    assert captured["kwargs"]["vad_min_silence_ms"] == 500
+
+    monkeypatch.undo()
+    options = _process_video_options(
+        tmp_path,
+        small_video=False,
+        vad=True,
+        vad_threshold=0.4,
+        vad_padding_ms=200,
+        vad_min_silence_ms=500,
+    )
+    assert options.vad is True
+    assert options.vad_threshold == 0.4
+    assert options.vad_padding_ms == 200
+    assert options.vad_min_silence_ms == 500
+
+
+def test_process_video_vad_defaults_when_settings_missing(tmp_path: Path) -> None:
+    """``vad=True`` without settings keeps the ``ProcessingOptions`` defaults."""
+
+    options = _process_video_options(tmp_path, small_video=False, vad=True)
+
+    assert options.vad is True
+    assert options.vad_threshold == 0.5
+    assert options.vad_padding_ms == 150
+    assert options.vad_min_silence_ms == 300
+
+    options = _process_video_options(tmp_path, small_video=False)
+    assert options.vad is False
+
+
+def test_process_video_vad_unavailable_reports_error(tmp_path: Path) -> None:
+    """A missing VAD engine surfaces as a processing error with its message."""
+
+    from talks_reducer.vad import VadUnavailableError
+
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        if options.vad:
+            raise VadUnavailableError("Install silero-vad-lite to use --vad")
+        raise AssertionError("vad was not forwarded")
+
+    dependencies = server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+    try:
+        with pytest.raises(gr.Error, match="Install silero-vad-lite to use --vad"):
+            list(
+                server.process_video(
+                    str(input_file),
+                    False,
+                    progress=None,
+                    dependencies=dependencies,
+                    vad=True,
+                )
+            )
+    finally:
+        server._cleanup_workspaces()
+
+
+def test_web_preset_controls_include_vad() -> None:
+    """Presets that define ``vad`` set the Speedup no voice checkbox."""
+
+    assert server.preset_to_web_controls(_preset(vad=True))["vad"] is True
+    assert server.preset_to_web_controls(_preset(vad=False))["vad"] is False
+    assert "vad" not in server.preset_to_web_controls(_preset())
+
+
+def test_process_video_ui_passes_vad(tmp_path: Path) -> None:
+    """The Web UI checkbox reaches ``ProcessingOptions`` with the lite engine."""
+
+    input_file = tmp_path / "clip.mp4"
+    input_file.write_bytes(b"data")
+    captured: dict = {}
+
+    def _speed_up(options: ProcessingOptions, reporter: server.SignalProgressReporter):
+        captured["options"] = options
+        return ProcessingResult(
+            input_file=options.input_file,
+            output_file=options.output_file or input_file,
+            frame_rate=30.0,
+            original_duration=10.0,
+            output_duration=5.0,
+            chunk_count=1,
+            used_gpu=False,
+            max_audio_volume=0.5,
+            time_ratio=0.5,
+            size_ratio=0.5,
+        )
+
+    dependencies = server.ProcessVideoDependencies(
+        speed_up=_speed_up,
+        reporter_factory=server._default_reporter_factory,
+        queue_factory=SimpleQueue,
+        run_pipeline_job_func=server.run_pipeline_job,
+        start_in_thread=False,
+    )
+    try:
+        list(
+            server.process_video_ui(
+                str(input_file),
+                "720p",
+                10.0,
+                "hevc",
+                True,
+                False,
+                False,
+                1.0,
+                0.01,
+                False,
+                0.0,
+                0.0,
+                "orig",
+                True,
+                progress=None,
+                dependencies=dependencies,
+            )
+        )
+    finally:
+        server._cleanup_workspaces()
+
+    assert captured["options"].vad is True
+
+
+def test_build_interface_has_vad_checkbox_wired_to_preset() -> None:
+    """The Speedup no voice checkbox is an upload input and a preset output."""
+
+    demo = server.build_interface(presets=[_preset(name="Voice", vad=True)])
+    labels_by_fn = {
+        getattr(fn, "name", ""): fn for fn in demo.fns.values() if hasattr(fn, "name")
+    }
+
+    upload_labels = [
+        getattr(component, "label", None)
+        for component in labels_by_fn["process_video_ui"].inputs
+    ]
+    assert upload_labels[-1] == "Speedup no voice"
+
+    preset_labels = [
+        getattr(component, "label", None)
+        for component in labels_by_fn["_apply_preset"].outputs
+    ]
+    assert preset_labels[-1] == "Speedup no voice"

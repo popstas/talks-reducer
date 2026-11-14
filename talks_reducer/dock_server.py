@@ -95,14 +95,18 @@ def build_args(
     auto_close: bool,
     preset: Optional[str] = None,
     fps: str = "orig",
+    vad: bool = False,
 ) -> List[str]:
     """Translate dock options into Talks Reducer command line arguments.
 
     When *preset* names a stored preset the dock emits ``--preset NAME`` for
     full fidelity, letting the CLI fan the preset's resolution/speed/codec/
-    threshold onto the run. Otherwise the resolution/speed/codec/fps mapping
-    is used. ``fps`` is always emitted in manual mode so the seeded GUI cannot
-    fall back to a stored cap.
+    threshold/vad onto the run, and *vad* is ignored. Otherwise the
+    resolution/speed/codec/fps mapping is used. ``fps`` is always emitted in
+    manual mode so the seeded GUI cannot fall back to a stored cap, and for the
+    same reason *vad* is always stated: ``--vad`` when the Speedup no voice box
+    is ticked, ``--no-vad`` when it is not (otherwise a remembered checkbox or
+    the GUI's Simple-mode preset would decide).
     """
 
     args: List[str] = [input_file]
@@ -122,6 +126,7 @@ def build_args(
         args.extend(["--silent-speed", str(speed)])
         args.extend(["--video-codec", codec])
         args.extend(["--fps", fps])
+        args.append("--vad" if vad else "--no-vad")
 
     if auto_close:
         args.extend(["--open-location", "--auto-close"])
@@ -138,10 +143,13 @@ def start_talks_reducer(
     auto_close: bool,
     preset: Optional[str] = None,
     fps: str = "orig",
+    vad: bool = False,
 ) -> None:
     """Spawn the Talks Reducer executable for a single dock job."""
 
-    args = build_args(input_file, resolution, speed, codec, auto_close, preset, fps)
+    args = build_args(
+        input_file, resolution, speed, codec, auto_close, preset, fps, vad
+    )
     print(f"[dock] launching: {exe_path} {' '.join(args)}", flush=True)
     subprocess.Popen([exe_path, *args], **hidden_subprocess_kwargs())
 
@@ -161,7 +169,10 @@ def handle_process(payload: dict, default_exe: Optional[str] = None) -> Tuple[in
     server's responses so the dock UI keeps behaving identically. When the
     payload carries a ``preset`` name the resolution/speed/codec fields are
     ignored (the preset drives them via ``--preset NAME``) and only the preset
-    name is validated against the stored list.
+    name is validated against the stored list. The optional boolean ``vad``
+    field (Speedup no voice) applies only in manual mode, and only a JSON
+    ``true`` turns it on: the string ``"false"`` is truthy, so ``bool()`` on
+    the payload value would have added ``--vad`` for it.
     """
 
     print(f"[dock] /process payload: {payload}", flush=True)
@@ -171,6 +182,7 @@ def handle_process(payload: dict, default_exe: Optional[str] = None) -> Tuple[in
     codec = str(payload.get("codec") or "h264").strip()
     fps = str(payload.get("fps") or "orig").strip()
     auto_close = bool(payload.get("autoClose"))
+    vad = payload.get("vad") is True
     exe_path = resolve_exe_path(payload.get("exe") or default_exe)
 
     try:
@@ -202,7 +214,15 @@ def handle_process(payload: dict, default_exe: Optional[str] = None) -> Tuple[in
         return 400, f"Executable not found: {exe_path}"
 
     start_talks_reducer(
-        exe_path, input_file, resolution, speed, codec, auto_close, preset or None, fps
+        exe_path,
+        input_file,
+        resolution,
+        speed,
+        codec,
+        auto_close,
+        preset or None,
+        fps,
+        vad,
     )
     return 202, f"Started talks-reducer: {exe_path}"
 

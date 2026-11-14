@@ -191,6 +191,32 @@ def _resolve_prefer_global_ffmpeg(
     return prefer_global
 
 
+def _resolve_vad_argument(gui: "TalksReducerGUI") -> bool:
+    """Return whether the run should speed up non-voice frames (``--vad``).
+
+    Advanced mode reads the "Speedup no voice" checkbox. Simple mode hides that
+    checkbox, so a value remembered from an Advanced session must not leak into
+    it: there only the preset selected in the Simple dropdown decides, and only
+    a preset that explicitly sets ``vad`` to ``True`` turns it on. The exception
+    is a launch that stated it (``--vad``/``--no-vad`` or a preset with ``vad``,
+    as the OBS dock sends): ``_seeded_vad`` then wins in Simple mode too, until
+    the user picks a Simple preset, which clears it (``_apply_simple_preset``).
+    The seeded fps and resolution need no such flag because they are plain var
+    values that a later preset pick overwrites; Simple mode ignores ``vad_var``,
+    so the seeded vad has to be held separately and released explicitly.
+    """
+
+    if not gui.simple_mode_var.get():
+        return bool(gui.vad_var.get())
+    seeded = getattr(gui, "_seeded_vad", None)
+    if seeded is not None:
+        return bool(seeded)
+    preset = presets.find_preset(
+        gui.simple_preset_var.get(), getattr(gui, "_simple_presets", [])
+    )
+    return preset is not None and preset.vad is True
+
+
 class TalksReducerGUI:
     """Tkinter application mirroring the CLI options with form controls."""
 
@@ -396,6 +422,9 @@ class TalksReducerGUI:
         self.add_codec_suffix_var = tk.BooleanVar(
             value=bool(self.preferences.get("add_codec_suffix", False))
         )
+        self.vad_var = tk.BooleanVar(
+            value=bool(self.preferences.get("vad_enabled", False))
+        )
         self.optimize_var = tk.BooleanVar(
             value=bool(self.preferences.get("optimize", True))
         )
@@ -423,6 +452,7 @@ class TalksReducerGUI:
         self.watch_directory_var.trace_add("write", self._on_watch_change)
         self.video_codec_var.trace_add("write", self._on_video_codec_change)
         self.add_codec_suffix_var.trace_add("write", self._on_add_codec_suffix_change)
+        self.vad_var.trace_add("write", self._on_vad_change)
         self.optimize_var.trace_add("write", self._on_optimize_change)
         self.use_global_ffmpeg_var.trace_add("write", self._on_use_global_ffmpeg_change)
         self.start_in_server_tray_var.trace_add(
@@ -488,6 +518,8 @@ class TalksReducerGUI:
         # ``--auto-close`` closes the window once every job succeeds.
         self._open_location_after_convert = False
         self._auto_close_after_convert = False
+        # ``--vad``/``--no-vad`` from the launch; ``None`` leaves it to the GUI.
+        self._seeded_vad: Optional[bool] = None
 
         if cli_settings:
             self._apply_cli_settings(cli_settings)
@@ -1348,6 +1380,9 @@ class TalksReducerGUI:
     def _on_add_codec_suffix_change(self, *_: object) -> None:
         self.preference_controller.on_add_codec_suffix_change(*_)
 
+    def _on_vad_change(self, *_: object) -> None:
+        self.preference_controller.on_vad_change(*_)
+
     def _on_optimize_change(self, *_: object) -> None:
         self.preference_controller.on_optimize_change(*_)
 
@@ -1505,6 +1540,15 @@ class TalksReducerGUI:
             self._open_location_after_convert = bool(settings["open_location"])
         if "auto_close" in settings:
             self._auto_close_after_convert = bool(settings["auto_close"])
+        if "vad" in settings:
+            self._seeded_vad = bool(settings["vad"])
+            self.vad_var.set(self._seeded_vad)
+        if "vad_threshold" in settings:
+            self.vad_threshold_var.set(float(settings["vad_threshold"]))
+        if "vad_padding_ms" in settings:
+            self.vad_padding_var.set(int(settings["vad_padding_ms"]))
+        if "vad_min_silence_ms" in settings:
+            self.vad_min_silence_var.set(int(settings["vad_min_silence_ms"]))
 
     def _schedule_auto_close_if_requested(self) -> None:
         """Close the window on the UI thread when ``--auto-close`` was requested.
@@ -1656,6 +1700,13 @@ class TalksReducerGUI:
             max_frame_rate = None
         if max_frame_rate:
             args["max_frame_rate"] = max_frame_rate
+        args["vad"] = _resolve_vad_argument(self)
+        if args["vad"]:
+            args["vad_threshold"] = round(float(self.vad_threshold_var.get()), 2)
+            args["vad_padding_ms"] = int(round(float(self.vad_padding_var.get())))
+            args["vad_min_silence_ms"] = int(
+                round(float(self.vad_min_silence_var.get()))
+            )
         # Cut video is an Advanced-only feature; Simple mode never trims even if
         # the flag persisted from a previous Advanced session.
         if self.cut_enabled_var.get() and not self.simple_mode_var.get():
@@ -2002,14 +2053,14 @@ class TalksReducerGUI:
         the log-parsed ``Task: NN%`` milestones — routes its stage label through
         this helper so the fallback timer never keeps overwriting the status with
         synthetic percentages after real progress has begun. Real
-        ``Audio processing:`` progress cancels the timer, while ``Generating
+        ``Voice detection:`` or ``Audio processing:`` progress cancels the timer, while ``Generating
         final`` progress completes the audio phase outright.
         """
 
         normalized = (desc or "").strip().lower()
         if normalized.startswith("generating final"):
             self._complete_audio_phase()
-        elif normalized.startswith("audio processing"):
+        elif normalized.startswith(("voice detection", "audio processing")):
             self._cancel_audio_progress()
 
     def _apply_stage_status(self, desc: str, percent: float) -> None:

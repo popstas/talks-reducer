@@ -187,3 +187,39 @@ def test_help_link_is_sized_to_its_glyph(root, themed):
     root.update_idletasks()
 
     assert help_button.winfo_reqwidth() < 30
+
+
+def test_vad_check_shares_row_with_silence_speedup(root, themed):
+    """The checkbox sits on the macro row, to the right of its buttons.
+
+    It is packed into ``basic_presets_frame`` beside the segmented control, so
+    the check is that real pack geometry puts both on one line. The widgets
+    have different parents, so the comparison uses root coordinates rather
+    than ``winfo_y``, which is relative to each widget's own parent.
+    """
+
+    gui = type("GuiStub", (), {})()
+    gui.tk = tk
+    gui.ttk = ttk
+    gui.vad_var = tk.BooleanVar(value=False)
+    gui._apply_basic_preset = lambda _value: None
+    gui.basic_options_frame = ttk.Frame(root)
+    gui.basic_options_frame.pack()
+
+    try:
+        layout.build_silence_speedup_row(gui)
+        root.update()
+
+        buttons = gui.basic_preset_control.buttons
+        check = gui.vad_check
+        assert check.winfo_width() > 1 and buttons[-1].winfo_width() > 1
+
+        def middle(widget) -> float:
+            return widget.winfo_rooty() + widget.winfo_height() / 2
+
+        assert abs(middle(check) - middle(buttons[0])) <= 4
+        assert (
+            check.winfo_rootx() >= buttons[-1].winfo_rootx() + buttons[-1].winfo_width()
+        )
+    finally:
+        gui.basic_options_frame.destroy()

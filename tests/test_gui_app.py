@@ -12,7 +12,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from talks_reducer.gui import app, summaries, taskbar
+from talks_reducer.gui.preferences import PreferenceController
 from talks_reducer.gui.theme import STATUS_COLORS
+from talks_reducer.presets import Preset
 
 
 def test_apply_cli_settings_seeds_post_convert_flags():
@@ -348,6 +350,9 @@ def test_collect_arguments_includes_video_codec():
         cut_enabled_var=SimpleNamespace(get=lambda: False),
         cut_start_var=SimpleNamespace(get=lambda: 0.0),
         cut_end_var=SimpleNamespace(get=lambda: 0.0),
+        simple_mode_var=SimpleNamespace(get=lambda: False),
+        vad_var=SimpleNamespace(get=lambda: False),
+        simple_preset_var=SimpleNamespace(get=lambda: ""),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     gui._parse_float = lambda value, _label: float(value)
@@ -390,6 +395,9 @@ def test_collect_arguments_accepts_mp3_codec():
         cut_enabled_var=SimpleNamespace(get=lambda: False),
         cut_start_var=SimpleNamespace(get=lambda: 0.0),
         cut_end_var=SimpleNamespace(get=lambda: 0.0),
+        simple_mode_var=SimpleNamespace(get=lambda: False),
+        vad_var=SimpleNamespace(get=lambda: False),
+        simple_preset_var=SimpleNamespace(get=lambda: ""),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     gui._parse_float = lambda value, _label: float(value)
@@ -420,6 +428,9 @@ def test_collect_arguments_includes_add_codec_suffix():
         cut_enabled_var=SimpleNamespace(get=lambda: False),
         cut_start_var=SimpleNamespace(get=lambda: 0.0),
         cut_end_var=SimpleNamespace(get=lambda: 0.0),
+        simple_mode_var=SimpleNamespace(get=lambda: False),
+        vad_var=SimpleNamespace(get=lambda: False),
+        simple_preset_var=SimpleNamespace(get=lambda: ""),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     gui._parse_float = lambda value, _label: float(value)
@@ -451,6 +462,12 @@ def _make_collect_gui(**overrides) -> SimpleNamespace:
         cut_start_var=SimpleNamespace(get=lambda: 0.0),
         cut_end_var=SimpleNamespace(get=lambda: 0.0),
         simple_mode_var=SimpleNamespace(get=lambda: False),
+        vad_var=SimpleNamespace(get=lambda: False),
+        simple_preset_var=SimpleNamespace(get=lambda: ""),
+        vad_threshold_var=SimpleNamespace(get=lambda: 0.5),
+        vad_padding_var=SimpleNamespace(get=lambda: 150.0),
+        vad_min_silence_var=SimpleNamespace(get=lambda: 300.0),
+        _simple_presets=[],
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     defaults.update(overrides)
@@ -1043,7 +1060,7 @@ def test_summary_manager_audio_processing_percent_cancels_synthetic_timer():
     gui._cancel_audio_progress.assert_called_once()
     gui._complete_audio_phase.assert_not_called()
     gui._set_progress.assert_called_once()
-    assert gui._set_progress.call_args[0][0] == pytest.approx(14.5)
+    assert gui._set_progress.call_args[0][0] == pytest.approx(17.25)
 
 
 def test_summary_manager_task_percent_never_moves_backwards():
@@ -2819,6 +2836,9 @@ def _collect_args_gui(*, small: bool, height: int, fps: str) -> SimpleNamespace:
         cut_enabled_var=_Var(False),
         cut_start_var=_Var(0.0),
         cut_end_var=_Var(0.0),
+        simple_mode_var=_Var(False),
+        vad_var=_Var(False),
+        simple_preset_var=_Var(""),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
     gui._parse_float = lambda value, _label: float(value)
@@ -2912,3 +2932,230 @@ def test_populate_initial_inputs_loads_cut_marks(tmp_path):
     app.TalksReducerGUI._populate_initial_inputs(gui, [str(video)])
 
     assert gui.remove_ranges == [(1.0, 2.0)]
+
+
+def _voice_and_optimal_presets() -> list:
+    return [
+        Preset(name="Optimal", resolution="720p", video_codec="hevc", vad=False),
+        Preset(name="Voice", resolution="720p", video_codec="hevc", vad=True),
+        Preset(name="Sparse", video_codec="hevc"),
+    ]
+
+
+def test_collect_arguments_includes_vad_in_advanced():
+    on = _make_collect_gui(vad_var=SimpleNamespace(get=lambda: True))
+    off = _make_collect_gui(vad_var=SimpleNamespace(get=lambda: False))
+
+    assert app.TalksReducerGUI._collect_arguments(on)["vad"] is True
+    assert app.TalksReducerGUI._collect_arguments(off)["vad"] is False
+
+
+def test_simple_mode_ignores_remembered_vad():
+    """Simple mode follows its preset, not a checkbox it does not show."""
+
+    for name in ("Optimal", "Sparse", "", "Missing"):
+        gui = _make_collect_gui(
+            simple_mode_var=SimpleNamespace(get=lambda: True),
+            vad_var=SimpleNamespace(get=lambda: True),
+            simple_preset_var=SimpleNamespace(get=lambda name=name: name),
+            _simple_presets=_voice_and_optimal_presets(),
+        )
+
+        assert app.TalksReducerGUI._collect_arguments(gui)["vad"] is False, name
+
+
+def test_simple_mode_voice_preset_enables_vad():
+    gui = _make_collect_gui(
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+        vad_var=SimpleNamespace(get=lambda: False),
+        simple_preset_var=SimpleNamespace(get=lambda: "Voice"),
+        _simple_presets=_voice_and_optimal_presets(),
+    )
+
+    assert app.TalksReducerGUI._collect_arguments(gui)["vad"] is True
+
+
+def test_simple_mode_voice_preset_uses_remembered_vad_settings():
+    gui = _make_collect_gui(
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+        simple_preset_var=SimpleNamespace(get=lambda: "Voice"),
+        _simple_presets=_voice_and_optimal_presets(),
+        vad_padding_var=SimpleNamespace(get=lambda: 500.0),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["vad"] is True
+    assert args["vad_padding_ms"] == 500
+
+
+def test_vad_preference_persists():
+    updates: list[tuple[str, object]] = []
+    gui = SimpleNamespace(
+        vad_var=SimpleNamespace(get=lambda: True),
+        preferences=SimpleNamespace(
+            update=lambda key, value: updates.append((key, value)) or True
+        ),
+    )
+
+    PreferenceController(gui).on_vad_change()
+
+    assert updates == [("vad_enabled", True)]
+
+
+def test_voice_detection_cancels_synthetic_timer():
+    """Opening the Voice detection stage retires the extraction fallback timer."""
+
+    gui = SimpleNamespace(
+        _complete_audio_phase=MagicMock(),
+        _cancel_audio_progress=MagicMock(),
+    )
+
+    app.TalksReducerGUI._apply_stage_transition(gui, "Voice detection:")
+
+    gui._cancel_audio_progress.assert_called_once()
+    gui._complete_audio_phase.assert_not_called()
+
+
+def _vad_collect_gui(vad: bool, simple: bool = False) -> SimpleNamespace:
+    """Build a stub GUI whose VAD vars hold non-default values."""
+
+    gui = SimpleNamespace(
+        output_var=SimpleNamespace(get=lambda: ""),
+        temp_var=SimpleNamespace(get=lambda: ""),
+        silent_threshold_var=SimpleNamespace(get=lambda: 0.01),
+        sounded_speed_var=SimpleNamespace(get=lambda: 1.0),
+        silent_speed_var=SimpleNamespace(get=lambda: 4.0),
+        frame_margin_var=SimpleNamespace(get=lambda: "2"),
+        sample_rate_var=SimpleNamespace(get=lambda: "48000"),
+        keyframe_interval_var=SimpleNamespace(get=lambda: 30.0),
+        small_var=SimpleNamespace(get=lambda: False),
+        small_height_var=SimpleNamespace(get=lambda: 720),
+        fps_var=SimpleNamespace(get=lambda: "orig"),
+        video_codec_var=SimpleNamespace(get=lambda: "h264", set=lambda value: None),
+        add_codec_suffix_var=SimpleNamespace(get=lambda: False),
+        use_global_ffmpeg_var=SimpleNamespace(get=lambda: False),
+        optimize_var=SimpleNamespace(get=lambda: True),
+        cut_enabled_var=SimpleNamespace(get=lambda: False),
+        cut_start_var=SimpleNamespace(get=lambda: 0.0),
+        cut_end_var=SimpleNamespace(get=lambda: 0.0),
+        simple_mode_var=SimpleNamespace(get=lambda: simple),
+        vad_var=SimpleNamespace(get=lambda: vad),
+        vad_threshold_var=SimpleNamespace(get=lambda: 0.7),
+        vad_padding_var=SimpleNamespace(get=lambda: 300.0),
+        vad_min_silence_var=SimpleNamespace(get=lambda: 500.0),
+        simple_preset_var=SimpleNamespace(get=lambda: ""),
+        preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
+    )
+    gui._parse_float = lambda value, _label: float(value)
+    return gui
+
+
+def test_collect_arguments_vad_settings_only_when_enabled():
+    args = app.TalksReducerGUI._collect_arguments(_vad_collect_gui(vad=True))
+    assert args["vad"] is True
+    assert args["vad_threshold"] == pytest.approx(0.7)
+    assert args["vad_padding_ms"] == 300
+    assert isinstance(args["vad_padding_ms"], int)
+    assert args["vad_min_silence_ms"] == 500
+
+    args = app.TalksReducerGUI._collect_arguments(_vad_collect_gui(vad=False))
+    assert args["vad"] is False
+    assert not {"vad_threshold", "vad_padding_ms", "vad_min_silence_ms"} & set(args)
+
+
+def test_apply_cli_settings_seeds_vad():
+    """A seeded ``--vad`` ticks the checkbox and overrides Simple mode's preset."""
+
+    gui = _make_settings_gui()
+    gui.vad_var = _RecordingVar(False)
+    gui.vad_threshold_var = _RecordingVar(0.5)
+    gui.vad_padding_var = _RecordingVar(150.0)
+    gui.vad_min_silence_var = _RecordingVar(300.0)
+    gui._seeded_vad = None
+
+    app.TalksReducerGUI._apply_cli_settings(
+        gui,
+        {
+            "vad": True,
+            "vad_threshold": 0.4,
+            "vad_padding_ms": 200,
+            "vad_min_silence_ms": 500,
+        },
+    )
+
+    assert gui.vad_var.get() is True
+    assert gui._seeded_vad is True
+    assert gui.vad_threshold_var.get() == 0.4
+    assert gui.vad_padding_var.get() == 200
+    assert gui.vad_min_silence_var.get() == 500
+
+
+def test_simple_mode_honors_seeded_vad():
+    """A launch flag (OBS dock) beats the Simple dropdown in both directions."""
+
+    seeded_on = _make_collect_gui(
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+        vad_var=SimpleNamespace(get=lambda: True),
+        simple_preset_var=SimpleNamespace(get=lambda: "Optimal"),
+        _simple_presets=_voice_and_optimal_presets(),
+        _seeded_vad=True,
+    )
+    seeded_off = _make_collect_gui(
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+        vad_var=SimpleNamespace(get=lambda: False),
+        simple_preset_var=SimpleNamespace(get=lambda: "Voice"),
+        _simple_presets=_voice_and_optimal_presets(),
+        _seeded_vad=False,
+    )
+
+    assert app.TalksReducerGUI._collect_arguments(seeded_on)["vad"] is True
+    assert app.TalksReducerGUI._collect_arguments(seeded_off)["vad"] is False
+
+
+def _seeded_simple_gui(seeded: bool, selected: str) -> SimpleNamespace:
+    """A Simple-mode GUI launched with ``--vad``/``--no-vad`` (*seeded*)."""
+
+    selection = {"name": selected}
+    return _make_collect_gui(
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+        vad_var=SimpleNamespace(get=lambda: seeded),
+        simple_preset_var=SimpleNamespace(get=lambda: selection["name"]),
+        _simple_presets=_voice_and_optimal_presets(),
+        _seeded_vad=seeded,
+        _selection=selection,
+    )
+
+
+def test_simple_preset_pick_releases_seeded_no_vad(monkeypatch):
+    """After a ``--no-vad`` launch, choosing Voice runs with voice detection."""
+
+    from talks_reducer.gui import layout
+
+    monkeypatch.setattr(layout, "apply_preset_to_gui", lambda gui, preset: None)
+    monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
+    gui = _seeded_simple_gui(seeded=False, selected="Optimal")
+    assert app.TalksReducerGUI._collect_arguments(gui)["vad"] is False
+
+    gui._selection["name"] = "Voice"
+    layout._apply_simple_preset(gui)
+
+    assert gui._seeded_vad is None
+    assert app.TalksReducerGUI._collect_arguments(gui)["vad"] is True
+
+
+def test_simple_preset_pick_releases_seeded_vad(monkeypatch):
+    """After a ``--vad`` launch, choosing a non-voice preset turns it off."""
+
+    from talks_reducer.gui import layout
+
+    monkeypatch.setattr(layout, "apply_preset_to_gui", lambda gui, preset: None)
+    monkeypatch.setattr(layout.presets, "set_selected_preset", lambda *a, **k: True)
+    gui = _seeded_simple_gui(seeded=True, selected="Voice")
+    gui._selection["name"] = "Optimal"
+    assert app.TalksReducerGUI._collect_arguments(gui)["vad"] is True
+
+    layout._apply_simple_preset(gui)
+
+    assert gui._seeded_vad is None
+    assert app.TalksReducerGUI._collect_arguments(gui)["vad"] is False
