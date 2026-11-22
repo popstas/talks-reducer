@@ -375,6 +375,7 @@ class PreferenceController:
             {
                 "root": self.gui.root,
                 "drop_zone": getattr(self.gui, "drop_zone", None),
+                "advanced_canvas": getattr(self.gui, "advanced_canvas", None),
                 "log_text": getattr(self.gui, "log_text", None),
                 "activity_text": getattr(self.gui, "activity_text", None),
                 "status_label": getattr(self.gui, "status_label", None),
@@ -398,8 +399,9 @@ class PreferenceController:
             self.gui.advanced_visible.set(not self.gui.advanced_visible.get())
         visible = self.gui.advanced_visible.get()
         if visible:
-            self.gui.advanced_frame.grid()
+            self.gui.advanced_container.grid()
+            layout_helpers.schedule_advanced_refit(self.gui)
             self.gui.advanced_button.configure(text="Hide advanced")
         else:
-            self.gui.advanced_frame.grid_remove()
+            self.gui.advanced_container.grid_remove()
             self.gui.advanced_button.configure(text="Advanced")

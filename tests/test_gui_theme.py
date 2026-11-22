@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from talks_reducer.gui.theme import (
+    DARK_THEME,
     LIGHT_THEME,
     STATUS_COLORS,
     apply_theme,
@@ -160,3 +161,16 @@ def test_segment_styles_are_configured():
     assert "Segment.TButton" in mapped
     disabled_foreground = dict(mapped["Segment.TButton"]["foreground"])["disabled"]
     assert disabled_foreground != configured["Segment.TButton"]["foreground"]
+
+
+def test_apply_theme_paints_the_advanced_canvas_like_the_frames():
+    """A plain Tk canvas gets no ttk styling, so it is painted explicitly."""
+
+    canvas = Mock()
+    apply_theme(
+        Mock(),
+        DARK_THEME,
+        {"root": Mock(), "advanced_canvas": canvas, "tk": SimpleNamespace(FLAT="flat")},
+    )
+
+    canvas.configure.assert_called_once_with(bg=DARK_THEME["background"])

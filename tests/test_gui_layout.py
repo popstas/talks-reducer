@@ -150,8 +150,14 @@ class WidgetStub:
     def configure(self, *args, **kwargs):
         self.configure_calls.append((args, kwargs))
 
-    def bind(self, sequence, callback):
+    def bind(self, sequence, callback, add=None):
         self.bind_calls.append((sequence, callback))
+
+    def create_window(self, *args, **kwargs):
+        return 1
+
+    def itemconfigure(self, *args, **kwargs):
+        pass
 
     def columnconfigure(self, index: int, **kwargs):
         self.columnconfigure_calls.append((index, kwargs))
@@ -209,6 +215,12 @@ class RootStub:
     def winfo_height(self) -> int:
         return 0
 
+    def after_idle(self, callback):
+        self.after_idle_calls = getattr(self, "after_idle_calls", []) + [callback]
+
+    def bind_all(self, sequence, callback, add=None):
+        self.bind_all_calls = getattr(self, "bind_all_calls", []) + [sequence]
+
 
 def make_widget_mock() -> Mock:
     widget = Mock()
@@ -242,6 +254,7 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         DoubleVar=DoubleVarStub,
         BooleanVar=BooleanVarStub,
         Scale=WidgetFactory("Scale"),
+        Canvas=WidgetFactory("Canvas"),
         FLAT="flat",
         LEFT="left",
         RIGHT="right",
@@ -510,6 +523,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         DoubleVar=DoubleVarStub,
         BooleanVar=BooleanVarStub,
         Scale=WidgetFactory("Scale"),
+        Canvas=WidgetFactory("Canvas"),
         FLAT="flat",
         LEFT="left",
         RIGHT="right",
@@ -851,6 +865,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         DoubleVar=DoubleVarStub,
         BooleanVar=BooleanVarStub,
         Scale=WidgetFactory("Scale"),
+        Canvas=WidgetFactory("Canvas"),
         FLAT="flat",
         LEFT="left",
         RIGHT="right",
@@ -1483,7 +1498,7 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
         activity_frame=make_widget_mock(),
         server_managed=True,
         button_frame=make_widget_mock(),
-        advanced_frame=make_widget_mock(),
+        advanced_container=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
         _simple_presets=list(_TEST_PRESETS),
@@ -1504,7 +1519,7 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     gui.activity_frame.grid_remove.assert_called_once()
     gui.activity_frame.grid.assert_not_called()
     gui.button_frame.grid_remove.assert_called_once()
-    gui.advanced_frame.grid_remove.assert_called_once()
+    gui.advanced_container.grid_remove.assert_called_once()
     gui.run_after_drop_var.set.assert_called_once_with(True)
     # With a preset available, Open output rides in the preset row instead.
     gui.open_output_check.pack_forget.assert_called_once()
@@ -1513,6 +1528,80 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     gui.cut_panel.grid_remove.assert_called_once()
     apply_size.assert_called_once_with(gui, simple=True)
     gui.drop_zone.focus_set.assert_called_once()
+
+
+def test_advanced_space_left_excludes_the_canvas_itself():
+    """What main needs besides the canvas is subtracted from main's height."""
+
+    gui = SimpleNamespace(
+        main_frame=SimpleNamespace(
+            winfo_height=lambda: 900, winfo_reqheight=lambda: 1300
+        ),
+        advanced_canvas=SimpleNamespace(winfo_reqheight=lambda: 500),
+    )
+
+    assert layout.advanced_space_left(gui) == 100
+
+
+def _refit_gui(*, simple=False, visible=True):
+    area = Mock()
+    return SimpleNamespace(
+        advanced_area=area,
+        advanced_canvas=SimpleNamespace(winfo_reqheight=lambda: 500),
+        main_frame=SimpleNamespace(
+            winfo_height=lambda: 900, winfo_reqheight=lambda: 1300
+        ),
+        simple_mode_var=SimpleNamespace(get=lambda: simple),
+        advanced_visible=SimpleNamespace(get=lambda: visible),
+        root=Mock(),
+    )
+
+
+def test_refit_advanced_fits_the_area_to_the_space_left():
+    gui = _refit_gui()
+
+    layout.refit_advanced(gui)
+
+    gui.advanced_area.fit.assert_called_once_with(
+        available=100, minimum=layout.ADVANCED_MIN_HEIGHT
+    )
+
+
+@pytest.mark.parametrize("simple,visible", [(True, True), (False, False)])
+def test_refit_advanced_skips_a_hidden_block(simple, visible):
+    gui = _refit_gui(simple=simple, visible=visible)
+
+    layout.refit_advanced(gui)
+
+    gui.advanced_area.fit.assert_not_called()
+
+
+def test_schedule_advanced_refit_collapses_bursts_into_one():
+    gui = _refit_gui()
+
+    layout.schedule_advanced_refit(gui)
+    layout.schedule_advanced_refit(gui)
+
+    gui.root.after_idle.assert_called_once()
+    gui.root.after_idle.call_args.args[0]()
+    gui.advanced_area.fit.assert_called_once()
+    layout.schedule_advanced_refit(gui)
+    assert gui.root.after_idle.call_count == 2
+
+
+def test_toggle_advanced_shows_the_scroll_container_and_refits():
+    root = Mock()
+    gui = SimpleNamespace(
+        advanced_visible=SimpleNamespace(get=lambda: True, set=Mock()),
+        advanced_container=make_widget_mock(),
+        advanced_button=make_widget_mock(),
+        root=root,
+    )
+
+    PreferenceController(gui).toggle_advanced(initial=True)
+
+    gui.advanced_container.grid.assert_called_once()
+    root.after_idle.assert_called_once()
 
 
 def _scaling_root(scaling: float) -> SimpleNamespace:
@@ -1571,7 +1660,7 @@ def test_apply_simple_mode_sets_the_drop_zone_height(monkeypatch, simple):
         simple_mode_var=SimpleNamespace(get=lambda: simple),
         basic_options_frame=make_widget_mock(),
         log_frame=make_widget_mock(),
-        advanced_frame=make_widget_mock(),
+        advanced_container=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
         drop_zone=Mock(),
@@ -1597,7 +1686,7 @@ def test_apply_simple_mode_simple_branch_keeps_checkboxes_without_presets(monkey
         activity_frame=make_widget_mock(),
         server_managed=True,
         button_frame=make_widget_mock(),
-        advanced_frame=make_widget_mock(),
+        advanced_container=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
         _simple_presets=[],
@@ -1630,9 +1719,10 @@ def test_apply_simple_mode_full_branch(monkeypatch):
         activity_frame=make_widget_mock(),
         server_managed=True,
         button_frame=make_widget_mock(),
-        advanced_frame=make_widget_mock(),
+        advanced_container=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: True),
+        root=Mock(),
         open_output_check=make_widget_mock(),
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
@@ -1651,7 +1741,9 @@ def test_apply_simple_mode_full_branch(monkeypatch):
     gui.activity_frame.grid.assert_called_once()
     gui.activity_frame.grid_remove.assert_not_called()
     gui.button_frame.grid.assert_called_once()
-    gui.advanced_frame.grid.assert_called_once()
+    gui.advanced_container.grid.assert_called_once()
+    # Reopening the block refits it to the space the full layout leaves.
+    gui.root.after_idle.assert_called_once()
     # Advanced restores its own Open output copy.
     gui.open_output_check.pack.assert_called_once()
     # Advanced restores the Cut video checkbox; the panel shows because cut is on.
@@ -1672,9 +1764,10 @@ def test_apply_simple_mode_full_branch_hides_activity_when_standalone(monkeypatc
         activity_frame=make_widget_mock(),
         server_managed=False,
         button_frame=make_widget_mock(),
-        advanced_frame=make_widget_mock(),
+        advanced_container=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: True),
+        root=Mock(),
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
         cut_enabled_var=SimpleNamespace(get=lambda: False),
@@ -1698,7 +1791,7 @@ def test_apply_simple_mode_full_branch_hides_advanced_when_not_visible(monkeypat
         basic_options_frame=make_widget_mock(),
         log_frame=make_widget_mock(),
         advanced_button=make_widget_mock(),
-        advanced_frame=make_widget_mock(),
+        advanced_container=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
         drop_zone=Mock(),
@@ -1706,7 +1799,7 @@ def test_apply_simple_mode_full_branch_hides_advanced_when_not_visible(monkeypat
 
     layout.apply_simple_mode(gui)
 
-    gui.advanced_frame.grid.assert_not_called()
+    gui.advanced_container.grid.assert_not_called()
     apply_size.assert_called_once_with(gui, simple=False)
 
 

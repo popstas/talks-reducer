@@ -18,6 +18,7 @@ tk = pytest.importorskip("tkinter")
 ttk = pytest.importorskip("tkinter.ttk")
 
 import talks_reducer.gui.layout as layout
+from talks_reducer.gui.scrollable import ScrollableFrame
 from talks_reducer.gui.segmented import CustomSpec, Option, SegmentedChoice
 from talks_reducer.gui.theme import LIGHT_THEME, apply_theme
 
@@ -223,3 +224,90 @@ def test_vad_check_shares_row_with_silence_speedup(root, themed):
         )
     finally:
         gui.basic_options_frame.destroy()
+
+
+@pytest.fixture
+def shown(root):
+    """Map the shared root: an unmapped window reports 1px for every widget."""
+
+    root.deiconify()
+    root.geometry("400x300")
+    try:
+        yield root
+    finally:
+        root.withdraw()
+
+
+def _settle(root):
+    for _ in range(3):
+        root.update_idletasks()
+        root.update()
+
+
+def test_real_area_scrolls_tall_content_and_reaches_its_end(shown, request):
+    root = shown
+    area = ScrollableFrame(root, tk=tk, ttk=ttk)
+    request.addfinalizer(area.container.destroy)
+    area.container.pack(fill="x", anchor="n")
+    labels = [ttk.Label(area.inner, text=f"row {i}") for i in range(40)]
+    for label in labels:
+        label.pack(anchor="w")
+    _settle(root)
+
+    area.fit(available=120, minimum=40)
+    _settle(root)
+
+    assert area.canvas.winfo_height() == 120
+    assert area.scrollbar.winfo_ismapped()
+
+    area.canvas.yview_moveto(1)
+    _settle(root)
+    last = labels[-1]
+    last_bottom = last.winfo_rooty() + last.winfo_height()
+    canvas_bottom = area.canvas.winfo_rooty() + area.canvas.winfo_height()
+    assert last_bottom <= canvas_bottom
+
+    area.fit(available=5000, minimum=40)
+    _settle(root)
+    assert int(area.canvas.cget("height")) == area.inner.winfo_reqheight()
+    assert not area.scrollbar.winfo_ismapped()
+
+
+def test_inner_frame_follows_the_canvas_width(shown, request):
+    root = shown
+    area = ScrollableFrame(root, tk=tk, ttk=ttk)
+    request.addfinalizer(area.container.destroy)
+    area.container.pack(fill="x", anchor="n")
+    ttk.Label(area.inner, text="x").pack()
+    _settle(root)
+    area.fit(available=200, minimum=40)
+    _settle(root)
+
+    assert area.inner.winfo_width() == area.canvas.winfo_width() > 1
+
+
+def test_wheel_scrolls_only_over_the_area_and_only_when_needed(shown, request):
+    root = shown
+    area = ScrollableFrame(root, tk=tk, ttk=ttk)
+    request.addfinalizer(area.container.destroy)
+    area.container.pack(fill="x", anchor="n")
+    for i in range(40):
+        ttk.Label(area.inner, text=f"row {i}").pack(anchor="w")
+    _settle(root)
+    area.fit(available=100, minimum=40)
+    _settle(root)
+
+    assert area.scroll_by_wheel(delta=-120, widget=area.inner) is True
+    _settle(root)
+    assert area.canvas.yview()[0] > 0
+    # One notch moves one 30px step, not Tk's default tenth of the view.
+    content = area.inner.winfo_reqheight()
+    assert round(area.canvas.yview()[0] * content) == 30
+
+    outside = ttk.Label(root, text="outside")
+    assert area.scroll_by_wheel(delta=-120, widget=outside) is False
+
+    area.fit(available=5000, minimum=40)
+    _settle(root)
+    assert area.scroll_by_wheel(delta=-120, widget=area.inner) is False
+    outside.destroy()

@@ -477,6 +477,12 @@ def apply_theme(
         thickness=20,
     )
 
+    # The Advanced block scrolls inside a plain Tk canvas, which ttk styling never
+    # reaches; paint it like the frames around it.
+    advanced_canvas = widgets.get("advanced_canvas")
+    if advanced_canvas is not None:
+        advanced_canvas.configure(bg=palette["background"])
+
     drop_zone = widgets.get("drop_zone")
     if drop_zone is not None:
         drop_zone.configure(

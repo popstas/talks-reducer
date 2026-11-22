@@ -13,6 +13,7 @@ from .. import presets
 from ..icons import find_icon_path
 from ..models import default_temp_folder
 from . import cut_marks_ui
+from .scrollable import ScrollableFrame
 from .segmented import CustomSpec, Option, SegmentedChoice
 from .tooltips import add_tooltip
 
@@ -76,6 +77,102 @@ CUT_SLIDER_LENGTH = 120
 DROP_ZONE_FULL_HEIGHT = 50
 
 
+# The log's requested height, in lines. It is only a floor: the log row takes
+# the window's slack, so it grows past this whenever Advanced leaves room, and
+# ``refit_advanced`` sizes the Advanced block around it.
+LOG_MIN_LINES = 5
+
+# The Advanced block never shrinks below this many 96-DPI pixels, so a cramped
+# window still shows a few rows to scroll through.
+ADVANCED_MIN_HEIGHT = 80
+
+# One mouse-wheel notch over the Advanced block scrolls about one row, in
+# 96-DPI pixels; Tk's default step is a tenth of the view, roughly 8px here.
+ADVANCED_SCROLL_STEP = 30
+
+
+def advanced_space_left(gui: "TalksReducerGUI") -> int:
+    """Return the height the Advanced canvas may take without clipping the window.
+
+    ``main``'s requested height is everything at its natural size, the canvas
+    included; take the canvas back out and what is left of ``main``'s actual
+    height is the canvas's share. The log counts at its requested
+    ``LOG_MIN_LINES``, which is how it keeps a few visible lines. The result
+    does not depend on the canvas's current height, so refitting converges in
+    one step instead of chasing its own resize.
+    """
+
+    main = gui.main_frame
+    canvas_height = gui.advanced_canvas.winfo_reqheight()
+    return main.winfo_height() - (main.winfo_reqheight() - canvas_height)
+
+
+def refit_advanced(gui: "TalksReducerGUI") -> None:
+    """Size the Advanced scroll area to the space left in the window.
+
+    Runs only while the block is on screen: a hidden block takes no space, so
+    there is nothing to fit. ``update_idletasks`` first, because a panel shown
+    a moment ago (Cut video, say) has not yet pushed its height up to ``main``.
+    """
+
+    gui._advanced_refit_pending = False
+    area = getattr(gui, "advanced_area", None)
+    if area is None or getattr(gui, "_advanced_refitting", False):
+        return
+    if gui.simple_mode_var.get() or not gui.advanced_visible.get():
+        return
+    gui._advanced_refitting = True
+    try:
+        gui.root.update_idletasks()
+        area.fit(
+            available=advanced_space_left(gui),
+            minimum=scaled_pixels(gui, ADVANCED_MIN_HEIGHT),
+        )
+    finally:
+        gui._advanced_refitting = False
+
+
+def schedule_advanced_refit(gui: "TalksReducerGUI", *_args) -> None:
+    """Queue one ``refit_advanced`` for the next idle moment.
+
+    Several ``<Configure>`` events arrive for one change (the window, the log,
+    the inner frame), so they collapse into a single refit.
+    """
+
+    if getattr(gui, "_advanced_refit_pending", False):
+        return
+    gui._advanced_refit_pending = True
+    gui.root.after_idle(lambda: refit_advanced(gui))
+
+
+def bind_advanced_refit(gui: "TalksReducerGUI") -> None:
+    """Refit the Advanced block whenever the space around it can have changed.
+
+    ``main`` resizes with the window; ``log_frame`` is the one row left with a
+    weight in the full layout, so any sibling growing or shrinking (Cut video,
+    the status buttons, the activity panel) resizes it; ``advanced_frame``
+    changes when its own rows do. The wheel is bound application-wide but only
+    acts over the block, and only while it scrolls (``scroll_by_wheel``).
+    """
+
+    for widget in (gui.main_frame, gui.log_frame, gui.advanced_frame):
+        widget.bind("<Configure>", lambda _event: schedule_advanced_refit(gui), add="+")
+
+    def on_wheel(event, delta=None) -> None:
+        try:
+            widget = gui.root.winfo_containing(event.x_root, event.y_root)
+        except Exception:
+            return
+        gui.advanced_area.scroll_by_wheel(
+            delta=event.delta if delta is None else delta, widget=widget
+        )
+
+    gui.root.bind_all("<MouseWheel>", on_wheel, add="+")
+    # X11 reports wheel turns as buttons 4 and 5 rather than ``<MouseWheel>``.
+    gui.root.bind_all("<Button-4>", lambda e: on_wheel(e, 120), add="+")
+    gui.root.bind_all("<Button-5>", lambda e: on_wheel(e, -120), add="+")
+
+
 def scaled_pixels(gui: "TalksReducerGUI", value: int) -> int:
     """Convert *value* 96-DPI pixels to the display's pixels.
 
@@ -112,11 +209,10 @@ def apply_drop_zone_height(gui: "TalksReducerGUI", *, simple: bool) -> None:
         # The frame's own padding sits inside the configured height, so add it
         # back: the visible zone is the label, not the frame around it.
         padding = int(getattr(gui, "PADDING", 0))
-        frame.configure(
-            height=scaled_pixels(gui, DROP_ZONE_FULL_HEIGHT) + 2 * padding
-        )
+        frame.configure(height=scaled_pixels(gui, DROP_ZONE_FULL_HEIGHT) + 2 * padding)
         frame.grid_propagate(False)
         main.rowconfigure(0, weight=0)
+
 
 # Vertical gap above every option row in ``basic_options_frame``. The group
 # headings that used to space the panel out are gone, so the gap itself is all
@@ -1278,8 +1374,21 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         )
         gui.update_status_label.grid(row=0, column=3, sticky="w", padx=(8, 0))
 
-    gui.advanced_frame = gui.ttk.Frame(gui.options_frame, padding=0)
-    gui.advanced_frame.grid(row=4, column=0, columnspan=2, sticky="nsew")
+    # The Advanced block is taller than the full layout can show, so its rows
+    # live in a scroll area sized by ``refit_advanced``. ``advanced_container`` is
+    # what gets shown and hidden; ``advanced_frame`` is the inner frame every row
+    # below is built into. Never ``grid`` the inner frame itself: the canvas owns
+    # its placement, and grid would silently take it away.
+    gui.advanced_area = ScrollableFrame(
+        gui.options_frame,
+        tk=gui.tk,
+        ttk=gui.ttk,
+        scroll_step=scaled_pixels(gui, ADVANCED_SCROLL_STEP),
+    )
+    gui.advanced_container = gui.advanced_area.container
+    gui.advanced_canvas = gui.advanced_area.canvas
+    gui.advanced_container.grid(row=4, column=0, columnspan=2, sticky="nsew")
+    gui.advanced_frame = gui.advanced_area.inner
     gui.advanced_frame.columnconfigure(1, weight=1)
 
     # Watch-directory chooser on a single row (checkbox + path + Browse), placed
@@ -1520,7 +1629,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.log_frame.rowconfigure(0, weight=1)
 
     gui.log_text = gui.tk.Text(
-        gui.log_frame, wrap="word", height=10, state=gui.tk.DISABLED
+        gui.log_frame, wrap="word", height=LOG_MIN_LINES, state=gui.tk.DISABLED
     )
     gui.log_text.grid(row=0, column=0, sticky="nsew")
     log_scroll = gui.ttk.Scrollbar(
@@ -1551,6 +1660,8 @@ def build_layout(gui: "TalksReducerGUI") -> None:
 
     if not bool(getattr(gui, "server_managed", False)):
         gui.activity_frame.grid_remove()
+
+    bind_advanced_refit(gui)
 
     # Resume watching a persisted directory as soon as the layout is ready.
     watch = getattr(gui, "watch", None)
@@ -2241,7 +2352,7 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
             gui.activity_frame.grid_remove()
         if hasattr(gui, "button_frame"):
             gui.button_frame.grid_remove()
-        gui.advanced_frame.grid_remove()
+        gui.advanced_container.grid_remove()
         gui.run_after_drop_var.set(True)
         # Show the preset selector only when at least one preset exists.
         if hasattr(gui, "simple_preset_frame") and getattr(
@@ -2279,7 +2390,8 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
         if hasattr(gui, "button_frame"):
             gui.button_frame.grid()
         if gui.advanced_visible.get():
-            gui.advanced_frame.grid()
+            gui.advanced_container.grid()
+            schedule_advanced_refit(gui)
         if hasattr(gui, "simple_preset_frame"):
             # Hides the whole preset row, including its Open output copy.
             gui.simple_preset_frame.grid_remove()
