@@ -1515,6 +1515,73 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     gui.drop_zone.focus_set.assert_called_once()
 
 
+def _scaling_root(scaling: float) -> SimpleNamespace:
+    return SimpleNamespace(tk=SimpleNamespace(call=lambda *args: scaling))
+
+
+def test_scaled_pixels_follows_tk_scaling():
+    """50 logical pixels stay 50 at 96 DPI and grow with display scaling."""
+
+    assert layout.scaled_pixels(SimpleNamespace(root=_scaling_root(96 / 72)), 50) == 50
+    assert layout.scaled_pixels(SimpleNamespace(root=_scaling_root(2.0)), 50) == 75
+
+
+def test_scaled_pixels_falls_back_without_a_tk_root():
+    assert layout.scaled_pixels(SimpleNamespace(root=SimpleNamespace()), 50) == 50
+
+
+def test_drop_zone_is_fixed_height_in_full_mode():
+    gui = SimpleNamespace(
+        root=_scaling_root(96 / 72),
+        PADDING=10,
+        main_frame=make_widget_mock(),
+        input_frame=make_widget_mock(),
+    )
+
+    layout.apply_drop_zone_height(gui, simple=False)
+
+    # The frame's padding is added back so the visible label is the full 50px.
+    gui.input_frame.configure.assert_called_once_with(
+        height=layout.DROP_ZONE_FULL_HEIGHT + 20
+    )
+    gui.input_frame.grid_propagate.assert_called_once_with(False)
+    gui.main_frame.rowconfigure.assert_called_once_with(0, weight=0)
+
+
+def test_drop_zone_stretches_again_in_simple_mode():
+    gui = SimpleNamespace(
+        root=_scaling_root(96 / 72),
+        main_frame=make_widget_mock(),
+        input_frame=make_widget_mock(),
+    )
+
+    layout.apply_drop_zone_height(gui, simple=True)
+
+    gui.input_frame.grid_propagate.assert_called_once_with(True)
+    gui.main_frame.rowconfigure.assert_called_once_with(0, weight=1)
+
+
+@pytest.mark.parametrize("simple", [True, False])
+def test_apply_simple_mode_sets_the_drop_zone_height(monkeypatch, simple):
+    monkeypatch.setattr(layout, "apply_window_size", Mock())
+    apply_height = Mock()
+    monkeypatch.setattr(layout, "apply_drop_zone_height", apply_height)
+    gui = SimpleNamespace(
+        tk=SimpleNamespace(LEFT="left", RIGHT="right"),
+        simple_mode_var=SimpleNamespace(get=lambda: simple),
+        basic_options_frame=make_widget_mock(),
+        log_frame=make_widget_mock(),
+        advanced_frame=make_widget_mock(),
+        run_after_drop_var=SimpleNamespace(set=Mock()),
+        advanced_visible=SimpleNamespace(get=lambda: False),
+        drop_zone=Mock(),
+    )
+
+    layout.apply_simple_mode(gui)
+
+    apply_height.assert_called_once_with(gui, simple=simple)
+
+
 def test_apply_simple_mode_simple_branch_keeps_checkboxes_without_presets(monkeypatch):
     """With no presets the resolution checkboxes stay visible in Simple mode."""
 

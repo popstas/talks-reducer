@@ -70,6 +70,54 @@ VALUE_ROW_TRAILING_GAP = (12, 0)
 # so this is only their minimum: both stretch to split the row's slack equally.
 CUT_SLIDER_LENGTH = 120
 
+# Height of the drop zone in the full layout, in 96-DPI pixels (``scaled_pixels``
+# converts it for the display). Fixed so the zone no longer absorbs the window's
+# slack and resizes whenever a panel such as Cut video opens or closes.
+DROP_ZONE_FULL_HEIGHT = 50
+
+
+def scaled_pixels(gui: "TalksReducerGUI", value: int) -> int:
+    """Convert *value* 96-DPI pixels to the display's pixels.
+
+    The process is DPI aware, so a bare pixel count in Tk is a physical pixel
+    and would shrink on a 150% display. ``tk scaling`` is pixels per point —
+    ``96 / 72`` at 100% — which gives the factor. Without a usable Tk root (the
+    stub suite) the value is returned unchanged.
+    """
+
+    try:
+        scaling = float(gui.root.tk.call("tk", "scaling"))
+    except Exception:
+        return value
+    return max(1, round(value * scaling / (96 / 72)))
+
+
+def apply_drop_zone_height(gui: "TalksReducerGUI", *, simple: bool) -> None:
+    """Pin the drop zone to ``DROP_ZONE_FULL_HEIGHT`` in full mode only.
+
+    Simple mode is little more than the drop zone, so there it keeps stretching
+    with the window. In full mode ``input_frame`` stops propagating its content
+    size and its row loses its weight, which leaves the window's slack to the
+    log and keeps the zone the same height whatever opens around it.
+    """
+
+    main = getattr(gui, "main_frame", None)
+    frame = getattr(gui, "input_frame", None)
+    if main is None or frame is None:
+        return
+    if simple:
+        frame.grid_propagate(True)
+        main.rowconfigure(0, weight=1)
+    else:
+        # The frame's own padding sits inside the configured height, so add it
+        # back: the visible zone is the label, not the frame around it.
+        padding = int(getattr(gui, "PADDING", 0))
+        frame.configure(
+            height=scaled_pixels(gui, DROP_ZONE_FULL_HEIGHT) + 2 * padding
+        )
+        frame.grid_propagate(False)
+        main.rowconfigure(0, weight=0)
+
 # Vertical gap above every option row in ``basic_options_frame``. The group
 # headings that used to space the panel out are gone, so the gap itself is all
 # that separates one setting from the next — hence a single shared value rather
@@ -766,10 +814,13 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     main.grid(row=0, column=0, sticky="nsew")
     gui.root.columnconfigure(0, weight=1)
     gui.root.rowconfigure(0, weight=1)
+    gui.main_frame = main
 
-    # Input selection frame
+    # Input selection frame; ``apply_drop_zone_height`` fixes its height in the
+    # full layout and lets it stretch in Simple mode.
     input_frame = gui.ttk.Frame(main, padding=gui.PADDING)
     input_frame.grid(row=0, column=0, sticky="nsew")
+    gui.input_frame = input_frame
     main.rowconfigure(0, weight=1)
     main.columnconfigure(0, weight=1)
     input_frame.columnconfigure(0, weight=1)
@@ -2177,6 +2228,7 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
     """Toggle between simple and full layouts."""
 
     simple = gui.simple_mode_var.get()
+    apply_drop_zone_height(gui, simple=simple)
     if simple:
         gui.basic_options_frame.grid_remove()
         # The Advanced-only preset management strip has no place in Simple mode.
