@@ -66,6 +66,10 @@ CHECKBOX_ROW_GAP = (24, 0)
 # buttons.
 VALUE_ROW_TRAILING_GAP = (12, 0)
 
+# Requested length of each Cut video range slider. Start and End share one row,
+# so this is only their minimum: both stretch to split the row's slack equally.
+CUT_SLIDER_LENGTH = 120
+
 # Vertical gap above every option row in ``basic_options_frame``. The group
 # headings that used to space the panel out are gone, so the gap itself is all
 # that separates one setting from the next — hence a single shared value rather
@@ -592,25 +596,28 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
 
     The panel hosts two linked sliders (start ≤ end, range ``0..duration``) and,
     next to each, a text entry for typing the in/out timecode by hand (supporting
-    millisecond precision via ``HH:MM:SS.mmm``). A tall **Convert** button spans
-    both slider rows so that, when Simple mode is off, the user can review the
-    trim before processing starts instead of converting immediately. The panel is
+    millisecond precision via ``HH:MM:SS.mmm``). Start and End share one row —
+    ``Start [slider][time]  End [slider][time]  [Convert] [Remove only]`` — so the
+    buttons are a single line tall; both sliders take the row's slack equally.
+    **Convert** lets the user review the trim before processing starts instead of
+    converting immediately when Simple mode is off. The panel is
     shown only when ``cut_enabled_var`` is set and is available in both Simple and
     Advanced layouts. Slider movement is forwarded to
     ``gui._on_cut_slider_change`` so the application can clamp the handles.
 
-    A third **Remove** row holds an entry with the fragments to drop from the
+    A second **Remove** row holds an entry with the fragments to drop from the
     middle of the video (``HH:MM:SS-HH:MM:SS`` list, committed on Enter or focus
-    loss) and a **Mark cuts…** button that opens mpv.net to mark them. The
-    label carries a ``?`` link to the how-to article (``REMOVE_ARTICLE_URL``),
-    since the marking keys are not discoverable from the panel itself. A tall
-    **Remove only** button in the last column runs a fast remove-only pass; it is
-    revealed by ``gui._update_cut_convert_button`` once ranges exist.
+    loss) and a **Mark cuts…** button, under Convert, that opens mpv.net to mark
+    them. The label carries a ``?`` link to the how-to article
+    (``REMOVE_ARTICLE_URL``), since the marking keys are not discoverable from the
+    panel itself. **Remove only**, last on the first row, runs a fast remove-only
+    pass; it is revealed by ``gui._update_cut_convert_button`` once ranges exist.
     """
 
     panel = gui.ttk.Frame(parent)
     panel.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 0))
-    panel.columnconfigure(1, weight=1)
+    panel.columnconfigure(1, weight=1, uniform="cut_slider")
+    panel.columnconfigure(4, weight=1, uniform="cut_slider")
     gui.cut_panel = panel
 
     gui.ttk.Label(panel, text="Start").grid(row=0, column=0, sticky="w")
@@ -623,7 +630,7 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
         resolution=0.001,
         showvalue=False,
         command=lambda _value: gui._on_cut_slider_change("start"),
-        length=240,
+        length=CUT_SLIDER_LENGTH,
         highlightthickness=0,
     )
     gui.cut_start_slider.grid(row=0, column=1, sticky="ew", padx=(8, 8))
@@ -634,7 +641,7 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
     gui.cut_start_entry.bind("<Return>", lambda _e: gui._on_cut_entry_commit("start"))
     gui.cut_start_entry.bind("<FocusOut>", lambda _e: gui._on_cut_entry_commit("start"))
 
-    gui.ttk.Label(panel, text="End").grid(row=1, column=0, sticky="w", pady=(4, 0))
+    gui.ttk.Label(panel, text="End").grid(row=0, column=3, sticky="w", padx=(16, 0))
     gui.cut_end_slider = gui.tk.Scale(
         panel,
         variable=gui.cut_end_var,
@@ -644,14 +651,14 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
         resolution=0.001,
         showvalue=False,
         command=lambda _value: gui._on_cut_slider_change("end"),
-        length=240,
+        length=CUT_SLIDER_LENGTH,
         highlightthickness=0,
     )
-    gui.cut_end_slider.grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(4, 0))
+    gui.cut_end_slider.grid(row=0, column=4, sticky="ew", padx=(8, 8))
     gui.cut_end_entry = gui.ttk.Entry(
         panel, textvariable=gui.cut_end_text_var, width=13, justify="center"
     )
-    gui.cut_end_entry.grid(row=1, column=2, sticky="e", pady=(4, 0))
+    gui.cut_end_entry.grid(row=0, column=5, sticky="e")
     gui.cut_end_entry.bind("<Return>", lambda _e: gui._on_cut_entry_commit("end"))
     gui.cut_end_entry.bind("<FocusOut>", lambda _e: gui._on_cut_entry_commit("end"))
 
@@ -660,9 +667,7 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
         text="Convert",
         command=gui._start_run,
     )
-    gui.cut_convert_button.grid(
-        row=0, column=3, rowspan=2, sticky="nsew", padx=(8, 0), pady=(0, 0)
-    )
+    gui.cut_convert_button.grid(row=0, column=6, sticky="ew", padx=(8, 0))
 
     remove_label = gui.ttk.Frame(panel)
     gui.ttk.Label(remove_label, text="Remove").pack(side=gui.tk.LEFT)
@@ -673,23 +678,27 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
         command=lambda: webbrowser.open(REMOVE_ARTICLE_URL),
     )
     gui.remove_help_button.pack(side=gui.tk.LEFT)
-    remove_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
+    remove_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
     gui.remove_ranges_entry = gui.ttk.Entry(
         panel, textvariable=gui.remove_ranges_text_var
     )
     gui.remove_ranges_entry.grid(
-        row=2, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(4, 0)
+        row=1, column=1, columnspan=5, sticky="ew", padx=(8, 0), pady=(4, 0)
     )
     gui.remove_ranges_entry.bind("<Return>", lambda _e: cut_marks_ui.commit_text(gui))
     gui.remove_ranges_entry.bind("<FocusOut>", lambda _e: cut_marks_ui.commit_text(gui))
     gui.mark_cuts_button = gui.ttk.Button(
         panel, text="Mark cuts…", command=lambda: cut_marks_ui.open_marker(gui)
     )
-    gui.mark_cuts_button.grid(row=2, column=3, sticky="ew", padx=(8, 0), pady=(4, 0))
+    # Spans the Remove only column too, so the row ends where the one above does
+    # (that column has zero width while Remove only is hidden).
+    gui.mark_cuts_button.grid(
+        row=1, column=6, columnspan=2, sticky="ew", padx=(8, 0), pady=(4, 0)
+    )
     gui.remove_only_button = gui.ttk.Button(
         panel, text="Remove only", command=lambda: gui._start_run(remove_only=True)
     )
-    gui.remove_only_button.grid(row=0, column=4, rowspan=2, sticky="nsew", padx=(8, 0))
+    gui.remove_only_button.grid(row=0, column=7, sticky="ew", padx=(8, 0))
 
     sliders = getattr(gui, "_sliders", None)
     if isinstance(sliders, list):

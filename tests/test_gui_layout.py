@@ -759,6 +759,37 @@ def test_build_cut_panel_constructs_widgets(monkeypatch):
     assert not gui.cut_panel.grid_remove_calls
 
 
+def test_cut_panel_puts_start_and_end_on_one_row(monkeypatch):
+    """Start and End share row 0, so Convert needs no rowspan and stays one line."""
+
+    gui = _build_layout_with_cut(monkeypatch, cut_enabled=True)
+
+    def cell(widget):
+        kwargs = widget.grid_calls[0][1]
+        return kwargs["row"], kwargs["column"]
+
+    assert cell(gui.cut_start_slider) == (0, 1)
+    assert cell(gui.cut_start_entry) == (0, 2)
+    assert cell(gui.cut_end_slider) == (0, 4)
+    assert cell(gui.cut_end_entry) == (0, 5)
+    assert cell(gui.cut_convert_button) == (0, 6)
+    assert cell(gui.remove_only_button) == (0, 7)
+    assert cell(gui.remove_ranges_entry) == (1, 1)
+    assert cell(gui.mark_cuts_button) == (1, 6)
+    for widget in (
+        gui.cut_start_slider,
+        gui.cut_start_entry,
+        gui.cut_end_slider,
+        gui.cut_end_entry,
+        gui.cut_convert_button,
+        gui.remove_only_button,
+        gui.remove_ranges_entry,
+        gui.mark_cuts_button,
+    ):
+        for _, kwargs in widget.grid_calls:
+            assert kwargs.get("rowspan", 1) == 1
+
+
 def test_remove_help_button_opens_the_article(monkeypatch):
     opened = []
     monkeypatch.setattr(layout.webbrowser, "open", lambda url: opened.append(url))
