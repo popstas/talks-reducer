@@ -36,6 +36,8 @@ re-encoding them to much smaller files.
   ([how](#command-line)).
 - **360° videos** — keep the 360° metadata through gluing and downscaling
   ([details](#360-videos)).
+- **Long pause speed** — play silences longer than a minute (configurable) at a second,
+  faster speed, e.g. ×20 for script runs with the microphone off ([how](#command-line)).
 
 ## Install
 
@@ -145,6 +147,16 @@ Advanced settings add **VAD threshold** (0.05-0.95), **Voice padding, ms** (0-20
 on (Simple mode's Voice preset uses the remembered values). The progress bar gets a **Voice
 detection** stage between audio extraction and audio processing, and the log prints
 `Voice detection (lite): 2.4 s, speech 61% of audio`.
+
+`--long-pause-speed 20` plays every silent stretch longer than `--long-pause-seconds`
+(default 60) at ×20 instead of the silent speed: an hour of waiting for scripts takes 3
+minutes instead of 6 at ×10. Short sounds inside the stretch (up to 2 s, e.g. a notification)
+do not break it and are sped up with it. It is off by default and is not part of presets. In
+the desktop GUI it is the **Speedup x[20] pauses longer than [60] seconds** checkbox at the end
+of the **Silent** row in Advanced mode, remembered between runs and ignored in Simple mode.
+A speed that is not faster than the silent speed is skipped, and the log prints
+`Long pauses: 1 stretch, 52.1 min at x20`. Remote mode sends it to the server; an older server
+would ignore it, so the client stops with an error asking you to update the server.
 
 **Presets** are saved bundles of processing settings (resolution, speeds, threshold, codec, fps,
 Speedup no voice) you author once in the desktop GUI's Advanced mode and reuse everywhere —
