@@ -6,7 +6,9 @@ import numpy as np
 import pytest
 
 from talks_reducer.chunks import (
+    LONG_PAUSE_SPEED_INDEX,
     REMOVED_SPEED_INDEX,
+    apply_long_pauses,
     apply_remove_ranges,
     build_chunks,
     detect_loud_frames,
@@ -176,3 +178,58 @@ def test_apply_remove_ranges_unsorted_input() -> None:
         [50, 60, R],
         [60, 100, 1],
     ]
+
+
+def test_apply_long_pauses_merges_across_short_sound():
+    chunks = [[0, 10, 1], [10, 100, 0], [100, 105, 1], [105, 200, 0], [200, 210, 1]]
+
+    result = apply_long_pauses(chunks, min_frames=150, tolerance_frames=10)
+
+    assert result == [[0, 10, 1], [10, 200, LONG_PAUSE_SPEED_INDEX], [200, 210, 1]]
+
+
+def test_apply_long_pauses_sound_longer_than_tolerance_splits_stretch():
+    chunks = [[0, 100, 0], [100, 130, 1], [130, 200, 0]]
+
+    assert apply_long_pauses(chunks, min_frames=150, tolerance_frames=10) == chunks
+
+
+def test_apply_long_pauses_single_silence_over_threshold():
+    chunks = [[0, 5, 1], [5, 205, 0], [205, 210, 1]]
+
+    result = apply_long_pauses(chunks, min_frames=200, tolerance_frames=10)
+
+    assert result[1] == [5, 205, LONG_PAUSE_SPEED_INDEX]
+
+
+def test_apply_long_pauses_short_stretch_left_unchanged():
+    chunks = [[0, 50, 0], [50, 55, 1], [55, 100, 0]]
+
+    assert apply_long_pauses(chunks, min_frames=150, tolerance_frames=10) == chunks
+
+
+def test_apply_long_pauses_edge_sounds_not_absorbed():
+    # Short sounds at the ends of the recording are outside any silent stretch.
+    chunks = [[0, 3, 1], [3, 200, 0], [200, 203, 1]]
+
+    result = apply_long_pauses(chunks, min_frames=150, tolerance_frames=10)
+
+    assert result == [[0, 3, 1], [3, 200, LONG_PAUSE_SPEED_INDEX], [200, 203, 1]]
+
+
+def test_apply_long_pauses_threshold_is_inclusive_and_returns_copies():
+    chunks = [[0, 150, 0]]
+
+    result = apply_long_pauses(chunks, min_frames=150, tolerance_frames=10)
+
+    assert result == [[0, 150, LONG_PAUSE_SPEED_INDEX]]
+    assert chunks == [[0, 150, 0]]
+
+
+def test_apply_long_pauses_trailing_short_sound_stays_outside_stretch():
+    # A short sound right before speech resumes is not followed by silence.
+    chunks = [[0, 200, 0], [200, 203, 1]]
+
+    result = apply_long_pauses(chunks, min_frames=150, tolerance_frames=10)
+
+    assert result == [[0, 200, LONG_PAUSE_SPEED_INDEX], [200, 203, 1]]
