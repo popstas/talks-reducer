@@ -87,6 +87,9 @@ Status: draft, awaiting approval. Date: 2026-11-22.
 
 ### GUI
 
+- **Изменено по просьбе пользователя во время реализации:** контролы стоят не
+  отдельной строкой, а в конце строки **Silent**, после кнопок скорости
+  (`add_segmented(..., value_row=True)`). Ниже — исходный вариант.
 - Строка в панели basic options (видна в Advanced, скрыта в Simple mode
   вместе с панелью), сразу под строкой **Silent**:
   `[✓] Speedup x[20] pauses longer than [60] seconds`. Это чекбокс, затем

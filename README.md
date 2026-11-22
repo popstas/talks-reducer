@@ -151,10 +151,13 @@ detection** stage between audio extraction and audio processing, and the log pri
 `--long-pause-speed 20` plays every silent stretch longer than `--long-pause-seconds`
 (default 60) at ×20 instead of the silent speed: an hour of waiting for scripts takes 3
 minutes instead of 6 at ×10. Short sounds inside the stretch (up to 2 s, e.g. a notification)
-do not break it and are sped up with it. It is off by default and is not part of presets. In
+do not break it and are sped up with it; a short word with less than 2 s of silence between it
+and speech stays with the speech. It is off by default and is not part of presets. In
 the desktop GUI it is the **Speedup x[20] pauses longer than [60] seconds** checkbox at the end
 of the **Silent** row in Advanced mode, remembered between runs and ignored in Simple mode.
-A speed that is not faster than the silent speed is skipped, and the log prints
+A speed that is not faster than the silent speed is skipped. With both regular speeds at 1 the
+output still gets the `_speedup` suffix. Shortcut flags (`talks-reducer.exe video.mp4
+--long-pause-speed 20`) apply to that launch without ticking the checkbox. The log prints
 `Long pauses: 1 stretch, 52.1 min at x20`. Remote mode sends it to the server; an older server
 would ignore it, so the client stops with an error asking you to update the server.
 
