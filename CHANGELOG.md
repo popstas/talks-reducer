@@ -1,6 +1,19 @@
 # Changelog
 
 
+## v1.10.1 - 2026-11-22
+
+### Features
+
+- Scroll the Advanced block inside the window
+- Keep the drop zone 50px tall in the full layout
+- Put Cut video start and end on one row
+- Centre long-pause numbers and align Speedup no voice
+
+### Bug Fixes
+
+- Let the Connected clients panel shrink instead of clipping
+
 ## v1.10.0 - 2026-11-22
 
 ### Features
