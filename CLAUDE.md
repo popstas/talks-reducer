@@ -25,7 +25,14 @@ files as soon as you drop them. Uncheck the box to return to the full layout
 with file pickers, the Run button, and detailed logging.
 - **Input drop zone** — drag files or folders from your desktop, click to open
 the system file picker, or add them via the Explorer/Finder dialog; duplicates
-are ignored.
+are ignored. In the full layout it is pinned to `DROP_ZONE_FULL_HEIGHT` (50px,
+scaled by `layout.scaled_pixels` from `tk scaling`) by `apply_drop_zone_height`:
+`input_frame` stops propagating and its row in `main_frame` loses its weight, so
+the zone no longer grows and shrinks as Cut video or Advanced open — the log row
+takes the slack instead. The configured frame height adds back `2 * PADDING`,
+because the frame's padding sits inside it and the visible zone is the label.
+Simple mode restores the weight and propagation, so there the zone still fills
+the window.
 - **Glue multiple inputs** — when a run resolves to 2+ media files (a multi-file
 drop, a picker selection, or a folder that expands), the worker asks
 `_ask_glue_confirmation` — a `messagebox.askyesno` marshalled onto the UI thread
@@ -185,7 +192,10 @@ itself when the sliders already matched the defaults, but a button rendered as "
 not simultaneously be disabled, so `update_basic_reset_state` no longer disables it — clicking
 it always re-applies the defaults. The **Speedup no voice** checkbox (`gui.vad_check`, bound to
 `vad_var`) is packed into `basic_presets_frame` right after that macro row, so it reads as part of
-the Silence speedup row and Simple mode hides it with the rest of the basic options. While it is on,
+the Silence speedup row and Simple mode hides it with the rest of the basic options. It is packed
+with `VALUE_ROW_TRAILING_GAP` (12px), the same gap as **Add codec suffix** after the Codec buttons
+and the long-pause group after the Silent buttons — not `CHECKBOX_ROW_GAP` (24px), which belongs to
+the Simple mode / Open output / Cut video row. While it is on,
 `update_threshold_for_vad` calls `SegmentedChoice.set_enabled(False)` on the Threshold control and
 swaps its tooltip (`set_tooltip`) for `VAD_THRESHOLD_TOOLTIP`, because the detector replaces the
 volume threshold and a live-looking control that does nothing misleads. `set_enabled` blocks only
@@ -209,8 +219,8 @@ in Simple mode, so its override has to be held and released explicitly.
 - **Long pause speed** — `Speedup x[20] pauses longer than [60] seconds` trails the **Silent**
 buttons on the same line: `add_segmented(..., value_row=True)` wraps the buttons in a frame
 (`control.value_row`) and `layout.build_long_pause_controls` packs the checkbox
-(`long_pause_enabled_var`) and two `ttk.Entry` fields (`long_pause_speed_text_var`,
-`long_pause_seconds_text_var`) after them. It is **not** a preset field and is kept out of
+(`long_pause_enabled_var`) and two centred (`justify="center"`) `ttk.Entry` fields
+(`long_pause_speed_text_var`, `long_pause_seconds_text_var`) after them. It is **not** a preset field and is kept out of
 `_basic_defaults`/`_slider_updaters`. Entries commit on Enter/FocusOut through
 `layout.parse_clamped` (speed 1–100, seconds 5–3600, a non-number restores the persisted value),
 and `_collect_arguments` parses the entry *text* with the same helper so a value typed but not
@@ -242,8 +252,12 @@ order. Every `pack` of those two (build *and* both restore paths) passes the sam
 - **Cut video** — an **Advanced-only** checkbox (`apply_simple_mode` hides
 `cut_check`/`cut_panel` in Simple mode) that reveals a collapsible trim panel
 with two linked range sliders (start ≤ end, range `0..duration`), each paired
-with an editable `ttk.Entry` time field (`cut_start_text_var`/`cut_end_text_var`)
-and a tall **Convert** button that spans both slider rows. On file-select the
+with an editable `ttk.Entry` time field (`cut_start_text_var`/`cut_end_text_var`),
+all on **one** row — `Start [slider][time]  End [slider][time]  [Convert] [Remove only]`
+(columns 0–7, the two sliders sharing the slack via `uniform="cut_slider"`,
+`CUT_SLIDER_LENGTH` only their minimum) — so Convert and Remove only are a single
+line tall. The Remove row sits below it, with **Mark cuts…** under Convert spanning
+the Remove only column too, so both rows end at the same edge. On file-select the
 slider range is seeded from `get_video_duration` (ffprobe). The entries mirror
 the handles as `HH:MM:SS.mmm` via `format_timecode(..., milliseconds=True)` and
 accept manual edits parsed by `parse_timecode` (`_on_cut_entry_commit`), so
@@ -290,7 +304,23 @@ though the folder chooser is Advanced-only. The enabled flag and chosen path
 persist via `GUIPreferences` (`watch_enabled`, `watch_directory`).
 - **Advanced** — reveals optional controls for the output path, temp folder,
 timing/audio knobs mirrored from the command line, and an appearance picker
-that can force dark or light mode or follow your operating system.
+that can force dark or light mode or follow your operating system. The block
+is taller than the full layout can show, so its rows live in a scroll area
+(`gui/scrollable.py:ScrollableFrame` → `gui.advanced_area`): `advanced_container`
+is what `toggle_advanced`/`apply_simple_mode` show and hide, `advanced_canvas`
+hosts the inner `advanced_frame` every row is built into — never `grid` that
+inner frame, the canvas owns it. `layout.refit_advanced` sets the canvas height
+to `advanced_space_left` (main's actual height minus everything else at its
+requested size, the log counted at `LOG_MIN_LINES`), never below
+`ADVANCED_MIN_HEIGHT`; the formula ignores the canvas's current height, so a
+refit converges in one step. `schedule_advanced_refit` collapses bursts into one
+`after_idle`, fired by `<Configure>` on `main_frame` (window resize), `log_frame`
+(the only weighted row left in the full layout, so it resizes whenever a
+sibling such as Cut video changes height) and `advanced_frame` (its own rows).
+The scrollbar shows only when the content does not fit; the wheel is bound with
+`bind_all` but `scroll_by_wheel` acts only over the block and only while it
+scrolls (one notch = `ADVANCED_SCROLL_STEP`), so the log keeps its own wheel.
+The canvas is plain Tk, so `apply_theme` paints it (`advanced_canvas` key).
 - **Check updates** — a platform-gated button (`update_checker.is_update_check_supported()`
 returns `True` on Windows and macOS). On **Windows** the button lives in the
 always-visible `button_frame` and downloads/launches the release installer, then
@@ -367,7 +397,8 @@ locally. The server's queue concurrency is
 configurable via `--concurrency` (`server_args.py` → `build_interface`), but file
 transfers bypass the queue so it only affects concurrent processing.
 
-Progress updates stream into the 10-line log panel while the processing runs in
+Progress updates stream into the log panel (a `LOG_MIN_LINES`-line floor that grows with the
+window) while the processing runs in
 a background thread. Once every queued job succeeds an **Open last output**
 button appears so you can jump straight to the exported file in your system
 file manager.
