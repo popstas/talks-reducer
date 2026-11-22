@@ -3011,13 +3011,19 @@ def _long_pause_gui(**preferences):
     return gui
 
 
-def test_long_pause_row_sits_under_silent():
+def test_long_pause_controls_trail_silent_buttons():
     gui = _long_pause_gui()
 
+    value_row = gui.silent_speed_control.value_row
+    assert value_row.args[0] is gui.basic_options_frame
+    assert value_row.grid_calls[0][1]["row"] == 4
+    assert value_row.grid_calls[0][1]["column"] == 1
+    assert gui.silent_speed_control.frame.args[0] is value_row
+    assert gui.silent_speed_control.frame.pack_calls == [((), {"side": "left"})]
+
     row = gui.long_pause_check.args[0]
-    assert row.args[0] is gui.basic_options_frame
-    assert row.grid_calls[0][1]["row"] == 5
-    assert row.grid_calls[0][1]["columnspan"] == 3
+    assert row.args[0] is value_row
+    assert row.pack_calls == [((), {"side": "left", "padx": (12, 0)})]
     assert gui.long_pause_check.kwargs["text"] == "Speedup x"
     assert gui.long_pause_check.kwargs["variable"] is gui.long_pause_enabled_var
     assert gui.long_pause_speed_entry.args[0] is row

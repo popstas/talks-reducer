@@ -1025,13 +1025,14 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             10.0,
         )
     )
-    add_segmented(
+    gui.silent_speed_control = add_segmented(
         gui,
         gui.basic_options_frame,
         "Silent",
         gui.silent_speed_var,
         row=4,
         setting_key="silent_speed",
+        value_row=True,
         options=[
             Option(10.0, "10"),
             Option(5.0, "5"),
@@ -1041,8 +1042,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         default_value=DEFAULT_SILENT_SPEED,
         custom=CustomSpec(minimum=1.0, maximum=10.0),
     )
-
-    build_long_pause_row(gui, gui.basic_options_frame, row=5)
+    build_long_pause_controls(gui, gui.silent_speed_control.value_row)
 
     gui.sounded_speed_var = gui.tk.DoubleVar(
         value=min(
@@ -1058,7 +1058,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Sounded",
         gui.sounded_speed_var,
-        row=6,
+        row=5,
         setting_key="sounded_speed",
         options=[
             Option(1.0, "1"),
@@ -1081,7 +1081,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Threshold",
         gui.silent_threshold_var,
-        row=7,
+        row=6,
         setting_key="silent_threshold",
         options=[
             Option(0.01, "0.01"),
@@ -1102,10 +1102,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     update_threshold_for_vad(gui)
 
     gui.ttk.Label(gui.basic_options_frame, text="Mode").grid(
-        row=8, column=0, sticky="w", pady=SETTING_ROW_PADY
+        row=7, column=0, sticky="w", pady=SETTING_ROW_PADY
     )
     mode_choice = gui.ttk.Frame(gui.basic_options_frame)
-    mode_choice.grid(row=8, column=1, sticky="w", pady=SETTING_ROW_PADY)
+    mode_choice.grid(row=7, column=1, sticky="w", pady=SETTING_ROW_PADY)
     gui.processing_mode_control = SegmentedChoice(
         mode_choice,
         [Option("local", "Local"), Option("remote", "Remote")],
@@ -1153,16 +1153,16 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text=format_local_server_url(local_server_url) if server_managed else "",
     )
     gui.local_server_url_label.grid(
-        row=8, column=2, sticky="w", padx=(8, 0), pady=SETTING_ROW_PADY
+        row=7, column=2, sticky="w", padx=(8, 0), pady=SETTING_ROW_PADY
     )
     if not (server_managed and local_server_url):
         gui.local_server_url_label.grid_remove()
 
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
-        row=9, column=0, sticky="w", pady=SETTING_ROW_PADY
+        row=8, column=0, sticky="w", pady=SETTING_ROW_PADY
     )
     theme_choice = gui.ttk.Frame(gui.basic_options_frame)
-    theme_choice.grid(row=9, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY)
+    theme_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY)
     gui.theme_control = SegmentedChoice(
         theme_choice,
         [Option("os", "OS"), Option("light", "Light"), Option("dark", "Dark")],
@@ -1757,8 +1757,11 @@ _LONG_PAUSE_FIELDS = (
 )
 
 
-def build_long_pause_row(gui: "TalksReducerGUI", parent, *, row: int) -> None:
-    """Add the "Speedup x[N] pauses longer than [S] seconds" row to *parent*.
+def build_long_pause_controls(gui: "TalksReducerGUI", parent) -> None:
+    """Pack "Speedup x[N] pauses longer than [S] seconds" into *parent*.
+
+    *parent* is the Silent row's value frame, so the controls trail the silent
+    speed buttons on the same line: both describe how silence is sped up.
 
     It is not registered in ``_basic_defaults``/``_slider_updaters``: it is not
     a preset field, so the Silence ×5 macro and preset matching leave it alone.
@@ -1774,7 +1777,7 @@ def build_long_pause_row(gui: "TalksReducerGUI", parent, *, row: int) -> None:
         )
 
     frame = gui.ttk.Frame(parent)
-    frame.grid(row=row, column=0, columnspan=3, sticky="w", pady=SETTING_ROW_PADY)
+    frame.pack(side=gui.tk.LEFT, padx=(12, 0))
     gui.long_pause_check = gui.ttk.Checkbutton(
         frame, text="Speedup x", variable=gui.long_pause_enabled_var
     )
@@ -1881,6 +1884,7 @@ def add_segmented(
     help_url: str | None = None,
     pady: "int | tuple[int, int]" = SETTING_ROW_PADY,
     basic: bool = True,
+    value_row: bool = False,
 ) -> "SegmentedChoice":
     """Add a labeled row of choice buttons to *parent* and wire it into presets.
 
@@ -1900,6 +1904,11 @@ def add_segmented(
     ``_slider_updaters`` (so persistence and programmatic writes work) but stay
     out of ``_basic_defaults``/``_basic_variables``, which would make the
     **Silence ×5** reset macro and the basic-preset highlight touch them.
+
+    *value_row* wraps the buttons in a frame exposed as ``control.value_row`` so
+    a caller can pack extra controls after them on the same line (the Silent
+    row's long-pause controls), the way the Codec row holds **Add codec
+    suffix**.
     """
 
     help_button = None
@@ -1921,8 +1930,9 @@ def add_segmented(
         gui.preferences.update(setting_key, float(f"{float(value):.6f}"))
         update_basic_reset_state(gui)
 
+    row_frame = gui.ttk.Frame(parent) if value_row else None
     control = SegmentedChoice(
-        parent,
+        row_frame if row_frame is not None else parent,
         options,
         tk=gui.tk,
         ttk=gui.ttk,
@@ -1932,8 +1942,13 @@ def add_segmented(
         tooltip=tooltip,
         on_change=persist,
     )
-    control.frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=pady)
+    if row_frame is not None:
+        control.frame.pack(side=gui.tk.LEFT)
+        row_frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=pady)
+    else:
+        control.frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=pady)
     control.help_button = help_button
+    control.value_row = row_frame
 
     def apply_and_persist(value) -> None:
         """Set the control and persist, for callers that drive it programmatically.
