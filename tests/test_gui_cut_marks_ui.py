@@ -226,3 +226,20 @@ def test_remove_only_overrides_turn_voice_detection_off() -> None:
         "remove_ranges": ((1.0, 2.0),),
     }
     assert args["vad"] is True
+
+
+def test_remove_only_overrides_drop_long_pause() -> None:
+    """A remove-only pass must not speed long pauses up a second time."""
+
+    args = {
+        "silent_speed": 10.0,
+        "sounded_speed": 1.0,
+        "long_pause_speed": 20.0,
+        "long_pause_seconds": 60.0,
+        "remove_ranges": ((1.0, 2.0),),
+    }
+
+    result = cut_marks_ui.remove_only_overrides(args)
+
+    assert "long_pause_speed" not in result
+    assert "long_pause_seconds" not in result

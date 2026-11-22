@@ -1718,3 +1718,89 @@ def test_send_video_vad_fallback_sees_streamed_log_lines(monkeypatch, tmp_path):
     )
 
     assert destination.read_bytes() == b"processed"
+
+
+LONG_PAUSE_LOG = "Extracting audio...\nLong pauses: 1 stretch, 52.1 min at x20"
+
+
+def test_send_video_appends_long_pause_tail_without_vad(monkeypatch, tmp_path):
+    """Long pause needs the vad slots filled so its values land at 19-20."""
+
+    args = _captured_submit_args(
+        monkeypatch,
+        tmp_path,
+        client=ApiInfoClient("http://localhost:9005/", parameter_count=21),
+        long_pause_speed=20.0,
+        long_pause_seconds=90.0,
+    )
+    assert len(args) == 21
+    assert args[13:] == (0, 0.0, False, None, None, None, 20.0, 90.0)
+
+
+def test_send_video_long_pause_defaults_seconds(monkeypatch, tmp_path):
+    args = _captured_submit_args(
+        monkeypatch,
+        tmp_path,
+        client=ApiInfoClient("http://localhost:9005/", parameter_count=21),
+        vad=True,
+        vad_threshold=0.4,
+        long_pause_speed=20.0,
+    )
+    assert args[13:] == (0, 0.0, True, 0.4, None, None, 20.0, 60.0)
+
+
+def test_send_video_without_long_pause_keeps_legacy_args(monkeypatch, tmp_path):
+    args = _captured_submit_args(monkeypatch, tmp_path, long_pause_seconds=90.0)
+    assert len(args) == 13
+
+
+def test_send_video_long_pause_rejects_server_without_parameters(monkeypatch, tmp_path):
+    """A 19-parameter (vad-era) server would drop the long-pause values."""
+
+    client = ApiInfoClient("http://localhost:9005/", parameter_count=19)
+    with pytest.raises(service_client.ServerTooOldError, match="Long pause speed"):
+        _captured_submit_args(
+            monkeypatch, tmp_path, client=client, long_pause_speed=20.0
+        )
+
+    assert client.submissions == []
+    assert not (tmp_path / "out.mp4").exists()
+
+
+def test_send_video_long_pause_fallback_fails_without_log_marker(monkeypatch, tmp_path):
+    with pytest.raises(service_client.ServerTooOldError, match="Long pause speed"):
+        _captured_submit_args(
+            monkeypatch,
+            tmp_path,
+            client=DummyClient("http://localhost:9005/"),
+            log="Extracting audio...",
+            long_pause_speed=20.0,
+        )
+
+    assert not (tmp_path / "out.mp4").exists()
+
+
+def test_send_video_long_pause_fallback_accepts_log_marker(monkeypatch, tmp_path):
+    _captured_submit_args(
+        monkeypatch,
+        tmp_path,
+        client=DummyClient("http://localhost:9005/"),
+        log=LONG_PAUSE_LOG,
+        long_pause_speed=20.0,
+    )
+
+    assert (tmp_path / "out.mp4").read_bytes() == b"processed"
+
+
+def test_send_video_fallback_requires_each_marker(monkeypatch, tmp_path):
+    """With vad and long pause on, a log proving only one of them still fails."""
+
+    with pytest.raises(service_client.ServerTooOldError, match="Long pause speed"):
+        _captured_submit_args(
+            monkeypatch,
+            tmp_path,
+            client=DummyClient("http://localhost:9005/"),
+            log=VAD_LOG,
+            vad=True,
+            long_pause_speed=20.0,
+        )

@@ -52,6 +52,16 @@ rows grouped under four quiet headings — **Basic options**, **Speed & silence*
   to commit — clicking away commits too — or press Escape to cancel. A committed value keeps its
   input box, so you can adjust it without reopening the editor; clicking any preset button
   resets the slot back to **…**.
+- The **Silent** row ends with **Speedup x[20] pauses longer than [60] seconds**: when checked,
+  silent stretches longer than that many seconds play at that speed instead of the silent
+  speed, and short sounds inside them (up to 2 s, such as notifications) are sped up with
+  them (a short word with less than 2 s of silence before speech stays with the speech). A
+  shortcut that passes `--long-pause-speed` applies it to that launch, in Simple mode too,
+  without ticking the checkbox; touching the row hands control back to it. Speed accepts
+  1–100 and seconds 5–3600; Enter or clicking away commits, and a value
+  that is not a number restores the previous one. The checkbox and both values are remembered,
+  the entries are greyed out while it is off, presets and **Silence ×5** never touch it, and
+  Simple mode ignores it. **Remove only** turns it off so a finished file is not sped up again.
 - **Threshold** works the same way, with buttons for 0.01, 0.03, 0.05, 0.10 and a **…** slot for
   any value from 0 to 0.9. Above roughly 0.9 the detector treats almost the whole track as
   silence, so the control stops there. See the threshold guidance below for what each value does.

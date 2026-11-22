@@ -378,6 +378,8 @@ def process_files_via_server(
         "vad_threshold",
         "vad_padding_ms",
         "vad_min_silence_ms",
+        "long_pause_speed",
+        "long_pause_seconds",
     }
     ignored = [key for key in args if key not in allowed_remote_keys]
     if ignored:
@@ -495,6 +497,7 @@ def process_files_via_server(
                         video_codec=codec_value,
                         silent_speed=args.get("silent_speed"),
                         sounded_speed=args.get("sounded_speed"),
+                        long_pause_speed=args.get("long_pause_speed"),
                     ).name
                 )
         else:
@@ -507,6 +510,7 @@ def process_files_via_server(
                 video_codec=codec_value,
                 silent_speed=args.get("silent_speed"),
                 sounded_speed=args.get("sounded_speed"),
+                long_pause_speed=args.get("long_pause_speed"),
             )
 
         started = time.perf_counter()
@@ -532,6 +536,8 @@ def process_files_via_server(
                 vad_threshold=args.get("vad_threshold"),
                 vad_padding_ms=args.get("vad_padding_ms"),
                 vad_min_silence_ms=args.get("vad_min_silence_ms"),
+                long_pause_speed=args.get("long_pause_speed"),
+                long_pause_seconds=args.get("long_pause_seconds"),
                 stream_updates=True,
                 log_callback=gui._append_log,
                 should_cancel=lambda: gui._stop_requested,

@@ -6,7 +6,9 @@ import numpy as np
 import pytest
 
 from talks_reducer.chunks import (
+    LONG_PAUSE_SPEED_INDEX,
     REMOVED_SPEED_INDEX,
+    apply_long_pauses,
     apply_remove_ranges,
     build_chunks,
     detect_loud_frames,
@@ -176,3 +178,122 @@ def test_apply_remove_ranges_unsorted_input() -> None:
         [50, 60, R],
         [60, 100, 1],
     ]
+
+
+def test_apply_long_pauses_merges_across_short_sound():
+    chunks = [[0, 10, 1], [10, 100, 0], [100, 105, 1], [105, 200, 0], [200, 210, 1]]
+
+    result = apply_long_pauses(chunks, min_frames=150, tolerance_frames=10)
+
+    assert result == [[0, 10, 1], [10, 200, LONG_PAUSE_SPEED_INDEX], [200, 210, 1]]
+
+
+def test_apply_long_pauses_sound_longer_than_tolerance_splits_stretch():
+    chunks = [[0, 100, 0], [100, 130, 1], [130, 200, 0]]
+
+    assert apply_long_pauses(chunks, min_frames=150, tolerance_frames=10) == chunks
+
+
+def test_apply_long_pauses_single_silence_over_threshold():
+    chunks = [[0, 5, 1], [5, 205, 0], [205, 210, 1]]
+
+    result = apply_long_pauses(chunks, min_frames=200, tolerance_frames=10)
+
+    assert result[1] == [5, 205, LONG_PAUSE_SPEED_INDEX]
+
+
+def test_apply_long_pauses_short_stretch_left_unchanged():
+    chunks = [[0, 50, 0], [50, 55, 1], [55, 100, 0]]
+
+    assert apply_long_pauses(chunks, min_frames=150, tolerance_frames=10) == chunks
+
+
+def test_apply_long_pauses_edge_sounds_not_absorbed():
+    # Short sounds at the ends of the recording are outside any silent stretch.
+    chunks = [[0, 3, 1], [3, 200, 0], [200, 203, 1]]
+
+    result = apply_long_pauses(chunks, min_frames=150, tolerance_frames=10)
+
+    assert result == [[0, 3, 1], [3, 200, LONG_PAUSE_SPEED_INDEX], [200, 203, 1]]
+
+
+def test_apply_long_pauses_threshold_is_inclusive_and_returns_copies():
+    chunks = [[0, 150, 0]]
+
+    result = apply_long_pauses(chunks, min_frames=150, tolerance_frames=10)
+
+    assert result == [[0, 150, LONG_PAUSE_SPEED_INDEX]]
+    assert chunks == [[0, 150, 0]]
+
+
+def test_apply_long_pauses_trailing_short_sound_stays_outside_stretch():
+    # A short sound right before speech resumes is not followed by silence.
+    chunks = [[0, 200, 0], [200, 203, 1]]
+
+    result = apply_long_pauses(chunks, min_frames=150, tolerance_frames=10)
+
+    assert result == [[0, 200, LONG_PAUSE_SPEED_INDEX], [200, 203, 1]]
+
+
+def test_apply_long_pauses_keeps_short_word_before_resumed_speech():
+    # Long silence, "So." (24 frames), a 12-frame gap, then speech: the word
+    # belongs to the speech, not to the pause.
+    chunks = [
+        [0, 300, 1],
+        [300, 9300, 0],
+        [9300, 9324, 1],
+        [9324, 9336, 0],
+        [9336, 12000, 1],
+    ]
+
+    result = apply_long_pauses(chunks, min_frames=1800, tolerance_frames=60)
+
+    assert result == [
+        [0, 300, 1],
+        [300, 9300, LONG_PAUSE_SPEED_INDEX],
+        [9300, 9324, 1],
+        [9324, 9336, 0],
+        [9336, 12000, 1],
+    ]
+
+
+def test_apply_long_pauses_keeps_short_word_after_speech_ends():
+    # Speech, a 12-frame gap, "Okay." (24 frames), then a long silence.
+    chunks = [
+        [0, 300, 1],
+        [300, 312, 0],
+        [312, 336, 1],
+        [336, 9336, 0],
+        [9336, 9400, 1],
+    ]
+
+    result = apply_long_pauses(chunks, min_frames=1800, tolerance_frames=60)
+
+    assert result == [
+        [0, 300, 1],
+        [300, 312, 0],
+        [312, 336, 1],
+        [336, 9336, LONG_PAUSE_SPEED_INDEX],
+        [9336, 9400, 1],
+    ]
+
+
+def test_apply_long_pauses_merges_double_notification_mid_silence():
+    # ding, short gap, ding inside a long silence: still one long pause.
+    chunks = [
+        [0, 4000, 0],
+        [4000, 4020, 1],
+        [4020, 4035, 0],
+        [4035, 4055, 1],
+        [4055, 9000, 0],
+    ]
+
+    result = apply_long_pauses(chunks, min_frames=1800, tolerance_frames=60)
+
+    assert result == [[0, 9000, LONG_PAUSE_SPEED_INDEX]]
+
+
+def test_apply_long_pauses_trimmed_stretch_below_threshold_is_unchanged():
+    chunks = [[0, 100, 0], [100, 110, 1], [110, 115, 0], [115, 200, 1]]
+
+    assert apply_long_pauses(chunks, min_frames=110, tolerance_frames=60) == chunks

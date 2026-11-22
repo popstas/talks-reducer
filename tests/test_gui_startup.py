@@ -815,3 +815,17 @@ def test_parse_seeded_launch_seeds_vad(tmp_path, monkeypatch) -> None:
 
     _, settings = startup._parse_seeded_launch([str(video), "--small"])
     assert "vad" not in settings
+
+
+def test_parse_seeded_launch_seeds_long_pause(tmp_path) -> None:
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"data")
+
+    seeded = startup._parse_seeded_launch(
+        [str(video), "--long-pause-speed", "20", "--long-pause-seconds", "90"]
+    )
+
+    assert seeded is not None
+    _files, settings = seeded
+    assert settings["long_pause_speed"] == 20.0
+    assert settings["long_pause_seconds"] == 90.0

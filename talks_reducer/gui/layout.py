@@ -71,6 +71,14 @@ SETTING_ROW_PADY = (12, 0)
 # the first of the rows.
 PRESET_ROW_PADY = (36, 24)
 
+# "Speedup x[20] pauses longer than [60] seconds": an absolute speed for long
+# silent stretches (script runs with the microphone off). Off by default; the
+# bounds clamp what the two entries accept.
+LONG_PAUSE_SPEED_RANGE = (1.0, 100.0)
+LONG_PAUSE_SECONDS_RANGE = (5.0, 3600.0)
+DEFAULT_LONG_PAUSE_SPEED = 20.0
+DEFAULT_LONG_PAUSE_SECONDS = 60.0
+
 # Silence is sped up 10x out of the box: every row is ordered strongest-first,
 # and the default is the first button so a fresh install starts there.
 DEFAULT_SILENT_SPEED = 10.0
@@ -1017,13 +1025,14 @@ def build_layout(gui: "TalksReducerGUI") -> None:
             10.0,
         )
     )
-    add_segmented(
+    gui.silent_speed_control = add_segmented(
         gui,
         gui.basic_options_frame,
         "Silent",
         gui.silent_speed_var,
         row=4,
         setting_key="silent_speed",
+        value_row=True,
         options=[
             Option(10.0, "10"),
             Option(5.0, "5"),
@@ -1033,6 +1042,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         default_value=DEFAULT_SILENT_SPEED,
         custom=CustomSpec(minimum=1.0, maximum=10.0),
     )
+    build_long_pause_controls(gui, gui.silent_speed_control.value_row)
 
     gui.sounded_speed_var = gui.tk.DoubleVar(
         value=min(
@@ -1718,6 +1728,133 @@ def build_vad_settings_rows(gui: "TalksReducerGUI", *, first_row: int) -> None:
     )
 
 
+def parse_clamped(text: str, bounds: tuple[float, float], fallback: float) -> float:
+    """Return *text* as a float clamped to *bounds*, or *fallback* if unusable.
+
+    Used for the long-pause entries both when they are committed and when a run
+    collects its arguments, so a value typed but never committed (Run clicked
+    straight from the entry) is read the same way a committed one would be.
+    """
+
+    try:
+        value = float(str(text).strip())
+    except ValueError:
+        return fallback
+    if not math.isfinite(value):
+        return fallback
+    minimum, maximum = bounds
+    return min(max(value, minimum), maximum)
+
+
+_LONG_PAUSE_FIELDS = (
+    ("speed", "long_pause_speed", LONG_PAUSE_SPEED_RANGE, DEFAULT_LONG_PAUSE_SPEED),
+    (
+        "seconds",
+        "long_pause_seconds",
+        LONG_PAUSE_SECONDS_RANGE,
+        DEFAULT_LONG_PAUSE_SECONDS,
+    ),
+)
+
+
+def build_long_pause_controls(gui: "TalksReducerGUI", parent) -> None:
+    """Pack "Speedup x[N] pauses longer than [S] seconds" into *parent*.
+
+    *parent* is the Silent row's value frame, so the controls trail the silent
+    speed buttons on the same line: both describe how silence is sped up.
+
+    It is not registered in ``_basic_defaults``/``_slider_updaters``: it is not
+    a preset field, so the Silence ×5 macro and preset matching leave it alone.
+    """
+
+    gui.long_pause_enabled_var = gui.tk.BooleanVar(
+        value=bool(gui.preferences.get("long_pause_enabled", False))
+    )
+    for name, key, bounds, default in _LONG_PAUSE_FIELDS:
+        value = _stored_long_pause_value(gui, key, bounds, default)
+        setattr(
+            gui, f"long_pause_{name}_text_var", gui.tk.StringVar(value=f"{value:g}")
+        )
+
+    frame = gui.ttk.Frame(parent)
+    frame.pack(side=gui.tk.LEFT, padx=(12, 0))
+    gui.long_pause_check = gui.ttk.Checkbutton(
+        frame, text="Speedup x", variable=gui.long_pause_enabled_var
+    )
+    gui.long_pause_check.pack(side=gui.tk.LEFT)
+    gui.long_pause_speed_entry = gui.ttk.Entry(
+        frame, textvariable=gui.long_pause_speed_text_var, width=4
+    )
+    gui.long_pause_speed_entry.pack(side=gui.tk.LEFT, padx=(2, 0))
+    gui.ttk.Label(frame, text="pauses longer than").pack(side=gui.tk.LEFT, padx=(6, 0))
+    gui.long_pause_seconds_entry = gui.ttk.Entry(
+        frame, textvariable=gui.long_pause_seconds_text_var, width=5
+    )
+    gui.long_pause_seconds_entry.pack(side=gui.tk.LEFT, padx=(6, 0))
+    gui.ttk.Label(frame, text="seconds").pack(side=gui.tk.LEFT, padx=(4, 0))
+
+    for name, key, bounds, default in _LONG_PAUSE_FIELDS:
+        entry = getattr(gui, f"long_pause_{name}_entry")
+        text_var = getattr(gui, f"long_pause_{name}_text_var")
+
+        def _commit(
+            _event=None, text_var=text_var, key=key, bounds=bounds, default=default
+        ) -> None:
+            commit_long_pause_entry(gui, text_var, key, bounds, default)
+
+        entry.bind("<Return>", _commit)
+        entry.bind("<FocusOut>", _commit)
+
+    def _on_toggle(*_args) -> None:
+        gui._seeded_long_pause = None
+        gui.preferences.update(
+            "long_pause_enabled", bool(gui.long_pause_enabled_var.get())
+        )
+        update_long_pause_state(gui)
+
+    gui.long_pause_enabled_var.trace_add("write", _on_toggle)
+    update_long_pause_state(gui)
+
+
+def _stored_long_pause_value(
+    gui: "TalksReducerGUI", key: str, bounds: tuple[float, float], default: float
+) -> float:
+    """Return the persisted long-pause value for *key*, clamped, or *default*."""
+
+    return parse_clamped(str(gui.preferences.get(key, default)), bounds, default)
+
+
+def commit_long_pause_entry(
+    gui: "TalksReducerGUI",
+    text_var,
+    key: str,
+    bounds: tuple[float, float],
+    default: float,
+) -> None:
+    """Clamp the entry text, write it back normalised and persist it.
+
+    A non-number falls back to the last persisted value, so a typo never
+    discards a setting the user already chose.
+    """
+
+    # The user's own edit replaces a value seeded by a launch flag.
+    gui._seeded_long_pause = None
+    fallback = _stored_long_pause_value(gui, key, bounds, default)
+    value = parse_clamped(text_var.get(), bounds, fallback)
+    text_var.set(f"{value:g}")
+    gui.preferences.update(key, value)
+
+
+def update_long_pause_state(gui: "TalksReducerGUI") -> None:
+    """Enable the long-pause entries only while the checkbox is on."""
+
+    state = gui.tk.NORMAL if gui.long_pause_enabled_var.get() else gui.tk.DISABLED
+    for name in ("long_pause_speed_entry", "long_pause_seconds_entry"):
+        entry = getattr(gui, name, None)
+        if entry is not None:
+            entry.configure(state=state)
+
+
 def update_threshold_for_vad(gui: "TalksReducerGUI") -> None:
     """Lock the Threshold control while "Speedup no voice" is on.
 
@@ -1750,6 +1887,7 @@ def add_segmented(
     help_url: str | None = None,
     pady: "int | tuple[int, int]" = SETTING_ROW_PADY,
     basic: bool = True,
+    value_row: bool = False,
 ) -> "SegmentedChoice":
     """Add a labeled row of choice buttons to *parent* and wire it into presets.
 
@@ -1769,6 +1907,11 @@ def add_segmented(
     ``_slider_updaters`` (so persistence and programmatic writes work) but stay
     out of ``_basic_defaults``/``_basic_variables``, which would make the
     **Silence ×5** reset macro and the basic-preset highlight touch them.
+
+    *value_row* wraps the buttons in a frame exposed as ``control.value_row`` so
+    a caller can pack extra controls after them on the same line (the Silent
+    row's long-pause controls), the way the Codec row holds **Add codec
+    suffix**.
     """
 
     help_button = None
@@ -1790,8 +1933,9 @@ def add_segmented(
         gui.preferences.update(setting_key, float(f"{float(value):.6f}"))
         update_basic_reset_state(gui)
 
+    row_frame = gui.ttk.Frame(parent) if value_row else None
     control = SegmentedChoice(
-        parent,
+        row_frame if row_frame is not None else parent,
         options,
         tk=gui.tk,
         ttk=gui.ttk,
@@ -1801,8 +1945,13 @@ def add_segmented(
         tooltip=tooltip,
         on_change=persist,
     )
-    control.frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=pady)
+    if row_frame is not None:
+        control.frame.pack(side=gui.tk.LEFT)
+        row_frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=pady)
+    else:
+        control.frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=pady)
     control.help_button = help_button
+    control.value_row = row_frame
 
     def apply_and_persist(value) -> None:
         """Set the control and persist, for callers that drive it programmatically.

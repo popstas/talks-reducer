@@ -79,6 +79,10 @@ class ProcessingOptions:
     vad_threshold: float = 0.5
     vad_padding_ms: int = 150
     vad_min_silence_ms: int = 300
+    # Absolute speed for silent stretches of at least ``long_pause_seconds``
+    # (short sounds inside included); ``None`` keeps the feature off.
+    long_pause_speed: Optional[float] = None
+    long_pause_seconds: float = 60.0
 
 
 @dataclass(frozen=True)

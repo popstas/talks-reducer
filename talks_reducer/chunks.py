@@ -119,6 +119,74 @@ def apply_remove_ranges(
     return merged
 
 
+LONG_PAUSE_SPEED_INDEX = 3
+LONG_PAUSE_SOUND_TOLERANCE_SECONDS = 2.0
+
+
+def apply_long_pauses(
+    chunks: Sequence[Sequence[int]], min_frames: int, tolerance_frames: int
+) -> List[List[int]]:
+    """Relabel silent stretches of at least *min_frames* as long pauses.
+
+    *chunks* come from :func:`build_chunks` (``[start, end, speed_index]``,
+    alternating silent ``0`` and sounded ``1``). A stretch starts and ends with
+    a silent chunk and may contain sounded chunks no longer than
+    *tolerance_frames*: during long script runs with the microphone off, a
+    stray notification would otherwise split one long pause into several
+    shorter ones. A qualifying stretch becomes a single chunk tagged
+    :data:`LONG_PAUSE_SPEED_INDEX`, absorbed sounds included; everything else is
+    copied unchanged.
+    """
+
+    result: List[List[int]] = []
+    count = len(chunks)
+    index = 0
+    while index < count:
+        chunk = chunks[index]
+        if int(chunk[2]) != 0:
+            result.append([int(value) for value in chunk])
+            index += 1
+            continue
+        last = index
+        while (
+            last + 2 < count
+            and int(chunks[last + 1][2]) == 1
+            and int(chunks[last + 1][1]) - int(chunks[last + 1][0]) <= tolerance_frames
+            and int(chunks[last + 2][2]) == 0
+        ):
+            last += 2
+        # A sound separated from speech by only a short gap is a word at the
+        # edge of the speech ("So." before talking resumes), not a stray sound
+        # inside the pause, so the stretch must start and end with a silence of
+        # at least the tolerance.
+        first, final = index, last
+        while first < final and _length(chunks[first]) < tolerance_frames:
+            first += 2
+        while final > first and _length(chunks[final]) < tolerance_frames:
+            final -= 2
+        start, end = int(chunks[first][0]), int(chunks[final][1])
+        result.extend(_copy(chunks[index:first]))
+        if end - start >= min_frames:
+            result.append([start, end, LONG_PAUSE_SPEED_INDEX])
+        else:
+            result.extend(_copy(chunks[first : final + 1]))
+        result.extend(_copy(chunks[final + 1 : last + 1]))
+        index = last + 1
+    return result
+
+
+def _length(chunk: Sequence[int]) -> int:
+    """Return the frame count of *chunk*."""
+
+    return int(chunk[1]) - int(chunk[0])
+
+
+def _copy(chunks: Sequence[Sequence[int]]) -> List[List[int]]:
+    """Return int copies of *chunks* so callers never share input lists."""
+
+    return [[int(value) for value in chunk] for chunk in chunks]
+
+
 def get_tree_expression(chunks: Sequence[Sequence[int]]) -> str:
     """Return the FFmpeg expression needed to map chunk timing updates."""
 
@@ -145,7 +213,10 @@ def _get_tree_expression_rec(chunks: Sequence[Sequence[int]]) -> str:
 
 
 __all__ = [
+    "LONG_PAUSE_SOUND_TOLERANCE_SECONDS",
+    "LONG_PAUSE_SPEED_INDEX",
     "REMOVED_SPEED_INDEX",
+    "apply_long_pauses",
     "apply_remove_ranges",
     "detect_loud_frames",
     "build_chunks",

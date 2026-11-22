@@ -2365,3 +2365,75 @@ def test_build_interface_has_vad_checkbox_wired_to_preset() -> None:
         for component in labels_by_fn["_apply_preset"].outputs
     ]
     assert preset_labels[-1] == "Speedup no voice"
+
+
+def test_process_video_api_passes_long_pause_to_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The long-pause values ride positional slots 19-20 after the vad four."""
+
+    captured: dict = {}
+
+    def _fake_process_video(*args: object, **kwargs: object):
+        captured["kwargs"] = kwargs
+        yield (None, "log", "summary", None)
+
+    monkeypatch.setattr(server, "process_video", _fake_process_video)
+
+    list(
+        server.process_video_api(
+            "clip.mp4",
+            True,
+            False,
+            True,
+            "h264",
+            False,
+            False,
+            None,
+            None,
+            None,
+            False,
+            None,
+            None,
+            0,
+            0.0,
+            False,
+            None,
+            None,
+            None,
+            20.0,
+            90.0,
+        )
+    )
+
+    assert captured["kwargs"]["long_pause_speed"] == 20.0
+    assert captured["kwargs"]["long_pause_seconds"] == 90.0
+
+    monkeypatch.undo()
+    options = _process_video_options(
+        tmp_path, small_video=False, long_pause_speed=20.0, long_pause_seconds=90.0
+    )
+    assert options.long_pause_speed == 20.0
+    assert options.long_pause_seconds == 90.0
+
+
+def test_process_video_long_pause_defaults(tmp_path: Path) -> None:
+    options = _process_video_options(tmp_path, small_video=False)
+    assert options.long_pause_speed is None
+
+    options = _process_video_options(tmp_path, small_video=False, long_pause_speed=20.0)
+    assert options.long_pause_speed == 20.0
+    assert options.long_pause_seconds == 60.0
+
+
+def test_build_output_path_marks_long_pause_only_run(tmp_path: Path) -> None:
+    path = server._build_output_path(
+        tmp_path / "a.mp4",
+        tmp_path,
+        False,
+        silent_speed=1.0,
+        sounded_speed=1.0,
+        long_pause_speed=20.0,
+    )
+
+    assert path.name == "a_speedup.mp4"

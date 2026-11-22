@@ -163,6 +163,13 @@ lives in the temporary working folder and is deleted when the run finishes.
 - `--silent_threshold` (`-t`) — the volume below which a segment counts as silence.
 - `--sounded_speed` (`-S`) — playback speed applied to segments with speech.
 - `--silent_speed` (`-s`) — playback speed applied to silent segments.
+- `--long-pause-speed SPEED` — absolute speed for silent stretches longer than
+  `--long-pause-seconds`; short sounds inside a stretch (up to 2 s) are absorbed into it and
+  sped up too, but a stretch always starts and ends with at least 2 s of silence, so a short
+  word right next to speech stays with the speech. Off by default; skipped with a log line when it is not faster than the silent
+  speed.
+- `--long-pause-seconds SECONDS` — minimum length of a long pause (default `60`). On its own
+  it does not enable anything.
 - `--frame_margin` (`-fm`) — frames of padding kept around each sounded segment.
 - `--sample_rate` (`-sr`) — audio sample rate used while analysing.
 - `-o` / `--output_file`, `--temp_folder` — where the result and the scratch files go.
@@ -251,7 +258,9 @@ with `--vad-threshold`, `--vad-padding` and `--vad-min-silence` when given; the 
 `silero-vad-lite` installed.
 `--vad` needs an up-to-date server: an older one would ignore it and speed up by loudness, so
 the client checks the server's API and stops with an error asking you to update the server.
-Runs without it keep working with older servers.
+Runs without it keep working with older servers. `--long-pause-speed` and
+`--long-pause-seconds` are forwarded the same way and are guarded the same way: an older
+server would treat long pauses like any other silence, so the client refuses it.
 
 Want to see progress as the remote server works? Add `--server-stream` so the CLI prints
 live progress bars and log lines while you wait for the download. The stream walks through

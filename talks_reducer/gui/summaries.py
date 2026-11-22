@@ -34,6 +34,7 @@ def default_remote_destination(
     video_codec: str = "h264",
     silent_speed: float | None = None,
     sounded_speed: float | None = None,
+    long_pause_speed: float | None = None,
 ) -> Path:
     """Return the default remote output path for *input_file*."""
 
@@ -52,6 +53,7 @@ def default_remote_destination(
         silent_speed=silent_speed,
         sounded_speed=sounded_speed,
         prefer_clean_audio_name=True,
+        long_pause_speed=long_pause_speed,
     )
 
 
@@ -240,7 +242,7 @@ def format_conversion_params(args: Mapping[str, object]) -> str:
 
     ``args`` is the dict built by ``TalksReducerGUI._collect_arguments``. The
     order is fixed — resolution, codec, fps, speeds, threshold (or ``no voice``
-    when voice detection replaces it), then trim and remove ranges — so headers
+    when voice detection replaces it), long pauses, then trim and remove ranges — so headers
     of consecutive runs line up. An mp3 run drops resolution and fps because
     its output has no video.
     """
@@ -262,6 +264,9 @@ def format_conversion_params(args: Mapping[str, object]) -> str:
         parts.append("no voice")
     elif args.get("silent_threshold") is not None:
         parts.append(f"threshold {float(args['silent_threshold']):g}")
+    if args.get("long_pause_speed"):
+        seconds = float(args.get("long_pause_seconds") or 60.0)
+        parts.append(f"long pauses ×{float(args['long_pause_speed']):g} >{seconds:g}s")
     if "cut_start_seconds" in args or "cut_end_seconds" in args:
         start = float(args.get("cut_start_seconds") or 0.0)
         end = float(args.get("cut_end_seconds") or 0.0)

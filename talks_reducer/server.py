@@ -725,6 +725,7 @@ def _build_output_path(
     video_codec: str = "h264",
     silent_speed: float | None = None,
     sounded_speed: float | None = None,
+    long_pause_speed: float | None = None,
 ) -> Path:
     """Mirror the CLI output naming scheme inside the workspace directory."""
 
@@ -741,6 +742,7 @@ def _build_output_path(
         add_codec_suffix=add_codec_suffix,
         silent_speed=silent_speed,
         sounded_speed=sounded_speed,
+        long_pause_speed=long_pause_speed,
     )
     return workspace / output_name.name
 
@@ -999,6 +1001,8 @@ def _stream_pipeline(
     vad_threshold: Optional[float] = None,
     vad_padding_ms: Optional[int] = None,
     vad_min_silence_ms: Optional[int] = None,
+    long_pause_speed: Optional[float] = None,
+    long_pause_seconds: Optional[float] = None,
 ) -> Iterator[tuple[str, object]]:
     """Run the pipeline, yielding semantic events shared by both handlers.
 
@@ -1050,6 +1054,11 @@ def _stream_pipeline(
         video_codec=codec_value,
         silent_speed=normalized_silent_speed,
         sounded_speed=normalized_sounded_speed,
+        long_pause_speed=(
+            float(long_pause_speed)
+            if long_pause_speed is not None and long_pause_speed > 0
+            else None
+        ),
     )
 
     deps = dependencies or ProcessVideoDependencies()
@@ -1084,6 +1093,10 @@ def _stream_pipeline(
             option_kwargs["vad_padding_ms"] = int(vad_padding_ms)
         if vad_min_silence_ms is not None:
             option_kwargs["vad_min_silence_ms"] = int(vad_min_silence_ms)
+    if long_pause_speed is not None and long_pause_speed > 0:
+        option_kwargs["long_pause_speed"] = float(long_pause_speed)
+        if long_pause_seconds is not None and long_pause_seconds > 0:
+            option_kwargs["long_pause_seconds"] = float(long_pause_seconds)
 
     options = ProcessingOptions(
         input_file=input_path,
@@ -1320,13 +1333,16 @@ def process_video_api(
     vad_threshold: Optional[float] = None,
     vad_padding_ms: Optional[int] = None,
     vad_min_silence_ms: Optional[int] = None,
+    long_pause_speed: Optional[float] = None,
+    long_pause_seconds: Optional[float] = None,
 ) -> Iterator[tuple[Optional[str], str, str, Optional[str]]]:
     """Clean-signature wrapper registered via ``gr.api`` (requires type hints).
 
     Preserves the 13-arg positional contract and 4-tuple output that
     ``service_client`` depends on, and accepts optional trailing args that newer
     clients send only when needed: ``target_height`` and ``max_frame_rate``
-    (positions 13-14), then ``vad`` and its three settings (positions 15-18).
+    (positions 13-14), then ``vad`` and its three settings (positions 15-18),
+    then ``long_pause_speed`` and ``long_pause_seconds`` (positions 19-20).
     New parameters are only ever appended, so an older client's shorter
     argument list still lines up.
     """
@@ -1351,6 +1367,8 @@ def process_video_api(
         vad_threshold=vad_threshold,
         vad_padding_ms=vad_padding_ms,
         vad_min_silence_ms=vad_min_silence_ms,
+        long_pause_speed=long_pause_speed,
+        long_pause_seconds=long_pause_seconds,
     )
 
 
@@ -1377,6 +1395,8 @@ def process_video(
     vad_threshold: Optional[float] = None,
     vad_padding_ms: Optional[int] = None,
     vad_min_silence_ms: Optional[int] = None,
+    long_pause_speed: Optional[float] = None,
+    long_pause_seconds: Optional[float] = None,
 ) -> Iterator[tuple[Optional[str], str, str, Optional[str]]]:
     """Run the Talks Reducer pipeline for a single uploaded file.
 
@@ -1405,6 +1425,8 @@ def process_video(
         vad_threshold=vad_threshold,
         vad_padding_ms=vad_padding_ms,
         vad_min_silence_ms=vad_min_silence_ms,
+        long_pause_speed=long_pause_speed,
+        long_pause_seconds=long_pause_seconds,
     ):
         if kind == "log":
             yield (gr.update(), cast(str, payload), gr.update(), gr.update())

@@ -1175,3 +1175,33 @@ def test_process_files_via_server_summary_closes_the_block(tmp_path: Path) -> No
     assert gui.logs.index("Server log:") < completed
     assert gui.logs[completed + 1].startswith("Duration: ")
     assert completed + 2 == len(gui.logs)
+
+
+def test_gui_remote_passes_long_pause_settings(tmp_path: Path) -> None:
+    gui = StubGUI()
+    send_calls: list[dict[str, object]] = []
+
+    def load_client() -> object:
+        def send_video(**kwargs: object) -> tuple[str, str, str]:
+            send_calls.append(kwargs)
+            return (str(tmp_path / "output.mp4"), "Summary", "")
+
+        return SimpleNamespace(send_video=send_video)
+
+    result = remote_module.process_files_via_server(
+        gui,
+        files=[str(tmp_path / "input.mp4")],
+        args={"long_pause_speed": 20.0, "long_pause_seconds": 90.0},
+        server_url="http://example.com",
+        open_after_convert=False,
+        default_remote_destination=lambda path, small, small_480, **kwargs: tmp_path
+        / path.name,
+        parse_summary=lambda text: (None, None),  # noqa: ARG005
+        load_service_client=load_client,
+        check_server=lambda *args, **kwargs: True,  # noqa: ANN002,ANN003
+    )
+
+    assert result is True
+    assert send_calls[0]["long_pause_speed"] == 20.0
+    assert send_calls[0]["long_pause_seconds"] == 90.0
+    assert not any("ignores the following" in message for message in gui.logs)

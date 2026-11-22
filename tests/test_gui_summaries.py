@@ -48,6 +48,22 @@ def test_header_vad_replaces_threshold_and_orig_defaults() -> None:
     )
 
 
+def test_header_lists_long_pauses_after_threshold() -> None:
+    args = {
+        "video_codec": "h264",
+        "silent_speed": 10.0,
+        "sounded_speed": 1.0,
+        "silent_threshold": 0.01,
+        "long_pause_speed": 20.0,
+        "long_pause_seconds": 60.0,
+    }
+
+    assert format_conversion_params(args) == (
+        "orig, h.264, orig fps, silent ×10, sounded ×1, threshold 0.01, "
+        "long pauses ×20 >60s"
+    )
+
+
 def test_header_mp3_omits_video_fields() -> None:
     args = {
         "small": True,
@@ -181,3 +197,17 @@ def test_measure_media_probe_error_degrades_to_unknown_duration(
     monkeypatch.setattr(summaries, "get_video_duration", blocked)
 
     assert measure_media(media) == (None, 4)
+
+
+def test_default_remote_destination_marks_long_pause_only_run() -> None:
+    from talks_reducer.gui.summaries import default_remote_destination
+
+    path = default_remote_destination(
+        Path("a.mp4"),
+        small=False,
+        silent_speed=1.0,
+        sounded_speed=1.0,
+        long_pause_speed=20.0,
+    )
+
+    assert path.name == "a_speedup.mp4"

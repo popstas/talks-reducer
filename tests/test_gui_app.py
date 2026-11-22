@@ -352,6 +352,7 @@ def test_collect_arguments_includes_video_codec():
         cut_end_var=SimpleNamespace(get=lambda: 0.0),
         simple_mode_var=SimpleNamespace(get=lambda: False),
         vad_var=SimpleNamespace(get=lambda: False),
+        long_pause_enabled_var=SimpleNamespace(get=lambda: False),
         simple_preset_var=SimpleNamespace(get=lambda: ""),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
@@ -397,6 +398,7 @@ def test_collect_arguments_accepts_mp3_codec():
         cut_end_var=SimpleNamespace(get=lambda: 0.0),
         simple_mode_var=SimpleNamespace(get=lambda: False),
         vad_var=SimpleNamespace(get=lambda: False),
+        long_pause_enabled_var=SimpleNamespace(get=lambda: False),
         simple_preset_var=SimpleNamespace(get=lambda: ""),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
@@ -430,6 +432,7 @@ def test_collect_arguments_includes_add_codec_suffix():
         cut_end_var=SimpleNamespace(get=lambda: 0.0),
         simple_mode_var=SimpleNamespace(get=lambda: False),
         vad_var=SimpleNamespace(get=lambda: False),
+        long_pause_enabled_var=SimpleNamespace(get=lambda: False),
         simple_preset_var=SimpleNamespace(get=lambda: ""),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
@@ -467,6 +470,9 @@ def _make_collect_gui(**overrides) -> SimpleNamespace:
         vad_threshold_var=SimpleNamespace(get=lambda: 0.5),
         vad_padding_var=SimpleNamespace(get=lambda: 150.0),
         vad_min_silence_var=SimpleNamespace(get=lambda: 300.0),
+        long_pause_enabled_var=SimpleNamespace(get=lambda: False),
+        long_pause_speed_text_var=SimpleNamespace(get=lambda: "20"),
+        long_pause_seconds_text_var=SimpleNamespace(get=lambda: "60"),
         _simple_presets=[],
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
@@ -474,6 +480,46 @@ def _make_collect_gui(**overrides) -> SimpleNamespace:
     gui = SimpleNamespace(**defaults)
     gui._parse_float = lambda value, _label: float(value)
     return gui
+
+
+def test_collect_arguments_includes_long_pause_when_enabled():
+    gui = _make_collect_gui(long_pause_enabled_var=SimpleNamespace(get=lambda: True))
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["long_pause_speed"] == 20.0
+    assert args["long_pause_seconds"] == 60.0
+
+
+def test_collect_arguments_reads_uncommitted_long_pause_text():
+    gui = _make_collect_gui(
+        long_pause_enabled_var=SimpleNamespace(get=lambda: True),
+        long_pause_speed_text_var=SimpleNamespace(get=lambda: "35"),
+        long_pause_seconds_text_var=SimpleNamespace(get=lambda: "99999"),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["long_pause_speed"] == 35.0
+    assert args["long_pause_seconds"] == 3600.0
+
+
+def test_collect_arguments_omits_long_pause_when_disabled():
+    args = app.TalksReducerGUI._collect_arguments(_make_collect_gui())
+
+    assert "long_pause_speed" not in args
+    assert "long_pause_seconds" not in args
+
+
+def test_collect_arguments_ignores_long_pause_in_simple_mode():
+    gui = _make_collect_gui(
+        long_pause_enabled_var=SimpleNamespace(get=lambda: True),
+        simple_mode_var=SimpleNamespace(get=lambda: True),
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert "long_pause_speed" not in args
 
 
 def test_collect_arguments_includes_cut_range_when_enabled():
@@ -2848,6 +2894,7 @@ def _collect_args_gui(*, small: bool, height: int, fps: str) -> SimpleNamespace:
         cut_end_var=_Var(0.0),
         simple_mode_var=_Var(False),
         vad_var=_Var(False),
+        long_pause_enabled_var=SimpleNamespace(get=lambda: False),
         simple_preset_var=_Var(""),
         preferences=SimpleNamespace(update=lambda *args, **kwargs: None),
     )
@@ -3051,6 +3098,7 @@ def _vad_collect_gui(vad: bool, simple: bool = False) -> SimpleNamespace:
         cut_end_var=SimpleNamespace(get=lambda: 0.0),
         simple_mode_var=SimpleNamespace(get=lambda: simple),
         vad_var=SimpleNamespace(get=lambda: vad),
+        long_pause_enabled_var=SimpleNamespace(get=lambda: False),
         vad_threshold_var=SimpleNamespace(get=lambda: 0.7),
         vad_padding_var=SimpleNamespace(get=lambda: 300.0),
         vad_min_silence_var=SimpleNamespace(get=lambda: 500.0),
@@ -3388,3 +3436,38 @@ def test_run_separator_follows_a_run_that_never_opened_a_block():
         "Starting processing…\n",
         "### Processing a.mp4: orig\n",
     ]
+
+
+def test_apply_cli_settings_seeds_long_pause_without_ticking_checkbox():
+    gui = _make_settings_gui()
+
+    app.TalksReducerGUI._apply_cli_settings(
+        gui, {"long_pause_speed": 20.0, "long_pause_seconds": 90.0}
+    )
+
+    assert gui._seeded_long_pause == {
+        "long_pause_speed": 20.0,
+        "long_pause_seconds": 90.0,
+    }
+
+
+def test_apply_cli_settings_long_pause_seconds_alone_seeds_nothing():
+    gui = _make_settings_gui()
+    gui._seeded_long_pause = None
+
+    app.TalksReducerGUI._apply_cli_settings(gui, {"long_pause_seconds": 90.0})
+
+    assert gui._seeded_long_pause is None
+
+
+@pytest.mark.parametrize("simple", [True, False])
+def test_collect_arguments_uses_seeded_long_pause(simple):
+    gui = _make_collect_gui(
+        simple_mode_var=SimpleNamespace(get=lambda: simple),
+        _seeded_long_pause={"long_pause_speed": 500.0},
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["long_pause_speed"] == 100.0
+    assert args["long_pause_seconds"] == 60.0
