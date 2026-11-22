@@ -91,8 +91,9 @@ Look at the commit history to get more examples.
 - **Cut video** — an **Advanced-only** checkbox (`apply_simple_mode` hides it and
   its panel in Simple mode) that reveals a collapsible trim panel with two linked
   range sliders (start ≤ end, range `0..duration`), each paired with an editable
-  time entry (`cut_start_text_var`/`cut_end_text_var`) and a tall **Convert**
-  button that spans both rows. On file-select the slider range is seeded from
+  time entry (`cut_start_text_var`/`cut_end_text_var`), Start and End on one row
+  with single-height **Convert** and **Remove only** buttons after them. On
+  file-select the slider range is seeded from
   `get_video_duration` (ffprobe). Entries mirror the handles as `HH:MM:SS.mmm`
   (`format_timecode(..., milliseconds=True)`) and accept manual edits parsed by
   `parse_timecode` (`_on_cut_entry_commit`), allowing millisecond input. With Cut
@@ -137,7 +138,9 @@ Look at the commit history to get more examples.
   path persist via `GUIPreferences` (`watch_enabled`, `watch_directory`).
 - **Advanced** — reveals optional controls for the output path, temp folder,
   timing/audio knobs mirrored from the command line, and an appearance picker
-  that can force dark or light mode or follow your operating system.
+  that can force dark or light mode or follow your operating system. The block
+  scrolls inside the window (`gui/scrollable.py`, refitted by
+  `layout.refit_advanced`), and the full layout pins the drop zone to 50px.
 - **Server mode (`--server-managed`)** — when the tray launches the GUI it passes
   `--server-managed` and `--server-url <local url>`. The window then shows a
   **Server:** label near **Mode** with the LAN-reachable address and a
@@ -147,7 +150,7 @@ Look at the commit history to get more examples.
   shows a refreshing **Waiting for download…** status during the
   processing→download gap, and the download bar advances to 100% only once.
 
-Progress updates stream into the 10-line log panel while the processing runs in
+Progress updates stream into the log panel while the processing runs in
 a background thread. Once every queued job succeeds an **Open last output**
 button appears so you can jump straight to the exported file in your system
 file manager.

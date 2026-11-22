@@ -150,8 +150,14 @@ class WidgetStub:
     def configure(self, *args, **kwargs):
         self.configure_calls.append((args, kwargs))
 
-    def bind(self, sequence, callback):
+    def bind(self, sequence, callback, add=None):
         self.bind_calls.append((sequence, callback))
+
+    def create_window(self, *args, **kwargs):
+        return 1
+
+    def itemconfigure(self, *args, **kwargs):
+        pass
 
     def columnconfigure(self, index: int, **kwargs):
         self.columnconfigure_calls.append((index, kwargs))
@@ -209,6 +215,12 @@ class RootStub:
     def winfo_height(self) -> int:
         return 0
 
+    def after_idle(self, callback):
+        self.after_idle_calls = getattr(self, "after_idle_calls", []) + [callback]
+
+    def bind_all(self, sequence, callback, add=None):
+        self.bind_all_calls = getattr(self, "bind_all_calls", []) + [sequence]
+
 
 def make_widget_mock() -> Mock:
     widget = Mock()
@@ -242,6 +254,7 @@ def _make_layout_gui(**overrides) -> SimpleNamespace:
         DoubleVar=DoubleVarStub,
         BooleanVar=BooleanVarStub,
         Scale=WidgetFactory("Scale"),
+        Canvas=WidgetFactory("Canvas"),
         FLAT="flat",
         LEFT="left",
         RIGHT="right",
@@ -510,6 +523,7 @@ def test_build_layout_initializes_widgets(monkeypatch):
         DoubleVar=DoubleVarStub,
         BooleanVar=BooleanVarStub,
         Scale=WidgetFactory("Scale"),
+        Canvas=WidgetFactory("Canvas"),
         FLAT="flat",
         LEFT="left",
         RIGHT="right",
@@ -759,6 +773,37 @@ def test_build_cut_panel_constructs_widgets(monkeypatch):
     assert not gui.cut_panel.grid_remove_calls
 
 
+def test_cut_panel_puts_start_and_end_on_one_row(monkeypatch):
+    """Start and End share row 0, so Convert needs no rowspan and stays one line."""
+
+    gui = _build_layout_with_cut(monkeypatch, cut_enabled=True)
+
+    def cell(widget):
+        kwargs = widget.grid_calls[0][1]
+        return kwargs["row"], kwargs["column"]
+
+    assert cell(gui.cut_start_slider) == (0, 1)
+    assert cell(gui.cut_start_entry) == (0, 2)
+    assert cell(gui.cut_end_slider) == (0, 4)
+    assert cell(gui.cut_end_entry) == (0, 5)
+    assert cell(gui.cut_convert_button) == (0, 6)
+    assert cell(gui.remove_only_button) == (0, 7)
+    assert cell(gui.remove_ranges_entry) == (1, 1)
+    assert cell(gui.mark_cuts_button) == (1, 6)
+    for widget in (
+        gui.cut_start_slider,
+        gui.cut_start_entry,
+        gui.cut_end_slider,
+        gui.cut_end_entry,
+        gui.cut_convert_button,
+        gui.remove_only_button,
+        gui.remove_ranges_entry,
+        gui.mark_cuts_button,
+    ):
+        for _, kwargs in widget.grid_calls:
+            assert kwargs.get("rowspan", 1) == 1
+
+
 def test_remove_help_button_opens_the_article(monkeypatch):
     opened = []
     monkeypatch.setattr(layout.webbrowser, "open", lambda url: opened.append(url))
@@ -820,6 +865,7 @@ def test_build_layout_disables_global_ffmpeg_when_unavailable(monkeypatch):
         DoubleVar=DoubleVarStub,
         BooleanVar=BooleanVarStub,
         Scale=WidgetFactory("Scale"),
+        Canvas=WidgetFactory("Canvas"),
         FLAT="flat",
         LEFT="left",
         RIGHT="right",
@@ -1452,7 +1498,7 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
         activity_frame=make_widget_mock(),
         server_managed=True,
         button_frame=make_widget_mock(),
-        advanced_frame=make_widget_mock(),
+        advanced_container=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
         _simple_presets=list(_TEST_PRESETS),
@@ -1473,7 +1519,7 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     gui.activity_frame.grid_remove.assert_called_once()
     gui.activity_frame.grid.assert_not_called()
     gui.button_frame.grid_remove.assert_called_once()
-    gui.advanced_frame.grid_remove.assert_called_once()
+    gui.advanced_container.grid_remove.assert_called_once()
     gui.run_after_drop_var.set.assert_called_once_with(True)
     # With a preset available, Open output rides in the preset row instead.
     gui.open_output_check.pack_forget.assert_called_once()
@@ -1482,6 +1528,164 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     gui.cut_panel.grid_remove.assert_called_once()
     apply_size.assert_called_once_with(gui, simple=True)
     gui.drop_zone.focus_set.assert_called_once()
+
+
+@pytest.mark.parametrize("visible,weight", [(True, 1), (False, 0)])
+def test_activity_row_is_weighted_only_while_shown(visible, weight):
+    """A shown panel can shrink with the log; a hidden one must not take slack."""
+
+    gui = SimpleNamespace(
+        activity_frame=make_widget_mock(), main_frame=make_widget_mock()
+    )
+
+    layout.set_activity_visible(gui, visible)
+
+    if visible:
+        gui.activity_frame.grid.assert_called_once()
+    else:
+        gui.activity_frame.grid_remove.assert_called_once()
+    gui.main_frame.rowconfigure.assert_called_once_with(4, weight=weight)
+
+
+def test_advanced_space_left_excludes_the_canvas_itself():
+    """What main needs besides the canvas is subtracted from main's height."""
+
+    gui = SimpleNamespace(
+        main_frame=SimpleNamespace(
+            winfo_height=lambda: 900, winfo_reqheight=lambda: 1300
+        ),
+        advanced_canvas=SimpleNamespace(winfo_reqheight=lambda: 500),
+    )
+
+    assert layout.advanced_space_left(gui) == 100
+
+
+def _refit_gui(*, simple=False, visible=True):
+    area = Mock()
+    return SimpleNamespace(
+        advanced_area=area,
+        advanced_canvas=SimpleNamespace(winfo_reqheight=lambda: 500),
+        main_frame=SimpleNamespace(
+            winfo_height=lambda: 900, winfo_reqheight=lambda: 1300
+        ),
+        simple_mode_var=SimpleNamespace(get=lambda: simple),
+        advanced_visible=SimpleNamespace(get=lambda: visible),
+        root=Mock(),
+    )
+
+
+def test_refit_advanced_fits_the_area_to_the_space_left():
+    gui = _refit_gui()
+
+    layout.refit_advanced(gui)
+
+    gui.advanced_area.fit.assert_called_once_with(
+        available=100, minimum=layout.ADVANCED_MIN_HEIGHT
+    )
+
+
+@pytest.mark.parametrize("simple,visible", [(True, True), (False, False)])
+def test_refit_advanced_skips_a_hidden_block(simple, visible):
+    gui = _refit_gui(simple=simple, visible=visible)
+
+    layout.refit_advanced(gui)
+
+    gui.advanced_area.fit.assert_not_called()
+
+
+def test_schedule_advanced_refit_collapses_bursts_into_one():
+    gui = _refit_gui()
+
+    layout.schedule_advanced_refit(gui)
+    layout.schedule_advanced_refit(gui)
+
+    gui.root.after_idle.assert_called_once()
+    gui.root.after_idle.call_args.args[0]()
+    gui.advanced_area.fit.assert_called_once()
+    layout.schedule_advanced_refit(gui)
+    assert gui.root.after_idle.call_count == 2
+
+
+def test_toggle_advanced_shows_the_scroll_container_and_refits():
+    root = Mock()
+    gui = SimpleNamespace(
+        advanced_visible=SimpleNamespace(get=lambda: True, set=Mock()),
+        advanced_container=make_widget_mock(),
+        advanced_button=make_widget_mock(),
+        root=root,
+    )
+
+    PreferenceController(gui).toggle_advanced(initial=True)
+
+    gui.advanced_container.grid.assert_called_once()
+    root.after_idle.assert_called_once()
+
+
+def _scaling_root(scaling: float) -> SimpleNamespace:
+    return SimpleNamespace(tk=SimpleNamespace(call=lambda *args: scaling))
+
+
+def test_scaled_pixels_follows_tk_scaling():
+    """50 logical pixels stay 50 at 96 DPI and grow with display scaling."""
+
+    assert layout.scaled_pixels(SimpleNamespace(root=_scaling_root(96 / 72)), 50) == 50
+    assert layout.scaled_pixels(SimpleNamespace(root=_scaling_root(2.0)), 50) == 75
+
+
+def test_scaled_pixels_falls_back_without_a_tk_root():
+    assert layout.scaled_pixels(SimpleNamespace(root=SimpleNamespace()), 50) == 50
+
+
+def test_drop_zone_is_fixed_height_in_full_mode():
+    gui = SimpleNamespace(
+        root=_scaling_root(96 / 72),
+        PADDING=10,
+        main_frame=make_widget_mock(),
+        input_frame=make_widget_mock(),
+    )
+
+    layout.apply_drop_zone_height(gui, simple=False)
+
+    # The frame's padding is added back so the visible label is the full 50px.
+    gui.input_frame.configure.assert_called_once_with(
+        height=layout.DROP_ZONE_FULL_HEIGHT + 20
+    )
+    gui.input_frame.grid_propagate.assert_called_once_with(False)
+    gui.main_frame.rowconfigure.assert_called_once_with(0, weight=0)
+
+
+def test_drop_zone_stretches_again_in_simple_mode():
+    gui = SimpleNamespace(
+        root=_scaling_root(96 / 72),
+        main_frame=make_widget_mock(),
+        input_frame=make_widget_mock(),
+    )
+
+    layout.apply_drop_zone_height(gui, simple=True)
+
+    gui.input_frame.grid_propagate.assert_called_once_with(True)
+    gui.main_frame.rowconfigure.assert_called_once_with(0, weight=1)
+
+
+@pytest.mark.parametrize("simple", [True, False])
+def test_apply_simple_mode_sets_the_drop_zone_height(monkeypatch, simple):
+    monkeypatch.setattr(layout, "apply_window_size", Mock())
+    apply_height = Mock()
+    monkeypatch.setattr(layout, "apply_drop_zone_height", apply_height)
+    gui = SimpleNamespace(
+        tk=SimpleNamespace(LEFT="left", RIGHT="right"),
+        simple_mode_var=SimpleNamespace(get=lambda: simple),
+        basic_options_frame=make_widget_mock(),
+        log_frame=make_widget_mock(),
+        advanced_container=make_widget_mock(),
+        run_after_drop_var=SimpleNamespace(set=Mock()),
+        advanced_visible=SimpleNamespace(get=lambda: False),
+        drop_zone=Mock(),
+    )
+
+    layout.apply_simple_mode(gui)
+
+    apply_height.assert_called_once_with(gui, simple=simple)
 
 
 def test_apply_simple_mode_simple_branch_keeps_checkboxes_without_presets(monkeypatch):
@@ -1499,7 +1703,7 @@ def test_apply_simple_mode_simple_branch_keeps_checkboxes_without_presets(monkey
         activity_frame=make_widget_mock(),
         server_managed=True,
         button_frame=make_widget_mock(),
-        advanced_frame=make_widget_mock(),
+        advanced_container=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
         _simple_presets=[],
@@ -1532,9 +1736,10 @@ def test_apply_simple_mode_full_branch(monkeypatch):
         activity_frame=make_widget_mock(),
         server_managed=True,
         button_frame=make_widget_mock(),
-        advanced_frame=make_widget_mock(),
+        advanced_container=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: True),
+        root=Mock(),
         open_output_check=make_widget_mock(),
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
@@ -1553,7 +1758,9 @@ def test_apply_simple_mode_full_branch(monkeypatch):
     gui.activity_frame.grid.assert_called_once()
     gui.activity_frame.grid_remove.assert_not_called()
     gui.button_frame.grid.assert_called_once()
-    gui.advanced_frame.grid.assert_called_once()
+    gui.advanced_container.grid.assert_called_once()
+    # Reopening the block refits it to the space the full layout leaves.
+    gui.root.after_idle.assert_called_once()
     # Advanced restores its own Open output copy.
     gui.open_output_check.pack.assert_called_once()
     # Advanced restores the Cut video checkbox; the panel shows because cut is on.
@@ -1574,9 +1781,10 @@ def test_apply_simple_mode_full_branch_hides_activity_when_standalone(monkeypatc
         activity_frame=make_widget_mock(),
         server_managed=False,
         button_frame=make_widget_mock(),
-        advanced_frame=make_widget_mock(),
+        advanced_container=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: True),
+        root=Mock(),
         cut_check=make_widget_mock(),
         cut_panel=make_widget_mock(),
         cut_enabled_var=SimpleNamespace(get=lambda: False),
@@ -1600,7 +1808,7 @@ def test_apply_simple_mode_full_branch_hides_advanced_when_not_visible(monkeypat
         basic_options_frame=make_widget_mock(),
         log_frame=make_widget_mock(),
         advanced_button=make_widget_mock(),
-        advanced_frame=make_widget_mock(),
+        advanced_container=make_widget_mock(),
         run_after_drop_var=SimpleNamespace(set=Mock()),
         advanced_visible=SimpleNamespace(get=lambda: False),
         drop_zone=Mock(),
@@ -1608,7 +1816,7 @@ def test_apply_simple_mode_full_branch_hides_advanced_when_not_visible(monkeypat
 
     layout.apply_simple_mode(gui)
 
-    gui.advanced_frame.grid.assert_not_called()
+    gui.advanced_container.grid.assert_not_called()
     apply_size.assert_called_once_with(gui, simple=False)
 
 
@@ -2823,8 +3031,21 @@ def test_vad_check_packed_in_silence_speedup_row():
     assert check.args[0] is gui.basic_presets_frame
     assert check.kwargs["text"] == "Speedup no voice"
     assert check.kwargs["variable"] is gui.vad_var
-    assert check.pack_calls == [((), {"side": "left", "padx": layout.CHECKBOX_ROW_GAP})]
+    assert check.pack_calls == [
+        ((), {"side": "left", "padx": layout.VALUE_ROW_TRAILING_GAP})
+    ]
     assert gui.basic_preset_control.frame.args[0] is gui.basic_presets_frame
+
+
+def test_trailing_checkboxes_share_one_gap_after_their_buttons():
+    """Speedup no voice sits as far from its buttons as Add codec suffix does."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    gap = {"side": "left", "padx": layout.VALUE_ROW_TRAILING_GAP}
+    assert gui.vad_check.pack_calls == [((), gap)]
+    assert gui.add_codec_suffix_check.pack_calls == [((), gap)]
 
 
 def test_apply_preset_to_gui_sets_vad():
@@ -3023,7 +3244,11 @@ def test_long_pause_controls_trail_silent_buttons():
 
     row = gui.long_pause_check.args[0]
     assert row.args[0] is value_row
-    assert row.pack_calls == [((), {"side": "left", "padx": (12, 0)})]
+    assert row.pack_calls == [
+        ((), {"side": "left", "padx": layout.VALUE_ROW_TRAILING_GAP})
+    ]
+    assert gui.long_pause_speed_entry.kwargs["justify"] == "center"
+    assert gui.long_pause_seconds_entry.kwargs["justify"] == "center"
     assert gui.long_pause_check.kwargs["text"] == "Speedup x"
     assert gui.long_pause_check.kwargs["variable"] is gui.long_pause_enabled_var
     assert gui.long_pause_speed_entry.args[0] is row

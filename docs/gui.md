@@ -10,7 +10,9 @@ controls and the log, and processes new files as soon as you drop them. Uncheck 
 return to the full layout with file pickers, the Run button, and detailed logging.
 
 Drag files or folders from your desktop onto the drop zone, click it to open the system file
-picker, or add them via the Explorer/Finder dialog; duplicates are ignored.
+picker, or add them via the Explorer/Finder dialog; duplicates are ignored. In the full layout the
+drop zone is a fixed 50px strip, so it stays put when Cut video or Advanced open or the window is
+resized; Simple mode keeps it large.
 
 In **Simple mode** a single **Preset** dropdown replaces the individual encoding controls:
 pick a saved preset (see [Presets](#presets) below) to fan its resolution, speeds, threshold,
@@ -81,6 +83,10 @@ buttons — **5 sec**, **10 sec**, **30 sec**, **60 sec** — plus a **…** slo
 to 60 seconds, to balance scroll smoothness against output size. A label beside the buttons
 shows the estimated size overhead for the selected interval (for example `+1.4%` at 30 seconds,
 `+0.5%` at 60 seconds); it updates as soon as you pick a different value.
+
+The Advanced block scrolls inside the window: it takes whatever height the rest of the layout
+leaves, shows a scrollbar only when its rows do not fit, and scrolls with the mouse wheel while
+the pointer is over it. A taller window shows more of it at once.
 
 Hovering the **Threshold** row shows a tooltip explaining what each preset trims:
 
@@ -154,8 +160,8 @@ unreachable` if the ping fails).
 
 Tick **Cut video** (an **Advanced-only** control — it is hidden in Simple mode) to reveal two
 linked start/end range sliders, each paired with an editable time field that accepts manual
-`HH:MM:SS.mmm` input (millisecond precision), plus a tall **Convert** button spanning both
-rows. After you pick a file the slider range is set from the video duration, and conversion
+`HH:MM:SS.mmm` input (millisecond precision). Start and End share one row, followed by a
+**Convert** button (and **Remove only** once fragments are marked). After you pick a file the slider range is set from the video duration, and conversion
 does not start automatically: adjust the keep range and click **Convert** when you are ready.
 
 The keep range matches the CLI's `--cut-start`/`--cut-end` semantics. The checkbox state and
@@ -226,7 +232,7 @@ exactly once instead of cycling through 100% several times. While a remote uploa
 is in flight the status also shows the live transfer rate next to the percentage, e.g.
 `Uploading: 55%, 5.5 MB/s`.
 
-Progress updates stream into the 10-line log panel while the processing runs in a background
+Progress updates stream into the log panel while the processing runs in a background
 thread. Once every queued job succeeds an **Open last output** button appears so you can jump
 straight to the exported file in your system file manager.
 

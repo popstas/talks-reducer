@@ -13,6 +13,7 @@ from .. import presets
 from ..icons import find_icon_path
 from ..models import default_temp_folder
 from . import cut_marks_ui
+from .scrollable import ScrollableFrame
 from .segmented import CustomSpec, Option, SegmentedChoice
 from .tooltips import add_tooltip
 
@@ -59,6 +60,178 @@ def format_activity_line(entry: dict) -> str:
 # row. Shared with ``apply_simple_mode``, which re-packs two of the three when
 # leaving Simple mode and would otherwise restore them flush against each other.
 CHECKBOX_ROW_GAP = (24, 0)
+
+# Gap between a setting's value buttons and the control trailing them on the same
+# line (Add codec suffix, Speedup no voice, the long-pause group). One value, so
+# the trailing controls of different rows line up the same distance from their
+# buttons.
+VALUE_ROW_TRAILING_GAP = (12, 0)
+
+# Requested length of each Cut video range slider. Start and End share one row,
+# so this is only their minimum: both stretch to split the row's slack equally.
+CUT_SLIDER_LENGTH = 120
+
+# Height of the drop zone in the full layout, in 96-DPI pixels (``scaled_pixels``
+# converts it for the display). Fixed so the zone no longer absorbs the window's
+# slack and resizes whenever a panel such as Cut video opens or closes.
+DROP_ZONE_FULL_HEIGHT = 50
+
+
+# The log's requested height, in lines. It is only a floor: the log row takes
+# the window's slack, so it grows past this whenever Advanced leaves room, and
+# ``refit_advanced`` sizes the Advanced block around it.
+LOG_MIN_LINES = 5
+
+# The Advanced block never shrinks below this many 96-DPI pixels, so a cramped
+# window still shows a few rows to scroll through.
+ADVANCED_MIN_HEIGHT = 80
+
+# One mouse-wheel notch over the Advanced block scrolls about one row, in
+# 96-DPI pixels; Tk's default step is a tenth of the view, roughly 8px here.
+ADVANCED_SCROLL_STEP = 30
+
+
+def advanced_space_left(gui: "TalksReducerGUI") -> int:
+    """Return the height the Advanced canvas may take without clipping the window.
+
+    ``main``'s requested height is everything at its natural size, the canvas
+    included; take the canvas back out and what is left of ``main``'s actual
+    height is the canvas's share. The log counts at its requested
+    ``LOG_MIN_LINES``, which is how it keeps a few visible lines. The result
+    does not depend on the canvas's current height, so refitting converges in
+    one step instead of chasing its own resize.
+    """
+
+    main = gui.main_frame
+    canvas_height = gui.advanced_canvas.winfo_reqheight()
+    return main.winfo_height() - (main.winfo_reqheight() - canvas_height)
+
+
+def refit_advanced(gui: "TalksReducerGUI") -> None:
+    """Size the Advanced scroll area to the space left in the window.
+
+    Runs only while the block is on screen: a hidden block takes no space, so
+    there is nothing to fit. ``update_idletasks`` first, because a panel shown
+    a moment ago (Cut video, say) has not yet pushed its height up to ``main``.
+    """
+
+    gui._advanced_refit_pending = False
+    area = getattr(gui, "advanced_area", None)
+    if area is None or getattr(gui, "_advanced_refitting", False):
+        return
+    if gui.simple_mode_var.get() or not gui.advanced_visible.get():
+        return
+    gui._advanced_refitting = True
+    try:
+        gui.root.update_idletasks()
+        area.fit(
+            available=advanced_space_left(gui),
+            minimum=scaled_pixels(gui, ADVANCED_MIN_HEIGHT),
+        )
+    finally:
+        gui._advanced_refitting = False
+
+
+def schedule_advanced_refit(gui: "TalksReducerGUI", *_args) -> None:
+    """Queue one ``refit_advanced`` for the next idle moment.
+
+    Several ``<Configure>`` events arrive for one change (the window, the log,
+    the inner frame), so they collapse into a single refit.
+    """
+
+    if getattr(gui, "_advanced_refit_pending", False):
+        return
+    gui._advanced_refit_pending = True
+    gui.root.after_idle(lambda: refit_advanced(gui))
+
+
+def set_activity_visible(gui: "TalksReducerGUI", visible: bool) -> None:
+    """Show or hide the Connected clients panel, weighting its row only when shown.
+
+    With the drop zone pinned, the log and this panel are the only rows that can
+    give way when the window is short, so the panel's row needs a weight or it
+    is the one cut off at the bottom (with Advanced open, in server-managed
+    mode). The weight must go with the panel: Tk hands slack to a weighted row
+    even when it is empty, which would leave a blank band in a standalone GUI.
+    """
+
+    if visible:
+        gui.activity_frame.grid()
+    else:
+        gui.activity_frame.grid_remove()
+    main = getattr(gui, "main_frame", None)
+    if main is not None:
+        main.rowconfigure(4, weight=1 if visible else 0)
+
+
+def bind_advanced_refit(gui: "TalksReducerGUI") -> None:
+    """Refit the Advanced block whenever the space around it can have changed.
+
+    ``main`` resizes with the window; ``log_frame`` is the one row left with a
+    weight in the full layout, so any sibling growing or shrinking (Cut video,
+    the status buttons, the activity panel) resizes it; ``advanced_frame``
+    changes when its own rows do. The wheel is bound application-wide but only
+    acts over the block, and only while it scrolls (``scroll_by_wheel``).
+    """
+
+    for widget in (gui.main_frame, gui.log_frame, gui.advanced_frame):
+        widget.bind("<Configure>", lambda _event: schedule_advanced_refit(gui), add="+")
+
+    def on_wheel(event, delta=None) -> None:
+        try:
+            widget = gui.root.winfo_containing(event.x_root, event.y_root)
+        except Exception:
+            return
+        gui.advanced_area.scroll_by_wheel(
+            delta=event.delta if delta is None else delta, widget=widget
+        )
+
+    gui.root.bind_all("<MouseWheel>", on_wheel, add="+")
+    # X11 reports wheel turns as buttons 4 and 5 rather than ``<MouseWheel>``.
+    gui.root.bind_all("<Button-4>", lambda e: on_wheel(e, 120), add="+")
+    gui.root.bind_all("<Button-5>", lambda e: on_wheel(e, -120), add="+")
+
+
+def scaled_pixels(gui: "TalksReducerGUI", value: int) -> int:
+    """Convert *value* 96-DPI pixels to the display's pixels.
+
+    The process is DPI aware, so a bare pixel count in Tk is a physical pixel
+    and would shrink on a 150% display. ``tk scaling`` is pixels per point —
+    ``96 / 72`` at 100% — which gives the factor. Without a usable Tk root (the
+    stub suite) the value is returned unchanged.
+    """
+
+    try:
+        scaling = float(gui.root.tk.call("tk", "scaling"))
+    except Exception:
+        return value
+    return max(1, round(value * scaling / (96 / 72)))
+
+
+def apply_drop_zone_height(gui: "TalksReducerGUI", *, simple: bool) -> None:
+    """Pin the drop zone to ``DROP_ZONE_FULL_HEIGHT`` in full mode only.
+
+    Simple mode is little more than the drop zone, so there it keeps stretching
+    with the window. In full mode ``input_frame`` stops propagating its content
+    size and its row loses its weight, which leaves the window's slack to the
+    log and keeps the zone the same height whatever opens around it.
+    """
+
+    main = getattr(gui, "main_frame", None)
+    frame = getattr(gui, "input_frame", None)
+    if main is None or frame is None:
+        return
+    if simple:
+        frame.grid_propagate(True)
+        main.rowconfigure(0, weight=1)
+    else:
+        # The frame's own padding sits inside the configured height, so add it
+        # back: the visible zone is the label, not the frame around it.
+        padding = int(getattr(gui, "PADDING", 0))
+        frame.configure(height=scaled_pixels(gui, DROP_ZONE_FULL_HEIGHT) + 2 * padding)
+        frame.grid_propagate(False)
+        main.rowconfigure(0, weight=0)
+
 
 # Vertical gap above every option row in ``basic_options_frame``. The group
 # headings that used to space the panel out are gone, so the gap itself is all
@@ -586,25 +759,28 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
 
     The panel hosts two linked sliders (start ≤ end, range ``0..duration``) and,
     next to each, a text entry for typing the in/out timecode by hand (supporting
-    millisecond precision via ``HH:MM:SS.mmm``). A tall **Convert** button spans
-    both slider rows so that, when Simple mode is off, the user can review the
-    trim before processing starts instead of converting immediately. The panel is
+    millisecond precision via ``HH:MM:SS.mmm``). Start and End share one row —
+    ``Start [slider][time]  End [slider][time]  [Convert] [Remove only]`` — so the
+    buttons are a single line tall; both sliders take the row's slack equally.
+    **Convert** lets the user review the trim before processing starts instead of
+    converting immediately when Simple mode is off. The panel is
     shown only when ``cut_enabled_var`` is set and is available in both Simple and
     Advanced layouts. Slider movement is forwarded to
     ``gui._on_cut_slider_change`` so the application can clamp the handles.
 
-    A third **Remove** row holds an entry with the fragments to drop from the
+    A second **Remove** row holds an entry with the fragments to drop from the
     middle of the video (``HH:MM:SS-HH:MM:SS`` list, committed on Enter or focus
-    loss) and a **Mark cuts…** button that opens mpv.net to mark them. The
-    label carries a ``?`` link to the how-to article (``REMOVE_ARTICLE_URL``),
-    since the marking keys are not discoverable from the panel itself. A tall
-    **Remove only** button in the last column runs a fast remove-only pass; it is
-    revealed by ``gui._update_cut_convert_button`` once ranges exist.
+    loss) and a **Mark cuts…** button, under Convert, that opens mpv.net to mark
+    them. The label carries a ``?`` link to the how-to article
+    (``REMOVE_ARTICLE_URL``), since the marking keys are not discoverable from the
+    panel itself. **Remove only**, last on the first row, runs a fast remove-only
+    pass; it is revealed by ``gui._update_cut_convert_button`` once ranges exist.
     """
 
     panel = gui.ttk.Frame(parent)
     panel.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 0))
-    panel.columnconfigure(1, weight=1)
+    panel.columnconfigure(1, weight=1, uniform="cut_slider")
+    panel.columnconfigure(4, weight=1, uniform="cut_slider")
     gui.cut_panel = panel
 
     gui.ttk.Label(panel, text="Start").grid(row=0, column=0, sticky="w")
@@ -617,7 +793,7 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
         resolution=0.001,
         showvalue=False,
         command=lambda _value: gui._on_cut_slider_change("start"),
-        length=240,
+        length=CUT_SLIDER_LENGTH,
         highlightthickness=0,
     )
     gui.cut_start_slider.grid(row=0, column=1, sticky="ew", padx=(8, 8))
@@ -628,7 +804,7 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
     gui.cut_start_entry.bind("<Return>", lambda _e: gui._on_cut_entry_commit("start"))
     gui.cut_start_entry.bind("<FocusOut>", lambda _e: gui._on_cut_entry_commit("start"))
 
-    gui.ttk.Label(panel, text="End").grid(row=1, column=0, sticky="w", pady=(4, 0))
+    gui.ttk.Label(panel, text="End").grid(row=0, column=3, sticky="w", padx=(16, 0))
     gui.cut_end_slider = gui.tk.Scale(
         panel,
         variable=gui.cut_end_var,
@@ -638,14 +814,14 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
         resolution=0.001,
         showvalue=False,
         command=lambda _value: gui._on_cut_slider_change("end"),
-        length=240,
+        length=CUT_SLIDER_LENGTH,
         highlightthickness=0,
     )
-    gui.cut_end_slider.grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(4, 0))
+    gui.cut_end_slider.grid(row=0, column=4, sticky="ew", padx=(8, 8))
     gui.cut_end_entry = gui.ttk.Entry(
         panel, textvariable=gui.cut_end_text_var, width=13, justify="center"
     )
-    gui.cut_end_entry.grid(row=1, column=2, sticky="e", pady=(4, 0))
+    gui.cut_end_entry.grid(row=0, column=5, sticky="e")
     gui.cut_end_entry.bind("<Return>", lambda _e: gui._on_cut_entry_commit("end"))
     gui.cut_end_entry.bind("<FocusOut>", lambda _e: gui._on_cut_entry_commit("end"))
 
@@ -654,9 +830,7 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
         text="Convert",
         command=gui._start_run,
     )
-    gui.cut_convert_button.grid(
-        row=0, column=3, rowspan=2, sticky="nsew", padx=(8, 0), pady=(0, 0)
-    )
+    gui.cut_convert_button.grid(row=0, column=6, sticky="ew", padx=(8, 0))
 
     remove_label = gui.ttk.Frame(panel)
     gui.ttk.Label(remove_label, text="Remove").pack(side=gui.tk.LEFT)
@@ -667,23 +841,27 @@ def build_cut_panel(gui: "TalksReducerGUI", parent: "tk.Misc", *, row: int) -> N
         command=lambda: webbrowser.open(REMOVE_ARTICLE_URL),
     )
     gui.remove_help_button.pack(side=gui.tk.LEFT)
-    remove_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
+    remove_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
     gui.remove_ranges_entry = gui.ttk.Entry(
         panel, textvariable=gui.remove_ranges_text_var
     )
     gui.remove_ranges_entry.grid(
-        row=2, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(4, 0)
+        row=1, column=1, columnspan=5, sticky="ew", padx=(8, 0), pady=(4, 0)
     )
     gui.remove_ranges_entry.bind("<Return>", lambda _e: cut_marks_ui.commit_text(gui))
     gui.remove_ranges_entry.bind("<FocusOut>", lambda _e: cut_marks_ui.commit_text(gui))
     gui.mark_cuts_button = gui.ttk.Button(
         panel, text="Mark cuts…", command=lambda: cut_marks_ui.open_marker(gui)
     )
-    gui.mark_cuts_button.grid(row=2, column=3, sticky="ew", padx=(8, 0), pady=(4, 0))
+    # Spans the Remove only column too, so the row ends where the one above does
+    # (that column has zero width while Remove only is hidden).
+    gui.mark_cuts_button.grid(
+        row=1, column=6, columnspan=2, sticky="ew", padx=(8, 0), pady=(4, 0)
+    )
     gui.remove_only_button = gui.ttk.Button(
         panel, text="Remove only", command=lambda: gui._start_run(remove_only=True)
     )
-    gui.remove_only_button.grid(row=0, column=4, rowspan=2, sticky="nsew", padx=(8, 0))
+    gui.remove_only_button.grid(row=0, column=7, sticky="ew", padx=(8, 0))
 
     sliders = getattr(gui, "_sliders", None)
     if isinstance(sliders, list):
@@ -751,10 +929,13 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     main.grid(row=0, column=0, sticky="nsew")
     gui.root.columnconfigure(0, weight=1)
     gui.root.rowconfigure(0, weight=1)
+    gui.main_frame = main
 
-    # Input selection frame
+    # Input selection frame; ``apply_drop_zone_height`` fixes its height in the
+    # full layout and lets it stretch in Simple mode.
     input_frame = gui.ttk.Frame(main, padding=gui.PADDING)
     input_frame.grid(row=0, column=0, sticky="nsew")
+    gui.input_frame = input_frame
     main.rowconfigure(0, weight=1)
     main.columnconfigure(0, weight=1)
     input_frame.columnconfigure(0, weight=1)
@@ -1002,7 +1183,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text="Add codec suffix",
         variable=gui.add_codec_suffix_var,
     )
-    gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(12, 0))
+    gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=VALUE_ROW_TRAILING_GAP)
 
     gui.ttk.Label(gui.basic_options_frame, text="FPS").grid(
         row=3, column=0, sticky="w", pady=SETTING_ROW_PADY
@@ -1212,8 +1393,21 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         )
         gui.update_status_label.grid(row=0, column=3, sticky="w", padx=(8, 0))
 
-    gui.advanced_frame = gui.ttk.Frame(gui.options_frame, padding=0)
-    gui.advanced_frame.grid(row=4, column=0, columnspan=2, sticky="nsew")
+    # The Advanced block is taller than the full layout can show, so its rows
+    # live in a scroll area sized by ``refit_advanced``. ``advanced_container`` is
+    # what gets shown and hidden; ``advanced_frame`` is the inner frame every row
+    # below is built into. Never ``grid`` the inner frame itself: the canvas owns
+    # its placement, and grid would silently take it away.
+    gui.advanced_area = ScrollableFrame(
+        gui.options_frame,
+        tk=gui.tk,
+        ttk=gui.ttk,
+        scroll_step=scaled_pixels(gui, ADVANCED_SCROLL_STEP),
+    )
+    gui.advanced_container = gui.advanced_area.container
+    gui.advanced_canvas = gui.advanced_area.canvas
+    gui.advanced_container.grid(row=4, column=0, columnspan=2, sticky="nsew")
+    gui.advanced_frame = gui.advanced_area.inner
     gui.advanced_frame.columnconfigure(1, weight=1)
 
     # Watch-directory chooser on a single row (checkbox + path + Browse), placed
@@ -1454,7 +1648,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     gui.log_frame.rowconfigure(0, weight=1)
 
     gui.log_text = gui.tk.Text(
-        gui.log_frame, wrap="word", height=10, state=gui.tk.DISABLED
+        gui.log_frame, wrap="word", height=LOG_MIN_LINES, state=gui.tk.DISABLED
     )
     gui.log_text.grid(row=0, column=0, sticky="nsew")
     log_scroll = gui.ttk.Scrollbar(
@@ -1483,8 +1677,9 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     activity_scroll.grid(row=1, column=1, sticky="ns")
     gui.activity_text.configure(yscrollcommand=activity_scroll.set)
 
-    if not bool(getattr(gui, "server_managed", False)):
-        gui.activity_frame.grid_remove()
+    set_activity_visible(gui, bool(getattr(gui, "server_managed", False)))
+
+    bind_advanced_refit(gui)
 
     # Resume watching a persisted directory as soon as the layout is ready.
     watch = getattr(gui, "watch", None)
@@ -1634,7 +1829,7 @@ def build_silence_speedup_row(gui: "TalksReducerGUI") -> None:
         text="Speedup no voice",
         variable=gui.vad_var,
     )
-    gui.vad_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
+    gui.vad_check.pack(side=gui.tk.LEFT, padx=VALUE_ROW_TRAILING_GAP)
 
 
 def build_vad_settings_rows(gui: "TalksReducerGUI", *, first_row: int) -> None:
@@ -1777,18 +1972,18 @@ def build_long_pause_controls(gui: "TalksReducerGUI", parent) -> None:
         )
 
     frame = gui.ttk.Frame(parent)
-    frame.pack(side=gui.tk.LEFT, padx=(12, 0))
+    frame.pack(side=gui.tk.LEFT, padx=VALUE_ROW_TRAILING_GAP)
     gui.long_pause_check = gui.ttk.Checkbutton(
         frame, text="Speedup x", variable=gui.long_pause_enabled_var
     )
     gui.long_pause_check.pack(side=gui.tk.LEFT)
     gui.long_pause_speed_entry = gui.ttk.Entry(
-        frame, textvariable=gui.long_pause_speed_text_var, width=4
+        frame, textvariable=gui.long_pause_speed_text_var, width=4, justify="center"
     )
     gui.long_pause_speed_entry.pack(side=gui.tk.LEFT, padx=(2, 0))
     gui.ttk.Label(frame, text="pauses longer than").pack(side=gui.tk.LEFT, padx=(6, 0))
     gui.long_pause_seconds_entry = gui.ttk.Entry(
-        frame, textvariable=gui.long_pause_seconds_text_var, width=5
+        frame, textvariable=gui.long_pause_seconds_text_var, width=5, justify="center"
     )
     gui.long_pause_seconds_entry.pack(side=gui.tk.LEFT, padx=(6, 0))
     gui.ttk.Label(frame, text="seconds").pack(side=gui.tk.LEFT, padx=(4, 0))
@@ -2162,6 +2357,7 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
     """Toggle between simple and full layouts."""
 
     simple = gui.simple_mode_var.get()
+    apply_drop_zone_height(gui, simple=simple)
     if simple:
         gui.basic_options_frame.grid_remove()
         # The Advanced-only preset management strip has no place in Simple mode.
@@ -2171,10 +2367,10 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
         # The Connected clients panel is a server-managed-only detail that has no
         # place in the minimal Simple layout.
         if hasattr(gui, "activity_frame"):
-            gui.activity_frame.grid_remove()
+            set_activity_visible(gui, False)
         if hasattr(gui, "button_frame"):
             gui.button_frame.grid_remove()
-        gui.advanced_frame.grid_remove()
+        gui.advanced_container.grid_remove()
         gui.run_after_drop_var.set(True)
         # Show the preset selector only when at least one preset exists.
         if hasattr(gui, "simple_preset_frame") and getattr(
@@ -2205,14 +2401,12 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
         # Restore the Connected clients panel only when the GUI is managed by the
         # server tray; standalone GUIs never show it.
         if hasattr(gui, "activity_frame"):
-            if bool(getattr(gui, "server_managed", False)):
-                gui.activity_frame.grid()
-            else:
-                gui.activity_frame.grid_remove()
+            set_activity_visible(gui, bool(getattr(gui, "server_managed", False)))
         if hasattr(gui, "button_frame"):
             gui.button_frame.grid()
         if gui.advanced_visible.get():
-            gui.advanced_frame.grid()
+            gui.advanced_container.grid()
+            schedule_advanced_refit(gui)
         if hasattr(gui, "simple_preset_frame"):
             # Hides the whole preset row, including its Open output copy.
             gui.simple_preset_frame.grid_remove()
