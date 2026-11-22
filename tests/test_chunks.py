@@ -233,3 +233,67 @@ def test_apply_long_pauses_trailing_short_sound_stays_outside_stretch():
     result = apply_long_pauses(chunks, min_frames=150, tolerance_frames=10)
 
     assert result == [[0, 200, LONG_PAUSE_SPEED_INDEX], [200, 203, 1]]
+
+
+def test_apply_long_pauses_keeps_short_word_before_resumed_speech():
+    # Long silence, "So." (24 frames), a 12-frame gap, then speech: the word
+    # belongs to the speech, not to the pause.
+    chunks = [
+        [0, 300, 1],
+        [300, 9300, 0],
+        [9300, 9324, 1],
+        [9324, 9336, 0],
+        [9336, 12000, 1],
+    ]
+
+    result = apply_long_pauses(chunks, min_frames=1800, tolerance_frames=60)
+
+    assert result == [
+        [0, 300, 1],
+        [300, 9300, LONG_PAUSE_SPEED_INDEX],
+        [9300, 9324, 1],
+        [9324, 9336, 0],
+        [9336, 12000, 1],
+    ]
+
+
+def test_apply_long_pauses_keeps_short_word_after_speech_ends():
+    # Speech, a 12-frame gap, "Okay." (24 frames), then a long silence.
+    chunks = [
+        [0, 300, 1],
+        [300, 312, 0],
+        [312, 336, 1],
+        [336, 9336, 0],
+        [9336, 9400, 1],
+    ]
+
+    result = apply_long_pauses(chunks, min_frames=1800, tolerance_frames=60)
+
+    assert result == [
+        [0, 300, 1],
+        [300, 312, 0],
+        [312, 336, 1],
+        [336, 9336, LONG_PAUSE_SPEED_INDEX],
+        [9336, 9400, 1],
+    ]
+
+
+def test_apply_long_pauses_merges_double_notification_mid_silence():
+    # ding, short gap, ding inside a long silence: still one long pause.
+    chunks = [
+        [0, 4000, 0],
+        [4000, 4020, 1],
+        [4020, 4035, 0],
+        [4035, 4055, 1],
+        [4055, 9000, 0],
+    ]
+
+    result = apply_long_pauses(chunks, min_frames=1800, tolerance_frames=60)
+
+    assert result == [[0, 9000, LONG_PAUSE_SPEED_INDEX]]
+
+
+def test_apply_long_pauses_trimmed_stretch_below_threshold_is_unchanged():
+    chunks = [[0, 100, 0], [100, 110, 1], [110, 115, 0], [115, 200, 1]]
+
+    assert apply_long_pauses(chunks, min_frames=110, tolerance_frames=60) == chunks

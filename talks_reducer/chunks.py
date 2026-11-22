@@ -155,15 +155,36 @@ def apply_long_pauses(
             and int(chunks[last + 2][2]) == 0
         ):
             last += 2
-        start, end = int(chunk[0]), int(chunks[last][1])
+        # A sound separated from speech by only a short gap is a word at the
+        # edge of the speech ("So." before talking resumes), not a stray sound
+        # inside the pause, so the stretch must start and end with a silence of
+        # at least the tolerance.
+        first, final = index, last
+        while first < final and _length(chunks[first]) < tolerance_frames:
+            first += 2
+        while final > first and _length(chunks[final]) < tolerance_frames:
+            final -= 2
+        start, end = int(chunks[first][0]), int(chunks[final][1])
+        result.extend(_copy(chunks[index:first]))
         if end - start >= min_frames:
             result.append([start, end, LONG_PAUSE_SPEED_INDEX])
         else:
-            result.extend(
-                [int(value) for value in piece] for piece in chunks[index : last + 1]
-            )
+            result.extend(_copy(chunks[first : final + 1]))
+        result.extend(_copy(chunks[final + 1 : last + 1]))
         index = last + 1
     return result
+
+
+def _length(chunk: Sequence[int]) -> int:
+    """Return the frame count of *chunk*."""
+
+    return int(chunk[1]) - int(chunk[0])
+
+
+def _copy(chunks: Sequence[Sequence[int]]) -> List[List[int]]:
+    """Return int copies of *chunks* so callers never share input lists."""
+
+    return [[int(value) for value in chunk] for chunk in chunks]
 
 
 def get_tree_expression(chunks: Sequence[Sequence[int]]) -> str:

@@ -1544,11 +1544,14 @@ def test_vad_engine_not_loaded_when_audio_is_not_analysed(
 
 
 def _long_pause_mask() -> np.ndarray:
-    """30 frames: speech, a long silence with a one-frame blip, speech."""
+    """30 frames: speech, a silence, speech.
+
+    The helper's clip is one second long, shorter than the 2-second sound
+    tolerance, so absorbed blips are covered by ``tests/test_chunks.py``.
+    """
 
     mask = np.zeros(30, dtype=bool)
     mask[0:3] = True
-    mask[14] = True
     mask[27:30] = True
     return mask
 
