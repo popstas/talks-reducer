@@ -1,6 +1,23 @@
 # Changelog
 
 
+## v1.10.0 - 2026-11-22
+
+### Features
+
+- Put long pause controls in the Silent row
+- Add long pause speed row to the GUI
+- Send long pause speed to the remote server
+- Add --long-pause-speed and --long-pause-seconds
+- Speed up long pauses in the pipeline
+- Add long pause chunk relabelling
+
+### Bug Fixes
+
+- Mark long-pause-only runs with the speedup suffix
+- Honour long pause flags on seeded GUI launches
+- Keep short words next to resumed speech out of long pauses
+
 ## v1.9.1 - 2026-11-14
 
 ### Features
