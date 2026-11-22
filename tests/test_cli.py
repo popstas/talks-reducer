@@ -1756,3 +1756,66 @@ def test_cli_application_reports_missing_vad_engine_without_traceback() -> None:
 
     assert exit_code == 1
     assert error_messages == ["Install it with: pip install silero-vad-lite"]
+
+
+def _run_local_cli(argv: list[str]) -> cli.ProcessingOptions:
+    """Run the CLI locally on *argv* and return the options it built."""
+
+    parsed_args = cli._build_parser().parse_args(argv)
+    speed_calls: list[cli.ProcessingOptions] = []
+
+    def fake_speed_up(options: cli.ProcessingOptions, reporter: object):
+        speed_calls.append(options)
+        return SimpleNamespace(output_file=Path("/videos/output.mp4"))
+
+    class DummyReporter:
+        def log(self, message: str) -> None:
+            pass
+
+    app = cli.CliApplication(
+        gather_files=lambda paths, **_kwargs: ["/videos/input.mp4"],
+        send_video=None,
+        speed_up=fake_speed_up,
+        reporter_factory=DummyReporter,
+    )
+    exit_code, _ = app.run(parsed_args)
+    assert exit_code == 0
+    return speed_calls[0]
+
+
+def test_long_pause_flags_map_to_options() -> None:
+    options = _run_local_cli(
+        ["--long-pause-speed", "20", "--long-pause-seconds", "90", "input.mp4"]
+    )
+
+    assert options.long_pause_speed == pytest.approx(20.0)
+    assert options.long_pause_seconds == pytest.approx(90.0)
+
+
+def test_long_pause_seconds_alone_does_not_enable_feature() -> None:
+    options = _run_local_cli(["--long-pause-seconds", "90", "input.mp4"])
+
+    assert options.long_pause_speed is None
+
+
+def test_long_pause_defaults_leave_options_untouched() -> None:
+    options = _run_local_cli(["input.mp4"])
+
+    assert options.long_pause_speed is None
+    assert options.long_pause_seconds == pytest.approx(60.0)
+
+
+def test_remote_long_pause_options() -> None:
+    parsed = cli._build_parser().parse_args(["input.mp4"])
+    assert cli._remote_long_pause_options(parsed) == {}
+
+    parsed = cli._build_parser().parse_args(
+        ["--long-pause-speed", "20", "--long-pause-seconds", "90", "input.mp4"]
+    )
+    assert cli._remote_long_pause_options(parsed) == {
+        "long_pause_speed": 20.0,
+        "long_pause_seconds": 90.0,
+    }
+
+    parsed = cli._build_parser().parse_args(["--long-pause-speed", "20", "input.mp4"])
+    assert cli._remote_long_pause_options(parsed) == {"long_pause_speed": 20.0}

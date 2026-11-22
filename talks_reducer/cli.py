@@ -184,6 +184,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="The speed that silent frames should be played at. Defaults to 4.",
     )
     parser.add_argument(
+        "--long-pause-speed",
+        dest="long_pause_speed",
+        type=float,
+        metavar="SPEED",
+        help="Absolute speed for silent stretches longer than --long-pause-seconds; short sounds inside them are sped up too. Off by default.",
+    )
+    parser.add_argument(
+        "--long-pause-seconds",
+        dest="long_pause_seconds",
+        type=float,
+        metavar="SECONDS",
+        help="Minimum length of a long pause in seconds. Defaults to 60.",
+    )
+    parser.add_argument(
         "-fm",
         "--frame_margin",
         type=float,
@@ -452,6 +466,24 @@ def _remote_vad_options(parsed_args: argparse.Namespace) -> Dict[str, object]:
     return options
 
 
+def _remote_long_pause_options(parsed_args: argparse.Namespace) -> Dict[str, object]:
+    """Return the long-pause values to send to a server, or ``{}`` when off.
+
+    ``--long-pause-seconds`` alone does not enable the feature, so it is only
+    sent together with ``--long-pause-speed``; the server falls back to its own
+    60-second default when it is omitted.
+    """
+
+    speed = getattr(parsed_args, "long_pause_speed", None)
+    if speed is None:
+        return {}
+    options: Dict[str, object] = {"long_pause_speed": float(speed)}
+    seconds = getattr(parsed_args, "long_pause_seconds", None)
+    if seconds is not None:
+        options["long_pause_seconds"] = float(seconds)
+    return options
+
+
 def gather_input_files(
     paths: List[str], *, allow_audio_only: bool = False
 ) -> List[str]:
@@ -695,6 +727,14 @@ class CliApplication:
                 )
             if local_options.get("remove_ranges"):
                 option_kwargs["remove_ranges"] = tuple(local_options["remove_ranges"])
+            if local_options.get("long_pause_speed") is not None:
+                option_kwargs["long_pause_speed"] = float(
+                    local_options["long_pause_speed"]
+                )
+                if local_options.get("long_pause_seconds") is not None:
+                    option_kwargs["long_pause_seconds"] = float(
+                        local_options["long_pause_seconds"]
+                    )
             if "vad" in local_options:
                 option_kwargs["vad"] = bool(local_options["vad"])
             if "vad_threshold" in local_options:
