@@ -60,6 +60,12 @@ def format_activity_line(entry: dict) -> str:
 # leaving Simple mode and would otherwise restore them flush against each other.
 CHECKBOX_ROW_GAP = (24, 0)
 
+# Gap between a setting's value buttons and the control trailing them on the same
+# line (Add codec suffix, Speedup no voice, the long-pause group). One value, so
+# the trailing controls of different rows line up the same distance from their
+# buttons.
+VALUE_ROW_TRAILING_GAP = (12, 0)
+
 # Vertical gap above every option row in ``basic_options_frame``. The group
 # headings that used to space the panel out are gone, so the gap itself is all
 # that separates one setting from the next — hence a single shared value rather
@@ -1002,7 +1008,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text="Add codec suffix",
         variable=gui.add_codec_suffix_var,
     )
-    gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=(12, 0))
+    gui.add_codec_suffix_check.pack(side=gui.tk.LEFT, padx=VALUE_ROW_TRAILING_GAP)
 
     gui.ttk.Label(gui.basic_options_frame, text="FPS").grid(
         row=3, column=0, sticky="w", pady=SETTING_ROW_PADY
@@ -1634,7 +1640,7 @@ def build_silence_speedup_row(gui: "TalksReducerGUI") -> None:
         text="Speedup no voice",
         variable=gui.vad_var,
     )
-    gui.vad_check.pack(side=gui.tk.LEFT, padx=CHECKBOX_ROW_GAP)
+    gui.vad_check.pack(side=gui.tk.LEFT, padx=VALUE_ROW_TRAILING_GAP)
 
 
 def build_vad_settings_rows(gui: "TalksReducerGUI", *, first_row: int) -> None:
@@ -1777,18 +1783,18 @@ def build_long_pause_controls(gui: "TalksReducerGUI", parent) -> None:
         )
 
     frame = gui.ttk.Frame(parent)
-    frame.pack(side=gui.tk.LEFT, padx=(12, 0))
+    frame.pack(side=gui.tk.LEFT, padx=VALUE_ROW_TRAILING_GAP)
     gui.long_pause_check = gui.ttk.Checkbutton(
         frame, text="Speedup x", variable=gui.long_pause_enabled_var
     )
     gui.long_pause_check.pack(side=gui.tk.LEFT)
     gui.long_pause_speed_entry = gui.ttk.Entry(
-        frame, textvariable=gui.long_pause_speed_text_var, width=4
+        frame, textvariable=gui.long_pause_speed_text_var, width=4, justify="center"
     )
     gui.long_pause_speed_entry.pack(side=gui.tk.LEFT, padx=(2, 0))
     gui.ttk.Label(frame, text="pauses longer than").pack(side=gui.tk.LEFT, padx=(6, 0))
     gui.long_pause_seconds_entry = gui.ttk.Entry(
-        frame, textvariable=gui.long_pause_seconds_text_var, width=5
+        frame, textvariable=gui.long_pause_seconds_text_var, width=5, justify="center"
     )
     gui.long_pause_seconds_entry.pack(side=gui.tk.LEFT, padx=(6, 0))
     gui.ttk.Label(frame, text="seconds").pack(side=gui.tk.LEFT, padx=(4, 0))

@@ -2823,8 +2823,21 @@ def test_vad_check_packed_in_silence_speedup_row():
     assert check.args[0] is gui.basic_presets_frame
     assert check.kwargs["text"] == "Speedup no voice"
     assert check.kwargs["variable"] is gui.vad_var
-    assert check.pack_calls == [((), {"side": "left", "padx": layout.CHECKBOX_ROW_GAP})]
+    assert check.pack_calls == [
+        ((), {"side": "left", "padx": layout.VALUE_ROW_TRAILING_GAP})
+    ]
     assert gui.basic_preset_control.frame.args[0] is gui.basic_presets_frame
+
+
+def test_trailing_checkboxes_share_one_gap_after_their_buttons():
+    """Speedup no voice sits as far from its buttons as Add codec suffix does."""
+
+    gui = _make_layout_gui()
+    layout.build_layout(gui)
+
+    gap = {"side": "left", "padx": layout.VALUE_ROW_TRAILING_GAP}
+    assert gui.vad_check.pack_calls == [((), gap)]
+    assert gui.add_codec_suffix_check.pack_calls == [((), gap)]
 
 
 def test_apply_preset_to_gui_sets_vad():
@@ -3023,7 +3036,11 @@ def test_long_pause_controls_trail_silent_buttons():
 
     row = gui.long_pause_check.args[0]
     assert row.args[0] is value_row
-    assert row.pack_calls == [((), {"side": "left", "padx": (12, 0)})]
+    assert row.pack_calls == [
+        ((), {"side": "left", "padx": layout.VALUE_ROW_TRAILING_GAP})
+    ]
+    assert gui.long_pause_speed_entry.kwargs["justify"] == "center"
+    assert gui.long_pause_seconds_entry.kwargs["justify"] == "center"
     assert gui.long_pause_check.kwargs["text"] == "Speedup x"
     assert gui.long_pause_check.kwargs["variable"] is gui.long_pause_enabled_var
     assert gui.long_pause_speed_entry.args[0] is row
