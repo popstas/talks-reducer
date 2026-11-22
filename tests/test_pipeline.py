@@ -1659,3 +1659,30 @@ def test_long_pause_keeps_remove_ranges_removed(tmp_path, monkeypatch) -> None:
     kinds = {chunk[2] for chunk in state["chunks"]}
     assert pipeline.chunk_utils.LONG_PAUSE_SPEED_INDEX in kinds
     assert pipeline.chunk_utils.REMOVED_SPEED_INDEX in kinds
+
+
+def test_output_name_marks_long_pause_only_run_as_speedup() -> None:
+    name = pipeline._input_to_output_filename(
+        Path("a.mp4"), silent_speed=1.0, sounded_speed=1.0, long_pause_speed=20.0
+    )
+
+    assert name.name == "a_speedup.mp4"
+
+
+def test_output_name_ignores_long_pause_not_faster_than_silent() -> None:
+    name = pipeline._input_to_output_filename(
+        Path("a.mp4"), silent_speed=1.0, sounded_speed=1.0, long_pause_speed=1.0
+    )
+
+    assert name.name == "a_h264.mp4"
+
+
+def test_resolve_output_path_passes_long_pause(tmp_path) -> None:
+    options = ProcessingOptions(
+        input_file=tmp_path / "a.mp4",
+        silent_speed=1.0,
+        sounded_speed=1.0,
+        long_pause_speed=20.0,
+    )
+
+    assert pipeline.resolve_output_path(options).name == "a_speedup.mp4"

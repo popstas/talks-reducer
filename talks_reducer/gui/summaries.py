@@ -34,6 +34,7 @@ def default_remote_destination(
     video_codec: str = "h264",
     silent_speed: float | None = None,
     sounded_speed: float | None = None,
+    long_pause_speed: float | None = None,
 ) -> Path:
     """Return the default remote output path for *input_file*."""
 
@@ -52,6 +53,7 @@ def default_remote_destination(
         silent_speed=silent_speed,
         sounded_speed=sounded_speed,
         prefer_clean_audio_name=True,
+        long_pause_speed=long_pause_speed,
     )
 
 

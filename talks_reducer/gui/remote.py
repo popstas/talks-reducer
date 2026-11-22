@@ -497,6 +497,7 @@ def process_files_via_server(
                         video_codec=codec_value,
                         silent_speed=args.get("silent_speed"),
                         sounded_speed=args.get("sounded_speed"),
+                        long_pause_speed=args.get("long_pause_speed"),
                     ).name
                 )
         else:
@@ -509,6 +510,7 @@ def process_files_via_server(
                 video_codec=codec_value,
                 silent_speed=args.get("silent_speed"),
                 sounded_speed=args.get("sounded_speed"),
+                long_pause_speed=args.get("long_pause_speed"),
             )
 
         started = time.perf_counter()

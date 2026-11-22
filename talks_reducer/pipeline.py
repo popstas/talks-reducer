@@ -508,6 +508,7 @@ def resolve_output_path(options: ProcessingOptions, source: Path | None = None) 
         sounded_speed=options.sounded_speed,
         prefer_clean_audio_name=True,
         has_cut=bool(getattr(options, "remove_ranges", ())),
+        long_pause_speed=options.long_pause_speed,
     )
 
 
@@ -1039,13 +1040,22 @@ def _input_to_output_filename(
     sounded_speed: float | None = None,
     prefer_clean_audio_name: bool = False,
     has_cut: bool = False,
+    long_pause_speed: float | None = None,
 ) -> Path:
     dot_index = filename.name.rfind(".")
     normalized_silent = _normalize_speed(silent_speed, _DEFAULT_SILENT_SPEED)
     normalized_sounded = _normalize_speed(sounded_speed, _DEFAULT_SOUNDED_SPEED)
     neutral_silent = math.isclose(normalized_silent, 1.0, rel_tol=1e-9, abs_tol=1e-9)
     neutral_sounded = math.isclose(normalized_sounded, 1.0, rel_tol=1e-9, abs_tol=1e-9)
-    include_speed_marker = not (neutral_silent and neutral_sounded)
+    # A long-pause speed the pipeline actually applies speeds the video up even
+    # when both regular speeds are 1, so the name must not collide with a plain
+    # compress run (``_h264``) or be mistaken for an unprocessed recording.
+    long_pause_applies = (
+        long_pause_speed is not None and float(long_pause_speed) > normalized_silent
+    )
+    include_speed_marker = (
+        not (neutral_silent and neutral_sounded) or long_pause_applies
+    )
 
     normalized_codec = str(video_codec or "h264").strip().lower()
     is_audio_only = normalized_codec == "mp3"

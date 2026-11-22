@@ -2424,3 +2424,16 @@ def test_process_video_long_pause_defaults(tmp_path: Path) -> None:
     options = _process_video_options(tmp_path, small_video=False, long_pause_speed=20.0)
     assert options.long_pause_speed == 20.0
     assert options.long_pause_seconds == 60.0
+
+
+def test_build_output_path_marks_long_pause_only_run(tmp_path: Path) -> None:
+    path = server._build_output_path(
+        tmp_path / "a.mp4",
+        tmp_path,
+        False,
+        silent_speed=1.0,
+        sounded_speed=1.0,
+        long_pause_speed=20.0,
+    )
+
+    assert path.name == "a_speedup.mp4"

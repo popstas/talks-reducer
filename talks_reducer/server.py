@@ -725,6 +725,7 @@ def _build_output_path(
     video_codec: str = "h264",
     silent_speed: float | None = None,
     sounded_speed: float | None = None,
+    long_pause_speed: float | None = None,
 ) -> Path:
     """Mirror the CLI output naming scheme inside the workspace directory."""
 
@@ -741,6 +742,7 @@ def _build_output_path(
         add_codec_suffix=add_codec_suffix,
         silent_speed=silent_speed,
         sounded_speed=sounded_speed,
+        long_pause_speed=long_pause_speed,
     )
     return workspace / output_name.name
 
@@ -1052,6 +1054,11 @@ def _stream_pipeline(
         video_codec=codec_value,
         silent_speed=normalized_silent_speed,
         sounded_speed=normalized_sounded_speed,
+        long_pause_speed=(
+            float(long_pause_speed)
+            if long_pause_speed is not None and long_pause_speed > 0
+            else None
+        ),
     )
 
     deps = dependencies or ProcessVideoDependencies()

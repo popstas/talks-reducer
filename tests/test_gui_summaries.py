@@ -197,3 +197,17 @@ def test_measure_media_probe_error_degrades_to_unknown_duration(
     monkeypatch.setattr(summaries, "get_video_duration", blocked)
 
     assert measure_media(media) == (None, 4)
+
+
+def test_default_remote_destination_marks_long_pause_only_run() -> None:
+    from talks_reducer.gui.summaries import default_remote_destination
+
+    path = default_remote_destination(
+        Path("a.mp4"),
+        small=False,
+        silent_speed=1.0,
+        sounded_speed=1.0,
+        long_pause_speed=20.0,
+    )
+
+    assert path.name == "a_speedup.mp4"
