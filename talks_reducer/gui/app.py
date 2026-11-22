@@ -1717,6 +1717,20 @@ class TalksReducerGUI:
             args["vad_min_silence_ms"] = int(
                 round(float(self.vad_min_silence_var.get()))
             )
+        # Long pause speed lives in the Advanced panel only; like Cut video it
+        # never applies in Simple mode, where the row is hidden. The entry text
+        # is parsed here so a value typed but not yet committed still counts.
+        if self.long_pause_enabled_var.get() and not self.simple_mode_var.get():
+            args["long_pause_speed"] = layout_helpers.parse_clamped(
+                self.long_pause_speed_text_var.get(),
+                layout_helpers.LONG_PAUSE_SPEED_RANGE,
+                layout_helpers.DEFAULT_LONG_PAUSE_SPEED,
+            )
+            args["long_pause_seconds"] = layout_helpers.parse_clamped(
+                self.long_pause_seconds_text_var.get(),
+                layout_helpers.LONG_PAUSE_SECONDS_RANGE,
+                layout_helpers.DEFAULT_LONG_PAUSE_SECONDS,
+            )
         # Cut video is an Advanced-only feature; Simple mode never trims even if
         # the flag persisted from a previous Advanced session.
         if self.cut_enabled_var.get() and not self.simple_mode_var.get():

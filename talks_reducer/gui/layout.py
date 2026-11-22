@@ -71,6 +71,14 @@ SETTING_ROW_PADY = (12, 0)
 # the first of the rows.
 PRESET_ROW_PADY = (36, 24)
 
+# "Speedup x[20] pauses longer than [60] seconds": an absolute speed for long
+# silent stretches (script runs with the microphone off). Off by default; the
+# bounds clamp what the two entries accept.
+LONG_PAUSE_SPEED_RANGE = (1.0, 100.0)
+LONG_PAUSE_SECONDS_RANGE = (5.0, 3600.0)
+DEFAULT_LONG_PAUSE_SPEED = 20.0
+DEFAULT_LONG_PAUSE_SECONDS = 60.0
+
 # Silence is sped up 10x out of the box: every row is ordered strongest-first,
 # and the default is the first button so a fresh install starts there.
 DEFAULT_SILENT_SPEED = 10.0
@@ -1034,6 +1042,8 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         custom=CustomSpec(minimum=1.0, maximum=10.0),
     )
 
+    build_long_pause_row(gui, gui.basic_options_frame, row=5)
+
     gui.sounded_speed_var = gui.tk.DoubleVar(
         value=min(
             max(
@@ -1048,7 +1058,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Sounded",
         gui.sounded_speed_var,
-        row=5,
+        row=6,
         setting_key="sounded_speed",
         options=[
             Option(1.0, "1"),
@@ -1071,7 +1081,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         gui.basic_options_frame,
         "Threshold",
         gui.silent_threshold_var,
-        row=6,
+        row=7,
         setting_key="silent_threshold",
         options=[
             Option(0.01, "0.01"),
@@ -1092,10 +1102,10 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     update_threshold_for_vad(gui)
 
     gui.ttk.Label(gui.basic_options_frame, text="Mode").grid(
-        row=7, column=0, sticky="w", pady=SETTING_ROW_PADY
+        row=8, column=0, sticky="w", pady=SETTING_ROW_PADY
     )
     mode_choice = gui.ttk.Frame(gui.basic_options_frame)
-    mode_choice.grid(row=7, column=1, sticky="w", pady=SETTING_ROW_PADY)
+    mode_choice.grid(row=8, column=1, sticky="w", pady=SETTING_ROW_PADY)
     gui.processing_mode_control = SegmentedChoice(
         mode_choice,
         [Option("local", "Local"), Option("remote", "Remote")],
@@ -1143,16 +1153,16 @@ def build_layout(gui: "TalksReducerGUI") -> None:
         text=format_local_server_url(local_server_url) if server_managed else "",
     )
     gui.local_server_url_label.grid(
-        row=7, column=2, sticky="w", padx=(8, 0), pady=SETTING_ROW_PADY
+        row=8, column=2, sticky="w", padx=(8, 0), pady=SETTING_ROW_PADY
     )
     if not (server_managed and local_server_url):
         gui.local_server_url_label.grid_remove()
 
     gui.ttk.Label(gui.basic_options_frame, text="Theme").grid(
-        row=8, column=0, sticky="w", pady=SETTING_ROW_PADY
+        row=9, column=0, sticky="w", pady=SETTING_ROW_PADY
     )
     theme_choice = gui.ttk.Frame(gui.basic_options_frame)
-    theme_choice.grid(row=8, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY)
+    theme_choice.grid(row=9, column=1, columnspan=2, sticky="w", pady=SETTING_ROW_PADY)
     gui.theme_control = SegmentedChoice(
         theme_choice,
         [Option("os", "OS"), Option("light", "Light"), Option("dark", "Dark")],
@@ -1716,6 +1726,127 @@ def build_vad_settings_rows(gui: "TalksReducerGUI", *, first_row: int) -> None:
         pady=4,
         basic=False,
     )
+
+
+def parse_clamped(text: str, bounds: tuple[float, float], fallback: float) -> float:
+    """Return *text* as a float clamped to *bounds*, or *fallback* if unusable.
+
+    Used for the long-pause entries both when they are committed and when a run
+    collects its arguments, so a value typed but never committed (Run clicked
+    straight from the entry) is read the same way a committed one would be.
+    """
+
+    try:
+        value = float(str(text).strip())
+    except ValueError:
+        return fallback
+    if not math.isfinite(value):
+        return fallback
+    minimum, maximum = bounds
+    return min(max(value, minimum), maximum)
+
+
+_LONG_PAUSE_FIELDS = (
+    ("speed", "long_pause_speed", LONG_PAUSE_SPEED_RANGE, DEFAULT_LONG_PAUSE_SPEED),
+    (
+        "seconds",
+        "long_pause_seconds",
+        LONG_PAUSE_SECONDS_RANGE,
+        DEFAULT_LONG_PAUSE_SECONDS,
+    ),
+)
+
+
+def build_long_pause_row(gui: "TalksReducerGUI", parent, *, row: int) -> None:
+    """Add the "Speedup x[N] pauses longer than [S] seconds" row to *parent*.
+
+    It is not registered in ``_basic_defaults``/``_slider_updaters``: it is not
+    a preset field, so the Silence ×5 macro and preset matching leave it alone.
+    """
+
+    gui.long_pause_enabled_var = gui.tk.BooleanVar(
+        value=bool(gui.preferences.get("long_pause_enabled", False))
+    )
+    for name, key, bounds, default in _LONG_PAUSE_FIELDS:
+        value = _stored_long_pause_value(gui, key, bounds, default)
+        setattr(
+            gui, f"long_pause_{name}_text_var", gui.tk.StringVar(value=f"{value:g}")
+        )
+
+    frame = gui.ttk.Frame(parent)
+    frame.grid(row=row, column=0, columnspan=3, sticky="w", pady=SETTING_ROW_PADY)
+    gui.long_pause_check = gui.ttk.Checkbutton(
+        frame, text="Speedup x", variable=gui.long_pause_enabled_var
+    )
+    gui.long_pause_check.pack(side=gui.tk.LEFT)
+    gui.long_pause_speed_entry = gui.ttk.Entry(
+        frame, textvariable=gui.long_pause_speed_text_var, width=4
+    )
+    gui.long_pause_speed_entry.pack(side=gui.tk.LEFT, padx=(2, 0))
+    gui.ttk.Label(frame, text="pauses longer than").pack(side=gui.tk.LEFT, padx=(6, 0))
+    gui.long_pause_seconds_entry = gui.ttk.Entry(
+        frame, textvariable=gui.long_pause_seconds_text_var, width=5
+    )
+    gui.long_pause_seconds_entry.pack(side=gui.tk.LEFT, padx=(6, 0))
+    gui.ttk.Label(frame, text="seconds").pack(side=gui.tk.LEFT, padx=(4, 0))
+
+    for name, key, bounds, default in _LONG_PAUSE_FIELDS:
+        entry = getattr(gui, f"long_pause_{name}_entry")
+        text_var = getattr(gui, f"long_pause_{name}_text_var")
+
+        def _commit(
+            _event=None, text_var=text_var, key=key, bounds=bounds, default=default
+        ) -> None:
+            commit_long_pause_entry(gui, text_var, key, bounds, default)
+
+        entry.bind("<Return>", _commit)
+        entry.bind("<FocusOut>", _commit)
+
+    def _on_toggle(*_args) -> None:
+        gui.preferences.update(
+            "long_pause_enabled", bool(gui.long_pause_enabled_var.get())
+        )
+        update_long_pause_state(gui)
+
+    gui.long_pause_enabled_var.trace_add("write", _on_toggle)
+    update_long_pause_state(gui)
+
+
+def _stored_long_pause_value(
+    gui: "TalksReducerGUI", key: str, bounds: tuple[float, float], default: float
+) -> float:
+    """Return the persisted long-pause value for *key*, clamped, or *default*."""
+
+    return parse_clamped(str(gui.preferences.get(key, default)), bounds, default)
+
+
+def commit_long_pause_entry(
+    gui: "TalksReducerGUI",
+    text_var,
+    key: str,
+    bounds: tuple[float, float],
+    default: float,
+) -> None:
+    """Clamp the entry text, write it back normalised and persist it.
+
+    A non-number falls back to the last persisted value, so a typo never
+    discards a setting the user already chose.
+    """
+
+    fallback = _stored_long_pause_value(gui, key, bounds, default)
+    value = parse_clamped(text_var.get(), bounds, fallback)
+    text_var.set(f"{value:g}")
+    gui.preferences.update(key, value)
+
+
+def update_long_pause_state(gui: "TalksReducerGUI") -> None:
+    """Enable the long-pause entries only while the checkbox is on."""
+
+    state = gui.tk.NORMAL if gui.long_pause_enabled_var.get() else gui.tk.DISABLED
+    for name in ("long_pause_speed_entry", "long_pause_seconds_entry"):
+        entry = getattr(gui, name, None)
+        if entry is not None:
+            entry.configure(state=state)
 
 
 def update_threshold_for_vad(gui: "TalksReducerGUI") -> None:

@@ -2978,3 +2978,101 @@ def test_vad_rows_do_not_collide_with_advanced_rows():
         gui.start_in_server_tray_check.grid_calls[0][1]["row"],
     ]
     assert len(set(rows)) == len(rows)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("30", 30.0),
+        (" 2.5 ", 2.5),
+        ("500", 100.0),
+        ("0", 1.0),
+        ("abc", 20.0),
+        ("", 20.0),
+        ("2,5", 20.0),
+        ("nan", 20.0),
+        ("inf", 20.0),
+    ],
+)
+def test_parse_clamped(text, expected):
+    assert layout.parse_clamped(text, (1.0, 100.0), 20.0) == expected
+
+
+def _long_pause_gui(**preferences):
+    stored = dict(preferences)
+    gui = _make_layout_gui(
+        preferences=SimpleNamespace(
+            get_float=lambda key, default: default,
+            get=lambda key, default: stored.get(key, default),
+            update=Mock(),
+        )
+    )
+    layout.build_layout(gui)
+    return gui
+
+
+def test_long_pause_row_sits_under_silent():
+    gui = _long_pause_gui()
+
+    row = gui.long_pause_check.args[0]
+    assert row.args[0] is gui.basic_options_frame
+    assert row.grid_calls[0][1]["row"] == 5
+    assert row.grid_calls[0][1]["columnspan"] == 3
+    assert gui.long_pause_check.kwargs["text"] == "Speedup x"
+    assert gui.long_pause_check.kwargs["variable"] is gui.long_pause_enabled_var
+    assert gui.long_pause_speed_entry.args[0] is row
+    assert gui.long_pause_seconds_entry.args[0] is row
+    labels = [w.kwargs.get("text") for w in gui.ttk.Label.created if w.args[0] is row]
+    assert labels == ["pauses longer than", "seconds"]
+
+
+def test_long_pause_row_defaults_off_with_disabled_entries():
+    gui = _long_pause_gui()
+
+    assert gui.long_pause_enabled_var.get() is False
+    assert gui.long_pause_speed_text_var.get() == "20"
+    assert gui.long_pause_seconds_text_var.get() == "60"
+    for entry in (gui.long_pause_speed_entry, gui.long_pause_seconds_entry):
+        assert entry.configure_calls[-1][1]["state"] == "disabled"
+
+
+def test_long_pause_row_restores_preferences():
+    gui = _long_pause_gui(
+        long_pause_enabled=True, long_pause_speed=30.0, long_pause_seconds=120.0
+    )
+
+    assert gui.long_pause_enabled_var.get() is True
+    assert gui.long_pause_speed_text_var.get() == "30"
+    assert gui.long_pause_seconds_text_var.get() == "120"
+    assert gui.long_pause_speed_entry.configure_calls[-1][1]["state"] == "normal"
+
+
+def test_long_pause_toggle_enables_entries_and_persists():
+    gui = _long_pause_gui()
+
+    gui.long_pause_enabled_var.set(True)
+
+    gui.preferences.update.assert_any_call("long_pause_enabled", True)
+    for entry in (gui.long_pause_speed_entry, gui.long_pause_seconds_entry):
+        assert entry.configure_calls[-1][1]["state"] == "normal"
+
+
+@pytest.mark.parametrize("sequence", ["<Return>", "<FocusOut>"])
+def test_long_pause_entry_commit_clamps_and_persists(sequence):
+    gui = _long_pause_gui()
+    gui.long_pause_speed_text_var.set("500")
+
+    callback = dict(gui.long_pause_speed_entry.bind_calls)[sequence]
+    callback(None)
+
+    assert gui.long_pause_speed_text_var.get() == "100"
+    gui.preferences.update.assert_any_call("long_pause_speed", 100.0)
+
+
+def test_long_pause_entry_commit_restores_last_value_on_garbage():
+    gui = _long_pause_gui(long_pause_seconds=90.0)
+    gui.long_pause_seconds_text_var.set("soon")
+
+    dict(gui.long_pause_seconds_entry.bind_calls)["<Return>"](None)
+
+    assert gui.long_pause_seconds_text_var.get() == "90"

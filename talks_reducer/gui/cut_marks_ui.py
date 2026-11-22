@@ -23,6 +23,8 @@ _OVERRIDDEN_KEYS = (
     "vad_threshold",
     "vad_padding_ms",
     "vad_min_silence_ms",
+    "long_pause_speed",
+    "long_pause_seconds",
 )
 
 
@@ -103,8 +105,9 @@ def remove_only_overrides(args: dict) -> dict:
     Speeds go to 1 so remaining silence is not sped up a second time, and
     scaling and the fps cap are removed so the picture is left as it is. Voice
     detection is turned off (and its settings dropped): with both speeds at 1
-    its mask changes nothing, so running Silero would only cost time. The
-    codec stays as selected.
+    its mask changes nothing, so running Silero would only cost time. Long
+    pauses are dropped too, or the already-sped-up file would be sped up again.
+    The codec stays as selected.
     """
 
     result = {key: value for key, value in args.items() if key not in _OVERRIDDEN_KEYS}
