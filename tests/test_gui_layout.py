@@ -3082,3 +3082,21 @@ def test_long_pause_entry_commit_restores_last_value_on_garbage():
     dict(gui.long_pause_seconds_entry.bind_calls)["<Return>"](None)
 
     assert gui.long_pause_seconds_text_var.get() == "90"
+
+
+def test_long_pause_toggle_releases_seeded_values():
+    gui = _long_pause_gui()
+    gui._seeded_long_pause = {"long_pause_speed": 30.0}
+
+    gui.long_pause_enabled_var.set(True)
+
+    assert gui._seeded_long_pause is None
+
+
+def test_long_pause_entry_commit_releases_seeded_values():
+    gui = _long_pause_gui()
+    gui._seeded_long_pause = {"long_pause_speed": 30.0}
+
+    dict(gui.long_pause_speed_entry.bind_calls)["<Return>"](None)
+
+    assert gui._seeded_long_pause is None

@@ -3436,3 +3436,38 @@ def test_run_separator_follows_a_run_that_never_opened_a_block():
         "Starting processing…\n",
         "### Processing a.mp4: orig\n",
     ]
+
+
+def test_apply_cli_settings_seeds_long_pause_without_ticking_checkbox():
+    gui = _make_settings_gui()
+
+    app.TalksReducerGUI._apply_cli_settings(
+        gui, {"long_pause_speed": 20.0, "long_pause_seconds": 90.0}
+    )
+
+    assert gui._seeded_long_pause == {
+        "long_pause_speed": 20.0,
+        "long_pause_seconds": 90.0,
+    }
+
+
+def test_apply_cli_settings_long_pause_seconds_alone_seeds_nothing():
+    gui = _make_settings_gui()
+    gui._seeded_long_pause = None
+
+    app.TalksReducerGUI._apply_cli_settings(gui, {"long_pause_seconds": 90.0})
+
+    assert gui._seeded_long_pause is None
+
+
+@pytest.mark.parametrize("simple", [True, False])
+def test_collect_arguments_uses_seeded_long_pause(simple):
+    gui = _make_collect_gui(
+        simple_mode_var=SimpleNamespace(get=lambda: simple),
+        _seeded_long_pause={"long_pause_speed": 500.0},
+    )
+
+    args = app.TalksReducerGUI._collect_arguments(gui)
+
+    assert args["long_pause_speed"] == 100.0
+    assert args["long_pause_seconds"] == 60.0

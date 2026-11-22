@@ -1806,6 +1806,7 @@ def build_long_pause_controls(gui: "TalksReducerGUI", parent) -> None:
         entry.bind("<FocusOut>", _commit)
 
     def _on_toggle(*_args) -> None:
+        gui._seeded_long_pause = None
         gui.preferences.update(
             "long_pause_enabled", bool(gui.long_pause_enabled_var.get())
         )
@@ -1836,6 +1837,8 @@ def commit_long_pause_entry(
     discards a setting the user already chose.
     """
 
+    # The user's own edit replaces a value seeded by a launch flag.
+    gui._seeded_long_pause = None
     fallback = _stored_long_pause_value(gui, key, bounds, default)
     value = parse_clamped(text_var.get(), bounds, fallback)
     text_var.set(f"{value:g}")

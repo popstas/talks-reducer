@@ -525,6 +525,11 @@ class TalksReducerGUI:
         self._auto_close_after_convert = False
         # ``--vad``/``--no-vad`` from the launch; ``None`` leaves it to the GUI.
         self._seeded_vad: Optional[bool] = None
+        # ``--long-pause-speed``/``--long-pause-seconds`` from the launch. Held
+        # apart from the row's variables so a one-off shortcut flag never ticks
+        # the remembered checkbox; it wins in both modes until the user touches
+        # the row (``layout.build_long_pause_controls`` releases it).
+        self._seeded_long_pause: Optional[dict[str, float]] = None
 
         if cli_settings:
             self._apply_cli_settings(cli_settings)
@@ -1559,6 +1564,11 @@ class TalksReducerGUI:
             self.vad_padding_var.set(int(settings["vad_padding_ms"]))
         if "vad_min_silence_ms" in settings:
             self.vad_min_silence_var.set(int(settings["vad_min_silence_ms"]))
+        if settings.get("long_pause_speed") is not None:
+            seeded = {"long_pause_speed": float(settings["long_pause_speed"])}
+            if settings.get("long_pause_seconds") is not None:
+                seeded["long_pause_seconds"] = float(settings["long_pause_seconds"])
+            self._seeded_long_pause = seeded
 
     def _schedule_auto_close_if_requested(self) -> None:
         """Close the window on the UI thread when ``--auto-close`` was requested.
@@ -1720,14 +1730,29 @@ class TalksReducerGUI:
         # Long pause speed lives in the Advanced panel only; like Cut video it
         # never applies in Simple mode, where the row is hidden. The entry text
         # is parsed here so a value typed but not yet committed still counts.
-        if self.long_pause_enabled_var.get() and not self.simple_mode_var.get():
+        # A launch flag (``_seeded_long_pause``) wins in both modes, like
+        # ``_seeded_vad``: the shortcut stated it explicitly.
+        seeded_long_pause = getattr(self, "_seeded_long_pause", None)
+        if seeded_long_pause is not None:
+            speed_text = str(seeded_long_pause["long_pause_speed"])
+            seconds_text = str(
+                seeded_long_pause.get(
+                    "long_pause_seconds", layout_helpers.DEFAULT_LONG_PAUSE_SECONDS
+                )
+            )
+        elif self.long_pause_enabled_var.get() and not self.simple_mode_var.get():
+            speed_text = self.long_pause_speed_text_var.get()
+            seconds_text = self.long_pause_seconds_text_var.get()
+        else:
+            speed_text = seconds_text = None
+        if speed_text is not None:
             args["long_pause_speed"] = layout_helpers.parse_clamped(
-                self.long_pause_speed_text_var.get(),
+                speed_text,
                 layout_helpers.LONG_PAUSE_SPEED_RANGE,
                 layout_helpers.DEFAULT_LONG_PAUSE_SPEED,
             )
             args["long_pause_seconds"] = layout_helpers.parse_clamped(
-                self.long_pause_seconds_text_var.get(),
+                seconds_text,
                 layout_helpers.LONG_PAUSE_SECONDS_RANGE,
                 layout_helpers.DEFAULT_LONG_PAUSE_SECONDS,
             )

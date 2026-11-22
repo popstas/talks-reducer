@@ -172,6 +172,8 @@ def _gui_settings_from_namespace(parsed: argparse.Namespace) -> Dict[str, object
         "vad_threshold",
         "vad_padding_ms",
         "vad_min_silence_ms",
+        "long_pause_speed",
+        "long_pause_seconds",
     ):
         if key in provided:
             settings[key] = provided[key]
