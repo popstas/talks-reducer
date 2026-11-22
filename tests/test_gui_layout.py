@@ -1530,6 +1530,23 @@ def test_apply_simple_mode_simple_branch(monkeypatch):
     gui.drop_zone.focus_set.assert_called_once()
 
 
+@pytest.mark.parametrize("visible,weight", [(True, 1), (False, 0)])
+def test_activity_row_is_weighted_only_while_shown(visible, weight):
+    """A shown panel can shrink with the log; a hidden one must not take slack."""
+
+    gui = SimpleNamespace(
+        activity_frame=make_widget_mock(), main_frame=make_widget_mock()
+    )
+
+    layout.set_activity_visible(gui, visible)
+
+    if visible:
+        gui.activity_frame.grid.assert_called_once()
+    else:
+        gui.activity_frame.grid_remove.assert_called_once()
+    gui.main_frame.rowconfigure.assert_called_once_with(4, weight=weight)
+
+
 def test_advanced_space_left_excludes_the_canvas_itself():
     """What main needs besides the canvas is subtracted from main's height."""
 

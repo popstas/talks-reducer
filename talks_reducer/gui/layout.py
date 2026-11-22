@@ -145,6 +145,25 @@ def schedule_advanced_refit(gui: "TalksReducerGUI", *_args) -> None:
     gui.root.after_idle(lambda: refit_advanced(gui))
 
 
+def set_activity_visible(gui: "TalksReducerGUI", visible: bool) -> None:
+    """Show or hide the Connected clients panel, weighting its row only when shown.
+
+    With the drop zone pinned, the log and this panel are the only rows that can
+    give way when the window is short, so the panel's row needs a weight or it
+    is the one cut off at the bottom (with Advanced open, in server-managed
+    mode). The weight must go with the panel: Tk hands slack to a weighted row
+    even when it is empty, which would leave a blank band in a standalone GUI.
+    """
+
+    if visible:
+        gui.activity_frame.grid()
+    else:
+        gui.activity_frame.grid_remove()
+    main = getattr(gui, "main_frame", None)
+    if main is not None:
+        main.rowconfigure(4, weight=1 if visible else 0)
+
+
 def bind_advanced_refit(gui: "TalksReducerGUI") -> None:
     """Refit the Advanced block whenever the space around it can have changed.
 
@@ -1658,8 +1677,7 @@ def build_layout(gui: "TalksReducerGUI") -> None:
     activity_scroll.grid(row=1, column=1, sticky="ns")
     gui.activity_text.configure(yscrollcommand=activity_scroll.set)
 
-    if not bool(getattr(gui, "server_managed", False)):
-        gui.activity_frame.grid_remove()
+    set_activity_visible(gui, bool(getattr(gui, "server_managed", False)))
 
     bind_advanced_refit(gui)
 
@@ -2349,7 +2367,7 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
         # The Connected clients panel is a server-managed-only detail that has no
         # place in the minimal Simple layout.
         if hasattr(gui, "activity_frame"):
-            gui.activity_frame.grid_remove()
+            set_activity_visible(gui, False)
         if hasattr(gui, "button_frame"):
             gui.button_frame.grid_remove()
         gui.advanced_container.grid_remove()
@@ -2383,10 +2401,7 @@ def apply_simple_mode(gui: "TalksReducerGUI", *, initial: bool = False) -> None:
         # Restore the Connected clients panel only when the GUI is managed by the
         # server tray; standalone GUIs never show it.
         if hasattr(gui, "activity_frame"):
-            if bool(getattr(gui, "server_managed", False)):
-                gui.activity_frame.grid()
-            else:
-                gui.activity_frame.grid_remove()
+            set_activity_visible(gui, bool(getattr(gui, "server_managed", False)))
         if hasattr(gui, "button_frame"):
             gui.button_frame.grid()
         if gui.advanced_visible.get():
