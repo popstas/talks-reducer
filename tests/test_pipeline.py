@@ -1358,7 +1358,7 @@ def _run_vad_pipeline(
 
     def fake_loud(*args, **kwargs):
         state["loud_calls"] += 1
-        return np.ones(30, dtype=bool)
+        return np.ones(30, dtype=bool) if mask is None else mask
 
     def fake_detect(audio, rate, frame_rate, frame_count, settings, **kwargs):
         state["vad_calls"] += 1
@@ -1391,6 +1391,7 @@ def _run_vad_pipeline(
 
     def fake_process_chunks(audio, chunks, *args, **kwargs):
         state["chunks"] = chunks
+        state["speeds"] = args[1]
         return np.zeros((10, 2)), [[0, 30, 1, 30]]
 
     monkeypatch.setattr(
@@ -1540,3 +1541,118 @@ def test_vad_engine_not_loaded_when_audio_is_not_analysed(
         silent_speed=1.0,
         sounded_speed=1.0,
     )
+
+
+def _long_pause_mask() -> np.ndarray:
+    """30 frames: speech, a long silence with a one-frame blip, speech."""
+
+    mask = np.zeros(30, dtype=bool)
+    mask[0:3] = True
+    mask[14] = True
+    mask[27:30] = True
+    return mask
+
+
+def test_long_pause_relabels_long_silence(tmp_path, monkeypatch) -> None:
+    _, state, reporter, _ = _run_vad_pipeline(
+        tmp_path,
+        monkeypatch,
+        vad=False,
+        mask=_long_pause_mask(),
+        silent_speed=10.0,
+        long_pause_speed=20.0,
+        long_pause_seconds=0.5,
+    )
+
+    long_chunks = [
+        chunk
+        for chunk in state["chunks"]
+        if chunk[2] == pipeline.chunk_utils.LONG_PAUSE_SPEED_INDEX
+    ]
+    assert len(long_chunks) == 1
+    assert state["speeds"][pipeline.chunk_utils.LONG_PAUSE_SPEED_INDEX] == 20.0
+    assert any(line.startswith("Long pauses: 1 stretch,") for line in reporter.logs)
+
+
+def test_long_pause_off_by_default_keeps_chunks(tmp_path, monkeypatch) -> None:
+    _, state, reporter, _ = _run_vad_pipeline(
+        tmp_path, monkeypatch, vad=False, mask=_long_pause_mask(), silent_speed=10.0
+    )
+
+    assert all(
+        chunk[2] != pipeline.chunk_utils.LONG_PAUSE_SPEED_INDEX
+        for chunk in state["chunks"]
+    )
+    assert not any(line.startswith("Long pauses:") for line in reporter.logs)
+
+
+def test_long_pause_none_longer_than_threshold_is_logged(tmp_path, monkeypatch) -> None:
+    _, state, reporter, _ = _run_vad_pipeline(
+        tmp_path,
+        monkeypatch,
+        vad=False,
+        mask=_long_pause_mask(),
+        silent_speed=10.0,
+        long_pause_speed=20.0,
+        long_pause_seconds=60.0,
+    )
+
+    assert all(
+        chunk[2] != pipeline.chunk_utils.LONG_PAUSE_SPEED_INDEX
+        for chunk in state["chunks"]
+    )
+    assert "Long pauses: none longer than 60 s" in reporter.logs
+
+
+def test_long_pause_not_faster_than_silent_is_skipped(tmp_path, monkeypatch) -> None:
+    _, state, reporter, _ = _run_vad_pipeline(
+        tmp_path,
+        monkeypatch,
+        vad=False,
+        mask=_long_pause_mask(),
+        silent_speed=10.0,
+        long_pause_speed=5.0,
+        long_pause_seconds=0.5,
+    )
+
+    assert all(
+        chunk[2] != pipeline.chunk_utils.LONG_PAUSE_SPEED_INDEX
+        for chunk in state["chunks"]
+    )
+    assert any(line.startswith("Long pauses: skipped") for line in reporter.logs)
+
+
+def test_long_pause_runs_with_neutral_speeds(tmp_path, monkeypatch) -> None:
+    _, state, _, _ = _run_vad_pipeline(
+        tmp_path,
+        monkeypatch,
+        vad=False,
+        mask=_long_pause_mask(),
+        silent_speed=1.0,
+        sounded_speed=1.0,
+        long_pause_speed=20.0,
+        long_pause_seconds=0.5,
+    )
+
+    assert state["chunks"] is not None
+    assert any(
+        chunk[2] == pipeline.chunk_utils.LONG_PAUSE_SPEED_INDEX
+        for chunk in state["chunks"]
+    )
+
+
+def test_long_pause_keeps_remove_ranges_removed(tmp_path, monkeypatch) -> None:
+    _, state, _, _ = _run_vad_pipeline(
+        tmp_path,
+        monkeypatch,
+        vad=False,
+        mask=_long_pause_mask(),
+        silent_speed=10.0,
+        long_pause_speed=20.0,
+        long_pause_seconds=0.5,
+        remove_ranges=((0.4, 0.5),),
+    )
+
+    kinds = {chunk[2] for chunk in state["chunks"]}
+    assert pipeline.chunk_utils.LONG_PAUSE_SPEED_INDEX in kinds
+    assert pipeline.chunk_utils.REMOVED_SPEED_INDEX in kinds

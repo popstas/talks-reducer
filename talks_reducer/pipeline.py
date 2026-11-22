@@ -399,6 +399,48 @@ def _load_vad_engine(
         raise
 
 
+def _apply_long_pauses(
+    options: ProcessingOptions,
+    chunks: list[list[int]],
+    frame_rate: float,
+    reporter: ProgressReporter,
+) -> list[list[int]]:
+    """Tag long silent stretches with the long-pause speed and log the outcome.
+
+    Every call logs a line starting with ``Long pauses:``; the remote client
+    relies on it to tell a server that applied the setting from one that
+    silently dropped it. A long-pause speed that is not faster than the silent
+    speed is skipped, since long pauses would otherwise play slower than short
+    ones.
+    """
+
+    speed = float(options.long_pause_speed or 0.0)
+    if speed <= options.silent_speed:
+        reporter.log(
+            f"Long pauses: skipped, x{speed:g} is not faster than silent "
+            f"x{options.silent_speed:g}"
+        )
+        return chunks
+    seconds = float(options.long_pause_seconds)
+    result = chunk_utils.apply_long_pauses(
+        chunks,
+        max(1, int(math.ceil(seconds * frame_rate))),
+        int(round(chunk_utils.LONG_PAUSE_SOUND_TOLERANCE_SECONDS * frame_rate)),
+    )
+    long_chunks = [
+        chunk for chunk in result if chunk[2] == chunk_utils.LONG_PAUSE_SPEED_INDEX
+    ]
+    if not long_chunks:
+        reporter.log(f"Long pauses: none longer than {seconds:g} s")
+        return result
+    frames = sum(chunk[1] - chunk[0] for chunk in long_chunks)
+    minutes = frames / frame_rate / 60.0 if frame_rate > 0 else 0.0
+    count = len(long_chunks)
+    noun = "stretch" if count == 1 else "stretches"
+    reporter.log(f"Long pauses: {count} {noun}, {minutes:.1f} min at x{speed:g}")
+    return result
+
+
 def _detect_voice_mask(
     options: ProcessingOptions,
     engine: vad_utils.VadEngine,
@@ -610,9 +652,11 @@ def speed_up_video(
         HARDWARE_BACKEND_LABELS.get(hardware_backend) if hardware_backend else None
     )
 
-    neutral_speeds = math.isclose(
-        options.silent_speed, 1.0, rel_tol=1e-9, abs_tol=1e-9
-    ) and math.isclose(options.sounded_speed, 1.0, rel_tol=1e-9, abs_tol=1e-9)
+    neutral_speeds = (
+        math.isclose(options.silent_speed, 1.0, rel_tol=1e-9, abs_tol=1e-9)
+        and math.isclose(options.sounded_speed, 1.0, rel_tol=1e-9, abs_tol=1e-9)
+        and options.long_pause_speed is None
+    )
 
     hwaccel = (
         ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
@@ -702,6 +746,8 @@ def speed_up_video(
             )
 
         chunks, _ = chunk_utils.build_chunks(has_loud_audio, options.frame_spreadage)
+        if options.long_pause_speed is not None:
+            chunks = _apply_long_pauses(options, chunks, frame_rate, reporter)
         if remove_ranges:
             chunks = chunk_utils.apply_remove_ranges(chunks, remove_ranges, frame_rate)
 
@@ -709,8 +755,14 @@ def speed_up_video(
 
         _raise_if_stopped(reporter, temp_path=job_temp_path, dependencies=dependencies)
 
-        # Index 2 is chunk_utils.REMOVED_SPEED_INDEX: removed fragments emit nothing.
-        new_speeds = [options.silent_speed, options.sounded_speed, math.inf]
+        # Index 2 is chunk_utils.REMOVED_SPEED_INDEX: removed fragments emit
+        # nothing. Index 3 is chunk_utils.LONG_PAUSE_SPEED_INDEX.
+        new_speeds = [
+            options.silent_speed,
+            options.sounded_speed,
+            math.inf,
+            options.long_pause_speed or options.silent_speed,
+        ]
         # Counted in chunks: see ``process_audio_chunks`` for why sample counts
         # stopped tracking elapsed time.
         audio_chunk_total = len(chunks) if chunks else None
