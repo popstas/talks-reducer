@@ -34,6 +34,9 @@ _TRANSFER_PATCH_LOCK = threading.Lock()
 
 PROCESS_VIDEO_API_NAME = "/process_video"
 VAD_LOG_MARKER = "Voice detection ("
+LONG_PAUSE_LOG_MARKER = "Long pauses:"
+# Endpoint parameter count once the four vad slots exist (13 base + 2 + 4).
+_VAD_PARAMETER_COUNT = 19
 
 
 class ServerTooOldError(RuntimeError):
@@ -45,13 +48,19 @@ class ServerTooOldError(RuntimeError):
     """
 
 
-def _server_too_old_for_vad(server_url: str) -> ServerTooOldError:
-    """Return the error raised when *server_url* cannot run Speedup no voice."""
+_FEATURE_FALLBACKS = {
+    "Speedup no voice": "speed up by loudness",
+    "Long pause speed": "speed up long pauses like any other silence",
+}
+
+
+def _server_too_old(server_url: str, feature: str) -> ServerTooOldError:
+    """Return the error raised when *server_url* cannot run *feature*."""
 
     return ServerTooOldError(
-        f"The server at {server_url} is too old for Speedup no voice: it would "
-        "ignore the setting and speed up by loudness. Update the server, or turn "
-        "Speedup no voice off."
+        f"The server at {server_url} is too old for {feature}: it would "
+        f"ignore the setting and {_FEATURE_FALLBACKS[feature]}. Update the "
+        f"server, or turn {feature} off."
     )
 
 
@@ -581,6 +590,8 @@ def send_video(
     vad_threshold: Optional[float] = None,
     vad_padding_ms: Optional[int] = None,
     vad_min_silence_ms: Optional[int] = None,
+    long_pause_speed: Optional[float] = None,
+    long_pause_seconds: Optional[float] = None,
     log_callback: Optional[Callable[[str], None]] = None,
     stream_updates: bool = False,
     should_cancel: Optional[Callable[[], bool]] = None,
@@ -608,6 +619,9 @@ def send_video(
     when the endpoint takes fewer parameters than were submitted or, when the
     endpoint cannot be described, after processing when no log line starts
     with ``Voice detection (`` -- before anything is written locally.
+    *long_pause_speed* (with *long_pause_seconds*, default 60) plays silent
+    stretches of at least that length at that absolute speed; it is guarded the
+    same way, by a 21-parameter endpoint or a ``Long pauses:`` log line.
     """
 
     if not input_path.exists():
@@ -634,7 +648,8 @@ def send_video(
     frame_rate_cap = (
         float(max_frame_rate) if max_frame_rate and max_frame_rate > 0 else 0.0
     )
-    if vad or target_height not in (0, 480, 720) or frame_rate_cap > 0:
+    long_pause = long_pause_speed is not None and long_pause_speed > 0
+    if vad or long_pause or target_height not in (0, 480, 720) or frame_rate_cap > 0:
         # Appended only when needed so a client stays compatible with servers
         # that predate these two parameters for every option that existed then.
         # The vad values below are positional too, so they need this pair first.
@@ -646,13 +661,36 @@ def send_video(
             int(vad_padding_ms) if vad_padding_ms is not None else None,
             int(vad_min_silence_ms) if vad_min_silence_ms is not None else None,
         )
-    verify_vad_in_log = False
+    elif long_pause:
+        # The long-pause values sit after the vad four, so those slots are
+        # filled with "off" to keep the positions aligned.
+        submit_args = submit_args + (False, None, None, None)
+    if long_pause:
+        submit_args = submit_args + (
+            float(long_pause_speed),
+            float(long_pause_seconds) if long_pause_seconds else 60.0,
+        )
+    # Each requested feature an old server would silently drop, with the log
+    # line that proves the server applied it.
+    required_markers: dict[str, str] = {}
     if vad:
+        required_markers["Speedup no voice"] = VAD_LOG_MARKER
+    if long_pause:
+        required_markers["Long pause speed"] = LONG_PAUSE_LOG_MARKER
+    verify_markers_in_log = False
+    if required_markers:
         accepted = _endpoint_parameter_count(client, PROCESS_VIDEO_API_NAME)
         if accepted is None:
-            verify_vad_in_log = True
+            verify_markers_in_log = True
         elif accepted < len(submit_args):
-            raise _server_too_old_for_vad(server_url)
+            # Name the first requested feature whose slots the server lacks:
+            # the vad four end at 19 parameters, the long-pause pair at 21.
+            feature = (
+                "Speedup no voice"
+                if vad and accepted < _VAD_PARAMETER_COUNT
+                else "Long pause speed"
+            )
+            raise _server_too_old(server_url, feature)
     submit_kwargs: dict[str, Any] = {"api_name": PROCESS_VIDEO_API_NAME}
 
     upload_total: Optional[int] = None
@@ -699,14 +737,15 @@ def send_video(
             raise ProcessingAborted("Remote processing cancelled by user.")
 
     printed_lines = 0
-    vad_log_seen = False
+    markers_seen: set[str] = set()
 
     def _emit_new_lines(log_text: str) -> None:
-        nonlocal printed_lines, vad_log_seen
+        nonlocal printed_lines
         if not log_text:
             return
-        if VAD_LOG_MARKER in log_text:
-            vad_log_seen = True
+        for feature, marker in required_markers.items():
+            if marker in log_text:
+                markers_seen.add(feature)
         if log_callback is None:
             return
         lines = log_text.splitlines()
@@ -754,8 +793,10 @@ def send_video(
     else:
         log_text = ""
 
-    if verify_vad_in_log and not vad_log_seen:
-        raise _server_too_old_for_vad(server_url)
+    if verify_markers_in_log:
+        for feature in required_markers:
+            if feature not in markers_seen:
+                raise _server_too_old(server_url, feature)
 
     target = download_path or video_path
     if not target:

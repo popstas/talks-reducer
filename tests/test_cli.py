@@ -1730,6 +1730,39 @@ def test_cli_remote_passes_vad() -> None:
     assert "vad" not in call
 
 
+def test_cli_remote_passes_long_pause() -> None:
+    """``--url`` with ``--long-pause-speed`` forwards both long-pause values."""
+
+    parsed_args = cli._build_parser().parse_args(
+        [
+            "--url",
+            "http://localhost:9005/",
+            "--long-pause-speed",
+            "20",
+            "--long-pause-seconds",
+            "90",
+            "input.mp4",
+        ]
+    )
+    send_calls: list[dict[str, object]] = []
+
+    def fake_send_video(**kwargs: object):
+        send_calls.append(dict(kwargs))
+        return Path("/tmp/result.mp4"), "Summary", "Log"
+
+    app = cli.CliApplication(
+        gather_files=lambda paths, **_kwargs: ["/tmp/input.mp4"],
+        send_video=fake_send_video,
+        speed_up=mock.Mock(side_effect=AssertionError("local run")),
+        reporter_factory=mock.Mock(side_effect=AssertionError("reporter")),
+    )
+    exit_code, _errors = app.run(parsed_args)
+
+    assert exit_code == 0
+    assert send_calls[0]["long_pause_speed"] == 20.0
+    assert send_calls[0]["long_pause_seconds"] == 90.0
+
+
 def test_cli_application_reports_missing_vad_engine_without_traceback() -> None:
     """A missing VAD engine ends the run with its install hint as the error."""
 

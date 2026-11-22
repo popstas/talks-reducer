@@ -871,6 +871,7 @@ class CliApplication:
         if max_frame_rate and max_frame_rate > 0:
             remote_option_values["max_frame_rate"] = float(max_frame_rate)
         remote_option_values.update(_remote_vad_options(parsed_args))
+        remote_option_values.update(_remote_long_pause_options(parsed_args))
 
         for index, file in enumerate(files, start=1):
             basename = os.path.basename(file)
