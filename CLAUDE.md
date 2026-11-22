@@ -313,7 +313,13 @@ inner frame, the canvas owns it. `layout.refit_advanced` sets the canvas height
 to `advanced_space_left` (main's actual height minus everything else at its
 requested size, the log counted at `LOG_MIN_LINES`), never below
 `ADVANCED_MIN_HEIGHT`; the formula ignores the canvas's current height, so a
-refit converges in one step. `schedule_advanced_refit` collapses bursts into one
+refit converges in one step. The log keeps its `LOG_MIN_LINES` only while the
+space left exceeds that minimum: at the minimum 1070×900 window with Cut video
+on, the rest of the layout needs ~874px, so Advanced sits at its 80px floor and
+grid squeezes the log to about one line (in server-managed mode the log and the
+Connected clients panel share the squeeze — `set_activity_visible` weights the
+panel's row only while it is shown, since Tk gives slack even to an empty
+weighted row). `schedule_advanced_refit` collapses bursts into one
 `after_idle`, fired by `<Configure>` on `main_frame` (window resize), `log_frame`
 (the only weighted row left in the full layout, so it resizes whenever a
 sibling such as Cut video changes height) and `advanced_frame` (its own rows).
@@ -397,8 +403,8 @@ locally. The server's queue concurrency is
 configurable via `--concurrency` (`server_args.py` → `build_interface`), but file
 transfers bypass the queue so it only affects concurrent processing.
 
-Progress updates stream into the log panel (a `LOG_MIN_LINES`-line floor that grows with the
-window) while the processing runs in
+Progress updates stream into the log panel (`LOG_MIN_LINES` lines requested; it grows with the
+window, and shrinks below that only when the window is too short) while the processing runs in
 a background thread. Once every queued job succeeds an **Open last output**
 button appears so you can jump straight to the exported file in your system
 file manager.

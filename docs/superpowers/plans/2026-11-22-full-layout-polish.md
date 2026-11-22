@@ -69,3 +69,13 @@ Available height = `main.winfo_height() - (main.winfo_reqheight() - canvas.winfo
 
 - [ ] Launch the GUI in full mode, screenshot with Advanced open/closed, Cut video on/off, resize.
 - [ ] Update `CLAUDE.md` GUI section and `docs/gui.md`; check off TODO; `black`, `isort`, full `pytest`; commit.
+
+## Drift from this plan (as built)
+
+- Task 3: the frame height adds back `2 * PADDING`; without it the visible label was 30px.
+- Task 2: **Mark cuts…** spans columns 6–7 so the Remove row ends with the one above.
+- Task 4: the scroll machinery lives in `talks_reducer/gui/scrollable.py` (`fit_height`,
+  `ScrollableFrame`) rather than `layout.advanced_canvas_height`; the log floor is 5 lines;
+  one wheel notch scrolls `ADVANCED_SCROLL_STEP` (30px).
+- Added after a server-managed probe: `layout.set_activity_visible` weights the Connected
+  clients row while shown, so that panel shrinks instead of being clipped.

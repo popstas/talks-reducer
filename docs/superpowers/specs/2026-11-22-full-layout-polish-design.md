@@ -20,7 +20,10 @@ is a stable, everything-reachable full layout. Simple mode is out of scope.
    *Add codec suffix*; the 12px trailing gap becomes one shared constant.
 5. **Advanced** — the block sits in a scrollable canvas whose height is what the
    window has left after the other rows, recomputed on resize. The log keeps a
-   few visible lines; the scrollbar only shows when the content does not fit.
+   few visible lines while the space left exceeds the Advanced minimum (at the
+   minimum 900px window with Cut video on it does not: Advanced sits at its
+   floor and the log shrinks to about a line); the scrollbar only shows when the
+   content does not fit.
 
 ## Non-goals
 
