@@ -165,8 +165,8 @@ lives in the temporary working folder and is deleted when the run finishes.
 - `--silent_speed` (`-s`) — playback speed applied to silent segments.
 - `--long-pause-speed SPEED` — absolute speed for silent stretches longer than
   `--long-pause-seconds`; short sounds inside a stretch (up to 2 s) are absorbed into it and
-  sped up too, but a stretch always starts and ends with at least 2 s of silence, so a short
-  word right next to speech stays with the speech. Off by default; skipped with a log line when it is not faster than the silent
+  sped up too. Sounds less than 2 s apart count as one sound, so speech made of short phrases,
+  or a short word right next to speech, is never absorbed. Off by default; skipped with a log line when it is not faster than the silent
   speed.
 - `--long-pause-seconds SECONDS` — minimum length of a long pause (default `60`). On its own
   it does not enable anything.
