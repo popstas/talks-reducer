@@ -1,6 +1,12 @@
 # Changelog
 
 
+## v1.10.2 - 2026-11-23
+
+### Bug Fixes
+
+- Stop long pauses from swallowing speech that starts with short phrases
+
 ## v1.10.1 - 2026-11-22
 
 ### Features
