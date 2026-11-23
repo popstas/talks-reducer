@@ -151,8 +151,9 @@ detection** stage between audio extraction and audio processing, and the log pri
 `--long-pause-speed 20` plays every silent stretch longer than `--long-pause-seconds`
 (default 60) at ×20 instead of the silent speed: an hour of waiting for scripts takes 3
 minutes instead of 6 at ×10. Short sounds inside the stretch (up to 2 s, e.g. a notification)
-do not break it and are sped up with it; a short word with less than 2 s of silence between it
-and speech stays with the speech. It is off by default and is not part of presets. In
+do not break it and are sped up with it. Sounds less than 2 s apart count as one, so speech
+that starts with short phrases (and a short word right next to speech) is never mistaken for a
+stray sound and plays at normal speed. It is off by default and is not part of presets. In
 the desktop GUI it is the **Speedup x[20] pauses longer than [60] seconds** checkbox at the end
 of the **Silent** row in Advanced mode, remembered between runs and ignored in Simple mode.
 A speed that is not faster than the silent speed is skipped. With both regular speeds at 1 the

@@ -297,3 +297,51 @@ def test_apply_long_pauses_trimmed_stretch_below_threshold_is_unchanged():
     chunks = [[0, 100, 0], [100, 110, 1], [110, 115, 0], [115, 200, 1]]
 
     assert apply_long_pauses(chunks, min_frames=110, tolerance_frames=60) == chunks
+
+
+def test_apply_long_pauses_stops_at_speech_made_of_short_phrases():
+    """Regression: speech after a long pause starts as short phrases.
+
+    Chunks from a real 30 fps recording: six minutes of silence, then speech
+    whose phrases are each under 2 s with short gaps between them. Every phrase
+    used to count as a stray sound, so ~17 s of speech played at the long-pause
+    speed. The pause must end where the speech starts (frame 11235).
+    """
+
+    chunks = [
+        [0, 406, 1],
+        [406, 11235, 0],
+        [11235, 11241, 1],
+        [11241, 11254, 0],
+        [11254, 11304, 1],
+        [11304, 11313, 0],
+        [11313, 11341, 1],
+        [11341, 11369, 0],
+        [11369, 11407, 1],
+        [11407, 11410, 0],
+        [11410, 11434, 1],
+        [11434, 11437, 0],
+        [11437, 11467, 1],
+        [11467, 11523, 0],
+        [11523, 11572, 1],
+        [11572, 11577, 0],
+        [11577, 11582, 1],
+        [11582, 11642, 0],
+        [11642, 11664, 1],
+        [11664, 11740, 0],
+        [11740, 12351, 1],
+    ]
+
+    result = apply_long_pauses(chunks, min_frames=1800, tolerance_frames=60)
+
+    assert result[1] == [406, 11235, LONG_PAUSE_SPEED_INDEX]
+    assert result[2:] == chunks[2:]
+
+
+def test_apply_long_pauses_absorbs_isolated_sound_separated_by_two_seconds():
+    # A lone notification 2 s away from silence on both sides is still absorbed.
+    chunks = [[0, 3000, 0], [3000, 3030, 1], [3030, 6000, 0], [6000, 6100, 1]]
+
+    result = apply_long_pauses(chunks, min_frames=1800, tolerance_frames=60)
+
+    assert result == [[0, 6000, LONG_PAUSE_SPEED_INDEX], [6000, 6100, 1]]

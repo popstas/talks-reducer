@@ -57,7 +57,8 @@ rows grouped under four quiet headings — **Basic options**, **Speed & silence*
 - The **Silent** row ends with **Speedup x[20] pauses longer than [60] seconds**: when checked,
   silent stretches longer than that many seconds play at that speed instead of the silent
   speed, and short sounds inside them (up to 2 s, such as notifications) are sped up with
-  them (a short word with less than 2 s of silence before speech stays with the speech). A
+  them. Sounds less than 2 s apart count as one, so speech starting with short phrases plays
+  at normal speed. A
   shortcut that passes `--long-pause-speed` applies it to that launch, in Simple mode too,
   without ticking the checkbox; touching the row hands control back to it. Speed accepts
   1–100 and seconds 5–3600; Enter or clicking away commits, and a value

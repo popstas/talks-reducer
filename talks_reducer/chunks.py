@@ -129,50 +129,79 @@ def apply_long_pauses(
     """Relabel silent stretches of at least *min_frames* as long pauses.
 
     *chunks* come from :func:`build_chunks` (``[start, end, speed_index]``,
-    alternating silent ``0`` and sounded ``1``). A stretch starts and ends with
-    a silent chunk and may contain sounded chunks no longer than
-    *tolerance_frames*: during long script runs with the microphone off, a
-    stray notification would otherwise split one long pause into several
-    shorter ones. A qualifying stretch becomes a single chunk tagged
-    :data:`LONG_PAUSE_SPEED_INDEX`, absorbed sounds included; everything else is
+    alternating silent ``0`` and sounded ``1``). Sounded chunks separated by
+    silences shorter than *tolerance_frames* form one sound cluster, and only a
+    cluster spanning at most *tolerance_frames* counts as a stray sound (a
+    notification, or a double ding) that a stretch may absorb: during long
+    script runs with the microphone off, such a sound would otherwise split one
+    long pause into several shorter ones. Measuring the cluster rather than
+    each chunk is what keeps speech out: speech is a run of short phrases with
+    short gaps, every phrase alone looks like a stray sound, but together they
+    are far longer than the tolerance. A word right next to speech joins the
+    speech's cluster the same way. A stretch starts and ends with a silent chunk;
+    once it reaches *min_frames* it becomes a single chunk tagged
+    :data:`LONG_PAUSE_SPEED_INDEX`, absorbed sounds included. Everything else is
     copied unchanged.
     """
 
+    # A silence long enough to be a long pause by itself never joins a cluster.
+    units = _sound_clusters(chunks, min(tolerance_frames, min_frames))
     result: List[List[int]] = []
-    count = len(chunks)
     index = 0
-    while index < count:
-        chunk = chunks[index]
-        if int(chunk[2]) != 0:
-            result.append([int(value) for value in chunk])
+    while index < len(units):
+        first, last = units[index]
+        if int(chunks[first][2]) != 0:
+            result.extend(_copy(chunks[first : last + 1]))
             index += 1
             continue
-        last = index
+        final = index
         while (
-            last + 2 < count
-            and int(chunks[last + 1][2]) == 1
-            and int(chunks[last + 1][1]) - int(chunks[last + 1][0]) <= tolerance_frames
-            and int(chunks[last + 2][2]) == 0
+            final + 2 < len(units)
+            and _span(chunks, units[final + 1]) <= tolerance_frames
+            and int(chunks[units[final + 2][0]][2]) == 0
         ):
-            last += 2
-        # A sound separated from speech by only a short gap is a word at the
-        # edge of the speech ("So." before talking resumes), not a stray sound
-        # inside the pause, so the stretch must start and end with a silence of
-        # at least the tolerance.
-        first, final = index, last
-        while first < final and _length(chunks[first]) < tolerance_frames:
-            first += 2
-        while final > first and _length(chunks[final]) < tolerance_frames:
-            final -= 2
-        start, end = int(chunks[first][0]), int(chunks[final][1])
-        result.extend(_copy(chunks[index:first]))
+            final += 2
+        stop = units[final][1]
+        start, end = int(chunks[first][0]), int(chunks[stop][1])
         if end - start >= min_frames:
             result.append([start, end, LONG_PAUSE_SPEED_INDEX])
         else:
-            result.extend(_copy(chunks[first : final + 1]))
-        result.extend(_copy(chunks[final + 1 : last + 1]))
-        index = last + 1
+            result.extend(_copy(chunks[first : stop + 1]))
+        index = final + 1
     return result
+
+
+def _sound_clusters(
+    chunks: Sequence[Sequence[int]], gap_frames: int
+) -> List[Tuple[int, int]]:
+    """Group *chunks* into ``(first, last)`` index ranges.
+
+    A silent chunk is its own unit; a run of sounded chunks joined by silences
+    shorter than *gap_frames* is one unit, so units alternate silence/cluster.
+    """
+
+    units: List[Tuple[int, int]] = []
+    count = len(chunks)
+    index = 0
+    while index < count:
+        last = index
+        if int(chunks[index][2]) != 0:
+            while (
+                last + 2 < count
+                and int(chunks[last + 1][2]) == 0
+                and _length(chunks[last + 1]) < gap_frames
+                and int(chunks[last + 2][2]) != 0
+            ):
+                last += 2
+        units.append((index, last))
+        index = last + 1
+    return units
+
+
+def _span(chunks: Sequence[Sequence[int]], unit: Tuple[int, int]) -> int:
+    """Return the frame span from the first to the last chunk of *unit*."""
+
+    return int(chunks[unit[1]][1]) - int(chunks[unit[0]][0])
 
 
 def _length(chunk: Sequence[int]) -> int:
